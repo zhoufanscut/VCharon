@@ -1,5 +1,5 @@
 """Channel entries (DESIGN §14 M10): their text, parsing them, their numbers, and appending one
-under a lock; client and server member (ferry channel, tools/mailbox_post.py,
+under a lock; client and server member (vcharon channel, tools/mailbox_post.py,
 tools/mailbox_watch.py).
 
 An entry is a heading with the poster's ID, a header up to the first blank line, and a body:
@@ -45,7 +45,7 @@ ALL = "@all"
 # another reader either.
 LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 # os.replace on Windows: tries, and the pause between them, while another program has the
-# file open (a ferry run reading it)
+# file open (a vcharon run reading it)
 REPLACE_TRIES = 5
 REPLACE_PAUSE = 0.2
 # how long a post waits for another post into the same folder
@@ -295,7 +295,7 @@ def _replace(src, dst, sleep=time.sleep):
 
 def append(path, text):
     """Appends text to path atomically: the whole new file goes to a stage-named temp file in
-    the same folder (ferry and the watcher skip those names), then replaces path. A missing
+    the same folder (vcharon and the watcher skip those names), then replaces path. A missing
     file starts with a "# <stem>" line. Call it under lock()."""
     folder = os.path.dirname(os.path.abspath(path))
     try:

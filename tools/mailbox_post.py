@@ -1,5 +1,5 @@
 """Post an entry to a channel member's file, atomically (DESIGN §14 M10, and MAILBOX.md and
-WATCHING.md in the ferry folder).
+WATCHING.md in the vcharon folder).
 
     python3 mailbox_post.py FILE --me laptop-api --to @laptop-ui --title "step 3 done" < body.md
     python3 mailbox_post.py FILE --me laptop-api --to @all --re laptop-ui#3 --title "steps" \
@@ -10,7 +10,7 @@ first folder that holds MEMBER.md is the own folder, and its name is the poster'
 in a subfolder is still posted by the own folder's member). --me <name> is the poster's own
 name, checked against that folder: in a channel root (a local member's, or a server's) every
 member's folder is writable, so --me is required there; in a remote member's local tree (under
-ferry's joined/ base) the tree already names its member, and --me is optional. It appends
+vcharon's joined/ base) the tree already names its member, and --me is optional. It appends
 
     ## <local time YYYY-mm-dd HH:MM> — <name>#<n> — <title>
     to: @<name> ...
@@ -20,7 +20,7 @@ ferry's joined/ base) the tree already names its member, and --me is optional. I
 
 to FILE, creating FILE with a `# <file name without extension>` line if it's missing. <n> is
 one more than the largest <name>#<n> in any entry heading of any .md file of the own folder
-(headings only, never bodies); a lock in ferry's state dir, one per own folder, covers the
+(headings only, never bodies); a lock in vcharon's state dir, one per own folder, covers the
 read, the append and the swap, so two posts at once can't take one number or lose an entry.
 The time is the clock's when it writes: an agent never types a time.
 
@@ -33,7 +33,7 @@ after the header's blank line, and a body line that starts like a Markdown headi
 … `###### `) gets `> ` in front, so a body can't forge a header or a heading.
 
 It refuses, writing nothing: a FILE outside a member's folder; a FILE in another member's
-folder, or one in a channel root without --me; MEMBER.md and CHANNEL.md (ferry
+folder, or one in a channel root without --me; MEMBER.md and CHANNEL.md (vcharon
 channel writes them); a FILE that isn't a .md file (the watcher and the numbering read only
 those); a FILE whose name is the same on macOS or Windows as another name next to it
 (ANSWERS.md next to answers.md: a client there would refuse the whole tree), or one in a folder
@@ -43,13 +43,13 @@ note on stderr, and the post goes on: it makes no new twin. At the top of the tr
 such a stray out; below it, the twin blocks macOS and Windows clients.
 
 The whole new content goes to a temp file in FILE's folder whose name starts with
-.ferry-stage- (ferry and mailbox_watch.py skip those names), then replaces FILE in one step:
-a reader, or a ferry run, sees the old file or the new one, never half of it. On Windows the
-swap fails while another program has the file open (a ferry run reading it); it's tried a few
+.vcharon-stage- (vcharon and mailbox_watch.py skip those names), then replaces FILE in one step:
+a reader, or a vcharon run, sees the old file or the new one, never half of it. On Windows the
+swap fails while another program has the file open (a vcharon run reading it); it's tried a few
 times before giving up.
 
 Standard library only, Python 3.9 or newer, Windows, macOS and Linux. It lives outside the
-ferry package, as mailbox_watch.py does, and posts through its entries module.
+vcharon package, as mailbox_watch.py does, and posts through its entries module.
 """
 
 from __future__ import annotations
@@ -60,19 +60,19 @@ import sys
 import time
 
 # the repo's src folder, which holds the vcharon package, for its rules and entries.py
-FERRY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 
-def _ferry():
-    # the ferry package next to this tool, never one on PATH (DESIGN §13)
-    if FERRY_DIR not in sys.path:
-        sys.path.insert(0, FERRY_DIR)
+def _vcharon():
+    # the vcharon package next to this tool, never one on PATH (DESIGN §13)
+    if VCHARON_DIR not in sys.path:
+        sys.path.insert(0, VCHARON_DIR)
     from vcharon import pathrules
     return pathrules
 
 
 def _entries():
-    _ferry()
+    _vcharon()
     from vcharon import entries
     return entries
 
@@ -106,9 +106,9 @@ def _listed(names):
 
 def twin(path):
     """("refuse", line), ("note", line) or None, for path's name and its folder's name
-    against the other names next to them, as macOS or Windows compare names (ferry's
+    against the other names next to them, as macOS or Windows compare names (vcharon's
     pathrules.fold): a client there would refuse the tree (DESIGN §10.1 collisions)."""
-    rules = _ferry()
+    rules = _vcharon()
     fold = rules.fold
     folder, name = os.path.split(os.path.abspath(path))
     there, others, on = _twins_in(folder, name, fold)
@@ -168,11 +168,11 @@ def _same(a, b):
 
 
 def member_of_tree(own):
-    """For an own folder in a remote member's local tree (<joined base>/<C>.<name>/, ferry
+    """For an own folder in a remote member's local tree (<joined base>/<C>.<name>/, vcharon
     channel's), the member whose tree it is; None for any other tree (a server member's
     channel folder). This box's copy of another member's folder holds a MEMBER.md too, so
     the walk up alone would post as that member."""
-    _ferry()
+    _vcharon()
     from vcharon import platform
     tree = os.path.dirname(own)
     if not _same(os.path.dirname(tree), os.path.expanduser(platform.joined_dir())):
@@ -181,8 +181,8 @@ def member_of_tree(own):
 
 
 def _refuse(text):
-    # a ferry command in it as this box runs ferry (M14a): someone runs it as printed
-    _ferry()
+    # a vcharon command in it as this box runs vcharon (M14a): someone runs it as printed
+    _vcharon()
     from vcharon import platform
     print("mailbox_post: %s" % platform.runnable(text), file=sys.stderr)
     return 1
@@ -233,7 +233,7 @@ def main(argv=None, stdin=None, clock=time.time):
         parser.error("no folder for %s: post into your own folder" % args.file)
     base = os.path.basename(path)
     if base.casefold() in (entries.MEMBER_FILE.casefold(), entries.CHANNEL_FILE.casefold()):
-        return _refuse("%s is ferry channel's to write: post into another file (RESULTS.md, "
+        return _refuse("%s is vcharon channel's to write: post into another file (RESULTS.md, "
                        "say)" % base)
     # then a twin refusal, which points at the folder or file to use, wherever it is
     found = twin(args.file)
@@ -242,14 +242,14 @@ def main(argv=None, stdin=None, clock=time.time):
     own = entries.own_folder(path)
     if own is None:
         return _refuse("%s: not in a channel member's folder (no %s in its folder or above; "
-                       "ferry channel join writes it)" % (args.file, entries.MEMBER_FILE))
+                       "vcharon channel join writes it)" % (args.file, entries.MEMBER_FILE))
     name = os.path.basename(own)
     if not base.endswith(".md"):
         return _refuse("%s: entries go in .md files (the watcher and the numbering read only "
                        "those)" % base)
     if not to:
         parser.error("--to is required: @<name> ..., or @all")
-    if _ferry().writer_problem(name) is not None:
+    if _vcharon().writer_problem(name) is not None:
         return _refuse("%s: the own folder's name %s isn't a member's name" % (args.file, name))
     mine = member_of_tree(own)
     if mine is not None and mine != name:
@@ -274,7 +274,7 @@ def main(argv=None, stdin=None, clock=time.time):
                   "have synced)" % (token, tree), file=sys.stderr)
     if found is not None:
         print("mailbox_post: note: %s" % found[1], file=sys.stderr)
-    _ferry()
+    _vcharon()
     from vcharon.proto import VCharonError
     try:
         id_, when = entries.post(path, own, name, title, to, args.re, body, clock=clock)

@@ -1,7 +1,7 @@
 """The engine through fake ssh: the M3 "done when" cases of DESIGN §14, each as a push and as a
 pull. The "remote" end is this machine, under the fake server's home.
 
-Set FERRY_TEST_REPORT=1 to print the times and memory peaks of the big cases to stderr."""
+Set VCHARON_TEST_REPORT=1 to print the times and memory peaks of the big cases to stderr."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from tests.util import (FakeSshCase, big_file, fd_count, helper_override, read_t
                         unblock_fifo, write_tree)
 
 POSIX = os.name != "nt"
-REPORT = bool(os.environ.get("FERRY_TEST_REPORT"))
+REPORT = bool(os.environ.get("VCHARON_TEST_REPORT"))
 MIB = 1 << 20
 # A run blocked on a FIFO gets a writer after this many seconds.
 FIFO_DELAY = 5.0
@@ -661,7 +661,7 @@ class RunTest(FakeSshCase):
         eng = self.engine(*self.sides("pull", src, dst), extra_modules=helper_override(TINY))
         e = self.failure(eng)
         self.assertEqual((e.code, e.exit_code), ("too_big", 1))
-        self.assertRegex(e.message, r"\Aa message of [0-9.]+ MiB is over ferry's [0-9.]+ MiB "
+        self.assertRegex(e.message, r"\Aa message of [0-9.]+ MiB is over vcharon's [0-9.]+ MiB "
                                     r"limit\Z")
         self.assertEqual(e.hint, "the plan is too big: exclude part of the tree, or copy it in "
                                  "parts")
@@ -700,7 +700,7 @@ class RunTest(FakeSshCase):
         return self.sides(direction, src, dst, keep_name="no", **options)
 
     def job_run(self, direction, src, dst, state, full=False, **options):
-        """One run of the engine with a state, as ferry run does; the engine."""
+        """One run of the engine with a state, as vcharon run does; the engine."""
         eng = self.engine(*self.job_sides(direction, src, dst, **options))
         eng.run(state=state, full=full)
         return eng
@@ -838,7 +838,7 @@ class RunTest(FakeSshCase):
         state = self.state_of(self.job_run(direction, src, dst, {}))
         write_tree(dst, {"edited.txt": b"54321", "truncated.txt": b"abc"})
         os.remove(os.path.join(dst, "removed.txt"))
-        # ferry trusts the target between runs
+        # vcharon trusts the target between runs
         eng = self.job_run(direction, src, dst, state)
         self.assertEqual(eng.plan.entries, [])
         eng = self.job_run(direction, src, dst, state, full=True)

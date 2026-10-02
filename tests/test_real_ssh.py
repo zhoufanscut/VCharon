@@ -1,4 +1,4 @@
-"""Against a real server: set FERRY_TEST_SSH=<dest>. Its key must work under BatchMode."""
+"""Against a real server: set VCHARON_TEST_SSH=<dest>. Its key must work under BatchMode."""
 
 from __future__ import annotations
 
@@ -18,18 +18,18 @@ from vcharon import cli, platform
 
 from tests.util import read_tree, use_test_jobs, write_tree
 
-DEST = os.environ.get("FERRY_TEST_SSH")
+DEST = os.environ.get("VCHARON_TEST_SSH")
 # Windows has no execute bit: os.chmod(0o755) there leaves st_mode at 0o666, and the path
 # source leaves exec out (DESIGN §9.2, §10.4). The execute-bit assertions below need POSIX.
 POSIX = os.name == "posix"
 
 
-@unittest.skipUnless(DEST, "set FERRY_TEST_SSH=<dest> to run against a real server")
+@unittest.skipUnless(DEST, "set VCHARON_TEST_SSH=<dest> to run against a real server")
 class RealSshTest(unittest.TestCase):
     def setUp(self):
-        tmp = self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": tmp})
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -45,9 +45,9 @@ class RealSshTest(unittest.TestCase):
 
     def remote_tmp(self):
         """A new directory under the server's home, removed after the test; its path."""
-        path = self.ssh("mktemp -d ~/ferry-test-XXXXXX").strip()
+        path = self.ssh("mktemp -d ~/vcharon-test-XXXXXX").strip()
         # never rm -rf anything but what mktemp just made
-        self.assertRegex(path, r"\A/[^\s']+/ferry-test-[A-Za-z0-9]{6}\Z")
+        self.assertRegex(path, r"\A/[^\s']+/vcharon-test-[A-Za-z0-9]{6}\Z")
         self.addCleanup(self.ssh, "rm -rf -- %s" % shlex.quote(path))
         return path
 
@@ -55,7 +55,7 @@ class RealSshTest(unittest.TestCase):
         self.assertEqual(cli.main(["ping", DEST]), 0)
 
     def run_job(self, *argv):
-        """ferry run <argv>, which must succeed; its lines."""
+        """vcharon run <argv>, which must succeed; its lines."""
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = cli.main(["run"] + list(argv))
@@ -71,7 +71,7 @@ class RealSshTest(unittest.TestCase):
                 "big.bin": os.urandom(1 << 20)}
         write_tree(src, spec)
         os.chmod(os.path.join(src, "run.sh"), 0o755)
-        with open(os.path.join(self.tmp, "ferry.ini"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.tmp, "vcharon.ini"), "w", encoding="utf-8") as f:
             f.write("[push]\nssh = %s\nfrom = local:path\nfrom.path = %s\nto = remote:dir\n"
                     "to.path = %s\n" % (DEST, src, remote))
         def size():
@@ -81,7 +81,7 @@ class RealSshTest(unittest.TestCase):
         self.assertEqual(self.run_job("push")[1], "  nothing to do")
         write_tree(src, {"with space/a b.txt": b"changed"})
         self.assertEqual(self.run_job("push")[1], "  put     1 file, 0 dirs (7 B)")
-        # one byte more at the server: ferry trusts the target until a --full run
+        # one byte more at the server: vcharon trusts the target until a --full run
         self.ssh("printf x >> %s" % shlex.quote(remote + "/run.sh"))
         self.assertEqual(self.run_job("push")[1], "  nothing to do")
         self.assertEqual(self.run_job("push", "--full")[1],
@@ -89,7 +89,7 @@ class RealSshTest(unittest.TestCase):
         # a pull job with prune from the same server directory
         pulled = os.path.join(self.tmp, "pulled")
         os.mkdir(pulled)
-        with open(os.path.join(self.tmp, "ferry.ini"), "a", encoding="utf-8") as f:
+        with open(os.path.join(self.tmp, "vcharon.ini"), "a", encoding="utf-8") as f:
             f.write("[pull]\nssh = %s\nfrom = remote:path\nfrom.path = %s\nfrom.prune = yes\n"
                     "to = local:dir\nto.path = %s\n" % (DEST, remote, pulled))
         self.assertEqual(self.run_job("pull")[1], "  put     4 files, 3 dirs (%s)" % size())

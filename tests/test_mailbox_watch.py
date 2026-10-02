@@ -78,20 +78,20 @@ def never(seconds):
 
 
 def member_md(name, leader, channel="mb"):
-    """MEMBER.md as ferry channel writes it."""
+    """MEMBER.md as vcharon channel writes it."""
     return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
             "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
 
 
 class WatchCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         # a channel's folder, mb; server mode watches it as the member debian, its leader
         self.tree = os.path.join(self.tmp, "mb")
-        # the saved snapshots and their locks go to ferry's state dir: one per test
-        self.ferry_home = os.path.join(self.tmp, "ferry-home")
-        patch = mock.patch.dict(os.environ, {"FERRY_HOME": self.ferry_home})
+        # the saved snapshots and their locks go to vcharon's state dir: one per test
+        self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": self.vcharon_home})
         patch.start()
         self.addCleanup(patch.stop)
         self.lines = []
@@ -135,8 +135,8 @@ class WatchCase(unittest.TestCase):
 class ScanTest(WatchCase):
     def test_what_it_skips(self):
         write_tree(self.tree, {"debian/STEPS.md": b"s", "debian/windows/x": b"x",
-                               "windows/mine.md": b"m", ".ferry-stage-0123/1": b"",
-                               "mac/.FERRY-STAGE-ab/2": b"", "mac/a b.md": b"ab", "empty/": None})
+                               "windows/mine.md": b"m", ".vcharon-stage-0123/1": b"",
+                               "mac/.VCHARON-STAGE-ab/2": b"", "mac/a b.md": b"ab", "empty/": None})
         if hasattr(os, "symlink"):
             try:
                 os.symlink("debian", os.path.join(self.tree, "link"))
@@ -180,7 +180,7 @@ class ServerModeTest(WatchCase):
 
         def own():
             # only the watcher's own folder changes: nothing to say
-            write_tree(self.tree, {"debian/STEPS.md": b"s2", "debian/.ferry-stage-1/x": b""})
+            write_tree(self.tree, {"debian/STEPS.md": b"s2", "debian/.vcharon-stage-1/x": b""})
             self.post("debian", 2, "own", to="@windows")
 
         def remove():
@@ -280,13 +280,13 @@ class RootTest(WatchCase):
         self.assertEqual(len(why), 1)
         self.assertTrue(why[0])
         # the channel's folder gone: a closed channel's fix (M13), with a placeholder for the
-        # flags, since this member has no record, its command as this box runs ferry (M14a);
+        # flags, since this member has no record, its command as this box runs vcharon (M14a);
         # then EXIT closed, even in continuous mode (M14b)
         self.assertEqual((code, self.lines), (watch.EXIT_CLOSED, [
             "2026-10-01 09:05:46 " + watching(self.tree, 1),
             "2026-10-01 09:05:47 ERROR can't read %s: %s" % (self.tree, why[0]),
             "2026-10-01 09:05:47   fix: " + platform.runnable(
-                "the channel is closed, or your folder in it is gone: ferry channel leave mb "
+                "the channel is closed, or your folder in it is gone: vcharon channel leave mb "
                 "<the --project and --role that make debian>"),
             "2026-10-01 09:05:47 EXIT closed"]))
 
@@ -324,7 +324,7 @@ class SnapshotTest(WatchCase):
 
         self.run_dir(made)
         path = self.state()
-        self.assertEqual(os.path.dirname(path), os.path.join(self.ferry_home, "state"))
+        self.assertEqual(os.path.dirname(path), os.path.join(self.vcharon_home, "state"))
         name = os.path.basename(path)
         self.assertRegex(name, r"\Amailbox-watch-dir-debian-[0-9a-f]{12}\.json\Z")
         with open(path, encoding="utf-8") as f:
@@ -616,8 +616,8 @@ class WarnTest(WatchCase):
                                "Stray/a": b"a", "Stray/A": b"A",
                                # composed and decomposed: one name on macOS only
                                "windows/\u00e9.md": b"1", "windows/e\u0301.md": b"2",
-                               ".ferry-stage-x/": None, "debian/.ferry-stage-a/A": b"a",
-                               "debian/.ferry-stage-a/a": b"a",
+                               ".vcharon-stage-x/": None, "debian/.vcharon-stage-a/A": b"a",
+                               "debian/.vcharon-stage-a/a": b"a",
                                # deeper in a writer's folder
                                "debian/sub/deep/A.md": b"a", "debian/sub/deep/a.md": b"a",
                                # names a Windows client can't hold
@@ -1146,15 +1146,16 @@ class UntilChangeTest(WatchCase):
                 ("ERROR connect: couldn't reach devbox", "transport"),
                 ("ERROR lost: the connection closed", "transport"),
                 ("ERROR timeout: no answer in 60 s", "transport"),
-                ("ERROR ferry run mailbox didn't finish within 900 s", "transport"),
-                ("ERROR couldn't start ferry: No such file", "transport"),
+                ("ERROR vcharon run mailbox didn't finish within 900 s", "transport"),
+                ("ERROR couldn't start vcharon: No such file", "transport"),
                 ("ERROR too_many_deletes: the plan deletes 612 files and directories, more "
                  "than max_deletes (500)", "too_many_deletes"),
                 ("ERROR unsafe_path: debian/a: a symlink (and 3 more; see the log)",
                  "ERROR unsafe_path: debian/a: a symlink"),
                 ("ERROR collision: debian/N.md and debian/n.md are the same path on macOS",
                  "ERROR collision: debian/N.md and debian/n.md are the same path on macOS"),
-                ("ERROR ferry run mailbox exited with 9", "ERROR ferry run mailbox exited with 9"),
+                ("ERROR vcharon run mailbox exited with 9",
+                 "ERROR vcharon run mailbox exited with 9"),
                 ("ERROR lostness: x", "ERROR lostness: x"),
                 ("ERROR vanished: debian/a.md changed while it was being listed", "vanished"),
                 ("ERROR aborted: couldn't read file 12: x", "aborted")):
@@ -1162,7 +1163,7 @@ class UntilChangeTest(WatchCase):
                 self.assertEqual(watch.error_key(line), key)
 
     def test_the_keys_with_the_job(self):
-        # M9c: ferry run S names the failing job; the connection's errors and the retry and
+        # M9c: vcharon run S names the failing job; the connection's errors and the retry and
         # too_many_deletes codes are keyed as without it, a content error keeps it
         for line, key in (
                 ("ERROR mailbox.up: connect: couldn't reach devbox", "transport"),
@@ -1295,7 +1296,7 @@ class UntilChangeTest(WatchCase):
         self.assertEqual((code, lines), (0, [one, two]))
 
     def test_a_b_a_counts_each_once(self):
-        # up's error can hide down's (the watcher reads ferry's first stderr line)
+        # up's error can hide down's (the watcher reads vcharon's first stderr line)
         a = "ERROR unsafe_path: lnk: a symlink"
         b = "ERROR collision: debian/N.md and debian/n.md are the same path on Windows"
         self.assertEqual(self.until_change([(1, a, {})])[:2], (0, [a, "EXIT change"]))
@@ -1429,7 +1430,7 @@ class UntilChangeTest(WatchCase):
             self.assertEqual(list(json.load(f)["files"]), ["debian/STEPS.md"])
 
 
-# M10: a channel section, in channels.d/ next to ferry.ini: the member windows of the channel
+# M10: a channel section, in channels.d/ next to vcharon.ini: the member windows of the channel
 # mb, led by debian
 MAILBOX = """
 [mb.windows]
@@ -1437,20 +1438,20 @@ ssh            = devbox
 mailbox.me     = windows
 mailbox.leader = debian
 mailbox.local  = {local}
-mailbox.remote = ~/.local/state/ferry/channels/mb
+mailbox.remote = ~/.local/state/vcharon/channels/mb
 """
 
 
 class ClientModeTest(WatchCase):
     @staticmethod
     def write_config(case):
-        """ferry.ini and channels.d/mb.windows.ini; the client's tree starts empty (server
+        """vcharon.ini and channels.d/mb.windows.ini; the client's tree starts empty (server
         mode's debian/MEMBER.md goes: a test of both modes writes it again)."""
         os.remove(os.path.join(case.tree, "debian", "MEMBER.md"))
         os.rmdir(os.path.join(case.tree, "debian"))
-        path = os.path.join(case.tmp, "ferry.ini")
+        path = os.path.join(case.tmp, "vcharon.ini")
         with open(path, "w", encoding="utf-8") as f:
-            f.write("[ferry]\n")
+            f.write("[vcharon]\n")
         folder = os.path.join(case.tmp, "channels.d")
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "mb.windows.ini"), "w", encoding="utf-8") as f:
@@ -1462,7 +1463,7 @@ class ClientModeTest(WatchCase):
         self.config = self.write_config(self)
 
     def test_rounds(self):
-        # a fake ferry run: each round's result, and what it brings
+        # a fake vcharon run: each round's result, and what it brings
         def steps():
             self.post("debian", 2, "steps", to="@all", file="STEPS.md")
             # the own folder: never told
@@ -1504,10 +1505,10 @@ class ClientModeTest(WatchCase):
         self.assertEqual(str(cm.exception), "mailbox_watch: %s has no channel section [nope]"
                          % self.config)
 
-    def test_a_fake_ferry_command(self):
-        # run_ferry runs SELF_ARGV run <job> --config <path>, as a child; here SELF_ARGV runs a
+    def test_a_fake_vcharon_command(self):
+        # run_vcharon runs SELF_ARGV run <job> --config <path>, as a child; here SELF_ARGV runs a
         # folder with a __main__.py
-        fake = os.path.join(self.tmp, "fake-ferry")
+        fake = os.path.join(self.tmp, "fake-vcharon")
         os.mkdir(fake)
         with open(os.path.join(fake, "__main__.py"), "w", encoding="utf-8") as f:
             f.write(textwrap.dedent("""
@@ -1517,7 +1518,7 @@ class ClientModeTest(WatchCase):
                     sys.stderr.write("\\nERROR lost: gone\\n  fix: run again\\n")
                     sys.exit(1)
                 if sys.argv[1:3] == ["run", "gone"]:
-                    # ferry run's block for a closed channel (the M13 measurement), after a
+                    # vcharon run's block for a closed channel (the M13 measurement), after a
                     # line that isn't an ERROR
                     sys.stderr.write("note: x\\nERROR mb.w.up: not_found: no root\\n"
                                      "  fix: the channel is closed: leave it\\n  log: l\\n")
@@ -1537,32 +1538,32 @@ class ClientModeTest(WatchCase):
                 assert sys.argv[1:] == ["run", "mailbox", "--config", "c.ini"], sys.argv
                 """))
         with mock.patch.object(watch, "SELF_ARGV", (sys.executable, fake)):
-            self.assertEqual(watch.ferry_argv("mailbox", None),
+            self.assertEqual(watch.vcharon_argv("mailbox", None),
                              [sys.executable, fake, "run", "mailbox"])
-            self.assertEqual(watch.run_ferry("mailbox", "c.ini"), (0, None, None))
-            self.assertEqual(watch.run_ferry("bad", None), (1, "ERROR lost: gone", "run again"))
-            self.assertEqual(watch.run_ferry("gone", None),
+            self.assertEqual(watch.run_vcharon("mailbox", "c.ini"), (0, None, None))
+            self.assertEqual(watch.run_vcharon("bad", None), (1, "ERROR lost: gone", "run again"))
+            self.assertEqual(watch.run_vcharon("gone", None),
                              (1, "ERROR mb.w.up: not_found: no root",
                               "the channel is closed: leave it\nl"))
             # the first ERROR's block holds no fix: its log, never a later line's fix
-            self.assertEqual(watch.run_ferry("nofix", None),
+            self.assertEqual(watch.run_vcharon("nofix", None),
                              (1, "ERROR lost: gone", "the job's log has the rest: l"))
             # the connection's last words come between the ERROR line and its fix
-            self.assertEqual(watch.run_ferry("tail", None), (4, "ERROR connect: no", "check"))
-            self.assertEqual(watch.run_ferry("quiet", None),
-                             (4, "ERROR ferry run quiet exited with 4", None))
-            self.assertEqual(watch.run_ferry("busy", None),
+            self.assertEqual(watch.run_vcharon("tail", None), (4, "ERROR connect: no", "check"))
+            self.assertEqual(watch.run_vcharon("quiet", None),
+                             (4, "ERROR vcharon run quiet exited with 4", None))
+            self.assertEqual(watch.run_vcharon("busy", None),
                              (2, "ERROR busy: another run of busy.up is in progress", None))
 
-    def test_a_stuck_ferry_run(self):
-        stuck = subprocess.TimeoutExpired(["ferry"], watch.RUN_TIMEOUT)
+    def test_a_stuck_vcharon_run(self):
+        stuck = subprocess.TimeoutExpired(["vcharon"], watch.RUN_TIMEOUT)
         with mock.patch.object(watch.subprocess, "run", side_effect=stuck):
-            self.assertEqual(watch.run_ferry("mailbox", None),
-                             (1, "ERROR ferry run mailbox didn't finish within 900 s", None))
+            self.assertEqual(watch.run_vcharon("mailbox", None),
+                             (1, "ERROR vcharon run mailbox didn't finish within 900 s", None))
 
 
-# A stand-in for the streaming child, `ferry run <job> --repeat <every>` (M15): it does the
-# actions in its argument, in order, then waits for the end of its stdin and exits 0, as ferry
+# A stand-in for the streaming child, `vcharon run <job> --repeat <every>` (M15): it does the
+# actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
 # run --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
 # at the end of a file; exit: exit with that code now; deaf: ignore the end of stdin for 60 s;
 # pause: sleep that many seconds (stdout and stderr are two pipes: a pause orders them).
@@ -1593,7 +1594,7 @@ sys.stdin.buffer.read()
 
 
 class StreamTest(WatchCase):
-    """A streaming --job (DESIGN §14 M15): one long-lived ferry run --repeat child, its rounds
+    """A streaming --job (DESIGN §14 M15): one long-lived vcharon run --repeat child, its rounds
     as steps, its restarts with the backoff, the wake rules in time, and the child stopped on
     every way out. The child is FAKE_CHILD."""
 
@@ -1673,13 +1674,13 @@ class StreamTest(WatchCase):
         self.assertEqual(lines, [watching(self.tree, 0, ", streaming every 2 s"),
                                  "to all: debian#2 — steps  (debian/RESULTS.md)",
                                  up, "  fix: remove or rename it", "  log: l", "ok again"])
-        # one child, as ferry run <job> --repeat <every> --config <path>, its prints in UTF-8
+        # one child, as vcharon run <job> --repeat <every> --config <path>, its prints in UTF-8
         self.assertEqual(len(self.spawned), 1)
         argv, env = self.spawned[0]
         self.assertEqual(argv, [sys.executable, "-m", "vcharon", "run", "mb.windows",
                                 "--repeat", "2", "--config", self.config])
         self.assertEqual((env["PYTHONIOENCODING"], env["PYTHONUTF8"]), ("utf-8", "1"))
-        self.assertEqual(env["FERRY_HOME"], self.ferry_home)
+        self.assertEqual(env["VCHARON_HOME"], self.vcharon_home)
         self.assertEqual(self.slept, [])
         self.assert_all_stopped()
 
@@ -1706,7 +1707,7 @@ class StreamTest(WatchCase):
         # after a round whose error broke the connection isn't: the round said why; an exit
         # after a good round is (a crash)
         self.assertEqual(lines[1:], ["ERROR config: no such file", connect, "ok again",
-                                     "ERROR ferry run mb.windows exited with 1", "ok again"])
+                                     "ERROR vcharon run mb.windows exited with 1", "ok again"])
         self.assertEqual(self.slept, [2, 4, 8, 16, 30, 30, 2])
         self.assertEqual(len(self.spawned), 8)
         self.assert_all_stopped()
@@ -1763,7 +1764,7 @@ class StreamTest(WatchCase):
 
     def test_exit_closed_from_a_streamed_round(self):
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
-        gone = channel_cmd.CHANNEL_GONE_PREFIX + "ferry channel leave mb --role w"
+        gone = channel_cmd.CHANNEL_GONE_PREFIX + "vcharon channel leave mb --role w"
         code, lines = self.watch([["out", "ROUND 0"], ["out", error], ["out", "  fix: " + gone],
                                   ["out", "  log: l"], ["out", "ROUND 1"], ["out", "ROUND 0"]])
         self.assertEqual((code, lines[1:]), (watch.EXIT_CLOSED, [
@@ -1800,7 +1801,7 @@ class StreamTest(WatchCase):
         self.assertLess(time.monotonic() - started, 30)
 
     def test_stderr_after_a_broken_round_is_its_way_out(self):
-        # ferry run --repeat exits after a round whose error broke the connection; what it
+        # vcharon run --repeat exits after a round whose error broke the connection; what it
         # says on stderr then (seen in the M15a review: an abort at shutdown) is no new error
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
         code, lines = self.watch(
@@ -1833,7 +1834,7 @@ class StreamTest(WatchCase):
             [["err", "note: skipped channels.d/x.ini"], ["pause", 0.5], ["out", "ROUND 0"],
              ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
-        self.assertEqual(lines[1:], ["ERROR ferry run mb.windows exited with 1", "ok again"])
+        self.assertEqual(lines[1:], ["ERROR vcharon run mb.windows exited with 1", "ok again"])
 
     def test_a_crash_after_a_good_round_is_a_round(self):
         code, lines = self.watch(
@@ -1872,14 +1873,14 @@ class StreamTest(WatchCase):
         self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_QUIET, ["EXIT quiet 1 min"]))
         self.assert_all_stopped()
 
-    def test_parse_failure_is_run_ferrys(self):
+    def test_parse_failure_is_run_vcharons(self):
         lines = ["ERROR mb.windows.up: connect: no", "  | ssh: refused", "  fix: check",
                  "  log: l", "ERROR other"]
         self.assertEqual(watch.parse_failure(4, lines, "mb.windows"),
                          (4, "ERROR mb.windows.up: connect: no", "check\nl"))
         self.assertEqual(watch.parse_failure(0, lines, "mb.windows"), (0, None, None))
         self.assertEqual(watch.parse_failure(2, [], "mb.windows"),
-                         (2, "ERROR ferry run mb.windows exited with 2", None))
+                         (2, "ERROR vcharon run mb.windows exited with 2", None))
 
 
 class EntriesTest(WatchCase):
@@ -1963,7 +1964,7 @@ class EntriesTest(WatchCase):
             "EXIT change"])
 
     def test_the_leader_is_the_records(self):
-        # a server member's leader is its record's (ferry channel join --local wrote it), not
+        # a server member's leader is its record's (vcharon channel join --local wrote it), not
         # MEMBER.md's, nor the holder of CHANNEL.md
         from vcharon import channel_cmd
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
@@ -2116,11 +2117,11 @@ class EntriesTest(WatchCase):
                                     rounds=0)
                 self.assertEqual(str(cm.exception), platform.runnable(
                     "mailbox_watch: %s isn't there: --dir is a channel's folder and --me a "
-                    "member whose folder in it holds MEMBER.md (ferry channel join --local)"
+                    "member whose folder in it holds MEMBER.md (vcharon channel join --local)"
                     % member))
         # refused before any line, lock or snapshot
         self.assertEqual(self.lines, [])
-        self.assertFalse(os.path.exists(os.path.join(self.ferry_home, "state")))
+        self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "state")))
         # main: exit 1, the line on stderr
         err = io.StringIO()
         with mock.patch("sys.stderr", err), mock.patch("sys.stdout", io.StringIO()), \
@@ -2139,8 +2140,8 @@ class ClosedTest(WatchCase):
     """A closed channel says so in the watcher (DESIGN §14 M13): the fix line after the ERROR
     line."""
 
-    # the fix as the watcher prints it: the leave command as this box runs ferry (M14a)
-    GONE = platform.runnable("the channel is closed, or your folder in it is gone: ferry channel "
+    # the fix as the watcher prints it: the leave command as this box runs vcharon (M14a)
+    GONE = platform.runnable("the channel is closed, or your folder in it is gone: vcharon channel "
                              "leave mb --project web --role b")
 
     def record(self):
@@ -2155,11 +2156,11 @@ class ClosedTest(WatchCase):
         self.assertTrue(channel_cmd.CHANNEL_GONE_HINT.startswith(channel_cmd.CHANNEL_GONE_PREFIX))
 
     def test_is_gone(self):
-        # by the hint's start, after runnable() and run_ferry's log part
+        # by the hint's start, after runnable() and run_vcharon's log part
         self.assertTrue(watch.is_gone(self.GONE))
         self.assertTrue(watch.is_gone(self.GONE + "\n/x/mb.windows.log"))
         self.assertTrue(watch.is_gone(channel_cmd.CHANNEL_GONE_HINT % ("mb", "--project p")))
-        for fix in (None, "", "the channel is closed: leave it", "ferry channel leave mb",
+        for fix in (None, "", "the channel is closed: leave it", "vcharon channel leave mb",
                     "x " + self.GONE):
             with self.subTest(fix=fix):
                 self.assertFalse(watch.is_gone(fix))
@@ -2172,7 +2173,7 @@ class ClosedTest(WatchCase):
             # close's rename: every member's next round sees the folder gone. Into a new
             # name in a fresh folder: on Windows os.rename can't replace a folder
             os.rename(self.tree, os.path.join(
-                tempfile.mkdtemp(prefix=".ferry-closed-mb-", dir=self.tmp), "mb"))
+                tempfile.mkdtemp(prefix=".vcharon-closed-mb-", dir=self.tmp), "mb"))
 
         for until_change in (True, False):
             with self.subTest(until_change=until_change):
@@ -2218,7 +2219,7 @@ class ClosedTest(WatchCase):
         self.assertIn("isn't there", str(cm.exception.code))
 
     def job_watch(self, results, rounds, until_change, fresh=False):
-        """watch_job on a fake ferry run: (exit code, the lines without their time but the
+        """watch_job on a fake vcharon run: (exit code, the lines without their time but the
         watching line)."""
         def run(job, config_path):
             return results.pop(0)
@@ -2276,7 +2277,7 @@ class ClosedTest(WatchCase):
         config = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
-        fix = "the channel is closed: ferry channel leave mb --project web"
+        fix = "the channel is closed: vcharon channel leave mb --project web"
         results = [(1, error, {}, fix), (1, error, {}, fix), (1, error, {}, "another text")]
 
         def run(job, config_path):
@@ -2335,7 +2336,7 @@ class MainTest(WatchCase):
                      ["--job", "m", "--until-change", "--max-errors", "0"],
                      ["--job", "m", "--until-change", "--max-errors", "1001"],
                      ["--job", "m", "--max-errors", "3"],
-                     # M15: a streaming --job's --every is ferry run --repeat's, 1 to 300
+                     # M15: a streaming --job's --every is vcharon run --repeat's, 1 to 300
                      ["--job", "m", "--every", "301"], ["--job", "m", "--every", "0"],
                      ["--dir", "x", "--me", "d", "--no-stream"]):
             with self.subTest(argv=argv):
@@ -2370,7 +2371,7 @@ class MainTest(WatchCase):
         # main() resolves the dir to an absolute, normalized path (abspath makes it "a\b" on
         # Windows), so that's what watch_dir gets
         plain = {"fresh": False, "until_change": False, "max_minutes": None, "max_errors": 10}
-        # --job streams by default, every 2 s (M15); --no-stream runs ferry every 30 s
+        # --job streams by default, every 2 s (M15); --no-stream runs vcharon every 30 s
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
             ((os.path.abspath(os.path.expanduser("~/box")), "debian", 10), plain),
@@ -2408,7 +2409,7 @@ class MainTest(WatchCase):
         argv = [sys.executable, TOOL, "--dir", self.tree, "--me", "debian", "--every", "1",
                 "--until-change"]
         child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 env=dict(os.environ, FERRY_HOME=self.ferry_home))
+                                 env=dict(os.environ, VCHARON_HOME=self.vcharon_home))
         try:
             first = child.stdout.readline().decode("utf-8")
             # the entry and the file at once: one rename of a folder made aside

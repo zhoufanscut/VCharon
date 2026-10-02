@@ -59,7 +59,7 @@ class BundleTest(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(os, "symlink") and os.name == "posix", "needs symlinks")
     def test_skips_names_python_cant_import(self):
-        root = tempfile.mkdtemp(prefix="ferry-test-")
+        root = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, root, True)
         for name, data in (("__init__.py", b"X = 1\n"), ("a.py", b"A = 1\n"),
                            ("._a.py", b"\x00\x05\x16\x07\xff\xfe junk"),
@@ -102,16 +102,16 @@ class BundleTest(unittest.TestCase):
 
 class LoaderTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": tmp})
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_too_old(self):
         result = run_loader(bundle.loader_line((99, 0)) + bundle.build(NONCE))
         self.assertEqual(result.returncode, 90, result.stderr)
-        self.assertIn(b"ferry needs 99.0 or newer", result.stderr)
+        self.assertIn(b"vcharon needs 99.0 or newer", result.stderr)
         self.assertEqual(result.stdout, b"")
 
     def test_bad_bundles(self):
@@ -123,23 +123,23 @@ class LoaderTest(unittest.TestCase):
                      struct.pack(">Q", 65 << 20), struct.pack(">Q", len(wrong)) + wrong):
             result = run_loader(bundle.loader_line() + blob)
             self.assertEqual(result.returncode, 91, (blob[:20], result.stderr))
-            self.assertIn(b"ferry: bad bundle: ", result.stderr)
+            self.assertIn(b"vcharon: bad bundle: ", result.stderr)
 
     def test_helper_that_wont_import(self):
         blob = bundle.build(NONCE, {"vcharon.helper": "def main(nonce):\n    return (\n"})
         result = run_loader(bundle.loader_line() + blob)
         self.assertEqual(result.returncode, 91, result.stderr)
         self.assertIn(b"SyntaxError", result.stderr)
-        self.assertIn(b"ferry-bundle/vcharon/helper.py", result.stderr)
+        self.assertIn(b"vcharon-bundle/vcharon/helper.py", result.stderr)
         # the loader writes through sys.stderr, whose text layer turns \n into \r\n on Windows
         self.assertTrue(result.stderr.replace(b"\r\n", b"\n")
-                        .endswith(b"ferry: bad bundle: vcharon.helper didn't import\n"))
+                        .endswith(b"vcharon: bad bundle: vcharon.helper didn't import\n"))
 
     def test_runs_the_helper(self):
         # The helper answers with the marker and a hello, then sees end of file and exits.
         result = run_loader(bundle.loader_line() + bundle.build(NONCE))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(result.stdout.startswith(b"FERRY-READY " + NONCE.encode() + b"\n"))
+        self.assertTrue(result.stdout.startswith(b"VCHARON-READY " + NONCE.encode() + b"\n"))
         self.assertIn(b'"t":"hello"', result.stdout)
 
 

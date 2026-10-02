@@ -14,15 +14,15 @@ from unittest import mock
 from vcharon import entries
 from vcharon.proto import VCharonError
 
-from tests.test_cli import FERRY_DIR
+from tests.test_cli import VCHARON_DIR
 from tests.util import write_tree
 
 
 class EntriesCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": os.path.join(self.tmp, "home")})
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": os.path.join(self.tmp, "home")})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.own = os.path.join(self.tmp, "tree", "mac-a")
@@ -137,7 +137,7 @@ class LockTest(EntriesCase):
     def test_two_posters_at_once(self):
         # real processes, each its own lock fd: one number each, no entry lost
         n = 25
-        procs = [subprocess.Popen([sys.executable, "-c", POSTER % FERRY_DIR, self.own, str(n),
+        procs = [subprocess.Popen([sys.executable, "-c", POSTER % VCHARON_DIR, self.own, str(n),
                                    tag], env=dict(os.environ)) for tag in "ab"]
         for p in procs:
             self.assertEqual(p.wait(timeout=120), 0)
@@ -146,7 +146,7 @@ class LockTest(EntriesCase):
         self.assertEqual(sorted(e.number for e in found), list(range(1, 2 * n + 1)))
         self.assertEqual(sorted(e.title for e in found),
                          sorted("post %s-%d" % (t, i) for t in "ab" for i in range(n)))
-        self.assertEqual([f for f in os.listdir(self.own) if f.startswith(".ferry-stage-")], [])
+        self.assertEqual([f for f in os.listdir(self.own) if f.startswith(".vcharon-stage-")], [])
 
     def test_lock_is_per_own_folder(self):
         self.assertNotEqual(entries.lock_path(self.own),

@@ -72,7 +72,7 @@ class ClassifyTest(unittest.TestCase):
         rows = [
             (255, ["Host key verification failed."], "host key", "run ssh devbox once"),
             (255, ["me@192.0.2.4: Permission denied (publickey)."], "Permission denied",
-             "ferry key devbox"),
+             "vcharon key devbox"),
             (255, ["ssh: connect to host 1.2.3.4 port 22: Connection refused"],
              "Connection refused", "check the host, port, VPN"),
             (255, ["ssh: connect to host x port 22: Operation timed out"], "timed out",
@@ -87,14 +87,14 @@ class ClassifyTest(unittest.TestCase):
              "install python3 on devbox, or set remote_python"),
             (126, ["bash: /usr/bin/python3: Permission denied"], "isn't runnable",
              "check remote_python"),
-            (90, ["ferry: the server's Python is 3.7; ferry needs 3.9 or newer"], "too old",
+            (90, ["vcharon: the server's Python is 3.7; vcharon needs 3.9 or newer"], "too old",
              "install Python 3.9 or newer"),
-            (91, ["ferry: bad bundle: short body"], "couldn't load ferry's code",
-             "bug in ferry"),
-            (1, ["boom"], "ssh exited with code 1 before ferry started",
+            (91, ["vcharon: bad bundle: short body"], "couldn't load vcharon's code",
+             "bug in vcharon"),
+            (1, ["boom"], "ssh exited with code 1 before vcharon started",
              "a shell startup file"),
             (255, ["kex_exchange_identification: read: Connection reset by peer"],
-             "ssh exited with code 255 before ferry started", "see ssh's messages above"),
+             "ssh exited with code 255 before vcharon started", "see ssh's messages above"),
         ]
         for rc, tail, message, hint in rows:
             err = self.classify(rc, tail)
@@ -115,7 +115,7 @@ class ClassifyTest(unittest.TestCase):
     def test_watchdog_kill(self):
         for killed, seconds in (("handshake", 30), ("run", 45)):
             err = self.classify(-9, ["Permission denied"], killed=killed, run_timeout=45)
-            self.assertEqual(err.message, "no answer from ferry on devbox within %d s" % seconds)
+            self.assertEqual(err.message, "no answer from vcharon on devbox within %d s" % seconds)
             self.assertIn("authentication or a jump host may be stuck", err.hint)
             self.assertIn("run ssh devbox in a terminal", err.hint)
 
@@ -270,7 +270,7 @@ class ParseAcceptedTest(unittest.TestCase):
 
 class ProbeKeyTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
         self.a = os.path.join(tmp, "id_a")
         self.b = os.path.join(tmp, "id b")

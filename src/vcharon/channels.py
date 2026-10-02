@@ -1,5 +1,5 @@
 """The channel root (DESIGN §14 M10): list, claim, release and remove channel and member
-folders, directly below the root; on both ends (the helper's channel.* calls, and ferry channel
+folders, directly below the root; on both ends (the helper's channel.* calls, and vcharon channel
 --local in-process)."""
 
 from __future__ import annotations
@@ -13,15 +13,15 @@ from . import fsops, pathrules, platform
 from .entries import CHANNEL_FILE, MEMBER_FILE
 from .proto import VCharonError
 
-# The fixed root; FERRY_CHANNELS_ROOT replaces it (tests only, through the fake ssh). Never a
+# The fixed root; VCHARON_CHANNELS_ROOT replaces it (tests only, through the fake ssh). Never a
 # flag: every member of a channel must reach the same folder.
-DEFAULT_ROOT = "~/.local/state/ferry/channels"
-ROOT_ENV = "FERRY_CHANNELS_ROOT"
+DEFAULT_ROOT = "~/.local/state/vcharon/channels"
+ROOT_ENV = "VCHARON_CHANNELS_ROOT"
 # so the section name <channel>.<member> (24 + 1 + 32) fits config.MAILBOX_NAME_MAX
 CHANNEL_MAX = 24
 # A closed channel is renamed to this, then deleted. A channel's name can't start with ".", so
 # nothing takes a leftover for a channel.
-CLOSED_PREFIX = ".ferry-closed-"
+CLOSED_PREFIX = ".vcharon-closed-"
 # a member's folder that only these files are in may be released (a failed join or create)
 RELEASABLE = frozenset([MEMBER_FILE, CHANNEL_FILE])
 
@@ -94,7 +94,7 @@ def _real_dir(handle, name, what):
         return None
     kind = fsops.kind(st)
     if kind == fsops.LINK:
-        raise refused("%s is a symlink: remove it by hand; ferry never follows one" % what)
+        raise refused("%s is a symlink: remove it by hand; vcharon never follows one" % what)
     if kind != fsops.DIR:
         raise refused("%s isn't a folder: remove it by hand" % what)
     return st
@@ -107,7 +107,7 @@ def _is_file(handle, name):
 
 def _no_channel(channel):
     return VCharonError("not_found", "there is no channel %s" % channel,
-                        "check the name: ferry channel list")
+                        "check the name: vcharon channel list")
 
 
 def _close_all(*handles):
@@ -278,7 +278,7 @@ HELD_CODES = (5, 32)
 def remove(root, channel, name, tick=_no_tick):
     """Closes a channel for its leader name: refused unless <channel>/<name>/CHANNEL.md exists
     and is the only CHANNEL.md, and every entry at the channel's top is a member's folder.
-    Then one rename to .ferry-closed-<channel>-<stamp>, so every member's next run sees the
+    Then one rename to .vcharon-closed-<channel>-<stamp>, so every member's next run sees the
     channel gone at once, and the §10.1 walk deletes that. Returns {"closed", "deleted"}."""
     _check_names(channel, name)
     top = _open_root(root)
@@ -333,7 +333,7 @@ def remove(root, channel, name, tick=_no_tick):
             err = _not_gone(e, os.path.join(root, closed))
             raise VCharonError(err.code, "%s is closed, but deleting %s failed: %s"
                                % (channel, closed, err.message),
-                               "delete it by hand; ferry channel list notes it")
+                               "delete it by hand; vcharon channel list notes it")
     except OSError as e:
         raise _not_gone(e, os.path.join(root, channel))
     finally:
@@ -360,5 +360,5 @@ def _not_gone(e, path):
     err = fsops.error(e, path) if isinstance(e, OSError) else e
     if err.code == "not_found":
         return VCharonError("vanished", "%s went away while the channel was checked or closed"
-                            % path, "check it with ferry channel list, then close again")
+                            % path, "check it with vcharon channel list, then close again")
     return err

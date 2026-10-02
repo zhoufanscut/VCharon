@@ -1,4 +1,4 @@
-"""ferry doctor (decisions 16-22 of the M5 plan), through fake ssh and fake ssh-add.
+"""vcharon doctor (decisions 16-22 of the M5 plan), through fake ssh and fake ssh-add.
 
 Item 1 of DESIGN §14's M5: doctor reports each failure class of §6.4 (RowTest, one case per
 row).
@@ -53,7 +53,7 @@ NO_AGENT_FIX = (keys.ADMIN_HINT if platform.os_name() == "windows"
                 else 'only a key without a passphrase works without an agent; start one: %s'
                      % keys.START_AGENT)
 LAST_OK = r"\AOK  nothing failed  \(\d+\.\d s\)\Z"
-RESET = "check the target; then: ferry state reset %s, and ferry run %s --full"
+RESET = "check the target; then: vcharon state reset %s, and vcharon run %s --full"
 
 
 def with_helper(code):
@@ -135,7 +135,7 @@ class DoctorTest(DoctorCase):
     def test_everything_ok(self):
         lines = self.doctor(code=0)
         home = self.home
-        self.assertEqual(lines[0], "ferry: doctor")
+        self.assertEqual(lines[0], "vcharon: doctor")
         self.assertEqual(self.subjects(lines), ["python", "config", "ssh", "agent", "dirs",
                                                 "machine", "fake-dest", "push", "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
@@ -143,12 +143,12 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines[1], "  ok    python     %s (%s) on %s"
                          % (platform.python_version(), sys.executable, platform.os_name()))
         self.assertEqual(lines[2], "  ok    config     %s: 2 jobs" % self.config)
-        self.assertEqual(lines[3], "  ok    ssh        OpenSSH_fake 1.0, for ferry's tests "
+        self.assertEqual(lines[3], "  ok    ssh        OpenSSH_fake 1.0, for vcharon's tests "
                                    "(%s)" % platform.default_ssh_path())
         self.assertEqual(lines[4], "  ok    agent      holds 1 key")
         self.assertEqual(lines[5], "  ok    dirs       state %s, logs %s"
-                         % (os.path.join(self.ferry_home, "state"),
-                            os.path.join(self.ferry_home, "logs")))
+                         % (os.path.join(self.vcharon_home, "state"),
+                            os.path.join(self.vcharon_home, "logs")))
         self.assertEqual(lines[6], "  ok    machine    %s" % TEST_MACHINE_ID)
         self.assertEqual(lines[7], "  ok    fake-dest  logs in")
         self.assertRegex(lines[8], r"\A  ok    fake-dest  Python \d+\.\d+\.\d+ on .+, user .*; "
@@ -171,7 +171,7 @@ class DoctorTest(DoctorCase):
             % os.path.realpath(self.dst)])
         self.assertRegex(lines[17], LAST_OK)
         self.assertEqual(len(lines), 18)
-        with open(os.path.join(self.ferry_home, "logs", "ferry.log"), encoding="utf-8") as f:
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             text = f.read()
         # every line is logged too
         self.assertIn("  ok    fake-dest  logs in", text)
@@ -188,8 +188,8 @@ class DoctorTest(DoctorCase):
             self.assertEqual(read_tree(p), tree, p)
         with open(state.path("push"), "rb") as f:
             self.assertEqual(f.read(), saved)
-        self.assertFalse([p for p in read_tree(self.tmp) if ".ferry-stage-" in p])
-        self.assertFalse([p for p in read_tree(self.tmp) if ".ferry-doctor-" in p])
+        self.assertFalse([p for p in read_tree(self.tmp) if ".vcharon-stage-" in p])
+        self.assertFalse([p for p in read_tree(self.tmp) if ".vcharon-doctor-" in p])
 
     def test_fix_and_note_lines_start_under_the_text(self):
         self.write_config("")
@@ -198,7 +198,7 @@ class DoctorTest(DoctorCase):
         at = lines.index("  warn  agent    none: %s" % keys.no_agent_why())
         self.assertEqual(lines[at + 1], "                 fix: " + NO_AGENT_FIX)
         self.assertEqual(lines[2], "  ok    config   %s: 0 jobs" % self.config)
-        self.assertEqual(lines[3], "                 note: no jobs; to check a server: ferry "
+        self.assertEqual(lines[3], "                 note: no jobs; to check a server: vcharon "
                                    "doctor <dest>")
         self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  \(\d+\.\d s\)\Z")
 
@@ -212,7 +212,7 @@ class DoctorTest(DoctorCase):
         lines = self.doctor("fake-dest", code=0)
         self.assertEqual(self.of(lines, "agent"), [("warn", "holds no keys")])
         self.assertIn("fix: " + platform.runnable("a key with a passphrase works only once "
-                                                  "it's in the agent: run ferry key fake-dest"),
+                                                  "it's in the agent: run vcharon key fake-dest"),
                       lines[lines.index("  warn  agent      holds no keys") + 1])
         os.environ["FAKE_SSH_ADD_L_RC"] = "2"
         lines = self.doctor(code=0)
@@ -244,7 +244,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "agent"), [("warn", why)])
         self.assertEqual(lines[lines.index("  warn  agent    " + why) + 1],
                          "                 fix: install the OpenSSH client, or set ssh_path in "
-                         "ferry.ini")
+                         "vcharon.ini")
 
     def test_python_on_windows(self):
         self.write_config("")
@@ -255,7 +255,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual([level for level, text in self.of(lines, "python")],
                          ["ok", "warn", "warn"])
         self.assertIn("  warn  python   32-bit Python on 64-bit Windows", lines)
-        self.assertIn("  warn  python   ferry is tested with Python 3.11 or later on Windows",
+        self.assertIn("  warn  python   vcharon is tested with Python 3.11 or later on Windows",
                       lines)
 
     def test_dirs_not_writable(self):
@@ -263,7 +263,7 @@ class DoctorTest(DoctorCase):
         blocker = os.path.join(self.tmp, "blocker")
         with open(blocker, "w") as f:
             f.write("a file where a directory should be")
-        os.environ["FERRY_HOME"] = blocker
+        os.environ["VCHARON_HOME"] = blocker
         got, out, err = self.run_cli("doctor", "--config", self.config)
         self.assertEqual(got, 1)
         dirs = [line for line in out.splitlines() if line.startswith("  FAIL  dirs")]
@@ -277,7 +277,7 @@ class DoctorTest(DoctorCase):
             with self.subTest(argv=argv):
                 lines = self.doctor(*argv, code=0)
                 self.assertEqual(self.of(lines, "machine"), [("ok", TEST_MACHINE_ID)])
-        os.environ["FERRY_TEST_MACHINE_ID"] = "f" * 32
+        os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         self.assertEqual(self.of(self.doctor(code=0), "machine"), [("ok", "f" * 32)])
 
     def test_no_machine_id(self):
@@ -287,9 +287,9 @@ class DoctorTest(DoctorCase):
         text = ("no machine id: this machine can't hold a channel (--local), nor keep jobs' "
                 "state as a server")
         for osn, fix in (("linux", "give it one: systemd-machine-id-setup, as root"),
-                         ("darwin", "ferry couldn't read this Mac's IOPlatformUUID (ioreg): "
+                         ("darwin", "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): "
                                     "ask the user"),
-                         ("windows", "ferry couldn't read this box's MachineGuid (the "
+                         ("windows", "vcharon couldn't read this box's MachineGuid (the "
                                      "registry): ask the user")):
             for argv in ((), ("fake-dest",)):
                 with self.subTest(osn=osn, argv=argv):
@@ -324,7 +324,7 @@ class DoctorTest(DoctorCase):
         os.environ["FAKE_SSH_JUNK_B64"] = "aGVsbG8K"
         with with_helper(NO_MACHINE):
             lines = self.doctor(code=1)
-        self.assertIn(("warn", "the server's shell printed 6 bytes before ferry started"),
+        self.assertIn(("warn", "the server's shell printed 6 bytes before vcharon started"),
                       self.of(lines, "fake-dest"))
         self.assertIn(("warn", "no machine id: jobs can't keep state there"),
                       self.of(lines, "fake-dest"))
@@ -335,7 +335,7 @@ class DoctorTest(DoctorCase):
 
     def test_a_server_that_isnt_linux(self):
         # M11a: a FAIL for the destination and for each job on it, not the no-machine warning
-        os.environ["FERRY_TEST_OS"] = "darwin"
+        os.environ["VCHARON_TEST_OS"] = "darwin"
         lines = self.doctor(code=1)
         refused = "fake-dest runs darwin: only a Linux server is supported as a remote end"
         self.assertIn(("FAIL", refused), self.of(lines, "fake-dest"))
@@ -420,7 +420,7 @@ class DoctorTest(DoctorCase):
 
     def test_one_job(self):
         lines = self.doctor("pull", code=0)
-        self.assertEqual(lines[0], "ferry: doctor pull")
+        self.assertEqual(lines[0], "vcharon: doctor pull")
         self.assertEqual(self.subjects(lines), ["python", "config", "ssh", "agent", "dirs",
                                                 "machine", "fake-dest", "pull"])
 
@@ -436,16 +436,16 @@ class DoctorTest(DoctorCase):
         self.assertTrue(err.startswith("ERROR config: the destination '-x' starts with '-'"))
 
     def test_no_jobs(self):
-        self.write_config("[ferry]\n")
+        self.write_config("[vcharon]\n")
         lines = self.doctor(code=0)
         self.assertEqual(self.subjects(lines), ["python", "config", "ssh", "agent", "dirs",
                                                 "machine"])
 
     def test_broken_config(self):
-        self.write_config("[ferry]\ncompress = maybe\n")
+        self.write_config("[vcharon]\ncompress = maybe\n")
         lines = self.doctor(code=1)
         self.assertEqual(self.of(lines, "config"),
-                         [("FAIL", "ferry.ini [ferry] compress: must be yes or no")])
+                         [("FAIL", "vcharon.ini [vcharon] compress: must be yes or no")])
         self.assertEqual(self.subjects(lines), ["python", "config", "ssh", "agent", "dirs",
                                                 "machine"])
         lines = self.doctor("fake-dest", code=1)
@@ -470,11 +470,11 @@ class DoctorTest(DoctorCase):
         self.input.side_effect = None
         self.input.return_value = "Y"
         lines = self.doctor("fake-dest", code=1)
-        self.input.assert_called_once_with("run ferry key fake-dest now? [y/N] ")
-        # setUp keeps this machine's own OS, and on macOS ferry key adds through the Keychain
+        self.input.assert_called_once_with("run vcharon key fake-dest now? [y/N] ")
+        # setUp keeps this machine's own OS, and on macOS vcharon key adds through the Keychain
         apple = ["--apple-use-keychain"] if platform.os_name() == "darwin" else []
         self.assertEqual(self.adds(), [apple + [key]])
-        self.assertIn("  test    ok: ferry logs in to fake-dest with no prompt", lines)
+        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", lines)
 
     def test_offer_no(self):
         self.locked()
@@ -493,10 +493,10 @@ class DoctorTest(DoctorCase):
 
 class ClockTest(DoctorCase):
     """M12b: the server's clock and time zone against this machine's, after the handshake
-    line; the fake server's hello moved by FERRY_TEST_CLOCK_SHIFT and FERRY_TEST_UTC_OFFSET."""
+    line; the fake server's hello moved by VCHARON_TEST_CLOCK_SHIFT and VCHARON_TEST_UTC_OFFSET."""
 
     def clock(self, shift, code):
-        os.environ["FERRY_TEST_CLOCK_SHIFT"] = str(shift)
+        os.environ["VCHARON_TEST_CLOCK_SHIFT"] = str(shift)
         lines = self.doctor("fake-dest", code=code)
         dest = self.of(lines, "fake-dest")
         self.assertTrue(dest[1][0] in ("ok", "warn") and "handshake" in dest[1][1], lines)
@@ -524,14 +524,14 @@ class ClockTest(DoctorCase):
                 self.assertIn("clock " + sign, lines[at])
                 self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  ")
                 # the gap is in the session's log line too
-                with open(os.path.join(self.ferry_home, "logs", "ferry.log"),
+                with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"),
                           encoding="utf-8") as f:
                     self.assertRegex(f.read(), r"hello from fake-dest, clock \%s\d+\.\d s:"
                                      % sign)
 
     def test_other_time_zone(self):
         local = time.localtime().tm_gmtoff
-        os.environ["FERRY_TEST_UTC_OFFSET"] = str(local + 3600)
+        os.environ["VCHARON_TEST_UTC_OFFSET"] = str(local + 3600)
         lines = self.doctor("fake-dest", code=0)
         text = "time zone %s, this machine %s" % (doctor.utc_text(local + 3600),
                                                   doctor.utc_text(local))
@@ -575,7 +575,7 @@ class RowTest(DoctorCase):
         dest = self.of(lines, "fake-dest")
         self.assertEqual(dest[-1], ("FAIL", message), lines)
         at = lines.index("  FAIL  fake-dest  " + message)
-        # a command in it as this box runs ferry (M14a)
+        # a command in it as this box runs vcharon (M14a)
         self.assertEqual(lines[at + 1], "                   fix: " + platform.runnable(fix))
         # no session, no echo, no remote side of the jobs
         self.assertFalse(any("echo" in text for level, text in dest), lines)
@@ -608,7 +608,7 @@ class RowTest(DoctorCase):
             f.write("k")
         self.exit(255, "debug1: Server accepts key: %s ED25519 SHA256:x\n%s" % (key, DENIED))
         self.failed("ssh can't use your key %s: the server accepts it, but it's locked by a "
-                    "passphrase" % key, "run: ferry key fake-dest")
+                    "passphrase" % key, "run: vcharon key fake-dest")
 
     def test_network(self):
         self.exit(255, "ssh: connect to host h port 22: Connection refused")
@@ -618,11 +618,11 @@ class RowTest(DoctorCase):
     def test_no_python(self):
         self.exit(127)
         self.failed("python3 wasn't found on fake-dest",
-                    "install python3 on fake-dest, or set remote_python in ferry.ini")
+                    "install python3 on fake-dest, or set remote_python in vcharon.ini")
 
     def test_not_runnable(self):
         self.exit(126)
-        self.failed("python3 isn't runnable on fake-dest", "check remote_python in ferry.ini")
+        self.failed("python3 isn't runnable on fake-dest", "check remote_python in vcharon.ini")
 
     def test_not_runnable_with_an_accepted_key(self):
         # review B1: bash exits 126 with its own "Permission denied"; that's no locked key
@@ -632,27 +632,28 @@ class RowTest(DoctorCase):
         self.terminal.return_value = True
         self.exit(126, "debug1: Server accepts key: %s ED25519 SHA256:x\n"
                        "bash: line 1: /usr/bin/python3: Permission denied" % key)
-        self.failed("python3 isn't runnable on fake-dest", "check remote_python in ferry.ini")
+        self.failed("python3 isn't runnable on fake-dest", "check remote_python in vcharon.ini")
         self.input.assert_not_called()
 
     def test_python_too_old(self):
         real = bundle.loader_line
         self.patch(bundle, "loader_line", side_effect=lambda floor=vcharon.FLOOR: real((99, 0)))
-        self.failed("the Python on fake-dest is too old for ferry",
+        self.failed("the Python on fake-dest is too old for vcharon",
                     "install Python 3.9 or newer on fake-dest, or set remote_python")
 
     def test_code_didnt_load(self):
         self.patch(bundle, "build", return_value=struct.pack(">Q", 3) + b"abc")
-        self.failed("the server couldn't load ferry's code", "this is a bug in ferry; see the log")
+        self.failed("the server couldn't load vcharon's code",
+                    "this is a bug in vcharon; see the log")
 
     def test_other_exit(self):
         self.exit(1)
-        self.failed("ssh exited with code 1 before ferry started on the server",
+        self.failed("ssh exited with code 1 before vcharon started on the server",
                     "a shell startup file on the server may have read stdin; see the log")
 
     def test_stdin_eaten(self):
         os.environ["FAKE_SSH_EAT_STDIN"] = "100"
-        lines = self.failed("ssh exited with code 1 before ferry started on the server",
+        lines = self.failed("ssh exited with code 1 before vcharon started on the server",
                             "a shell startup file on the server may have read stdin; see "
                             "the log")
         # the probe sends nothing on stdin, so it logged in; the session failed
@@ -661,9 +662,9 @@ class RowTest(DoctorCase):
     def test_no_marker_in_time(self):
         os.environ["FAKE_SSH_STALL"] = "5"
         with open(self.config, "a") as f:
-            f.write("\n[ferry]\nhandshake_timeout = 1\n")
+            f.write("\n[vcharon]\nhandshake_timeout = 1\n")
         started = time.monotonic()
-        self.failed("no answer from ferry on fake-dest within 1 s", "authentication or a jump "
+        self.failed("no answer from vcharon on fake-dest within 1 s", "authentication or a jump "
                     "host may be stuck; run ssh fake-dest in a terminal to see")
         self.assertLess(time.monotonic() - started, 4)
 
@@ -671,7 +672,7 @@ class RowTest(DoctorCase):
         missing = os.path.join(self.tmp, "no-such-ssh")
         self.patch(ssh, "ssh_prefix", side_effect=lambda settings: [missing])
         why = "couldn't start %s: %s" % (missing, start_failure_text(missing))
-        lines = self.failed(why, "install the OpenSSH client, or set ssh_path in ferry.ini")
+        lines = self.failed(why, "install the OpenSSH client, or set ssh_path in vcharon.ini")
         self.assertEqual(self.of(lines, "ssh"), [("FAIL", why)])
 
 

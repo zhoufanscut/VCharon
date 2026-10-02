@@ -1,4 +1,4 @@
-"""File kinds, OS errors as FerryErrors, directory handles and tree walks, on both ends."""
+"""File kinds, OS errors as VCharonErrors, directory handles and tree walks, on both ends."""
 
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def private_group(gid):
 
 
 def dir_problem(st, root_dev, owner_rule=True):
-    """Why ferry may not go through this directory, or None. root_dev None: no device rule (a
+    """Why vcharon may not go through this directory, or None. root_dev None: no device rule (a
     source only reads, and may cross mount points)."""
     if root_dev is not None and st.st_dev != root_dev:
         return "is on another file system"
@@ -207,7 +207,7 @@ def unsafe_dir(what, problem, abs_path):
 
 def _link_error(rel):
     return VCharonError("unsafe_path",
-                        "%s is a symlink or junction; ferry never goes through one" % rel,
+                        "%s is a symlink or junction; vcharon never goes through one" % rel,
                         LINK_HINT)
 
 
@@ -724,8 +724,8 @@ def run(argv, timeout, new_session=False, env=None):
     stdin and stdout and stderr captured; returns a Ran. env: the program's environment, as
     Popen takes it; None inherits this process's. After timeout seconds it kills the
     program and returns what it had printed, with rc None, or the exit code if the program
-    itself had already exited. An OSError from starting it propagates. The one way ferry runs
-    another program, apart from the session's own ssh and ferry key's ssh-add (run_terminal).
+    itself had already exited. An OSError from starting it propagates. The one way vcharon runs
+    another program, apart from the session's own ssh and vcharon key's ssh-add (run_terminal).
 
     The empty pipe, not the null device: a program that reads stdin must see the end of input.
     Win32-OpenSSH 9.5p2 never signals it for a null-device stdin, so a probe's ssh, whose
@@ -781,6 +781,6 @@ def run(argv, timeout, new_session=False, env=None):
 
 def run_terminal(argv):
     """Runs argv on this terminal: stdin, stdout and stderr stay the terminal's, so a person
-    can type into it; returns its exit code. No timeout. Only ferry key uses it, for ssh-add,
-    which asks for the passphrase itself: ferry never sees it (DESIGN §16)."""
+    can type into it; returns its exit code. No timeout. Only vcharon key uses it, for ssh-add,
+    which asks for the passphrase itself: vcharon never sees it (DESIGN §16)."""
     return subprocess.call(list(argv))

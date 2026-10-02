@@ -37,7 +37,7 @@ LIST_HINT = "fix its permissions, or exclude it"
 ROOT_LIST_HINT = "fix its permissions"
 # a missing root; a channel section's down swaps it (channel_cmd.CHANNEL_GONE_HINT)
 MISSING_HINT = "check the path"
-# ferry run gives every state_mismatch its own hint, which names the job
+# vcharon run gives every state_mismatch its own hint, which names the job
 STATE_HINT = "check the target; then reset the job's state, and run it with --full"
 EMPTY_HINT = "check that its disk is mounted; if it's really empty, set from.allow_empty = yes"
 
@@ -426,7 +426,7 @@ class Source(plugin.Source):
                 name, st = items.pop()
                 tick()
                 parts = here + (name,)
-                # ferry's own stage dirs, in any case, and excluded entries: never entered,
+                # vcharon's own stage dirs, in any case, and excluded entries: never entered,
                 # counted or noted
                 if name.casefold().startswith(pathrules.STAGE_PREFIX):
                     continue
@@ -674,7 +674,7 @@ class Source(plugin.Source):
     # --- doctor ---
 
     def doctor(self):
-        """ferry doctor: the path exists, and is a directory it can list or a file it can
+        """vcharon doctor: the path exists, and is a directory it can list or a file it can
         read. The top is followed, as plan() follows it. Only reads."""
         given = self.options["path"]
         abs_path = os.path.abspath(self.ctx.resolve(given, "from.path"))

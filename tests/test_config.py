@@ -1,4 +1,4 @@
-"""Reading and checking ferry.ini."""
+"""Reading and checking vcharon.ini."""
 
 from __future__ import annotations
 
@@ -26,19 +26,19 @@ to = remote:dir
 to.path = inbox
 """
 
-# a ferry.ini that holds settings only
-FERRY = "[ferry]\ncompress = yes\n"
+# a vcharon.ini that holds settings only
+VCHARON = "[vcharon]\ncompress = yes\n"
 
 
 class ConfigCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": self.tmp, "HOME": self.tmp,
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": self.tmp, "HOME": self.tmp,
                                                "USERPROFILE": self.tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.path = os.path.join(self.tmp, "ferry.ini")
+        self.path = os.path.join(self.tmp, "vcharon.ini")
 
     def write(self, data):
         with open(self.path, "wb") as f:
@@ -69,9 +69,9 @@ class ConfigTest(ConfigCase):
                           s.idle_timeout, s.run_timeout, s.compress),
                          (platform.default_ssh_path(), "python3", 10, 30, 300, 0, False))
 
-    def test_ferry_home_is_the_default_path(self):
-        cfg = self.load("[ferry]\nidle_timeout = 70\n")
-        self.assertEqual(cfg.path, os.path.join(self.tmp, "ferry.ini"))
+    def test_vcharon_home_is_the_default_path(self):
+        cfg = self.load("[vcharon]\nidle_timeout = 70\n")
+        self.assertEqual(cfg.path, os.path.join(self.tmp, "vcharon.ini"))
         self.assertTrue(cfg.exists)
         self.assertEqual(cfg.settings.idle_timeout, 70)
 
@@ -84,97 +84,97 @@ class ConfigTest(ConfigCase):
     def test_explicit_path(self):
         other = os.path.join(self.tmp, "other.ini")
         with open(other, "w") as f:
-            f.write("[ferry]\ncompress = yes\n")
+            f.write("[vcharon]\ncompress = yes\n")
         cfg = config.load(other)
         self.assertEqual(cfg.path, other)
         self.assertTrue(cfg.settings.compress)
 
     def test_bom(self):
-        cfg = self.load(b"\xef\xbb\xbf[ferry]\nremote_python = python3.13\n")
+        cfg = self.load(b"\xef\xbb\xbf[vcharon]\nremote_python = python3.13\n")
         self.assertEqual(cfg.settings.remote_python, "python3.13")
 
     def test_hash_kept_inside_a_value(self):
-        cfg = self.load("[ferry]\nremote_python = py #2\n")
+        cfg = self.load("[vcharon]\nremote_python = py #2\n")
         self.assertEqual(cfg.settings.remote_python, "py #2")
 
     def test_comment_lines(self):
-        cfg = self.load("# top\n; also\n[ferry]\n# ssh_path = relative\n  ; indented\n"
+        cfg = self.load("# top\n; also\n[vcharon]\n# ssh_path = relative\n  ; indented\n"
                         "idle_timeout = 90\n")
         self.assertEqual(cfg.settings.idle_timeout, 90)
 
     def test_default_section_refused(self):
         self.refused("[DEFAULT]\nidle_timeout = 5\n", "[DEFAULT]")
-        self.refused("[ferry]\n[default]\nx = 1\n", "[default]")
+        self.refused("[vcharon]\n[default]\nx = 1\n", "[default]")
 
     def test_continuation_line_refused(self):
-        self.refused("[ferry]\nremote_python = python3\n  -X dev\n", "remote_python", "indented")
+        self.refused("[vcharon]\nremote_python = python3\n  -X dev\n", "remote_python", "indented")
 
     def test_unknown_key(self):
-        self.refused("[ferry]\nidle_timeuot = 5\n", "ferry.ini [ferry] idle_timeuot",
+        self.refused("[vcharon]\nidle_timeuot = 5\n", "vcharon.ini [vcharon] idle_timeuot",
                      "unknown key")
 
     def test_duplicate_key(self):
-        self.refused("[ferry]\nidle_timeout = 5\nidle_timeout = 6\n", "line 3", "twice")
+        self.refused("[vcharon]\nidle_timeout = 5\nidle_timeout = 6\n", "line 3", "twice")
 
     def test_duplicate_section(self):
-        self.refused("[ferry]\n[ferry]\n", "twice")
+        self.refused("[vcharon]\n[vcharon]\n", "twice")
 
     def test_key_outside_a_section(self):
         self.refused("idle_timeout = 5\n", "line 1")
 
     def test_bad_utf8(self):
-        self.refused(b"[ferry]\nremote_python = \xff\n", "UTF-8")
+        self.refused(b"[vcharon]\nremote_python = \xff\n", "UTF-8")
 
     def test_numbers(self):
         for key in ("connect_timeout", "handshake_timeout"):
             for value in ("0", "-5", "abc", "1.5", "", "+3", " 1_0"):
-                err = self.refused("[ferry]\n%s = %s\n" % (key, value), key,
+                err = self.refused("[vcharon]\n%s = %s\n" % (key, value), key,
                                    "whole number of seconds, 1 or more")
-                self.assertIn("[ferry] %s" % key, err.message)
-            self.assertEqual(getattr(self.load("[ferry]\n%s = 1\n" % key).settings, key), 1)
+                self.assertIn("[vcharon] %s" % key, err.message)
+            self.assertEqual(getattr(self.load("[vcharon]\n%s = 1\n" % key).settings, key), 1)
         # The helper ticks every 10 s, so less than three ticks would kill a busy helper.
         for value in ("0", "1", "29", "-30", "abc", "30.5"):
-            self.refused("[ferry]\nidle_timeout = %s\n" % value, "[ferry] idle_timeout",
+            self.refused("[vcharon]\nidle_timeout = %s\n" % value, "[vcharon] idle_timeout",
                          "whole number of seconds, 30 or more", "10 s tick")
-        self.assertEqual(self.load("[ferry]\nidle_timeout = 30\n").settings.idle_timeout, 30)
-        self.refused("[ferry]\nrun_timeout = -1\n", "0 or more")
-        self.refused("[ferry]\nrun_timeout = x\n", "0 or more")
-        self.assertEqual(self.load("[ferry]\nrun_timeout = 0\n").settings.run_timeout, 0)
-        self.assertEqual(self.load("[ferry]\nrun_timeout = 60\n").settings.run_timeout, 60)
+        self.assertEqual(self.load("[vcharon]\nidle_timeout = 30\n").settings.idle_timeout, 30)
+        self.refused("[vcharon]\nrun_timeout = -1\n", "0 or more")
+        self.refused("[vcharon]\nrun_timeout = x\n", "0 or more")
+        self.assertEqual(self.load("[vcharon]\nrun_timeout = 0\n").settings.run_timeout, 0)
+        self.assertEqual(self.load("[vcharon]\nrun_timeout = 60\n").settings.run_timeout, 60)
 
     def test_message_format(self):
-        err = self.refused("[ferry]\nconnect_timeout = 0\n")
-        self.assertEqual(err.message, "ferry.ini [ferry] connect_timeout: must be a whole number "
-                         "of seconds, 1 or more")
+        err = self.refused("[vcharon]\nconnect_timeout = 0\n")
+        self.assertEqual(err.message, "vcharon.ini [vcharon] connect_timeout: must be a whole "
+                         "number of seconds, 1 or more")
         self.assertIn(self.path, err.hint)
-        err = self.refused("[ferry]\nidle_timeout = 10\n")
-        self.assertEqual(err.message, "ferry.ini [ferry] idle_timeout: must be a whole number of "
-                         "seconds, 30 or more (three times the helper's 10 s tick interval)")
+        err = self.refused("[vcharon]\nidle_timeout = 10\n")
+        self.assertEqual(err.message, "vcharon.ini [vcharon] idle_timeout: must be a whole number "
+                         "of seconds, 30 or more (three times the helper's 10 s tick interval)")
 
     def test_bools(self):
         for value, want in (("yes", True), ("YES", True), ("true", True), ("1", True),
                             ("no", False), ("False", False), ("0", False)):
-            self.assertIs(self.load("[ferry]\ncompress = %s\n" % value).settings.compress, want)
-        self.refused("[ferry]\ncompress = maybe\n", "yes or no")
+            self.assertIs(self.load("[vcharon]\ncompress = %s\n" % value).settings.compress, want)
+        self.refused("[vcharon]\ncompress = maybe\n", "yes or no")
 
     def test_remote_python(self):
         for value in ("python3'", 'py"', "py\\3"):
-            self.refused("[ferry]\nremote_python = %s\n" % value, "quotes or backslashes")
-        self.refused("[ferry]\nremote_python =\n", "empty")
+            self.refused("[vcharon]\nremote_python = %s\n" % value, "quotes or backslashes")
+        self.refused("[vcharon]\nremote_python =\n", "empty")
         # ssh would read it as an option, since it parses options after the destination too
-        self.refused("[ferry]\nremote_python = -oProxyCommand=touch /tmp/x\n",
+        self.refused("[vcharon]\nremote_python = -oProxyCommand=touch /tmp/x\n",
                      "remote_python", "can't start with '-'")
-        cfg = self.load("[ferry]\nremote_python = /opt/py/bin/python3\n")
+        cfg = self.load("[vcharon]\nremote_python = /opt/py/bin/python3\n")
         self.assertEqual(cfg.settings.remote_python, "/opt/py/bin/python3")
 
     def test_ssh_path(self):
-        self.refused("[ferry]\nssh_path = ssh\n", "absolute")
-        self.refused("[ferry]\nssh_path = bin/ssh\n", "absolute")
-        cfg = self.load("[ferry]\nssh_path = ~/bin/ssh\n")
+        self.refused("[vcharon]\nssh_path = ssh\n", "absolute")
+        self.refused("[vcharon]\nssh_path = bin/ssh\n", "absolute")
+        cfg = self.load("[vcharon]\nssh_path = ~/bin/ssh\n")
         self.assertEqual(os.path.normpath(cfg.settings.ssh_path),
                          os.path.join(self.tmp, "bin", "ssh"))
         absolute = os.path.join(self.tmp, "ssh")
-        cfg = self.load("[ferry]\nssh_path = %s\n" % absolute)
+        cfg = self.load("[vcharon]\nssh_path = %s\n" % absolute)
         self.assertEqual(cfg.settings.ssh_path, absolute)
 
     def test_jobs_leave_the_settings_alone(self):
@@ -182,18 +182,18 @@ class ConfigTest(ConfigCase):
         os.mkdir(folder)
         with open(os.path.join(folder, "ch.windows.ini"), "w", encoding="utf-8") as f:
             f.write(MAILBOX + "idle_timeout = 60\n")
-        cfg = self.load(FERRY)
+        cfg = self.load(VCHARON)
         self.assertEqual(cfg.settings, config.Settings(compress=True))
         self.assertEqual(cfg.jobs["ch.windows.up"].settings.idle_timeout, 60)
 
     def test_no_job_sections(self):
         # the config file holds settings only; a channel's section lives in channels.d/
-        for text in (JOB, FERRY + JOB.replace("[j]", "[ch.windows]")):
+        for text in (JOB, VCHARON + JOB.replace("[j]", "[ch.windows]")):
             with self.subTest(text=text):
                 e = self.refused(text)
                 section = "[ch.windows]" if "[ch.windows]" in text else "[j]"
-                self.assertEqual(e.message, "ferry.ini %s: ferry.ini holds only [ferry]; a "
-                                            "channel's section goes in channels.d, which ferry "
+                self.assertEqual(e.message, "vcharon.ini %s: vcharon.ini holds only [vcharon]; a "
+                                            "channel's section goes in channels.d, which vcharon "
                                             "channel writes" % section)
 
 
@@ -204,8 +204,8 @@ MAILBOX = """
 ssh            = devbox
 mailbox.me     = windows
 mailbox.leader = laptop-ui
-mailbox.local  = ~/ferry_mailbox
-mailbox.remote = ~/ferry_mailbox
+mailbox.local  = ~/vcharon_mailbox
+mailbox.remote = ~/vcharon_mailbox
 """
 WHERE = "channels.d/ch.windows.ini [ch.windows]"
 
@@ -218,7 +218,7 @@ class MailboxCase(ConfigCase):
             f.write(text.encode("utf-8") if isinstance(text, str) else text)
 
     def load_channel(self, text, ini="", file="ch.windows.ini"):
-        """ferry.ini holds ini, channels.d/<file> holds text; the config."""
+        """vcharon.ini holds ini, channels.d/<file> holds text; the config."""
         self.write_channel(text, file)
         return self.load(ini)
 
@@ -242,27 +242,27 @@ class MailboxTest(MailboxCase):
     """A channel section and its two jobs (the M7b plan, ported to M10's channels.d/)."""
 
     def test_two_jobs(self):
-        cfg = self.load_channel(MAILBOX + "idle_timeout = 600\n", FERRY)
+        cfg = self.load_channel(MAILBOX + "idle_timeout = 600\n", VCHARON)
         self.assertEqual(list(cfg.jobs), ["ch.windows.up", "ch.windows.down"])
         self.assertEqual(cfg.mailboxes, {"ch.windows": ["ch.windows.up", "ch.windows.down"]})
         up, down = cfg.jobs["ch.windows.up"], cfg.jobs["ch.windows.down"]
-        own = os.path.join("~/ferry_mailbox", "windows")
+        own = os.path.join("~/vcharon_mailbox", "windows")
         self.assertEqual((up.ssh, up.from_text, up.to_text), ("devbox", "local:path", "remote:dir"))
         self.assertEqual(up.source, Side("local", "path", {"path": own, "prune": "yes",
                                                            "allow_empty": "yes"}))
         # M10: up never creates; the claim made the member's folder
-        self.assertEqual(up.sink, Side("remote", "dir", {"path": "~/ferry_mailbox/windows",
+        self.assertEqual(up.sink, Side("remote", "dir", {"path": "~/vcharon_mailbox/windows",
                                                          "create": "no"}))
         self.assertEqual((down.from_text, down.to_text), ("remote:path", "local:dir"))
         self.assertEqual(down.source, Side("remote", "path", {
-            "path": "~/ferry_mailbox", "mailbox_me": "windows", "prune": "yes",
+            "path": "~/vcharon_mailbox", "mailbox_me": "windows", "prune": "yes",
             "allow_empty": "yes"}))
-        self.assertEqual(down.sink, Side("local", "dir", {"path": "~/ferry_mailbox",
+        self.assertEqual(down.sink, Side("local", "dir", {"path": "~/vcharon_mailbox",
                                                           "create": "yes"}))
         for job in (up, down):
             self.assertEqual(job.settings.idle_timeout, 600)
             self.assertEqual(job.mailbox, config.Mailbox("ch.windows", "windows",
-                                                         "~/ferry_mailbox", "~/ferry_mailbox",
+                                                         "~/vcharon_mailbox", "~/vcharon_mailbox",
                                                          "laptop-ui", "ch"))
         self.assertEqual([j.name for j in cfg.named("ch.windows")],
                          ["ch.windows.up", "ch.windows.down"])
@@ -283,10 +283,10 @@ class MailboxTest(MailboxCase):
             with self.subTest(me=me):
                 # each its own local tree: one tree per section (M10)
                 cfg = self.load_channel(MAILBOX.replace("windows", me).replace(
-                    "local  = ~/ferry_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
+                    "local  = ~/vcharon_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
                 self.assertEqual(cfg.jobs["ch.%s.up" % me].mailbox.me, me)
         # the name is checked before the section's: the file keeps its name
-        for me in ("Windows", "WIN", "wIndows", "mAc", "..", ".ferry-stage-x", "x" * 33, "-a",
+        for me in ("Windows", "WIN", "wIndows", "mAc", "..", ".vcharon-stage-x", "x" * 33, "-a",
                    "_a", "a.b",
                    "a/b", "a b", "ä"):
             with self.subTest(me=me):
@@ -308,7 +308,7 @@ class MailboxTest(MailboxCase):
         for me in ("con1", "com", "conx", "com0"):
             with self.subTest(me=me):
                 self.load_channel(MAILBOX.replace("windows", me).replace(
-                    "local  = ~/ferry_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
+                    "local  = ~/vcharon_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
         # the leader follows the same rule (M10)
         for leader in ("Laptop-ui", "con", "x" * 33):
             with self.subTest(leader=leader):
@@ -340,17 +340,17 @@ class MailboxTest(MailboxCase):
         self.assertEqual(e.message, "%s compress: must be yes or no" % WHERE)
 
     def test_paths(self):
-        e = self.channel_refused(MAILBOX.replace("mailbox.local  = ~/ferry_mailbox",
-                                                 "mailbox.local  = ferry_mailbox"))
+        e = self.channel_refused(MAILBOX.replace("mailbox.local  = ~/vcharon_mailbox",
+                                                 "mailbox.local  = vcharon_mailbox"))
         self.assertEqual(e.message, "%s mailbox.local: a local path must be absolute or start "
                                     "with ~" % WHERE)
-        e = self.channel_refused(MAILBOX.replace("mailbox.remote = ~/ferry_mailbox",
+        e = self.channel_refused(MAILBOX.replace("mailbox.remote = ~/vcharon_mailbox",
                                                  "mailbox.remote ="))
         self.assertEqual(e.message, "%s mailbox.remote: can't be empty" % WHERE)
         absolute = os.path.join(self.tmp, "box")
-        cfg = self.load_channel(MAILBOX.replace("mailbox.local  = ~/ferry_mailbox",
+        cfg = self.load_channel(MAILBOX.replace("mailbox.local  = ~/vcharon_mailbox",
                                                 "mailbox.local  = " + absolute)
-                                .replace("mailbox.remote = ~/ferry_mailbox",
+                                .replace("mailbox.remote = ~/vcharon_mailbox",
                                          "mailbox.remote = box"))
         self.assertEqual(cfg.jobs["ch.windows.up"].source.options["path"],
                          os.path.join(absolute, "windows"))
@@ -390,8 +390,8 @@ class MailboxTest(MailboxCase):
         prints = {name[len("ch.windows"):]: state.fingerprint(job)
                   for name, job in base.jobs.items()}
         for old, new in (("= windows", "= mac"),
-                         ("mailbox.local  = ~/ferry_mailbox", "mailbox.local  = ~/box"),
-                         ("mailbox.remote = ~/ferry_mailbox", "mailbox.remote = ~/box")):
+                         ("mailbox.local  = ~/vcharon_mailbox", "mailbox.local  = ~/box"),
+                         ("mailbox.remote = ~/vcharon_mailbox", "mailbox.remote = ~/box")):
             with self.subTest(new=new):
                 text = MAILBOX.replace(old, new)
                 file = "ch.windows.ini"
@@ -406,14 +406,14 @@ class MailboxTest(MailboxCase):
                                         name)
                 if file != "ch.windows.ini":
                     os.remove(os.path.join(self.tmp, "channels.d", file))
-        # the leader isn't in it: it changes nothing ferry sends (M10)
+        # the leader isn't in it: it changes nothing vcharon sends (M10)
         cfg = self.load_channel(MAILBOX.replace("= laptop-ui", "= mac-other"))
         self.assertEqual({n[len("ch.windows"):]: state.fingerprint(j)
                           for n, j in cfg.jobs.items()}, prints)
         # the list it hashes: the derived sides, then the writer's name
         down = base.jobs["ch.windows.down"]
-        want = json.dumps(["devbox", "remote:path", "local:dir", "~/ferry_mailbox",
-                           "~/ferry_mailbox", "windows"], separators=(",", ":"))
+        want = json.dumps(["devbox", "remote:path", "local:dir", "~/vcharon_mailbox",
+                           "~/vcharon_mailbox", "windows"], separators=(",", ":"))
         self.assertEqual(state.fingerprint(down), hashlib.sha256(want.encode()).hexdigest())
 
     def test_down_options_pass_the_path_source(self):
@@ -440,29 +440,29 @@ class MailboxTest(MailboxCase):
     def test_remote_isnt_the_home_or_the_root(self):
         for value in ("~", "~/", "/", ".", "./", "~/.", "//"):
             with self.subTest(value=value):
-                e = self.channel_refused(MAILBOX.replace("mailbox.remote = ~/ferry_mailbox",
+                e = self.channel_refused(MAILBOX.replace("mailbox.remote = ~/vcharon_mailbox",
                                                          "mailbox.remote = " + value))
                 self.assertEqual(e.message, "%s mailbox.remote: can't be the server's home or "
                                             "its root; give the tree a folder of its own, such "
-                                            "as ~/.local/state/ferry/mailbox" % WHERE)
+                                            "as ~/.local/state/vcharon/mailbox" % WHERE)
 
 
 class ChannelsDirTest(MailboxCase):
-    """channels.d/ (DESIGN §14 M10, Config): one file per section, read after ferry.ini; a
+    """channels.d/ (DESIGN §14 M10, Config): one file per section, read after vcharon.ini; a
     broken or clashing file is skipped, fatal only for a command that names it."""
 
     def test_one_section_per_file_in_name_order(self):
         self.write_channel(MAILBOX.replace("ch.windows", "b.windows").replace(
-            "local  = ~/ferry_mailbox", "local  = ~/b"), "b.windows.ini")
+            "local  = ~/vcharon_mailbox", "local  = ~/b"), "b.windows.ini")
         self.write_channel(MAILBOX.replace("ch.windows", "a.windows"), "a.windows.ini")
-        cfg = self.load(FERRY)
+        cfg = self.load(VCHARON)
         self.assertEqual(list(cfg.jobs), ["a.windows.up", "a.windows.down", "b.windows.up",
                                           "b.windows.down"])
         self.assertEqual(cfg.skipped, [])
 
     def test_only_one_channel_section(self):
-        rows = (("[ferry]\ncompress = yes\n" + MAILBOX,
-                 "channels.d/ch.windows.ini: [ferry] goes in ferry.ini, not in channels.d"),
+        rows = (("[vcharon]\ncompress = yes\n" + MAILBOX,
+                 "channels.d/ch.windows.ini: [vcharon] goes in vcharon.ini, not in channels.d"),
                 (MAILBOX + JOB,
                  "channels.d/ch.windows.ini: holds exactly one section, [ch.windows], named as "
                  "the file"),
@@ -487,7 +487,7 @@ class ChannelsDirTest(MailboxCase):
         for text, message in rows:
             with self.subTest(message=message):
                 raw = b"\xff" if text == "\xff" else text
-                e = self.channel_refused(raw, FERRY)
+                e = self.channel_refused(raw, VCHARON)
                 self.assertEqual(e.message, message)
                 self.assertTrue(e.hint.startswith("fix %s" % os.path.join(
                     self.tmp, "channels.d", "ch.windows.ini")), e.hint)
@@ -501,30 +501,30 @@ class ChannelsDirTest(MailboxCase):
                      "ch.windows.ini.bak"):
             self.write_channel("broken [", file)
         os.mkdir(os.path.join(self.tmp, "channels.d", "sub.ini.d"))
-        cfg = self.load(FERRY)
+        cfg = self.load(VCHARON)
         self.assertEqual(list(cfg.jobs), [])
         self.assertEqual(cfg.skipped, [])
 
     def test_a_broken_file_is_skipped_for_the_others(self):
         self.write_channel("[a.windows\n", "a.windows.ini")
         self.write_channel(MAILBOX.replace("ch.windows", "b.windows"), "b.windows.ini")
-        cfg = self.load(FERRY)
+        cfg = self.load(VCHARON)
         self.assertEqual(list(cfg.jobs), ["b.windows.up", "b.windows.down"])
         self.assertEqual([s.line for s in cfg.skipped], [
             "skipped channels.d/a.windows.ini: line 1: a key outside any section: [a.windows"])
         self.assertEqual(cfg.skipped[0].names, ("a.windows", "a.windows.up", "a.windows.down"))
 
     def test_next_to_the_config_file(self):
-        # --config's directory, not FERRY_HOME's
+        # --config's directory, not VCHARON_HOME's
         other = os.path.join(self.tmp, "elsewhere")
         os.makedirs(os.path.join(other, "channels.d"))
-        with open(os.path.join(other, "ferry.ini"), "w", encoding="utf-8") as f:
-            f.write(FERRY)
+        with open(os.path.join(other, "vcharon.ini"), "w", encoding="utf-8") as f:
+            f.write(VCHARON)
         with open(os.path.join(other, "channels.d", "ch.windows.ini"), "w",
                   encoding="utf-8") as f:
             f.write(MAILBOX)
         self.write_channel(MAILBOX.replace("ch.windows", "home.windows"), "home.windows.ini")
-        cfg = config.load(os.path.join(other, "ferry.ini"))
+        cfg = config.load(os.path.join(other, "vcharon.ini"))
         self.assertEqual(list(cfg.jobs), ["ch.windows.up", "ch.windows.down"])
         self.assertEqual(config.channels_dir(cfg.path), os.path.join(other, "channels.d"))
 
@@ -534,10 +534,10 @@ class ChannelsDirTest(MailboxCase):
         self.write_channel(MAILBOX.replace("ch.windows", "zz.windows"), "zz.windows.ini")
         # another spelling of the same folder
         self.write_channel(MAILBOX.replace("ch.windows", "x.windows").replace(
-            "local  = ~/ferry_mailbox", "local  = ~/./ferry_mailbox/"), "x.windows.ini")
+            "local  = ~/vcharon_mailbox", "local  = ~/./vcharon_mailbox/"), "x.windows.ini")
         self.write_channel(MAILBOX.replace("ch.windows", "y.windows").replace(
-            "local  = ~/ferry_mailbox", "local  = ~/own"), "y.windows.ini")
-        cfg = self.load(FERRY)
+            "local  = ~/vcharon_mailbox", "local  = ~/own"), "y.windows.ini")
+        cfg = self.load(VCHARON)
         self.assertEqual(list(cfg.jobs), ["y.windows.up", "y.windows.down"])
         lines = sorted(skip.line for skip in cfg.skipped)
         self.assertEqual(lines, sorted([
@@ -555,7 +555,7 @@ class ChannelsDirTest(MailboxCase):
         folder = os.path.join(self.tmp, "channels.d")
         os.chmod(folder, 0)
         self.addCleanup(os.chmod, folder, 0o755)
-        cfg = self.load(FERRY)
+        cfg = self.load(VCHARON)
         self.assertEqual(list(cfg.jobs), [])
         # a name the config lacks says why, not "no job named"
         skip = cfg.skipped_for("ch.windows.up")
@@ -563,107 +563,107 @@ class ChannelsDirTest(MailboxCase):
                         skip.error.message)
         self.assertIsNone(cfg.named("ch.windows.up"))
 
-    def test_without_a_ferry_ini(self):
+    def test_without_a_vcharon_ini(self):
         # a box whose config is only channels.d/ still reads it
         self.write_channel(MAILBOX)
         cfg = config.load()
         self.assertFalse(cfg.exists)
         self.assertEqual(list(cfg.jobs), ["ch.windows.up", "ch.windows.down"])
 
-    def test_a_retired_mailbox_in_ferry_ini(self):
+    def test_a_retired_mailbox_in_vcharon_ini(self):
         fixed = ("[mailbox]\nssh = devbox\nmailbox.me = windows\nmailbox.local = ~/m\n"
                  "mailbox.remote = m\n")
-        cfg = self.load(FERRY + fixed)
+        cfg = self.load(VCHARON + fixed)
         self.assertEqual(list(cfg.jobs), [])
         self.assertEqual(cfg.mailboxes, {})
-        message = ('the fixed mailbox is retired (M10): delete [mailbox] from ferry.ini '
-                   '(MAILBOX.md in the ferry folder, "Retired")')
+        message = ('the fixed mailbox is retired (M10): delete [mailbox] from vcharon.ini '
+                   '(MAILBOX.md in the vcharon folder, "Retired")')
         self.assertEqual([s.line for s in cfg.skipped],
-                         ["skipped ferry.ini [mailbox]: " + message])
+                         ["skipped vcharon.ini [mailbox]: " + message])
         for name in ("mailbox", "mailbox.up", "mailbox.down"):
             self.assertEqual(cfg.skipped_for(name).error.message, message)
                 # broken as well: still only skipped, whatever it holds
-        cfg = self.load(FERRY + "[mailbox]\nmailbox.bogus = 1\n")
+        cfg = self.load(VCHARON + "[mailbox]\nmailbox.bogus = 1\n")
         self.assertEqual(list(cfg.jobs), [])
-        # its names stay taken in ferry.ini
+        # its names stay taken in vcharon.ini
         self.refused(fixed + fixed.replace("[mailbox]", "[Mailbox.Up]"), "same name")
 
     def test_box(self):
         for box in ("mac", "win", "linux", "laptop", "x" * 10, "a_b-c"):
             with self.subTest(box=box):
-                self.assertEqual(self.load("[ferry]\nbox = %s\n" % box).box, box)
-        self.assertIsNone(self.load("[ferry]\ncompress = yes\n").box)
+                self.assertEqual(self.load("[vcharon]\nbox = %s\n" % box).box, box)
+        self.assertIsNone(self.load("[vcharon]\ncompress = yes\n").box)
         for box, words in (("x" * 11, "longer than 10"), ("Mac", "lowercase"), ("con",
                            "reserved"), ("", "lowercase"), ("a.b", "lowercase")):
             with self.subTest(box=box):
-                e = self.refused("[ferry]\nbox = %s\n" % box, words)
-                self.assertTrue(e.message.startswith("ferry.ini [ferry] box: "), e.message)
+                e = self.refused("[vcharon]\nbox = %s\n" % box, words)
+                self.assertTrue(e.message.startswith("vcharon.ini [vcharon] box: "), e.message)
                 self.assertIn("such as mac, win, linux or laptop", e.message)
 
 
-# a retired fixed mailbox's section, with mailbox keys: the only section besides [ferry] that
-# ferry.ini still takes (skipped, its names taken)
+# a retired fixed mailbox's section, with mailbox keys: the only section besides [vcharon] that
+# vcharon.ini still takes (skipped, its names taken)
 RETIRED = "[%s]\nssh = devbox\nmailbox.me = windows\nmailbox.local = ~/m\nmailbox.remote = m\n"
 
 
-class FerryIniSectionsTest(MailboxCase):
-    """The checks of ferry.ini's own sections, besides [ferry]."""
+class VCharonIniSectionsTest(MailboxCase):
+    """The checks of vcharon.ini's own sections, besides [vcharon]."""
 
     def test_settings_only(self):
         # a stray section of any name: the settings-only message, not a name rule's
         for name in ("My Jobs", "j", "con"):
             with self.subTest(name=name):
-                e = self.refused(FERRY + "[%s]\nx = 1\n" % name)
-                self.assertEqual(e.message, "ferry.ini [%s]: ferry.ini holds only [ferry]; a "
-                                            "channel's section goes in channels.d, which ferry "
+                e = self.refused(VCHARON + "[%s]\nx = 1\n" % name)
+                self.assertEqual(e.message, "vcharon.ini [%s]: vcharon.ini holds only [vcharon]; a "
+                                            "channel's section goes in channels.d, which vcharon "
                                             "channel writes" % name)
                 self.assertEqual(e.hint, "fix %s" % self.path)
 
     def test_the_global_section_spelling(self):
-        for text in ("[Ferry]\nidle_timeout = 60\n", RETIRED % "FERRY"):
+        for text in ("[VCharon]\nidle_timeout = 60\n", RETIRED % "VCHARON"):
             with self.subTest(text=text):
                 e = self.refused(text)
                 section = text.split("]")[0][1:]
-                self.assertEqual(e.message, "ferry.ini [%s]: the global section is spelled "
-                                            "[ferry]" % section)
+                self.assertEqual(e.message, "vcharon.ini [%s]: the global section is spelled "
+                                            "[vcharon]" % section)
 
     def test_section_names(self):
         for name in ("1a", "a.b_c-d", "x" * 64, "Game"):
             with self.subTest(name=name):
                 cfg = self.load(RETIRED % name)
-                self.assertEqual([s.where for s in cfg.skipped], ["ferry.ini [%s]" % name])
+                self.assertEqual([s.where for s in cfg.skipped], ["vcharon.ini [%s]" % name])
         for name in (".a", "-a", "a b", "ä", "x" * 65, "CON", "nul.txt", "com1", "a/b", "_a"):
             with self.subTest(name=name):
-                e = self.refused(RETIRED % name, "ferry.ini [%s]: " % name)
+                e = self.refused(RETIRED % name, "vcharon.ini [%s]: " % name)
                 self.assertEqual(e.hint, "fix %s" % self.path)
         e = self.refused(RETIRED % "CON")
-        self.assertEqual(e.message, "ferry.ini [CON]: CON is a reserved name on Windows")
+        self.assertEqual(e.message, "vcharon.ini [CON]: CON is a reserved name on Windows")
         e = self.refused(RETIRED % "a b")
-        self.assertEqual(e.message, "ferry.ini [a b]: a job name has only letters, digits, '.', "
+        self.assertEqual(e.message, "vcharon.ini [a b]: a job name has only letters, digits, '.', "
                                     "'_' and '-', starts with a letter or digit, and is at most "
                                     "64 characters long")
 
     def test_case_folded_clashes(self):
         e = self.refused(RETIRED % "game" + RETIRED % "Game")
-        self.assertEqual(e.message, "ferry.ini [Game]: the same name as [game] when case is "
+        self.assertEqual(e.message, "vcharon.ini [Game]: the same name as [game] when case is "
                                     "ignored")
         # a section named as another one's job
         e = self.refused(RETIRED % "game" + RETIRED % "Game.Up")
-        self.assertEqual(e.message, "ferry.ini [Game.Up]: the same name as the job game.up of "
+        self.assertEqual(e.message, "vcharon.ini [Game.Up]: the same name as the job game.up of "
                                     "[game] when case is ignored")
         # a section whose job is named as an earlier section
         e = self.refused(RETIRED % "game.down" + RETIRED % "Game")
-        self.assertEqual(e.message, "ferry.ini [Game]: its job Game.down has the same name as "
+        self.assertEqual(e.message, "vcharon.ini [Game]: its job Game.down has the same name as "
                                     "[game.down] when case is ignored")
 
     def test_a_clash_with_a_channels_d_file(self):
-        # ferry.ini's names are taken first: the channels.d/ file is skipped too
+        # vcharon.ini's names are taken first: the channels.d/ file is skipped too
         for name in ("ch.windows.up", "CH.WINDOWS.DOWN", "Ch.Windows", "ch.windows"):
             with self.subTest(name=name):
                 cfg = self.load_channel(MAILBOX, RETIRED % name)
                 self.assertEqual(list(cfg.jobs), [])
                 self.assertEqual([s.where for s in cfg.skipped],
-                                 ["ferry.ini [%s]" % name, "channels.d/ch.windows.ini"])
+                                 ["vcharon.ini [%s]" % name, "channels.d/ch.windows.ini"])
                 e = cfg.skipped[1].error
                 self.assertEqual(e.message, "%s: %s has the same name as [%s] when case is "
                                             "ignored" % (WHERE, name.lower(), name))

@@ -29,14 +29,14 @@ view = _load("mailbox_view")
 NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)
 MINUTE = "2026-10-02 10:12"
 
-# M10: a channel section, in channels.d/ next to ferry.ini, as test_mailbox_watch.py's
+# M10: a channel section, in channels.d/ next to vcharon.ini, as test_mailbox_watch.py's
 MAILBOX = """
 [mb.windows]
 ssh            = devbox
 mailbox.me     = windows
 mailbox.leader = debian
 mailbox.local  = {local}
-mailbox.remote = ~/.local/state/ferry/channels/mb
+mailbox.remote = ~/.local/state/vcharon/channels/mb
 """
 
 
@@ -54,9 +54,9 @@ def md(*entries):
 
 class ViewCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        patch = mock.patch.dict(os.environ, {"FERRY_HOME": os.path.join(self.tmp, "home")})
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": os.path.join(self.tmp, "home")})
         patch.start()
         self.addCleanup(patch.stop)
         self.tree = os.path.join(self.tmp, "mb")
@@ -174,10 +174,10 @@ class PlacedTest(ViewCase):
     def test_what_is_left_out(self):
         tree = {"aa/MEMBER.md": md(entry("aa#1", "member")),
                 "aa/sub/MEMBER.md": md(entry("aa#2", "a MEMBER.md below the top")),
-                "aa/.ferry-stage-x/R.md": md(entry("aa#3")),
-                "aa/.ferry-stage-y.md": md(entry("aa#4")),
+                "aa/.vcharon-stage-x/R.md": md(entry("aa#3")),
+                "aa/.vcharon-stage-y.md": md(entry("aa#4")),
                 "aa/notes.txt": md(entry("aa#5")),
-                ".ferry-stage-z/R.md": md(entry("zz#1")),
+                ".vcharon-stage-z/R.md": md(entry("zz#1")),
                 "Stray/R.md": md(entry("zz#2")),
                 "top.md": md(entry("zz#3")),
                 "empty/": None}
@@ -248,9 +248,9 @@ class OutputTest(ViewCase):
 class JobTest(ViewCase):
     def setUp(self):
         ViewCase.setUp(self)
-        self.config = os.path.join(self.tmp, "ferry.ini")
+        self.config = os.path.join(self.tmp, "vcharon.ini")
         with open(self.config, "w", encoding="utf-8") as f:
-            f.write("[ferry]\n")
+            f.write("[vcharon]\n")
         write_tree(self.tmp, {"channels.d/mb.windows.ini":
                               MAILBOX.format(local=self.tree).encode("utf-8")})
         write_tree(self.tree, {"debian/R.md": md(entry("debian#2", "steps")),

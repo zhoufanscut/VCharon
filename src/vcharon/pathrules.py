@@ -9,7 +9,7 @@ import unicodedata
 
 from .proto import VCharonError, quote
 
-STAGE_PREFIX = ".ferry-stage-"
+STAGE_PREFIX = ".vcharon-stage-"
 
 # Python 3.13's ntpath._reserved_names; ported, since the floor is 3.9.
 RESERVED = frozenset(
@@ -53,9 +53,9 @@ def _split_problem(path):
     for part in parts:
         if part in ("", ".", ".."):
             return None, "has an empty, \".\" or \"..\" part"
-        # decision 4 of the M2 plan: stage dir names are ferry's own, in any case
+        # decision 4 of the M2 plan: stage dir names are vcharon's own, in any case
         if part.casefold().startswith(STAGE_PREFIX):
-            return None, "uses a name reserved for ferry's stage dirs"
+            return None, "uses a name reserved for vcharon's stage dirs"
     return parts, None
 
 
@@ -213,7 +213,7 @@ def _check_collisions(plan, all_parts, osn):
 
 def is_absolute(path, osn):
     """DESIGN §9.1: absolute by osn's rules. On Windows that takes a drive or a share: /srv/x,
-    \\x and C:x depend on the current directory, which ferry never uses, although Python before
+    \\x and C:x depend on the current directory, which vcharon never uses, although Python before
     3.13 calls the first two absolute."""
     if osn == "windows":
         return ntpath.isabs(path) and bool(ntpath.splitdrive(path)[0])
@@ -221,7 +221,7 @@ def is_absolute(path, osn):
 
 
 def win_long_path(root, parts=()):
-    """DESIGN §10.1: every absolute path ferry hands to Windows starts with \\\\?\\ (\\\\?\\UNC\\
+    """DESIGN §10.1: every absolute path vcharon hands to Windows starts with \\\\?\\ (\\\\?\\UNC\\
     for a share). parts have passed the Windows rules and are joined as they are."""
     if root.startswith("\\\\?\\"):
         path = root

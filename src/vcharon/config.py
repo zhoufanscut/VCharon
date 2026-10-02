@@ -1,4 +1,4 @@
-"""Read and check ferry.ini (DESIGN §12)."""
+"""Read and check vcharon.ini (DESIGN §12)."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class Job:
     ssh: str
     source: Side          # options as the raw strings
     sink: Side
-    settings: Settings    # [ferry]'s, with the section's overrides
+    settings: Settings    # [vcharon]'s, with the section's overrides
     from_text: str        # the raw from and to values
     to_text: str
     # a job derived from a mailbox section: that section's values; else None
@@ -64,11 +64,11 @@ class Job:
 
 @dataclasses.dataclass
 class Skipped:
-    """A section ferry goes on without (DESIGN §14 M10): a channels.d/ file that is broken or
-    clashes, or a retired mailbox section in ferry.ini. Only a command that names it fails, with
-    its error; ferry doctor lists it, every other command logs it."""
+    """A section vcharon goes on without (DESIGN §14 M10): a channels.d/ file that is broken or
+    clashes, or a retired mailbox section in vcharon.ini. Only a command that names it fails, with
+    its error; vcharon doctor lists it, every other command logs it."""
 
-    where: str            # channels.d/<file>, or ferry.ini [<section>]
+    where: str            # channels.d/<file>, or vcharon.ini [<section>]
     error: VCharonError     # code config; its message names where
     names: tuple          # the section and its jobs: what a command may name it by
 
@@ -95,9 +95,9 @@ class Config:
     jobs: dict = dataclasses.field(default_factory=dict)
     # mailbox section -> the names of its jobs, up first
     mailboxes: dict = dataclasses.field(default_factory=dict)
-    # [ferry] box: this box's name in channel members' names (M10), or None
+    # [vcharon] box: this box's name in channel members' names (M10), or None
     box: str = None
-    # [Skipped], ferry.ini's first, then channels.d/'s in name order
+    # [Skipped], vcharon.ini's first, then channels.d/'s in name order
     skipped: list = dataclasses.field(default_factory=list)
 
     def named(self, name):
@@ -126,19 +126,19 @@ _DIGITS = re.compile(r"\A[0-9]+\Z")
 # A job's name names its state, lock and log files on every OS. At most 64 characters, so a
 # "<job>.json.tmp" name stays far under 255 bytes.
 _JOB_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-# the [ferry] settings a channel section may override
+# the [vcharon] settings a channel section may override
 JOB_SETTINGS = ("idle_timeout", "run_timeout", "compress", "remote_python")
 # A mailbox section [S] becomes the jobs S.up and S.down (DESIGN §12).
 MAILBOX_KEYS = ("mailbox.me", "mailbox.leader", "mailbox.local", "mailbox.remote")
 MAILBOX_JOBS = (".up", ".down")
 # so S.down stays a job name
 MAILBOX_NAME_MAX = 64 - len(".down")
-# [ferry] box: at most this long, so a member's name <box>-<project>-<role> fits 32 (M10)
+# [vcharon] box: at most this long, so a member's name <box>-<project>-<role> fits 32 (M10)
 BOX_MAX = 10
 # next to the config file: one channel section per file (DESIGN §14 M10)
 CHANNELS_DIR = "channels.d"
 RETIRED = ("the fixed mailbox is retired (M10): delete [%s] from %s (MAILBOX.md in the "
-           "ferry folder, \"Retired\")")
+           "vcharon folder, \"Retired\")")
 
 
 def job_name_problem(name):
@@ -176,8 +176,8 @@ def load(path=None):
         parser = _parse(raw, name, path, hint)
         settings = Settings()
         box = None
-        if parser.has_section("ferry"):
-            box = _read_ferry(parser, name, hint, settings)
+        if parser.has_section("vcharon"):
+            box = _read_vcharon(parser, name, hint, settings)
         jobs, mailboxes, folded, skipped = _read_jobs(parser, name, hint, settings, path)
         cfg = Config(path, True, settings, jobs, mailboxes, box, skipped)
     _read_channels(cfg, folded)
@@ -185,7 +185,7 @@ def load(path=None):
 
 
 def _parse(raw, name, source, hint):
-    """A ConfigParser of one file's bytes, with ferry's rules (DESIGN §12); config errors name
+    """A ConfigParser of one file's bytes, with vcharon's rules (DESIGN §12); config errors name
     the file as name."""
     try:
         # Windows Notepad may add a BOM.
@@ -226,11 +226,11 @@ def _parse_error(name, e):
     return "%s: %s" % (name, e.message)
 
 
-def _read_ferry(parser, name, hint, settings):
-    """Reads [ferry] into settings; returns its box, or None."""
+def _read_vcharon(parser, name, hint, settings):
+    """Reads [vcharon] into settings; returns its box, or None."""
     box = None
-    for key, value in parser.items("ferry"):
-        where = "%s [ferry] %s" % (name, key)
+    for key, value in parser.items("vcharon"):
+        where = "%s [vcharon] %s" % (name, key)
         if key == "box":
             problem = box_problem(value)
             if problem:
@@ -242,7 +242,7 @@ def _read_ferry(parser, name, hint, settings):
 
 
 def box_problem(box):
-    """Why box can't be [ferry] box, or None: mailbox.me's rule, at most BOX_MAX long."""
+    """Why box can't be [vcharon] box, or None: mailbox.me's rule, at most BOX_MAX long."""
     problem = pathrules.writer_problem(box)
     if problem is None and len(box) > BOX_MAX:
         problem = "it's longer than %d characters" % BOX_MAX
@@ -253,7 +253,7 @@ def box_problem(box):
 
 
 def _setting(settings, key, value, where, hint):
-    """Checks one [ferry] setting and sets it; False for a key that isn't one. A channel section's
+    """Checks one [vcharon] setting and sets it; False for a key that isn't one. A channel section's
     overrides come through here too, so they get exactly the same checks."""
     if key == "ssh_path":
         path = os.path.expanduser(value)
@@ -299,7 +299,7 @@ def _setting(settings, key, value, where, hint):
 
 
 def _read_jobs(parser, name, hint, settings, path):
-    """The sections besides [ferry]; (name -> Job, mailbox sections, the folded names taken,
+    """The sections besides [vcharon]; (name -> Job, mailbox sections, the folded names taken,
     [Skipped]). The config file holds no jobs of its own: a section here with mailbox keys is
     the retired fixed mailbox, skipped (M10) with its names still taken; any other section is
     refused. Channel sections live in channels.d/."""
@@ -309,15 +309,15 @@ def _read_jobs(parser, name, hint, settings, path):
     # folded name -> the section that has it, or "[S] makes S.up" for a derived job
     folded = {}
     for section in parser.sections():
-        if section == "ferry":
+        if section == "vcharon":
             continue
-        # configparser keeps section names as written, so [Ferry] would be a job
-        if section.casefold() == "ferry":
-            raise VCharonError("config", "%s [%s]: the global section is spelled [ferry]"
+        # configparser keeps section names as written, so [VCharon] would be a job
+        if section.casefold() == "vcharon":
+            raise VCharonError("config", "%s [%s]: the global section is spelled [vcharon]"
                                % (name, section), hint=hint)
         if not any(key.startswith("mailbox.") for key in parser.options(section)):
-            raise VCharonError("config", "%s [%s]: %s holds only [ferry]; a channel's section "
-                               "goes in %s, which ferry channel writes"
+            raise VCharonError("config", "%s [%s]: %s holds only [vcharon]; a channel's section "
+                               "goes in %s, which vcharon channel writes"
                                % (name, section, name, CHANNELS_DIR), hint=hint)
         problem = job_name_problem(section)
         if problem:
@@ -348,7 +348,7 @@ def channels_dir(config_path):
 
 
 def _read_channels(cfg, folded):
-    """Adds channels.d/'s sections to cfg, after ferry.ini's: each file whose name ends in
+    """Adds channels.d/'s sections to cfg, after vcharon.ini's: each file whose name ends in
     exactly .ini and doesn't start with ".", in name order. A file that is broken or clashes
     is skipped (cfg.skipped), never fatal here: one agent's broken channel can't stop the
     user's other channels."""
@@ -423,8 +423,8 @@ def _read_channel_file(path, where, section, hint, settings):
                            hint=hint)
     parser = _parse(raw, where, path, hint)
     sections = parser.sections()
-    if any(s.casefold() == "ferry" for s in sections):
-        raise VCharonError("config", "%s: [ferry] goes in ferry.ini, not in %s"
+    if any(s.casefold() == "vcharon" for s in sections):
+        raise VCharonError("config", "%s: [vcharon] goes in vcharon.ini, not in %s"
                            % (where, CHANNELS_DIR), hint=hint)
     if sections != [section]:
         raise VCharonError("config", "%s: holds exactly one section, [%s], named as the file"
@@ -474,7 +474,7 @@ def _read_mailbox(parser, section, name, hint, base):
     problem = pathrules.writer_problem(leader)
     if problem:
         refuse("mailbox.leader", problem)
-    # [<channel>.<me>]: one section per channel and member, as ferry channel names it
+    # [<channel>.<me>]: one section per channel and member, as vcharon channel names it
     channel = section[:-len(me) - 1] if section.endswith("." + me) else ""
     if not channel:
         refuse(None, "a channel section is named <channel>.<mailbox.me>, here [<channel>.%s]"
@@ -492,7 +492,7 @@ def _read_mailbox(parser, section, name, hint, base):
     # down prunes the whole tree: never the server's home or its root
     if posixpath.normpath(remote) in ("/", "//", ".", "~"):
         refuse("mailbox.remote", "can't be the server's home or its root; give the tree a "
-                                 "folder of its own, such as ~/.local/state/ferry/mailbox")
+                                 "folder of its own, such as ~/.local/state/vcharon/mailbox")
     box = Mailbox(section, me, local, remote, leader, channel)
     up = Job(section + ".up", values["ssh"],
              Side("local", "path", {"path": box.own_folder, "prune": "yes",

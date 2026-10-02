@@ -1,34 +1,34 @@
-"""Watch a ferry channel and print what reached you, one line per entry (DESIGN §14 M10,
-MAILBOX.md and WATCHING.md in the ferry folder).
+"""Watch a vcharon channel and print what reached you, one line per entry (DESIGN §14 M10,
+MAILBOX.md and WATCHING.md in the vcharon folder).
 
 Two ways to run it. Continuous, the default, for a Claude Code Monitor: it prints only when
 something changed and runs until --max-minutes, a usage error or Ctrl-C. --until-change, for a
 session without a Monitor (a background command, which notifies only when it exits): it exits
 after the first round that printed something that counts, or whose error counts (see
-status()). Standard library only, Python 3.9 or newer. It lives outside the ferry package:
-DESIGN §1 keeps watching out of ferry itself.
+status()). Standard library only, Python 3.9 or newer. It lives outside the vcharon package:
+DESIGN §1 keeps watching out of vcharon itself.
 
 Server mode, for a server member, on the server box, where the channel is plain files; its own
-folder <dir>/<me>/ must hold MEMBER.md (ferry channel join --local wrote it):
+folder <dir>/<me>/ must hold MEMBER.md (vcharon channel join --local wrote it):
 
-    python3 mailbox_watch.py --dir ~/.local/state/ferry/channels/<C> --me <name> [--every 10]
+    python3 mailbox_watch.py --dir ~/.local/state/vcharon/channels/<C> --me <name> [--every 10]
 
-Client mode: each round is a `ferry run <job>` (the channel section's up and down jobs), then
+Client mode: each round is a `vcharon run <job>` (the channel section's up and down jobs), then
 compares the client's copy of the channel with the round before:
 
     python3 mailbox_watch.py --job <C>.<name> [--config PATH] [--every 2] [--no-stream]
 
-It streams by default (DESIGN §14 M15): one long-lived child, `ferry run <job> --repeat
+It streams by default (DESIGN §14 M15): one long-lived child, `vcharon run <job> --repeat
 <every>`, keeps one ssh connection and prints `ROUND <code>` after each round; each ROUND line
 is one round here. When the child exits it is started again after 2, 4, 8, 16, 30, 30… s (back
 to 2 after a round that worked); every way out of the watch closes its stdin, waits up to 10 s,
 then kills it. Streaming, the wake rules count time: an error of RETRY_KEYS counts once it has
 held 60 s in a row, and --until-change's EXIT error comes after --max-errors × 30 s of failing
-that woke nobody. --no-stream runs `ferry run <job>` each round, every 30 s by default, with
+that woke nobody. --no-stream runs `vcharon run <job>` each round, every 30 s by default, with
 the rules in rounds, as before M15.
 
-Both skip the member's own folder <me>/ and ferry's stage dirs. In the other members' folders
-it reads the entries of every .md file (ferry/entries.py's format) and prints the new ones
+Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
+it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
 addressed to <me>, or to @all from the leader (the section's mailbox.leader; in server mode
 the record's, else MEMBER.md's). Every line starts with the local time, `YYYY-mm-dd HH:MM:SS `.
 Lines; * marks the ones that count for --until-change:
@@ -61,9 +61,9 @@ Lines; * marks the ones that count for --until-change:
   * ERROR ...                      a failed round's first error line, once, and again only
                                    when it changes (status() says when it counts)
       fix: <text>                  what to do, right after its ERROR line when there is one:
-                                   ferry run's fix line, or with --dir the leave command for a
+                                   vcharon run's fix line, or with --dir the leave command for a
                                    channel folder that's gone (a closed channel); a command in
-                                   it is as this box runs ferry, `python3 <ferry> ...`
+                                   it is as this box runs vcharon, `python3 <vcharon> ...`
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed
                                    the last line, when it exits on its own (exit 0, 10, 11,
@@ -72,8 +72,8 @@ Lines; * marks the ones that count for --until-change:
                                    channel that's gone, in every mode and on every start while
                                    it stays gone: don't restart, run the fix line's leave
 
-The snapshot (version 2) is saved in ferry's state dir at the start and after every round whose
-scan worked (a failed ferry run doesn't stop that), after the round's lines are printed, so a
+The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
+scan worked (a failed vcharon run doesn't stop that), after the round's lines are printed, so a
 restart prints what came while no watcher ran; a round that changed nothing in it (its saved
 time aside) doesn't write it again (M15), so its saved time, the watching line's `since`, is
 that of the last round that changed it. Per member folder it holds the entry numbers
@@ -104,38 +104,38 @@ import threading
 import time
 
 # the repo's src folder, which holds the vcharon package
-FERRY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 # how the watcher starts the command line as a child: this Python, the installed package
 SELF_ARGV = (sys.executable, "-m", "vcharon")
-# ferry's stage dirs, in any case (DESIGN §10.3)
-STAGE_PREFIX = ".ferry-stage-"
-# how ferry run's fix and log lines start, among its ERROR line's own (cli.py's show_error)
+# vcharon's stage dirs, in any case (DESIGN §10.3)
+STAGE_PREFIX = ".vcharon-stage-"
+# how vcharon run's fix and log lines start, among its ERROR line's own (cli.py's show_error)
 FIX = "  fix: "
 LOG = "  log: "
-# between a fix's text and its log path, in the fix that run_ferry returns and the snapshot
+# between a fix's text and its log path, in the fix that run_vcharon returns and the snapshot
 # keeps; status() prints them as two lines
 LOG_SEP = "\n"
-# A round's ferry run has its own timeouts; this only keeps a stuck one from stopping the watch.
+# A round's vcharon run has its own timeouts; this only keeps a stuck one from stopping the watch.
 RUN_TIMEOUT = 900
 # --job's default seconds between rounds: streaming, and with --no-stream (M15)
 STREAM_EVERY, RUN_EVERY = 2, 30
-# a streaming --job's --every, which is ferry run --repeat's SECONDS: 1 to this
+# a streaming --job's --every, which is vcharon run --repeat's SECONDS: 1 to this
 STREAM_EVERY_MAX = 300
 # Streaming, a round is seconds, so M9's wake rules count time, not rounds (M15): an error of
 # RETRY_KEYS counts once it has held this long in a row (as its second 30-s round did), and
 # with --until-change each --max-errors round is this many seconds of failing that woke nobody.
 STREAM_HOLD = 60
 STREAM_ERROR_ROUND = 30
-# the waits before starting the ferry run --repeat child again after it exited; back to the
+# the waits before starting the vcharon run --repeat child again after it exited; back to the
 # first after a round that worked
 BACKOFF = (2, 4, 8, 16, 30)
 # how long the child may take to end after its stdin closes, before it's killed
 STOP_WAIT = 10
-# the child's line that ends one round: ferry run's exit code for it
+# the child's line that ends one round: vcharon run's exit code for it
 _ROUND = re.compile(r"\AROUND (\d+)\Z")
 # Windows and macOS clients ignore case in names, so Windows/ there is the own folder.
 FOLDS = sys.platform in ("win32", "darwin")
-# ferry's exit code for busy: another run of the job holds its lock (DESIGN §11.3)
+# vcharon's exit code for busy: another run of the job holds its lock (DESIGN §11.3)
 BUSY = 2
 # exit codes of the watcher itself (WATCHING.md)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
@@ -147,7 +147,7 @@ HEAD_HEX = 12
 TRANSPORT = "transport"
 # keys that count only in their second failed round in a row: a one-round blip wakes nobody
 RETRY_KEYS = frozenset([TRANSPORT, "vanished", "aborted"])
-# ERROR <code>: ..., or ERROR <job>: <code>: ... from a ferry run of several jobs (M9c), as a
+# ERROR <code>: ..., or ERROR <job>: <code>: ... from a vcharon run of several jobs (M9c), as a
 # mailbox section's run is. A mailbox job's name, S.up or S.down, holds a dot; a code never does.
 _CODE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:up|down): )?([a-z_]+): ")
 _MORE = re.compile(r" \(and \d+ more; see the log\)")
@@ -163,8 +163,8 @@ def error_key(line):
     one problem. It stays in the text key: a content error in up and one in down are two."""
     m = _CODE.match(line)
     code = m.group(1) if m else None
-    if (code in ("connect", "timeout", "lost") or line.startswith("ERROR couldn't start ferry")
-            or (line.startswith("ERROR ferry run ") and " didn't finish within " in line)):
+    if (code in ("connect", "timeout", "lost") or line.startswith("ERROR couldn't start vcharon")
+            or (line.startswith("ERROR vcharon run ") and " didn't finish within " in line)):
         return TRANSPORT
     if code in ("too_many_deletes", "vanished", "aborted"):
         return code
@@ -234,7 +234,7 @@ def warnings(root, me):
     or special file, which fails every client's run. Stage dirs and symlinks are never
     entered. An error on the root raises OSError, as scan's does; below it, an entry that
     vanishes is left out."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import pathrules
     out = []
     with os.scandir(root) as it:
@@ -382,7 +382,7 @@ def read_entries(root, paths, marks, me, leader, baseline=False):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
     member's is ignored, since any member can write anything into its own folder."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import entries
     told = Told()
     ids = set()
@@ -448,10 +448,10 @@ def say(line):
     sys.stdout.flush()
 
 
-def _ferry_import():
-    # the ferry package next to this tool, never one on PATH (DESIGN §13)
-    if FERRY_DIR not in sys.path:
-        sys.path.insert(0, FERRY_DIR)
+def _vcharon_import():
+    # the vcharon package next to this tool, never one on PATH (DESIGN §13)
+    if VCHARON_DIR not in sys.path:
+        sys.path.insert(0, VCHARON_DIR)
 
 
 def _root_key(root):
@@ -459,15 +459,15 @@ def _root_key(root):
 
 
 def snapshot_path(root, me, job=None):
-    """Where the saved snapshot lives: ferry's state dir, one file per mailbox job on a client,
+    """Where the saved snapshot lives: vcharon's state dir, one file per mailbox job on a client,
     one per writer and tree on the server."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import platform
     if job is not None:
         name = "mailbox-watch-%s.json" % job
     else:
         # normcase(realpath), as the post lock: two spellings of one folder (a link, and on
-        # Windows another case) get one lock, so exit 12 and ferry channel's lock checks see
+        # Windows another case) get one lock, so exit 12 and vcharon channel's lock checks see
         # every watcher of it (M11a). On Linux with no links the name is as before.
         key = _root_key(root)
         digest = hashlib.sha256(os.fsencode(key)).hexdigest()[:12]
@@ -606,9 +606,9 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
 
 
 def take_lock(path):
-    """The held lock on <snapshot>.lock, or None if another watcher holds it. ferry's own
+    """The held lock on <snapshot>.lock, or None if another watcher holds it. vcharon's own
     lock: the OS drops it when the process dies (DESIGN §11.3)."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon.lock import Lock
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lk = Lock.open(path + ".lock")
@@ -708,7 +708,7 @@ class _Watch:
             self.entries(self.snap, list(self.snap), baseline=True)
             warns = self.check(self.root, self.me) if self.check is not None else []
         except FileNotFoundError:
-            # not there yet: the first ferry run makes it
+            # not there yet: the first vcharon run makes it
             self.snap = {}
             warns = []
         except OSError as e:
@@ -966,9 +966,9 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         lk.release()
 
 
-def ferry_argv(job, config_path, repeat=None):
-    """ferry run <job>, with this Python and SELF_ARGV, never PATH (DESIGN §13); with
-    repeat, ferry run <job> --repeat <repeat> (M15)."""
+def vcharon_argv(job, config_path, repeat=None):
+    """vcharon run <job>, with this Python and SELF_ARGV, never PATH (DESIGN §13); with
+    repeat, vcharon run <job> --repeat <repeat> (M15)."""
     argv = list(SELF_ARGV) + ["run", job]
     if repeat is not None:
         argv += ["--repeat", str(repeat)]
@@ -978,11 +978,11 @@ def ferry_argv(job, config_path, repeat=None):
 
 
 def parse_failure(code, lines, job):
-    """(exit code, its error line, that line's fix) of ferry run's output lines: the first
+    """(exit code, its error line, that line's fix) of vcharon run's output lines: the first
     line that starts with ERROR, else the first that isn't blank; the fix is the text of that
     ERROR line's "  fix: " line (M13), with its "  log: " path after it, since a fix can point
     at lines the watcher doesn't show ("see ssh's messages above"); a log with no fix gives one
-    that names the log; else None. Both are None for code 0. One parser for a ferry run's
+    that names the log; else None. Both are None for code 0. One parser for a vcharon run's
     stderr and a streamed round's lines (M15)."""
     if code == 0:
         return 0, None, None
@@ -1004,20 +1004,20 @@ def parse_failure(code, lines, job):
     for line in lines:
         if line.strip():
             return code, line.strip(), None
-    return code, "ERROR ferry run %s exited with %d" % (job, code), None
+    return code, "ERROR vcharon run %s exited with %d" % (job, code), None
 
 
-def run_ferry(job, config_path):
-    """(exit code, its error line, that line's fix) of one ferry run, from its stderr
+def run_vcharon(job, config_path):
+    """(exit code, its error line, that line's fix) of one vcharon run, from its stderr
     (parse_failure). All but the code are None on success."""
     try:
-        ran = subprocess.run(ferry_argv(job, config_path), stdin=subprocess.DEVNULL,
+        ran = subprocess.run(vcharon_argv(job, config_path), stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              timeout=RUN_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return 1, "ERROR ferry run %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
+        return 1, "ERROR vcharon run %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
     except OSError as e:
-        return 1, "ERROR couldn't start ferry: %s" % (e.strerror or e), None
+        return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
     return parse_failure(ran.returncode, ran.stderr.decode("utf-8", "replace").splitlines(),
                          job)
 
@@ -1043,13 +1043,13 @@ class _ErrTail:
         return list(self.lines)[-n:] if n > 0 else []
 
 
-# ferry run's codes for the errors that break its connection (cli.py's _still_usable): after
-# a round that ended with one, ferry run --repeat exits by design
+# vcharon run's codes for the errors that break its connection (cli.py's _still_usable): after
+# a round that ended with one, vcharon run --repeat exits by design
 _BROKE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*: )?(connect|timeout|lost|protocol): ")
 
 
 class Stream:
-    """A streaming --job's child (DESIGN §14 M15): one long-lived `ferry run <job> --repeat
+    """A streaming --job's child (DESIGN §14 M15): one long-lived `vcharon run <job> --repeat
     <every>`. A reader thread puts its stdout's lines in a queue, another keeps stderr's last
     20. Each ROUND <code> line ends one round; when the child exits, it's started again after
     BACKOFF's wait. spawn, sleep and timer are the tests' to replace."""
@@ -1057,7 +1057,7 @@ class Stream:
     def __init__(self, job, config_path, every, spawn=_spawn, sleep=time.sleep,
                  timer=time.monotonic, stop_wait=STOP_WAIT):
         self.job = job
-        self.argv = ferry_argv(job, config_path, repeat=every)
+        self.argv = vcharon_argv(job, config_path, repeat=every)
         self.every = every
         self.spawn = spawn
         self.sleep = sleep
@@ -1079,7 +1079,7 @@ class Stream:
         self._broke = False
 
     def _start(self):
-        # ferry's own prints in UTF-8, on Windows too (the gbk lesson)
+        # vcharon's own prints in UTF-8, on Windows too (the gbk lesson)
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         proc = self.spawn(self.argv, env)
         self.proc = proc
@@ -1116,7 +1116,7 @@ class Stream:
             pass
 
     def next_round(self, deadline=None):
-        """(code, error line, fix) of the child's next round, as run_ferry gives them, after
+        """(code, error line, fix) of the child's next round, as run_vcharon gives them, after
         starting the child if none runs; None when deadline (by timer, --max-minutes) passes
         before the round: during the wait before a start, or before its ROUND line, when the
         child is stopped. A child that exits after a ROUND line whose error breaks the
@@ -1140,7 +1140,7 @@ class Stream:
                     self._start()
                 except OSError as e:
                     self.exits += 1
-                    return 1, "ERROR couldn't start ferry: %s" % (e.strerror or e), None
+                    return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
             line = self._next_line(deadline)
             if line is _LATE:
                 # --max-minutes: on time, whatever the round under way does (a dying link
@@ -1148,10 +1148,10 @@ class Stream:
                 self.stop()
                 return None
             if line is _STUCK:
-                # no round for too long: the child is stuck; ferry's own timeouts didn't end it
+                # no round for too long: the child is stuck; vcharon's own timeouts didn't end it
                 self.stop()
                 self.exits += 1
-                return 1, ("ERROR ferry run %s didn't finish within %d s"
+                return 1, ("ERROR vcharon run %s didn't finish within %d s"
                            % (self.job, RUN_TIMEOUT)), None
             if line is None:
                 err = self._err
@@ -1225,7 +1225,7 @@ class Stream:
     def stop(self):
         """Ends the child, on every way out of the watch: its stdin closed, so it ends after
         its round under way, then up to stop_wait seconds, then a kill (whose round's held
-        log lines are lost; ferry's session lines are in the job's log already). A watcher
+        log lines are lost; vcharon's session lines are in the job's log already). A watcher
         that is killed closes the pipe the same way; the child then ends at its next wait."""
         proc, self.proc = self.proc, None
         if proc is None:
@@ -1248,10 +1248,10 @@ _STUCK = object()
 
 
 def mailbox_of(job, config_path, prog="mailbox_watch"):
-    """(local tree, me, leader) of the channel section job, read through ferry's own config
+    """(local tree, me, leader) of the channel section job, read through vcharon's own config
     code. prog starts the error's text: the calling tool's name (mailbox_view.py uses it
     too)."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import config, plugin
     from vcharon.proto import VCharonError
     try:
@@ -1261,7 +1261,7 @@ def mailbox_of(job, config_path, prog="mailbox_watch"):
     if job not in cfg.mailboxes:
         skip = cfg.skipped_for(job)
         if skip is not None:
-            # a broken channels.d/ file: its own error, as ferry run's
+            # a broken channels.d/ file: its own error, as vcharon run's
             raise SystemExit("%s: %s" % (prog, skip.error.message))
         raise SystemExit("%s: %s has no channel section [%s]" % (prog, cfg.path, job))
     box = cfg.jobs[cfg.mailboxes[job][0]].mailbox
@@ -1269,10 +1269,10 @@ def mailbox_of(job, config_path, prog="mailbox_watch"):
 
 
 def server_leader(root, me):
-    """The leader of a server member's channel: its record's (ferry channel join --local
+    """The leader of a server member's channel: its record's (vcharon channel join --local
     wrote it), else its MEMBER.md's. SystemExit if root/me/ holds no MEMBER.md: server mode
     watches a channel member's folder only (DESIGN §14 M10)."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import channel_cmd, entries, pathrules, platform
     from vcharon.proto import VCharonError
     member = os.path.join(root, me, entries.MEMBER_FILE)
@@ -1281,7 +1281,7 @@ def server_leader(root, me):
         # a root that's gone never gets here: watch_dir ends with EXIT closed (M14b)
         raise SystemExit(platform.runnable(
             "mailbox_watch: %s isn't there: --dir is a channel's folder and --me a member "
-            "whose folder in it holds MEMBER.md (ferry channel join --local)" % member))
+            "whose folder in it holds MEMBER.md (vcharon channel join --local)" % member))
     try:
         record = None if pathrules.writer_problem(channel) else channel_cmd.read_record(
             channel, me)
@@ -1301,10 +1301,10 @@ def server_leader(root, me):
 
 
 def gone_fix(root, me):
-    """Server mode's fix line for a channel folder that's gone (M13): ferry run's text for a
+    """Server mode's fix line for a channel folder that's gone (M13): vcharon run's text for a
     closed channel, with the leave command's flags from me's record (a placeholder without
-    one: name_flags never raises), and the command as this box runs ferry (M14a)."""
-    _ferry_import()
+    one: name_flags never raises), and the command as this box runs vcharon (M14a)."""
+    _vcharon_import()
     from vcharon import channel_cmd, platform
     channel = os.path.basename(root)
     return platform.runnable(channel_cmd.CHANNEL_GONE_HINT
@@ -1313,22 +1313,22 @@ def gone_fix(root, me):
 
 def is_gone(fix):
     """Whether a fix line is the one for a channel that's gone (M14b): CHANNEL_GONE_HINT's,
-    told by its start, which neither platform.runnable nor run_ferry's log part changes.
-    ferry run swaps that hint in only for a channel job's not_found on up's sink root or
+    told by its start, which neither platform.runnable nor run_vcharon's log part changes.
+    vcharon run swaps that hint in only for a channel job's not_found on up's sink root or
     down's source root (M10); server mode's scan gives it only for FileNotFoundError on the
     channel's folder."""
     if not fix:
         return False
-    _ferry_import()
+    _vcharon_import()
     from vcharon import channel_cmd
     return fix.startswith(channel_cmd.CHANNEL_GONE_PREFIX)
 
 
-def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_ferry, rounds=None,
+def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_vcharon, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT):
     """Client mode: run the job, then compare the local tree with the round before. Returns
-    the exit code. stream (M15): the rounds are those of one long-lived `ferry run <job>
+    the exit code. stream (M15): the rounds are those of one long-lived `vcharon run <job>
     --repeat <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
     run(job, config_path) every `every` seconds; the wake rules then count time by timer."""
     local, me, leader = mailbox_of(job, config_path)
@@ -1423,19 +1423,19 @@ def _utf8_output():
 def main(argv=None):
     _utf8_output()
     parser = argparse.ArgumentParser(prog="mailbox_watch.py", description="Print what reached "
-                                     "you in a ferry channel, one line per entry.")
+                                     "you in a vcharon channel, one line per entry.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dir", help="a local member (--local): the channel's folder in the "
                       "channel root on this machine")
     mode.add_argument("--job", help="client mode: the channel section (channels.d/) to run")
     parser.add_argument("--me", help="with --dir: this member's name; its folder, which "
                         "holds MEMBER.md, is skipped")
-    parser.add_argument("--config", help="client mode: ferry's config file")
+    parser.add_argument("--config", help="client mode: vcharon's config file")
     parser.add_argument("--every", type=_every, help="seconds between rounds (--dir 10; "
                         "--job %d, 1 to %d; --job --no-stream %d)"
                         % (STREAM_EVERY, STREAM_EVERY_MAX, RUN_EVERY))
-    parser.add_argument("--no-stream", action="store_true", help="with --job: a ferry run "
-                        "each round, as before streaming, in place of one long-lived ferry "
+    parser.add_argument("--no-stream", action="store_true", help="with --job: a vcharon run "
+                        "each round, as before streaming, in place of one long-lived vcharon "
                         "run --repeat")
     parser.add_argument("--until-change", action="store_true", help="exit after the first "
                         "round that printed a change or an error that counts (for a background "
@@ -1458,7 +1458,7 @@ def main(argv=None):
         if args.dir is not None:
             if not args.me or args.config or args.no_stream:
                 parser.error("--dir needs --me, and takes no --config or --no-stream")
-            _ferry_import()
+            _vcharon_import()
             from vcharon import pathrules
             problem = pathrules.writer_problem(args.me)
             if problem:

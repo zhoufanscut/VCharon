@@ -38,18 +38,18 @@ T0 = time.mktime((2026, 10, 1, 9, 5, 46, 0, 0, -1))
 
 
 def member_md(name, leader, channel="mb"):
-    """MEMBER.md as ferry channel writes it."""
+    """MEMBER.md as vcharon channel writes it."""
     return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
             "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
 
 
 class PostCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        # the post lock goes to ferry's state dir: one per test
-        self.ferry_home = os.path.join(self.tmp, "ferry-home")
-        patch = mock.patch.dict(os.environ, {"FERRY_HOME": self.ferry_home})
+        # the post lock goes to vcharon's state dir: one per test
+        self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": self.vcharon_home})
         patch.start()
         self.addCleanup(patch.stop)
         # a channel's tree: this member windows, and its leader debian
@@ -258,7 +258,7 @@ class PostTest(PostCase):
             code, out, err = self.main([self.file, "--title", "second", "--body", "c"] + TO)
         self.assertEqual(code, 0, err)
         name, during, scanned, planned = seen
-        self.assertTrue(name.startswith(".ferry-stage-"), name)
+        self.assertTrue(name.startswith(".vcharon-stage-"), name)
         self.assertEqual(during, before)
         self.assertEqual(scanned, ["windows/MEMBER.md", "windows/RESULTS.md"])
         self.assertEqual(planned, ["debian", "debian/MEMBER.md", "windows", "windows/MEMBER.md",
@@ -282,7 +282,7 @@ class PostTest(PostCase):
         self.assertTrue(out.startswith("posted windows#3 — u "), out)
 
     def test_the_swap_is_tried_again(self):
-        # Windows: the swap fails while a ferry run has the file open
+        # Windows: the swap fails while a vcharon run has the file open
         self.main([self.file, "--title", "first", "--body", "b"] + TO)
         real = os.replace
         calls = []
@@ -377,11 +377,12 @@ class ChannelTest(PostCase):
             with self.subTest(argv=argv):
                 code, out, err = self.main([path, "--title", "t", "--body", "b"] + argv)
                 self.assertEqual((code, out), (1, ""))
-                # the command as this box runs ferry (M14a)
+                # the command as this box runs vcharon (M14a)
                 self.assertEqual(err, platform.runnable(
                     "mailbox_post: %s: not in a channel member's folder (no MEMBER.md in its "
-                    "folder or above; ferry channel join writes it)\n" % path))
-                self.assertNotIn(" ferry channel join", err)
+                    "folder or above; vcharon channel join writes it)\n" % path))
+                self.assertNotIn("; vcharon channel join", err)
+                self.assertIn("; %s channel join" % platform.vcharon_command(), err)
         self.assertEqual(os.listdir(os.path.join(self.tree, "mac")), [])
         # a MEMBER.md that is a folder isn't one
         write_tree(self.tree, {"mac/MEMBER.md/": None})
@@ -392,8 +393,8 @@ class ChannelTest(PostCase):
         for name in ("MEMBER.md", "CHANNEL.md", "member.md", "Channel.md"):
             with self.subTest(name=name):
                 code, out, err = self.post(os.path.join(self.folder, name))
-                # "ferry channel's" isn't a command: as written (M14a)
-                self.assertEqual((code, out, err), (1, "", "mailbox_post: %s is ferry channel's "
+                # "vcharon channel's" isn't a command: as written (M14a)
+                self.assertEqual((code, out, err), (1, "", "mailbox_post: %s is vcharon channel's "
                                                     "to write: post into another file "
                                                     "(RESULTS.md, say)\n" % name))
         # nor a file that isn't .md: the numbers and the watcher read only those

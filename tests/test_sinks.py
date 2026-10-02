@@ -21,7 +21,7 @@ MTIME = 1790000000.25
 
 class SinkCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = os.path.join(self.tmp, "root")
         os.mkdir(self.root)

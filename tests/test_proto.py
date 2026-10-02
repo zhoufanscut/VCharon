@@ -164,7 +164,7 @@ class FrameTest(unittest.TestCase):
             proto.encode_json(big)
         self.assertEqual((cm.exception.code, cm.exception.exit_code), ("too_big", 1))
         self.assertEqual(cm.exception.message,
-                         "a message of 64.1 MiB is over ferry's 64 MiB limit")
+                         "a message of 64.1 MiB is over vcharon's 64 MiB limit")
         for n, text in ((1 << 20, "1"), ((1 << 20) + 1, "1.1"), (100 << 20, "100"),
                         ((100 << 20) + (300 << 10), "100.3"), (1, "0.1")):
             self.assertEqual(proto._mib(n), text, n)

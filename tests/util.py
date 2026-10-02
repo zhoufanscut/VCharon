@@ -34,7 +34,7 @@ TEST_MACHINE_ID = "0123456789abcdef0123456789abcdef"
 def _can_symlink():
     """True when os.symlink works here, probed once in a temp dir: Windows needs a privilege
     (Developer Mode or admin) that an ordinary shell may not hold."""
-    with tempfile.TemporaryDirectory(prefix="ferry-test-") as d:
+    with tempfile.TemporaryDirectory(prefix="vcharon-test-") as d:
         try:
             os.symlink("target", os.path.join(d, "link"))
         except (OSError, NotImplementedError):
@@ -63,17 +63,17 @@ class FakeSshCase(unittest.TestCase):
     """A temp dir with a fake server home and a log file; ssh is fake_ssh.py."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.home = os.path.join(self.tmp, "home")
-        self.ferry_home = os.path.join(self.tmp, "ferry-home")
+        self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
         os.mkdir(self.home)
-        os.mkdir(self.ferry_home)
+        os.mkdir(self.vcharon_home)
         self.log_path = os.path.join(self.tmp, "test.log")
         self.log = Log(self.log_path)
         env = {k: v for k, v in os.environ.items() if not k.startswith("FAKE_SSH_")}
-        env.update(FAKE_SSH_HOME=self.home, FERRY_TEST_MACHINE_ID=TEST_MACHINE_ID,
-                   FERRY_HOME=self.ferry_home)
+        env.update(FAKE_SSH_HOME=self.home, VCHARON_TEST_MACHINE_ID=TEST_MACHINE_ID,
+                   VCHARON_HOME=self.vcharon_home)
         patcher = mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -109,8 +109,8 @@ class FakeSshCase(unittest.TestCase):
                           after_plan=after_plan)
 
     def write_config(self, text):
-        """Writes text, dedented, as $FERRY_HOME/ferry.ini; its path."""
-        path = os.path.join(self.ferry_home, "ferry.ini")
+        """Writes text, dedented, as $VCHARON_HOME/vcharon.ini; its path."""
+        path = os.path.join(self.vcharon_home, "vcharon.ini")
         with open(path, "w", encoding="utf-8") as f:
             f.write(textwrap.dedent(text))
         return path
@@ -142,7 +142,7 @@ def _read_jobs_with_test_jobs(parser, name, hint, settings, path):
     folded = {}
     for section in parser.sections():
         keys = parser.options(section)
-        if section == "ferry" or any(k.startswith("mailbox.") for k in keys):
+        if section == "vcharon" or any(k.startswith("mailbox.") for k in keys):
             continue
         values = dict(parser.items(section))
         settings_ = dataclasses.replace(settings)
@@ -284,7 +284,7 @@ def write_tree(root, spec):
 def folds_case():
     """True if the temp dir takes a and A as one name (APFS and NTFS by default): a tree with
     case twins can't be made there."""
-    with tempfile.TemporaryDirectory(prefix="ferry-test-") as d:
+    with tempfile.TemporaryDirectory(prefix="vcharon-test-") as d:
         open(os.path.join(d, "a"), "wb").close()
         return os.path.exists(os.path.join(d, "A"))
 
@@ -322,7 +322,7 @@ def umask():
 
 
 def start_failure_text(path):
-    """[<path>] run with this Python: the message ferry's "couldn't start <path>: ..." shows.
+    """[<path>] run with this Python: the message vcharon's "couldn't start <path>: ..." shows.
     Raising the same OSError is the only way to get it: this OS localizes it (Windows says
     "系统找不到指定的文件。" on a Chinese code page), so no literal English string fits every
     machine."""

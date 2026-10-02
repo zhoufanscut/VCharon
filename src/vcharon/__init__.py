@@ -1,4 +1,4 @@
-"""ferry: move files between the two ends of an ssh connection."""
+"""vcharon: move files between the two ends of an ssh connection."""
 
 VERSION = "0.1.0"
 # Both ends run the same bundled code, so this changes only when the frames or messages do.

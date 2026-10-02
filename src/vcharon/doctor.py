@@ -1,4 +1,4 @@
-"""ferry doctor: checks of the client, each server and each job, one line each (DESIGN §13);
+"""vcharon doctor: checks of the client, each server and each job, one line each (DESIGN §13);
 client. It only reads, apart from a temp file in the state and log dirs, and its log."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("python", "config", "ssh", "agent", "dirs", "machine")
-NO_JOBS_NOTE = "no jobs; to check a server: ferry doctor <dest>"
+NO_JOBS_NOTE = "no jobs; to check a server: vcharon doctor <dest>"
 # A chosen line, not a derived one (M12b): headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
 CLOCK_WARN = 30
@@ -52,7 +52,7 @@ class Report:
             self.warnings += 1
         # the fix or the note starts under the text
         if level != "ok" and hint:
-            # as this box runs ferry (M14a)
+            # as this box runs vcharon (M14a)
             self.say(" " * len(head) + "fix: " + platform.runnable(hint))
         if level == "ok" and note:
             self.say(" " * len(head) + "note: " + note)
@@ -111,9 +111,9 @@ def _python(rep):
         return
     if platform.is_wow64():
         rep.check("warn", "python", "32-bit Python on 64-bit Windows",
-                  "install a 64-bit Python; until then ferry runs Sysnative\\OpenSSH\\ssh.exe")
+                  "install a 64-bit Python; until then vcharon runs Sysnative\\OpenSSH\\ssh.exe")
     if python_tuple() < (3, 11):
-        rep.check("warn", "python", "ferry is tested with Python 3.11 or later on Windows",
+        rep.check("warn", "python", "vcharon is tested with Python 3.11 or later on Windows",
                   "install a newer Python")
 
 
@@ -167,7 +167,7 @@ def _agent(rep, agent, dests):
     dest = dests[0].dest if len(dests) == 1 else "<dest>"
     if state_ == "empty":
         rep.check("warn", "agent", text, "a key with a passphrase works only once it's in the "
-                  "agent: run ferry key %s" % dest)
+                  "agent: run vcharon key %s" % dest)
         return
     if platform.os_name() == "windows":
         hint = keys.ADMIN_HINT
@@ -186,13 +186,13 @@ def _dirs(rep):
     for folder in folders:
         try:
             os.makedirs(folder, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=folder, prefix=".ferry-doctor-", suffix=".tmp")
+            fd, tmp = tempfile.mkstemp(dir=folder, prefix=".vcharon-doctor-", suffix=".tmp")
             os.close(fd)
             os.remove(tmp)
         except OSError as e:
             good = False
             rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e),
-                      "fix its permissions, or set FERRY_HOME")
+                      "fix its permissions, or set VCHARON_HOME")
     if good:
         rep.check("ok", "dirs", "state %s, logs %s" % folders)
 
@@ -265,7 +265,7 @@ def _login(rep, d, agent, log):
     if ssh.denied(probe) and kind == "file":
         # DESIGN §6.4's third row
         rep.check("FAIL", dest, "ssh can't use your key %s: the server accepts it, but it's "
-                  "locked by a passphrase" % ssh.shown(key.ident), "run: ferry key %s" % dest)
+                  "locked by a passphrase" % ssh.shown(key.ident), "run: vcharon key %s" % dest)
         return False, True
     if ssh.denied(probe) and key is None:
         err = keys.no_key_error(dest, agent[0])
@@ -291,7 +291,7 @@ def _server(rep, d, session):
                                           time.localtime().tm_gmtoff):
         rep.check(level, dest, text, hint)
     if session.junk_bytes:
-        rep.check("warn", dest, "the server's shell printed %d bytes before ferry started"
+        rep.check("warn", dest, "the server's shell printed %d bytes before vcharon started"
                   % session.junk_bytes, "make its startup files print nothing when the shell "
                   "isn't interactive; the log has the text")
     if hello.get("os") != "linux":
@@ -376,7 +376,7 @@ def _job(rep, job, session, hello, log):
                 checks = [("FAIL", e.message, e.hint)]
         for level, message, fix in checks:
             if job.mailbox is not None and side.end == "remote" and level == "FAIL":
-                # the closed channel's hint, as ferry run shows it (M10)
+                # the closed channel's hint, as vcharon run shows it (M10)
                 from . import cli
                 fix = cli.channel_gone_hint(job, "not_found", fix) or fix
             elif job.mailbox is not None and role == "source":
@@ -398,18 +398,18 @@ def _made_by_the_run(job, level, message, fix):
         saved = None
     if saved is not None and isinstance(saved.source, dict) and saved.source.get("sent"):
         return (level, "%s, but %s.up has sent files from it" % (message, section),
-                "restore the folder; if it's meant to be gone: ferry state reset %s.up"
+                "restore the folder; if it's meant to be gone: vcharon state reset %s.up"
                 % section)
-    return "ok", "%s yet; ferry run %s makes it" % (message, section), None
+    return "ok", "%s yet; vcharon run %s makes it" % (message, section), None
 
 
 # --- the command ---
 
 def main(args, run):
-    """ferry doctor [<target>]: exit 0 when no check failed, else 1 (decisions 16-22 of the
+    """vcharon doctor [<target>]: exit 0 when no check failed, else 1 (decisions 16-22 of the
     M5 plan)."""
     started = time.monotonic()
-    log = run.log = Log(os.path.join(platform.log_dir(), "ferry.log"), console=args.verbose)
+    log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
     target = args.target
     try:
         cfg, cfg_err = config.load(args.config), None
@@ -422,7 +422,7 @@ def main(args, run):
     # a skipped section's own config error is a FAIL line, and nothing is in scope
     dests = _scope(target, cfg) if skip is None else []
     base = cfg.settings if cfg is not None else config.Settings()
-    log.info("ferry %s doctor%s; Python %s (%s) on %s; config %s"
+    log.info("vcharon %s doctor%s; Python %s (%s) on %s; config %s"
              % (VERSION, " " + target if target is not None else "",
                 platform.python_version(), sys.executable, platform.os_name(),
                 cfg.path if cfg is not None else "broken"))
@@ -435,7 +435,7 @@ def main(args, run):
     subjects = list(CLIENT_SUBJECTS) + [d.dest for d in dests] + [job.name for d in dests
                                                                  for job in d.jobs]
     rep = Report(say, subjects)
-    say("ferry: doctor%s" % (" " + target if target is not None else ""))
+    say("vcharon: doctor%s" % (" " + target if target is not None else ""))
     _python(rep)
     _config(rep, cfg, cfg_err, not dests and skip is None)
     if skip is not None:
@@ -462,18 +462,18 @@ def main(args, run):
 
 
 def _offer(locked, log, say, run):
-    """In a terminal, offers to run ferry key for each destination whose key is locked
+    """In a terminal, offers to run vcharon key for each destination whose key is locked
     (DESIGN §6.5); the default is no. The doctor's exit code stays its own."""
     for d in locked:
         if not keys.terminal():
             return
         try:
-            answer = input("run ferry key %s now? [y/N] " % d.dest)
+            answer = input("run vcharon key %s now? [y/N] " % d.dest)
         except EOFError:
             continue
         yes = answer.strip().lower() in ("y", "yes")
         # never the answer's text: it's typed on the terminal
-        log.info("offer to run ferry key %s: %s" % (d.dest, "yes" if yes else "no"))
+        log.info("offer to run vcharon key %s: %s" % (d.dest, "yes" if yes else "no"))
         if not yes:
             continue
         try:

@@ -26,7 +26,7 @@ class Sink(plugin.StagerSink):
         return self.stager.check(plan)
 
     def doctor(self):
-        """ferry doctor: the Stager's own root checks on an empty plan (symlinks on the way,
+        """vcharon doctor: the Stager's own root checks on an empty plan (symlinks on the way,
         the owner rule, create), then that the root is writable. Only reads: an empty plan
         never creates the root or a stage dir."""
         try:

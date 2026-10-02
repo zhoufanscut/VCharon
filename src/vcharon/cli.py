@@ -42,14 +42,14 @@ def _add_common(parser, sub):
 
 
 def _parser():
-    parser = _Parser(prog="ferry", description="Move files between the two ends of an ssh "
+    parser = _Parser(prog="vcharon", description="Move files between the two ends of an ssh "
                      "connection.")
     _add_common(parser, sub=False)
     commands = parser.add_subparsers(dest="command", metavar="<command>")
     commands.required = True
     run = commands.add_parser("run", help="run jobs of the config: send what changed since "
                               "their last run")
-    run.add_argument("job", nargs="+", help="a job's name: its section in ferry.ini; several "
+    run.add_argument("job", nargs="+", help="a job's name: its section in vcharon.ini; several "
                      "run in the order given, and those next to each other with the same ssh "
                      "and settings share one connection")
     run.add_argument("--dry-run", action="store_true",
@@ -85,7 +85,7 @@ def _parser():
     ping = commands.add_parser("ping", help="connect, echo 1 MiB, and say bye")
     ping.add_argument("dest", help="an ~/.ssh/config alias, user@host, or ssh://user@host:port")
     _add_common(ping, sub=True)
-    version = commands.add_parser("version", help="print ferry's and Python's versions")
+    version = commands.add_parser("version", help="print vcharon's and Python's versions")
     _add_common(version, sub=True)
     _channel_parser(commands)
     return parser
@@ -93,7 +93,8 @@ def _parser():
 
 def _channel_parser(commands):
     ch = commands.add_parser("channel", help="list, create, join, leave or close an agents' "
-                             "channel: a mailbox tree on a server (MAILBOX.md in the ferry folder)")
+                             "channel: a mailbox tree on a server (MAILBOX.md in the vcharon "
+                             "folder)")
     _add_common(ch, sub=True)
     actions = ch.add_subparsers(dest="action", metavar="<action>")
     actions.required = True
@@ -109,7 +110,7 @@ def _channel_parser(commands):
         if action in ("list", "create", "join"):
             where = one.add_mutually_exclusive_group(required=True)
             where.add_argument("--ssh", metavar="ALIAS", help="the server, over ssh: you are "
-                               "a remote member, with a local tree that ferry syncs")
+                               "a remote member, with a local tree that vcharon syncs")
             where.add_argument("--local", action="store_true", help="this machine holds "
                                "the channel root: you write your folder in it directly")
         if action != "list":
@@ -164,7 +165,7 @@ def _main(argv, run):
             # --help
             return e.code if isinstance(e.code, int) else 0
         if args.command == "version":
-            print("ferry %s, protocol %d, Python %s (%s)"
+            print("vcharon %s, protocol %d, Python %s (%s)"
                   % (VERSION, PROTOCOL, platform.python_version(), sys.executable))
             return 0
         if args.command == "run":
@@ -186,7 +187,7 @@ def _main(argv, run):
     except KeyboardInterrupt:
         # The session has killed ssh on its way out.
         run.log_line("error", "interrupted")
-        sys.stderr.write("ferry: interrupted\n")
+        sys.stderr.write("vcharon: interrupted\n")
         return 130
     except Exception as e:
         run.log_line("error", traceback.format_exc(), create=True)
@@ -203,17 +204,17 @@ class _Run:
         self.log = None
         # what a failed commit did, as the error block shows it; None if nothing
         self.done_line = None
-        # the job whose error this is, in a ferry run of several jobs: its console ERROR line
+        # the job whose error this is, in a vcharon run of several jobs: its console ERROR line
         # names it (M9c); None for one job and every other command
         self.job_name = None
-        # where the error block goes: stderr, or with ferry run --repeat the round's lines,
+        # where the error block goes: stderr, or with vcharon run --repeat the round's lines,
         # which go to stdout (M15)
         self.out = None
 
     def log_line(self, level, msg, create=False):
         if self.log is None and create:
             try:
-                self.log = Log(os.path.join(platform.log_dir(), "ferry.log"))
+                self.log = Log(os.path.join(platform.log_dir(), "vcharon.log"))
             except Exception:
                 pass
         if self.log is not None:
@@ -222,7 +223,7 @@ class _Run:
     def show_error(self, err, logged=False):
         hint = err.hint
         if not hint and err.code == "internal":
-            hint = "this is a bug in ferry; see the log"
+            hint = "this is a bug in vcharon; see the log"
         if not logged:
             self.log_line("error", "%s: %s" % (err.code, err.message))
             if hint:
@@ -238,7 +239,7 @@ class _Run:
         if self.done_line:
             lines.append(self.done_line)
         if hint:
-            # as this box runs ferry (M14a); the log keeps the plain text, read later by a
+            # as this box runs vcharon (M14a); the log keeps the plain text, read later by a
             # person, maybe on another box
             lines.append("  fix: %s" % platform.runnable(hint))
         if self.log is not None:
@@ -257,11 +258,11 @@ def _say(line):
 
 
 def load_config(path):
-    """config.load, and each skipped section's line in ferry.log (M10): never on stderr, whose
+    """config.load, and each skipped section's line in vcharon.log (M10): never on stderr, whose
     first line the client watcher takes for the round's error."""
     cfg = config.load(path)
     if cfg.skipped:
-        log = Log(os.path.join(platform.log_dir(), "ferry.log"))
+        log = Log(os.path.join(platform.log_dir(), "vcharon.log"))
         for skip in cfg.skipped:
             log.info(skip.line)
     return cfg
@@ -271,14 +272,14 @@ def _ping(args, run):
     started = time.monotonic()
     cfg = load_config(args.config)
     ssh.check_dest(args.dest)
-    log = run.log = Log(os.path.join(platform.log_dir(), "ferry.log"), console=args.verbose)
-    log.info("ferry %s ping %s; Python %s (%s) on %s; config %s%s"
+    log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
+    log.info("vcharon %s ping %s; Python %s (%s) on %s; config %s%s"
              % (VERSION, args.dest, platform.python_version(), sys.executable,
                 platform.os_name(), cfg.path, "" if cfg.exists else " (missing: defaults)"))
-    _say("ferry: ping %s" % args.dest)
+    _say("vcharon: ping %s" % args.dest)
     with ssh.Session(cfg.settings, args.dest, log) as session:
         hello = session.open()
-        _say("  helper   ferry %s, protocol %s, Python %s"
+        _say("  helper   vcharon %s, protocol %s, Python %s"
              % (hello.get("version"), hello.get("protocol"), hello.get("python")))
         _say("  server   %s, user %s, home %s"
              % (hello.get("distro") or hello.get("os"), hello.get("user"), hello.get("home")))
@@ -288,7 +289,7 @@ def _ping(args, run):
             _say("  machine  none (jobs that keep state won't run)")
         _say("  connect  %.2f s  (ssh start to hello)" % session.handshake_seconds)
         if session.junk_bytes:
-            _say("  warn     the server's shell printed %d bytes before ferry started; see the "
+            _say("  warn     the server's shell printed %d bytes before vcharon started; see the "
                  "log" % session.junk_bytes)
         data = bytes(range(256)) + os.urandom(1 << 20)
         echo_started = time.monotonic()
@@ -307,7 +308,7 @@ def _ping(args, run):
 
 
 def _key(args, run):
-    """ferry key (DESIGN §6.5): the terminal first, then the arguments and the config, then
+    """vcharon key (DESIGN §6.5): the terminal first, then the arguments and the config, then
     keys.unlock."""
     if not keys.terminal():
         raise keys.needs_terminal()
@@ -322,8 +323,8 @@ def _key(args, run):
             raise VCharonError("config", "%s isn't a file" % ssh.shown(key_file),
                                hint="check the path")
     cfg = load_config(args.config)
-    log = run.log = Log(os.path.join(platform.log_dir(), "ferry.log"), console=args.verbose)
-    log.info("ferry %s key %s%s; Python %s (%s) on %s; config %s%s"
+    log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
+    log.info("vcharon %s key %s%s; Python %s (%s) on %s; config %s%s"
              % (VERSION, args.dest or "", " --key %s" % ssh.shown(key_file) if key_file else "",
                 platform.python_version(), sys.executable, platform.os_name(), cfg.path,
                 "" if cfg.exists else " (missing: defaults)"))
@@ -342,7 +343,7 @@ def _first_difference(a, b):
     return min(len(a), len(b))
 
 
-PULL_HINT = ("the ferry on the server may be broken, or the server compromised; nothing was "
+PULL_HINT = ("the vcharon on the server may be broken, or the server compromised; nothing was "
              "changed")
 
 
@@ -417,7 +418,7 @@ def _listing(say, items):
 
 
 def _summary(say, p, checked, dry_run, job=False, full=False):
-    """The lines after the check, before any bytes move. job: ferry run's form, which says
+    """The lines after the check, before any bytes move. job: vcharon run's form, which says
     "nothing to do" for an empty plan, and with full how many files the target holds."""
     puts = [e for e in p.entries if e.op == "put"]
     files = [e for e in puts if e.kind == "file"]
@@ -464,7 +465,7 @@ def _done_line(eng):
 
 # --- jobs: run, state ---
 
-NO_CONFIG_HINT = "create it; see ferry/DESIGN.md §12"
+NO_CONFIG_HINT = "create it; see vcharon/DESIGN.md §12"
 SAVE_HINT = "the files were written; fix that, then run again"
 
 
@@ -474,7 +475,7 @@ def _dumps(obj):
 
 
 def side_text(job, side, role):
-    """One side of a job as ferry run shows it: <ssh>:<path> on the remote end, <path> on the
+    """One side of a job as vcharon run shows it: <ssh>:<path> on the remote end, <path> on the
     local one, with the plugin unless it's path for a source or dir for a sink. A side with
     no path is its plugin's name alone."""
     if "path" not in side.options:
@@ -498,13 +499,13 @@ def _jobs_named(cfg, name):
                            hint=NO_CONFIG_HINT)
     if jobs is None:
         raise VCharonError("config", "no job named %s in %s" % (pathrules.show(name), cfg.path),
-                           hint="ferry doctor lists them")
+                           hint="vcharon doctor lists them")
     return jobs
 
 
 @dataclasses.dataclass
 class _JobRun:
-    """One job of a ferry run, and how it ended."""
+    """One job of a vcharon run, and how it ended."""
 
     job: config.Job
     log: Log
@@ -516,7 +517,7 @@ class _JobRun:
     status: str = None
     code: int = 0
     ok_line: str = None
-    # ferry run --repeat: the job's own log, while log is the round's HeldLog; and whether
+    # vcharon run --repeat: the job's own log, while log is the round's HeldLog; and whether
     # the round wrote its state (M15)
     real_log: Log = None
     saved_state: bool = False
@@ -543,7 +544,7 @@ class _Conn:
 
 def session_key(job):
     """Jobs next to each other with the same key share one connection (M7a): the destination
-    as written, and every [ferry] setting, each of which the ssh command or the Session
+    as written, and every [vcharon] setting, each of which the ssh command or the Session
     reads."""
     return (job.ssh, dataclasses.astuple(job.settings))
 
@@ -574,7 +575,7 @@ def _named_once(names):
 
 
 def _run_job(args, run):
-    """ferry run JOB [JOB ...] (decision 16 of the M4 plan, M7a): the arguments, every job's
+    """vcharon run JOB [JOB ...] (decision 16 of the M4 plan, M7a): the arguments, every job's
     config and plugins, the logs, every lock, then each job in the order given; the jobs
     next to each other with one session key share one connection. One job prints and logs
     exactly as ever; several end with a summary line."""
@@ -588,7 +589,7 @@ def _run_job(args, run):
     _named_once([job.name for job in jobs])
     if args.repeat is not None and len({session_key(job) for job in jobs}) > 1:
         raise VCharonError("config", "--repeat needs jobs that share one connection",
-                           hint="run the jobs of each connection in a ferry run --repeat of "
+                           hint="run the jobs of each connection in a vcharon run --repeat of "
                            "their own")
     # Every usage, config, option and capability error fails before anything else: one bad
     # job, and none runs.
@@ -607,7 +608,7 @@ def _run_job(args, run):
     todo = []
     for job in jobs:
         log = Log(os.path.join(platform.log_dir(), job.name + ".log"), console=args.verbose)
-        log.info("ferry %s run %s%s; Python %s (%s) on %s; config %s"
+        log.info("vcharon %s run %s%s; Python %s (%s) on %s; config %s"
                  % (VERSION, names, flags, platform.python_version(), sys.executable,
                     platform.os_name(), cfg.path))
         shown = (side_text(job, job.source, "source"), side_text(job, job.sink, "sink"))
@@ -668,14 +669,14 @@ def _run_job(args, run):
 def _skip(jr, conn):
     """A job whose connection broke under an earlier job of its group: one line, and the
     exit code of the failure that broke it."""
-    line = "ferry: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
+    line = "vcharon: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
     _say(line)
     jr.log.info(line)
     jr.status = "skipped"
     jr.code = conn.broke.exit_code if isinstance(conn.broke, VCharonError) else 1
 
 
-# --- ferry run --repeat (DESIGN §14 M15) ---
+# --- vcharon run --repeat (DESIGN §14 M15) ---
 
 # The opener's log gets one line this often, in seconds, while rounds have nothing to do.
 REPEAT_SUMMARY = 600
@@ -712,7 +713,7 @@ def _watch_stdin(ended):
             pass
         ended.set()
 
-    threading.Thread(target=read, name="ferry-stdin", daemon=True).start()
+    threading.Thread(target=read, name="vcharon-stdin", daemon=True).start()
 
 
 def _wait_or_end(ended, seconds):
@@ -741,7 +742,7 @@ class _Tally:
 
 
 def _repeat(args, run, todo):
-    """ferry run JOB... --repeat SECONDS: one session, opened by the first round, kept for
+    """vcharon run JOB... --repeat SECONDS: one session, opened by the first round, kept for
     every round; rounds until stdin ends (exit 0, after the round under way) or a round's
     error breaks the connection (exit with that round's code). Between rounds it waits
     SECONDS from the end of a round."""
@@ -782,7 +783,7 @@ def _repeat(args, run, todo):
 def _round(args, todo, conn, stack):
     """One round of --repeat: each job once, in the order given, each under its lock taken
     for this job and round only (a busy job sits this round out). The round's lines go to
-    stdout at its end: each failed job's error block, then ROUND <code>, the code a ferry run
+    stdout at its end: each failed job's error block, then ROUND <code>, the code a vcharon run
     of the jobs would exit with (2 for a busy job when nothing failed). A job's log gets its
     lines only for a round that planned something, saved its state, failed or was busy.
     Returns (the code, whether every job ran and had nothing to do)."""
@@ -818,7 +819,7 @@ def _repeat_one(args, jr, conn, stack):
     a failed one's error block goes to the round's lines. Returns whether its plan had
     entries."""
     if conn.broke is not None:
-        line = "ferry: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
+        line = "vcharon: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
         jr.errors.out.append(line)
         jr.log.info(line)
         jr.status = "skipped"
@@ -972,8 +973,8 @@ def _own_folder(job, log, dry_run):
                 and _missing(os.path.join(path, entries.MEMBER_FILE))):
             raise VCharonError("not_found", "the own folder %s has no %s, which %s has sent: it "
                                "was emptied or replaced" % (path, entries.MEMBER_FILE, up),
-                               "ferry channel join %s --ssh %s %s takes its files back from the "
-                               "server (a rejoin); MEMBER.md is ferry's: to drop other files, "
+                               "vcharon channel join %s --ssh %s %s takes its files back from the "
+                               "server (a rejoin); MEMBER.md is vcharon's: to drop other files, "
                                "delete them one by one and keep it"
                                % (job.mailbox.channel, job.ssh,
                                   channel_cmd.name_flags(job.mailbox.channel, job.mailbox.me)))
@@ -981,7 +982,7 @@ def _own_folder(job, log, dry_run):
     if sent:
         raise VCharonError("not_found", "the mailbox's own folder %s is gone, but %s has sent "
                            "files from it" % (path, up),
-                           "restore the folder; if it's meant to be gone: ferry state reset %s"
+                           "restore the folder; if it's meant to be gone: vcharon state reset %s"
                            % up)
     if dry_run:
         log.info("a real run would create %s, the mailbox's own folder" % path)
@@ -999,7 +1000,7 @@ def _own_folder(job, log, dry_run):
 # from the helper arrives with its hint as text.
 SOURCE_HINTS = frozenset([pathrules.UNSAFE_HINT, pathrules.COLLISION_HINT,
                           path_plugin.LINKS_HINT, path_plugin.NAME_HINT])
-MAILBOX_DOWN_HINT = ("the writer of each folder named above %s (MAILBOX.md in the ferry "
+MAILBOX_DOWN_HINT = ("the writer of each folder named above %s (MAILBOX.md in the vcharon "
                      "folder, §5); your up still runs")
 # with the writer's folder, since up's paths are relative to it (M9c)
 MAILBOX_UP_HINT = "%s in your own folder (%s/)"
@@ -1009,7 +1010,7 @@ CHANNEL_GONE_HINT = channel_cmd.CHANNEL_GONE_HINT
 
 def channel_gone_hint(job, code, hint):
     """CHANNEL_GONE_HINT for a channel job's not_found on up's sink root or down's source
-    root, else None; ferry run and ferry doctor both swap it in."""
+    root, else None; vcharon run and vcharon doctor both swap it in."""
     if job.mailbox is None or code != "not_found":
         return None
     up = job.name == job.mailbox.section + ".up"
@@ -1040,7 +1041,7 @@ def _mailbox_hint(e, job):
 
 
 def _mismatch(e, name):
-    """ferry run's hint for every state_mismatch that names no hint of its own."""
+    """vcharon run's hint for every state_mismatch that names no hint of its own."""
     if isinstance(e, VCharonError) and e.code == "state_mismatch":
         e.hint = state.reset_hint(name)
 
@@ -1071,8 +1072,8 @@ def _run_one(args, jr, conn, stack):
         log.info(line)
 
     mode = [word for word, on in (("full", args.full), ("dry run", args.dry_run)) if on]
-    say("ferry: %s  %s -> %s%s" % (name, shown[0], shown[1],
-                                   "  (%s)" % ", ".join(mode) if mode else ""))
+    say("vcharon: %s  %s -> %s%s" % (name, shown[0], shown[1],
+                                     "  (%s)" % ", ".join(mode) if mode else ""))
     # the sink binding, once the check has passed
     bound = []
     session = _session(conn, stack, jr)
@@ -1081,7 +1082,7 @@ def _run_one(args, jr, conn, stack):
     # must be Linux (M11a).
     state.need_linux({"os": conn.os}, job.ssh, state.LINUX_HINT % job.ssh)
     if not machine:
-        raise VCharonError("state_mismatch", "the server %s has no machine id, so ferry can't "
+        raise VCharonError("state_mismatch", "the server %s has no machine id, so vcharon can't "
                            "tie the state of %s to it" % (job.ssh, name),
                            state.NO_MACHINE_HINT)
 
@@ -1166,7 +1167,7 @@ def _job_name(name, config_path=None):
     problem = config.job_name_problem(name)
     if problem:
         raise VCharonError("config", "%s isn't a job name: %s" % (pathrules.show(name), problem),
-                           hint="give the name of the job's section in ferry.ini")
+                           hint="give the name of the job's section in vcharon.ini")
     # A mailbox section names no state of its own. A config that doesn't load can't say,
     # and mustn't block a reset (DESIGN §12).
     try:
@@ -1181,15 +1182,15 @@ def _job_name(name, config_path=None):
 
 
 def _show_state(name, st, why=None):
-    """What ferry state show prints: a summary, since a mirror's state can hold 100,000
+    """What vcharon state show prints: a summary, since a mirror's state can hold 100,000
     paths."""
     if why is not None:
-        print("ferry: the state of %s can't be read (%s)" % (name, why))
+        print("vcharon: the state of %s can't be read (%s)" % (name, why))
         return
     if st is None:
-        print("ferry: no state for %s" % name)
+        print("vcharon: no state for %s" % name)
         return
-    print("ferry: state of %s  (%s)" % (name, state.path(name)))
+    print("vcharon: state of %s  (%s)" % (name, state.path(name)))
     print("  saved     %s" % st.saved)
     print("  source    %s" % ("none" if st.identity is None else _dumps(st.identity)))
     print("  target    %s" % _dumps(st.sink))

@@ -49,7 +49,7 @@ def stop_child(child):
 
 class LockTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.path = os.path.join(self.tmp, "lock")
 

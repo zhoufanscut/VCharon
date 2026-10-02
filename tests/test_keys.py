@@ -1,4 +1,4 @@
-"""ferry key (decisions 8-15 of the M5 plan), through fake ssh and fake ssh-add."""
+"""vcharon key (decisions 8-15 of the M5 plan), through fake ssh and fake ssh-add."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ FP = "SHA256:abcDEF0123456789"
 DENIED = "fake@host: Permission denied (publickey)."
 ADMIN = ("once, in an admin PowerShell: Get-Service ssh-agent | Set-Service -StartupType "
          "Automatic; Start-Service ssh-agent")
-EVAL = 'start one in this shell: eval "$(ssh-agent -s)", then run ferry key again'
+EVAL = 'start one in this shell: eval "$(ssh-agent -s)", then run vcharon key again'
 LINUX_NOTE = ("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
               "login that brought it is open; for cron, use a key without a passphrase on this "
-              "machine (see ferry/README.md)")
+              "machine (see vcharon/README.md)")
 
 
 def accepts(ident, *flags):
@@ -91,7 +91,7 @@ class KeyTest(KeyCase):
         self.terminal.return_value = False
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(out, [])
-        self.assertEqual(err[:2], ["ERROR config: ferry key needs a terminal: ssh-add asks for "
+        self.assertEqual(err[:2], ["ERROR config: vcharon key needs a terminal: ssh-add asks for "
                                    "your passphrase there", "  fix: run it in a terminal window"])
         self.assertEqual((self.ssh_runs(), self.adds()), ([], []))
 
@@ -113,7 +113,7 @@ class KeyTest(KeyCase):
         self.locked()
         out, err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
-        self.assertEqual(out[:4], ["ferry: key fake-dest", "  agent   holds no keys",
+        self.assertEqual(out[:4], ["vcharon: key fake-dest", "  agent   holds no keys",
                                    "  key     %s (RSA): the server accepts it, but it's locked"
                                    % self.key, "  run     %s" % self.key_add_shown(
                                        "--apple-use-keychain", self.key)])
@@ -123,7 +123,7 @@ class KeyTest(KeyCase):
                                      "                IdentityFile %s" % self.key,
                                      "                UseKeychain yes",
                                      "                AddKeysToAgent yes"])
-        self.assertEqual(out[10], "  test    ok: ferry logs in to fake-dest with no prompt")
+        self.assertEqual(out[10], "  test    ok: vcharon logs in to fake-dest with no prompt")
         self.assertRegex(out[11], r"\AOK  \(\d+\.\d s\)\Z")
         self.assertEqual(len(out), 12)
         # the probe had -v and ControlMaster off; so did the test
@@ -133,7 +133,7 @@ class KeyTest(KeyCase):
         self.assertNotIn("-v", runs[1])
         for argv in runs:
             self.assertIn("ControlMaster=no", argv)
-        with open(os.path.join(self.ferry_home, "logs", "ferry.log"), encoding="utf-8") as f:
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("  agent   holds no keys", text)
         self.assertIn("  test    ok", text)
@@ -147,8 +147,8 @@ class KeyTest(KeyCase):
         self.os_name("darwin")
         # any absolute path but Apple's; a host path, since ssh_path is checked as one
         other = os.path.join(self.tmp, "ssh")
-        with open(os.path.join(self.ferry_home, "ferry.ini"), "w") as f:
-            f.write("[ferry]\nssh_path = %s\n" % other)
+        with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nssh_path = %s\n" % other)
         self.locked()
         out, err = self.key_cli("fake-dest")
         self.assertIn("  warn    only Apple's ssh (/usr/bin/ssh) reads the Keychain; ssh_path is "
@@ -166,7 +166,7 @@ class KeyTest(KeyCase):
         self.agent(1)
         out, err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [[self.key]])
-        self.assertIn("  test    ok: ferry logs in to fake-dest with no prompt", out)
+        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
         self.assertFalse(any(line.startswith("  config") for line in out))
 
     def test_locked_linux(self):
@@ -188,7 +188,7 @@ class KeyTest(KeyCase):
         out, err = self.key_cli("fake-dest")
         self.assertIn("  agent   holds 1 key", out)
         self.assertEqual(self.adds(), [[self.key]])
-        self.assertIn("  test    ok: ferry logs in to fake-dest with no prompt", out)
+        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
 
     def test_key_path_with_a_space(self):
         self.os_name("darwin")
@@ -239,11 +239,11 @@ class KeyTest(KeyCase):
         why = "couldn't start %s: %s" % (missing, start_failure_text(missing))
         self.assertIn("  agent   %s" % why, out)
         self.assertEqual(err[:2], ["ERROR config: " + why, "  fix: install the OpenSSH client, "
-                                   "or set ssh_path in ferry.ini"])
+                                   "or set ssh_path in vcharon.ini"])
         self.assertFalse(any(line.startswith("  run") for line in out))
 
     def test_run_terminal_cant_start(self):
-        # review W3: an OSError from run_terminal isn't "a bug in ferry"
+        # review W3: an OSError from run_terminal isn't "a bug in vcharon"
         os.environ["SSH_AUTH_SOCK"] = "/x"
         self.agent(1)
         self.locked()
@@ -252,7 +252,8 @@ class KeyTest(KeyCase):
             out, err = self.key_cli("fake-dest", code=3)
         self.assertTrue(err[0].startswith("ERROR config: couldn't start "), err)
         self.assertTrue(err[0].endswith(": No such file or directory"), err)
-        self.assertEqual(err[1], "  fix: install the OpenSSH client, or set ssh_path in ferry.ini")
+        self.assertEqual(err[1],
+                         "  fix: install the OpenSSH client, or set ssh_path in vcharon.ini")
 
     def test_unlock_needs_a_terminal(self):
         self.terminal.return_value = False
@@ -260,8 +261,8 @@ class KeyTest(KeyCase):
         with self.assertRaises(keys.VCharonError) as cm:
             keys.unlock(self.settings(), "fake-dest", None, self.log, said.append)
         self.assertEqual((cm.exception.code, cm.exception.message),
-                         ("config", "ferry key needs a terminal: ssh-add asks for your passphrase "
-                          "there"))
+                         ("config", "vcharon key needs a terminal: ssh-add asks for your "
+                          "passphrase there"))
         self.assertEqual(cm.exception.hint, "run it in a terminal window")
         self.assertEqual((said, self.ssh_runs(), self.adds()), ([], [], []))
 
@@ -278,7 +279,7 @@ class KeyTest(KeyCase):
                     lines.append(LINUX_NOTE)
                 self.assertEqual(out[2:2 + len(lines)], lines)
                 self.assertEqual(out[2 + len(lines)],
-                                 "  test    ok: ferry logs in to fake-dest with no prompt")
+                                 "  test    ok: vcharon logs in to fake-dest with no prompt")
                 self.assertFalse(any(line.startswith("  run") for line in out))
                 self.assertEqual(self.adds(), [])
 
@@ -338,7 +339,7 @@ class KeyTest(KeyCase):
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: ssh-add didn't add %s (exit 1)" % self.key,
                                    "  fix: " + platform.runnable("check the passphrase, then "
-                                                                 "run ferry key again")])
+                                                                 "run vcharon key again")])
         self.assertFalse(any(line.startswith("  test") for line in out))
 
     def test_still_locked_after_the_add(self):
@@ -368,7 +369,7 @@ class KeyTest(KeyCase):
         here = os.path.join(os.getcwd(), "id_rsa")
         out, err = self.key_cli("--key", "id_rsa")
         self.assertEqual(self.adds(), [[self.key], [here]])
-        self.assertEqual(out[0], "ferry: key %s" % here)
+        self.assertEqual(out[0], "vcharon: key %s" % here)
         self.assertFalse(any(line.startswith("  test") for line in out))
         # no probe: no run had -v
         self.assertTrue(self.ssh_runs())
@@ -382,7 +383,7 @@ class KeyTest(KeyCase):
 
 
 # the folder that holds the vcharon package (src/ in the repo)
-FERRY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 # cli.main in a child whose stdout is a real UTF-8 pipe, with fake ssh and ssh-add and a
 # terminal: StringIO would take any str and hide a crash on a lone surrogate
@@ -394,7 +395,7 @@ ssh.ssh_prefix = lambda settings: [sys.executable, %r]
 ssh.ssh_add_prefix = lambda settings: [sys.executable, %r]
 keys.terminal = lambda: True
 sys.exit(cli.main(sys.argv[1:]))
-""" % (FERRY_DIR, FAKE_SSH, FAKE_SSH_ADD)
+""" % (VCHARON_DIR, FAKE_SSH, FAKE_SSH_ADD)
 
 
 class UndecodableKeyNameTest(KeyCase):
@@ -429,7 +430,7 @@ class UndecodableKeyNameTest(KeyCase):
                       out)
         [run] = [line for line in out.splitlines() if line.startswith("  run     ")]
         self.assertIn(self.shown, run)
-        self.assertIn("  test    ok: ferry logs in to fake-dest with no prompt", out)
+        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
         # ssh-add got the real name
         self.assertEqual(self.adds(), [[self.key]])
 

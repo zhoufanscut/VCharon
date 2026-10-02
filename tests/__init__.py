@@ -1,1 +1,1 @@
-"""ferry's tests: python3 -m unittest discover -s ferry/tests -t ferry -v"""
+"""vcharon's tests: python -m unittest discover -s tests -t . -v"""

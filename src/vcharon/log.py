@@ -65,7 +65,7 @@ class Log:
                 os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
                 self._made_dir = True
             self._roll()
-            # Open and close for each write: short-lived, and another ferry may roll the file.
+            # Open and close for each write: short-lived, and another vcharon may roll the file.
             with open(self.path, "a", encoding="utf-8", errors="replace") as f:
                 f.write(text)
         except OSError:
@@ -76,13 +76,13 @@ class Log:
             if os.path.getsize(self.path) >= ROLL_BYTES:
                 os.replace(self.path, self.path + ".1")
         except OSError:
-            # Missing, or on Windows another ferry has it open: keep appending.
+            # Missing, or on Windows another vcharon has it open: keep appending.
             pass
 
 
 class HeldLog(Log):
     """A Log whose lines wait in memory until flush() hands them to its target; dropped with
-    the object otherwise. ferry run --repeat logs a round only when it did something, so a
+    the object otherwise. vcharon run --repeat logs a round only when it did something, so a
     quiet watch doesn't roll the log every half hour (DESIGN §14 M15)."""
 
     def __init__(self, target):

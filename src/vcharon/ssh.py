@@ -33,7 +33,7 @@ _EMPTY = object()
 
 
 def check_dest(dest):
-    """Refuses a destination ssh would misread. ferry never parses it otherwise."""
+    """Refuses a destination ssh would misread. vcharon never parses it otherwise."""
     hint = "use an ~/.ssh/config alias, user@host, or ssh://user@host:port"
     if not dest:
         raise VCharonError("config", "the destination is empty", hint=hint)
@@ -80,29 +80,29 @@ def classify_exit(rc, tail, dest, settings, killed=None):
     if killed:
         seconds = {"handshake": settings.handshake_timeout, "idle": settings.idle_timeout,
                    "run": settings.run_timeout}.get(killed, settings.handshake_timeout)
-        err = VCharonError("connect", "no answer from ferry on %s within %d s" % (dest, seconds),
+        err = VCharonError("connect", "no answer from vcharon on %s within %d s" % (dest, seconds),
                            hint="authentication or a jump host may be stuck; run ssh %s in a "
                            "terminal to see" % dest)
     elif rc == 90:
-        err = VCharonError("connect", "the Python on %s is too old for ferry" % dest,
+        err = VCharonError("connect", "the Python on %s is too old for vcharon" % dest,
                            hint="install Python %d.%d or newer on %s, or set remote_python"
                            % (FLOOR[0], FLOOR[1], dest))
     elif rc == 91:
-        err = VCharonError("connect", "the server couldn't load ferry's code",
-                           hint="this is a bug in ferry; see the log")
+        err = VCharonError("connect", "the server couldn't load vcharon's code",
+                           hint="this is a bug in vcharon; see the log")
     elif rc == 126:
         err = VCharonError("connect", "%s isn't runnable on %s" % (settings.remote_python, dest),
-                           hint="check remote_python in ferry.ini")
+                           hint="check remote_python in vcharon.ini")
     elif rc == 127:
         err = VCharonError("connect", "%s wasn't found on %s" % (settings.remote_python, dest),
-                           hint="install %s on %s, or set remote_python in ferry.ini"
+                           hint="install %s on %s, or set remote_python in vcharon.ini"
                            % (settings.remote_python, dest))
     elif rc == 255 and "Host key verification failed" in text:
         err = VCharonError("connect", "ssh couldn't verify the host key of %s" % dest,
                            hint="run ssh %s once in a terminal" % dest)
     elif rc == 255 and "Permission denied" in text:
         err = VCharonError("connect", "ssh couldn't log in to %s (Permission denied)" % dest,
-                           hint="add your key to the server, or run: ferry key %s" % dest)
+                           hint="add your key to the server, or run: vcharon key %s" % dest)
     elif rc == 255 and any(phrase in text for phrase in _NETWORK):
         phrase = next(phrase for phrase in _NETWORK if phrase in text)
         err = VCharonError("connect", "ssh couldn't reach %s (%s)" % (dest, phrase),
@@ -118,15 +118,15 @@ def classify_exit(rc, tail, dest, settings, killed=None):
         else:
             # A startup file that eats stdin garbles the bootstrap, which then exits 1.
             hint = "a shell startup file on the server may have read stdin; see the log"
-        err = VCharonError("connect", "%s before ferry started on the server" % what, hint=hint)
+        err = VCharonError("connect", "%s before vcharon started on the server" % what, hint=hint)
     err.tail = list(tail)
     return err
 
 
-START_HINT = "install the OpenSSH client, or set ssh_path in ferry.ini"
+START_HINT = "install the OpenSSH client, or set ssh_path in vcharon.ini"
 
 
-# --- the -v probe of ferry doctor and ferry key (DESIGN §6.4, §6.5) ---
+# --- the -v probe of vcharon doctor and vcharon key (DESIGN §6.4, §6.5) ---
 
 def probe_command(settings, dest):
     """A probe's ssh command with -v: BatchMode on, ControlMaster off, and the bootstrap line
@@ -358,7 +358,7 @@ class _Stdout:
 
 
 class Session:
-    """One ssh connection with ferry's helper at the other end (DESIGN §6)."""
+    """One ssh connection with vcharon's helper at the other end (DESIGN §6)."""
 
     def __init__(self, settings, dest, log, probe=False, floor=FLOOR, extra_modules=None):
         self.settings = settings
@@ -389,7 +389,7 @@ class Session:
         self._marker_seen = False
         self._reader_done = False
         self._started = 0.0
-        # where run_timeout counts from: the start, or with ferry run --repeat the round's
+        # where run_timeout counts from: the start, or with vcharon run --repeat the round's
         # start; None between rounds, when it doesn't count (start_round, end_round)
         self._run_from = None
         self._activity = 0.0
@@ -431,7 +431,7 @@ class Session:
         except OSError as e:
             self._closed = True
             raise VCharonError("connect", "couldn't start %s: %s" % (argv[0], e.strerror or e),
-                               hint="install the OpenSSH client, or set ssh_path in ferry.ini")
+                               hint="install the OpenSSH client, or set ssh_path in vcharon.ini")
         try:
             return self._start(loader, blob)
         except BaseException as e:
@@ -472,9 +472,9 @@ class Session:
             self._healthy = False
             got = proto.quote(msg) if kind == proto.J else "a %s frame" % chr(kind)
             raise VCharonError("protocol",
-                               "the helper on %s isn't ferry %s, protocol %d: it sent %s"
+                               "the helper on %s isn't vcharon %s, protocol %d: it sent %s"
                                % (self.dest, VERSION, PROTOCOL, got),
-                               hint="this is a bug in ferry's bundling")
+                               hint="this is a bug in vcharon's bundling")
         self.hello = msg
         self.handshake_seconds = time.monotonic() - self._started
         self.hello_received = received
@@ -484,7 +484,7 @@ class Session:
         return msg
 
     def _thread(self, target):
-        thread = threading.Thread(target=target, name="ferry" + target.__name__, daemon=True)
+        thread = threading.Thread(target=target, name="vcharon" + target.__name__, daemon=True)
         thread.start()
         return thread
 
@@ -528,7 +528,7 @@ class Session:
     def _find_marker(self):
         """Skips what the server's shell printed before the marker. Returns the bytes after
         the marker, or None at end of file."""
-        marker = b"FERRY-READY " + self._nonce.encode("ascii") + b"\n"
+        marker = b"VCHARON-READY " + self._nonce.encode("ascii") + b"\n"
         keep = len(marker) - 1
         buf = b""
         try:
@@ -553,7 +553,7 @@ class Session:
         finally:
             if self.junk_bytes:
                 text = self._junk_head.decode("utf-8", "replace")
-                self.log.warn("the server's shell printed %d bytes before ferry started:\n%s"
+                self.log.warn("the server's shell printed %d bytes before vcharon started:\n%s"
                               % (self.junk_bytes, "\n".join("| " + line
                                                             for line in text.splitlines())))
 
@@ -624,12 +624,12 @@ class Session:
                 return
 
     def start_round(self):
-        """ferry run --repeat: run_timeout counts from now, within this round (M15)."""
+        """vcharon run --repeat: run_timeout counts from now, within this round (M15)."""
         with self._lock:
             self._run_from = time.monotonic()
 
     def end_round(self):
-        """ferry run --repeat: the wait between rounds doesn't count for run_timeout."""
+        """vcharon run --repeat: the wait between rounds doesn't count for run_timeout."""
         with self._lock:
             self._run_from = None
 

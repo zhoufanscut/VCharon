@@ -114,7 +114,7 @@ def _puts_file(path):
 
 
 def _link(path):
-    return VCharonError("unsafe_path", "%s is a symlink or junction; ferry never goes through one"
+    return VCharonError("unsafe_path", "%s is a symlink or junction; vcharon never goes through one"
                         % pathrules.show(path), fsops.LINK_HINT)
 
 
@@ -602,7 +602,7 @@ class Stager:
             self._stage = self._root.enter(name, owner_rule=False)
             self._lock = self._stage.open_lock(create=True, exclusive=True)
             if not self._lock.try_acquire():
-                raise VCharonError("io", "another ferry run took the new stage dir; run again")
+                raise VCharonError("io", "another vcharon run took the new stage dir; run again")
         except BaseException as e:
             self._drop_stage()
             if isinstance(e, OSError):

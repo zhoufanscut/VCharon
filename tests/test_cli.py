@@ -28,12 +28,12 @@ from tests.test_lock import hold_in_child, stop_child
 from tests.util import (CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, helper_override,
                         read_tree, write_tree)
 
-PULL_HINT = ("the ferry on the server may be broken, or the server compromised; nothing was "
+PULL_HINT = ("the vcharon on the server may be broken, or the server compromised; nothing was "
              "changed")
 
 
 def json_inner(value):
-    """value as ferry prints it inside the JSON of an identity, a target or a saved state, with
+    """value as vcharon prints it inside the JSON of an identity, a target or a saved state, with
     the quotes left to the template: json.dumps escapes a Windows path's \\, so a message that
     names one reads C:\\\\Users\\\\... here."""
     return json.dumps(value, ensure_ascii=False)[1:-1]
@@ -57,7 +57,7 @@ _real.HANDLERS["source.send"] = source_send
 """
 
 # the folder that holds the vcharon package (src/ in the repo)
-FERRY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 # a helper whose server has no machine id
 NO_MACHINE = """
@@ -85,7 +85,7 @@ to         = local:dir
 to.path    = {dst}
 """
 
-RESET_HINT = "  fix: check the target; then: ferry state reset %s, and ferry run %s --full"
+RESET_HINT = "  fix: check the target; then: vcharon state reset %s, and vcharon run %s --full"
 OK_LINE = r"\AOK  %d written, %d deleted  \(\d+\.\d s\)\Z"
 
 
@@ -93,15 +93,15 @@ class CliTest(FakeSshCase):
     def test_version(self):
         code, out, err = self.run_cli("version")
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"\Aferry 0\.1\.0, protocol 3, Python 3\.\d+\.\d+ \(.+\)\n\Z")
+        self.assertRegex(out, r"\Avcharon 0\.1\.0, protocol 3, Python 3\.\d+\.\d+ \(.+\)\n\Z")
         self.assertIn(sys.executable, out)
 
     def test_ping(self):
         code, out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 0, err)
         lines = out.splitlines()
-        self.assertEqual(lines[0], "ferry: ping fake-dest")
-        self.assertRegex(lines[1], r"\A  helper   ferry 0\.1\.0, protocol 3, Python 3\.")
+        self.assertEqual(lines[0], "vcharon: ping fake-dest")
+        self.assertRegex(lines[1], r"\A  helper   vcharon 0\.1\.0, protocol 3, Python 3\.")
         self.assertRegex(lines[2], r"\A  server   .+, user .*, home " + re.escape(self.home)
                          + r"\Z")
         self.assertEqual(lines[3], "  machine  0123456789abcdef0123456789abcdef")
@@ -110,10 +110,10 @@ class CliTest(FakeSshCase):
                          r"round trip\Z")
         self.assertRegex(lines[6], r"\AOK  \(\d+\.\d s\)\Z")
         self.assertEqual(err, "")
-        log = os.path.join(self.ferry_home, "logs", "ferry.log")
+        log = os.path.join(self.vcharon_home, "logs", "vcharon.log")
         with open(log, encoding="utf-8") as f:
             text = f.read()
-        self.assertIn("ferry 0.1.0 ping fake-dest", text)
+        self.assertIn("vcharon 0.1.0 ping fake-dest", text)
         self.assertIn("ping OK", text)
 
     def test_ping_warnings(self):
@@ -127,7 +127,7 @@ class CliTest(FakeSshCase):
         with mock.patch.object(ssh, "Session", NoMachineId):
             code, out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 0, err)
-        self.assertIn("\n  warn     the server's shell printed 6 bytes before ferry started; "
+        self.assertIn("\n  warn     the server's shell printed 6 bytes before vcharon started; "
                       "see the log\n", out)
         self.assertIn("\n  machine  none (jobs that keep state won't run)\n", out)
 
@@ -140,10 +140,10 @@ class CliTest(FakeSshCase):
         self.assertEqual(lines[0], "ERROR connect: ssh couldn't log in to fake-dest "
                          "(Permission denied)")
         self.assertIn("  | Permission denied (publickey).", lines)
-        # the command as this box runs ferry (M14a)
-        self.assertIn(platform.runnable("  fix: add your key to the server, or run: ferry key "
+        # the command as this box runs vcharon (M14a)
+        self.assertIn(platform.runnable("  fix: add your key to the server, or run: vcharon key "
                                         "fake-dest"), lines)
-        self.assertIn("  log: %s" % os.path.join(self.ferry_home, "logs", "ferry.log"), lines)
+        self.assertIn("  log: %s" % os.path.join(self.vcharon_home, "logs", "vcharon.log"), lines)
 
     def test_a_bug_is_internal(self):
         with mock.patch.object(ssh.Session, "echo", side_effect=RuntimeError("oops")):
@@ -151,8 +151,8 @@ class CliTest(FakeSshCase):
         self.assertEqual(code, 1)
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR internal: RuntimeError: oops")
-        self.assertIn("  fix: this is a bug in ferry; see the log", lines)
-        with open(os.path.join(self.ferry_home, "logs", "ferry.log"), encoding="utf-8") as f:
+        self.assertIn("  fix: this is a bug in vcharon; see the log", lines)
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             self.assertIn("Traceback (most recent call last):", f.read())
 
     def test_usage_errors_exit_3(self):
@@ -165,24 +165,24 @@ class CliTest(FakeSshCase):
                 self.assertIn("  fix: ", err)
 
     def test_bad_config_exits_3(self):
-        with open(os.path.join(self.ferry_home, "ferry.ini"), "w") as f:
-            f.write("[ferry]\nidle_timeout = 0\n")
+        with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nidle_timeout = 0\n")
         code, out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 3)
-        self.assertIn("ERROR config: ferry.ini [ferry] idle_timeout: must be a whole number",
+        self.assertIn("ERROR config: vcharon.ini [vcharon] idle_timeout: must be a whole number",
                       err)
 
     def test_options_before_and_after_the_command(self):
         other = os.path.join(self.tmp, "other.ini")
         with open(other, "w") as f:
-            f.write("[ferry]\ncompress = maybe\n")
+            f.write("[vcharon]\ncompress = maybe\n")
         for argv in (["--config", other, "ping", "fake-dest"],
                      ["ping", "fake-dest", "--config", other],
                      ["-v", "ping", "--config", other, "fake-dest"]):
             with self.subTest(argv=argv):
                 code, out, err = self.run_cli(*argv)
                 self.assertEqual(code, 3)
-                self.assertIn("other.ini [ferry] compress", err)
+                self.assertIn("other.ini [vcharon] compress", err)
 
     def test_verbose_prints_the_log(self):
         code, out, err = self.run_cli("ping", "fake-dest", "-v")
@@ -196,18 +196,18 @@ class CliTest(FakeSshCase):
                   "sys.path[:0] = [%r]\n"
                   "from vcharon import cli, ssh\n"
                   "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
-                  "sys.exit(cli.main(['ping', 'fake-dest']))\n" % (FERRY_DIR, FAKE_SSH))
+                  "sys.exit(cli.main(['ping', 'fake-dest']))\n" % (VCHARON_DIR, FAKE_SSH))
         # A shell may start background jobs with SIGINT ignored; Python then never sees it.
         proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, universal_newlines=True,
                                 preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
-        self.assertEqual(proc.stdout.readline(), "ferry: ping fake-dest\n")
+        self.assertEqual(proc.stdout.readline(), "vcharon: ping fake-dest\n")
         time.sleep(0.5)
         proc.send_signal(signal.SIGINT)
         out, err = proc.communicate(timeout=20)
         self.assertEqual(proc.returncode, 130)
-        self.assertEqual(err, "ferry: interrupted\n")
-        with open(os.path.join(self.ferry_home, "logs", "ferry.log"), encoding="utf-8") as f:
+        self.assertEqual(err, "vcharon: interrupted\n")
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             self.assertIn("killing ssh: interrupted", f.read())
 
     def test_help_exits_0(self):
@@ -272,7 +272,7 @@ def with_helper(code):
 
 
 class JobTest(FakeSshCase):
-    """ferry run, jobs and state through fake ssh (decisions 16-20 of the M4 plan); the remote
+    """vcharon run, jobs and state through fake ssh (decisions 16-20 of the M4 plan); the remote
     end is under the fake server's home."""
 
     def setUp(self):
@@ -290,7 +290,7 @@ class JobTest(FakeSshCase):
 
     def job_log(self, name="push"):
         try:
-            with open(os.path.join(self.ferry_home, "logs", name + ".log"),
+            with open(os.path.join(self.vcharon_home, "logs", name + ".log"),
                       encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
@@ -335,7 +335,7 @@ class JobTest(FakeSshCase):
 
     def test_push(self):
         lines = self.ok("run", "push")
-        self.assertEqual(lines[:2], ["ferry: push  %s -> fake-dest:inbox" % self.src,
+        self.assertEqual(lines[:2], ["vcharon: push  %s -> fake-dest:inbox" % self.src,
                                      "  put     3 files, 2 dirs (1.2 kB)"])
         self.assertRegex(lines[2], OK_LINE % (3, 0))
         self.assertEqual(len(lines), 3)
@@ -349,12 +349,12 @@ class JobTest(FakeSshCase):
         self.assertEqual(sorted(doc["source"]["sent"]), ["a.txt", "d", "d/b.txt", "e",
                                                         "中 文.txt"])
         log = self.job_log()
-        self.assertIn("ferry 0.1.0 run push; Python ", log)
+        self.assertIn("vcharon 0.1.0 run push; Python ", log)
         self.assertIn("  info    put     3 files, 2 dirs (1.2 kB)\n", log)
         self.assertIn("transfer: 3 files, 1202 bytes", log)
         # the second run: nothing to do, and nothing moves
         lines = self.ok("run", "push")
-        self.assertEqual(lines[:2], ["ferry: push  %s -> fake-dest:inbox" % self.src,
+        self.assertEqual(lines[:2], ["vcharon: push  %s -> fake-dest:inbox" % self.src,
                                      "  nothing to do"])
         self.assertRegex(lines[2], OK_LINE % (0, 0))
         self.assertEqual(len(lines), 3)
@@ -371,7 +371,7 @@ class JobTest(FakeSshCase):
 
     def test_dry_run(self):
         lines = self.ok("run", "push", "--dry-run")
-        self.assertEqual(lines[0], "ferry: push  %s -> fake-dest:inbox  (dry run)" % self.src)
+        self.assertEqual(lines[0], "vcharon: push  %s -> fake-dest:inbox  (dry run)" % self.src)
         self.assertEqual(lines[1:7], ["  put     3 files, 2 dirs (1.2 kB)", "          a.txt",
                                       "          d/", "          d/b.txt", "          e/",
                                       "          中 文.txt"])
@@ -406,14 +406,14 @@ class JobTest(FakeSshCase):
         write_tree(self.inbox, read_tree(self.src))
         write_tree(self.inbox, {"a.txt": b"A" * 1000})
         lines = self.ok("run", "push", "--full")
-        self.assertEqual(lines[:2], ["ferry: push  %s -> fake-dest:inbox  (full)" % self.src,
+        self.assertEqual(lines[:2], ["vcharon: push  %s -> fake-dest:inbox  (full)" % self.src,
                                      "  put     3 files, 2 dirs (1.2 kB), 2 already there"])
         # have files count as written
         self.assertRegex(lines[2], OK_LINE % (3, 0))
         self.assertIn("transfer: 1 files, 1000 bytes", self.job_log())
         self.assertEqual(read_tree(self.inbox), read_tree(self.src))
         lines = self.ok("run", "push", "--full", "--dry-run")
-        self.assertEqual(lines[:2], ["ferry: push  %s -> fake-dest:inbox  (full, dry run)"
+        self.assertEqual(lines[:2], ["vcharon: push  %s -> fake-dest:inbox  (full, dry run)"
                                      % self.src,
                                      "  put     3 files, 2 dirs (1.2 kB), 3 already there"])
         self.assertEqual(self.ok("run", "push")[1], "  nothing to do")
@@ -430,7 +430,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(err[0], "ERROR state_mismatch: the state of push was saved for another "
                                  "config: its ssh, from, to, from.path or to.path changed")
         self.assertIn(platform.runnable(RESET_HINT % ("push", "push")), err)
-        self.assertEqual(err[-1], "  log: %s" % os.path.join(self.ferry_home, "logs",
+        self.assertEqual(err[-1], "  log: %s" % os.path.join(self.vcharon_home, "logs",
                                                             "push.log"))
         # before ssh starts, and before the header
         self.assertFalse(os.path.exists(self.argv_file))
@@ -448,7 +448,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(before, {"x.log": b"x", "sub/": None, "sub/y.log": b"yy"})
         # the alias now points at another server, where outbox has less: prune mustn't run
         os.remove(os.path.join(self.home, "outbox", "x.log"))
-        os.environ["FERRY_TEST_MACHINE_ID"] = "f" * 32
+        os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         saved = self.state_bytes("pull")
         out, err = self.failed(3, "run", "pull")
         self.assertEqual(self.state_bytes("pull"), saved)
@@ -460,11 +460,11 @@ class JobTest(FakeSshCase):
                          % (TEST_MACHINE_ID, json_inner(path), "f" * 32, json_inner(path)))
         self.assertIn(platform.runnable(RESET_HINT % ("pull", "pull")), err)
         self.assertEqual(read_tree(back), before)
-        self.assertEqual(out, ["ferry: pull  fake-dest:outbox -> %s" % back])
+        self.assertEqual(out, ["vcharon: pull  fake-dest:outbox -> %s" % back])
 
     def test_7_push_to_another_server(self):
         self.ok("run", "push")
-        os.environ["FERRY_TEST_MACHINE_ID"] = "f" * 32
+        os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         write_tree(self.src, {"new.txt": b"n"})
         before = self.state_bytes()
         out, err = self.failed(3, "run", "push")
@@ -544,9 +544,9 @@ class JobTest(FakeSshCase):
         self.ok("run", "push")
 
     def test_8_busy_in_another_process(self):
-        # the lock is the OS's: a second ferry process sees it (DESIGN §11.3)
+        # the lock is the OS's: a second vcharon process sees it (DESIGN §11.3)
         self.lock_is_free()
-        child = hold_in_child(os.path.join(self.ferry_home, "state", "push.lock"))
+        child = hold_in_child(os.path.join(self.vcharon_home, "state", "push.lock"))
         try:
             out, err = self.failed(2, "run", "push")
         finally:
@@ -627,7 +627,7 @@ class JobTest(FakeSshCase):
                 self.assertNotIn("OK", "\n".join(out))
                 self.assertEqual(read_tree(self.inbox), read_tree(self.src))
                 # no state file, no temp file, and the lock is free
-                self.assertEqual(os.listdir(os.path.join(self.ferry_home, "state")),
+                self.assertEqual(os.listdir(os.path.join(self.vcharon_home, "state")),
                                  ["push.lock"])
                 self.lock_is_free()
 
@@ -662,7 +662,7 @@ class JobTest(FakeSshCase):
 
         with mock.patch.object(engine.Engine, "run", interrupted):
             code, out, err = self.run_cli("run", "push")
-        self.assertEqual((code, err), (130, "ferry: interrupted\n"))
+        self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         self.assertEqual(self.state_bytes(), before)
         self.assertIn("  error  interrupted", self.job_log())
         self.lock_is_free()
@@ -671,7 +671,7 @@ class JobTest(FakeSshCase):
         with with_helper(NO_MACHINE):
             out, err = self.failed(3, "run", "push")
         self.assertEqual(err[:2], ["ERROR state_mismatch: the server fake-dest has no machine id, "
-                                   "so ferry can't tie the state of push to it",
+                                   "so vcharon can't tie the state of push to it",
                                    "  fix: " + platform.runnable(state.NO_MACHINE_HINT)])
         self.assertFalse(os.path.exists(state.path("push")))
         self.assertEqual(read_tree(self.inbox), {})
@@ -679,7 +679,7 @@ class JobTest(FakeSshCase):
     def test_a_server_that_isnt_linux(self):
         # M11a: a Mac or Windows box has a machine id now; the client refuses it by its OS
         for osn in ("darwin", "windows"):
-            os.environ["FERRY_TEST_OS"] = osn
+            os.environ["VCHARON_TEST_OS"] = osn
             out, err = self.failed(3, "run", "push")
             self.assertEqual(err[:2], ["ERROR state_mismatch: fake-dest runs %s: only a Linux "
                                        "server is supported as a remote end" % osn,
@@ -744,11 +744,11 @@ class JobTest(FakeSshCase):
     # state show and state reset
 
     def test_state_show_and_reset(self):
-        self.assertEqual(self.ok("state", "show", "push"), ["ferry: no state for push"])
+        self.assertEqual(self.ok("state", "show", "push"), ["vcharon: no state for push"])
         self.ok("run", "push")
         lines = self.ok("state", "show", "push")
         root = os.path.realpath(self.inbox)
-        self.assertEqual(lines[0], "ferry: state of push  (%s)" % state.path("push"))
+        self.assertEqual(lines[0], "vcharon: state of push  (%s)" % state.path("push"))
         self.assertRegex(lines[1], r"\A  saved     \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\Z")
         self.assertEqual(lines[2:], [
             '  source    {"end": "local", "kind": "dir", "path": "%s"}' % json_inner(self.src),
@@ -760,10 +760,10 @@ class JobTest(FakeSshCase):
                          lines + ["removed %s" % state.path("push")])
         self.assertFalse(os.path.exists(state.path("push")))
         self.assertIn("state reset: removed %s" % state.path("push"), self.job_log())
-        self.assertEqual(self.ok("state", "reset", "push"), ["ferry: no state for push"])
+        self.assertEqual(self.ok("state", "reset", "push"), ["vcharon: no state for push"])
         # a job no longer in the config
         self.ok("run", "push")
-        self.write_config("[ferry]\n")
+        self.write_config("[vcharon]\n")
         self.assertEqual(self.ok("state", "show", "push")[-1], "  sent      3 files, 2 dirs")
         # a malformed file: show refuses it, reset removes it
         with open(state.path("push"), "wb") as f:
@@ -772,7 +772,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(err[0], "ERROR state_mismatch: the state file %s can't be read: it "
                                  "isn't a JSON object" % state.path("push"))
         self.assertEqual(self.ok("state", "reset", "push"),
-                         ["ferry: the state of push can't be read (it isn't a JSON object)",
+                         ["vcharon: the state of push can't be read (it isn't a JSON object)",
                           "removed %s" % state.path("push")])
         for name in ("../x", "a b", "", "-x", "CON"):
             for action in ("show", "reset"):
@@ -794,14 +794,14 @@ class JobTest(FakeSshCase):
     def test_unknown_job_and_missing_config(self):
         out, err = self.failed(3, "run", "nope")
         self.assertEqual(err[:2], ["ERROR config: no job named nope in %s" % self.config,
-                                   "  fix: " + platform.runnable("ferry doctor lists them")])
+                                   "  fix: " + platform.runnable("vcharon doctor lists them")])
         self.write_config(PUSH.format(src=self.src) + "from.pth = x\n")
         out, err = self.failed(3, "run", "push")
         self.assertEqual(err[0], "ERROR bad_options: from.pth: unknown option")
         os.remove(self.config)
         out, err = self.failed(3, "run", "push")
         self.assertEqual(err[:2], ["ERROR config: there is no config file at %s" % self.config,
-                                   "  fix: create it; see ferry/DESIGN.md §12"])
+                                   "  fix: create it; see vcharon/DESIGN.md §12"])
         out, err = self.failed(3, "run", "push", "--config", self.config)
         self.assertEqual(err[0], "ERROR config: the config file %s doesn't exist" % self.config)
         for argv in (["run"], ["state"], ["state", "show"], ["state", "drop", "push"]):
@@ -813,7 +813,7 @@ class JobTest(FakeSshCase):
     def test_verbose(self):
         code, out, err = self.run_cli("run", "push", "-v")
         self.assertEqual(code, 0, err)
-        self.assertIn("  info  ferry 0.1.0 run push; Python ", err)
+        self.assertIn("  info  vcharon 0.1.0 run push; Python ", err)
         self.assertIn("  info  starting ssh: ", err)
         code, out, err = self.run_cli("-v", "state", "reset", "push")
         self.assertIn("  info  state reset: removed ", err)
@@ -875,7 +875,7 @@ SUMMARY_FAILED = r"\AFAILED  %s  \(\d+\.\d s\)\Z"
 
 
 class MultiJobTest(FakeSshCase):
-    """ferry run with several jobs (M7a): one connection per run of jobs with one session key,
+    """vcharon run with several jobs (M7a): one connection per run of jobs with one session key,
     per-job blocks, logs and states, the summary line and the exit code."""
 
     def setUp(self):
@@ -902,7 +902,7 @@ class MultiJobTest(FakeSshCase):
 
     def job_log(self, name):
         try:
-            with open(os.path.join(self.ferry_home, "logs", name + ".log"),
+            with open(os.path.join(self.vcharon_home, "logs", name + ".log"),
                       encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
@@ -922,10 +922,10 @@ class MultiJobTest(FakeSshCase):
         code, out, err = self.run_cli("run", "a", "b")
         self.assertEqual((code, err), (0, ""))
         lines = out.splitlines()
-        self.assertEqual(lines[0], "ferry: a  %s/a -> fake-dest:inbox_a" % self.local)
+        self.assertEqual(lines[0], "vcharon: a  %s/a -> fake-dest:inbox_a" % self.local)
         self.assertEqual(lines[1], "  put     1 file, 0 dirs (1 B)")
         self.assertRegex(lines[2], OK_LINE % (1, 0))
-        self.assertEqual(lines[3], "ferry: b  %s/b -> fake-dest:inbox_b" % self.local)
+        self.assertEqual(lines[3], "vcharon: b  %s/b -> fake-dest:inbox_b" % self.local)
         self.assertEqual(lines[4], "  put     1 file, 0 dirs (1 B)")
         self.assertRegex(lines[5], OK_LINE % (1, 0))
         self.assertRegex(lines[6], SUMMARY_OK % 2)
@@ -938,8 +938,8 @@ class MultiJobTest(FakeSshCase):
                 self.assertEqual(list(json.load(f)["source"]["sent"]), [name + ".txt"])
         # the session's own lines are a's; b says whose connection it used
         a, b = self.job_log("a"), self.job_log("b")
-        self.assertIn("ferry 0.1.0 run a b; Python ", a)
-        self.assertIn("ferry 0.1.0 run a b; Python ", b)
+        self.assertIn("vcharon 0.1.0 run a b; Python ", a)
+        self.assertIn("vcharon 0.1.0 run a b; Python ", b)
         self.assertIn("starting ssh", a)
         self.assertIn("ssh exited with code 0", a)
         self.assertNotIn("starting ssh", b)
@@ -954,15 +954,15 @@ class MultiJobTest(FakeSshCase):
 
     def test_dry_run_and_full_apply_to_every_job(self):
         lines = self.run_cli("run", "a", "b", "--dry-run")[1].splitlines()
-        self.assertEqual([l for l in lines if l.startswith("ferry: ")],
-                         ["ferry: a  %s/a -> fake-dest:inbox_a  (dry run)" % self.local,
-                          "ferry: b  %s/b -> fake-dest:inbox_b  (dry run)" % self.local])
+        self.assertEqual([l for l in lines if l.startswith("vcharon: ")],
+                         ["vcharon: a  %s/a -> fake-dest:inbox_a  (dry run)" % self.local,
+                          "vcharon: b  %s/b -> fake-dest:inbox_b  (dry run)" % self.local])
         self.assertFalse(os.path.exists(state.path("a")))
         self.assertFalse(os.path.exists(state.path("b")))
         lines = self.run_cli("run", "--full", "a", "b")[1].splitlines()
-        self.assertEqual([l for l in lines if l.startswith("ferry: ")],
-                         ["ferry: a  %s/a -> fake-dest:inbox_a  (full)" % self.local,
-                          "ferry: b  %s/b -> fake-dest:inbox_b  (full)" % self.local])
+        self.assertEqual([l for l in lines if l.startswith("vcharon: ")],
+                         ["vcharon: a  %s/a -> fake-dest:inbox_a  (full)" % self.local,
+                          "vcharon: b  %s/b -> fake-dest:inbox_b  (full)" % self.local])
 
     def test_session_keys(self):
         # another destination, or the same one with other settings, is another connection;
@@ -978,7 +978,7 @@ class MultiJobTest(FakeSshCase):
                 self.assertEqual(code, 0, err)
                 self.assertEqual(self.dests(), dests)
                 self.assertEqual([l.split()[1] for l in out.splitlines()
-                                  if l.startswith("ferry: ")], argv)
+                                  if l.startswith("vcharon: ")], argv)
         # the compress = yes at the end belongs to c; now give it to b instead: a and b
         # then have one destination and different settings
         text = MULTI.replace("to.path   = inbox_b\n", "to.path   = inbox_b\ncompress  = yes\n")
@@ -1044,14 +1044,14 @@ class MultiJobTest(FakeSshCase):
         code, out, err = self.run_cli("run", "p", "q", "a")
         self.assertEqual(code, 1)
         lines = out.splitlines()
-        self.assertEqual(lines[0], "ferry: p  fake-dest:missing -> %s/p" % self.local)
-        self.assertEqual(lines[1], "ferry: q  fake-dest:outbox -> %s/q" % self.local)
+        self.assertEqual(lines[0], "vcharon: p  fake-dest:missing -> %s/p" % self.local)
+        self.assertEqual(lines[1], "vcharon: q  fake-dest:outbox -> %s/q" % self.local)
         self.assertEqual(lines[2], "  put     1 file, 0 dirs (1 B)")
         self.assertRegex(lines[3], OK_LINE % (1, 0))
-        self.assertEqual(lines[4], "ferry: a  %s/a -> fake-dest:inbox_a" % self.local)
+        self.assertEqual(lines[4], "vcharon: a  %s/a -> fake-dest:inbox_a" % self.local)
         self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 3 jobs failed")
         self.assertTrue(err.startswith("ERROR p: not_found: "), err)
-        self.assertIn("  log: %s" % os.path.join(self.ferry_home, "logs", "p.log"), err)
+        self.assertIn("  log: %s" % os.path.join(self.vcharon_home, "logs", "p.log"), err)
         self.assertEqual(self.dests(), ["fake-dest"])
         self.assertEqual(read_tree(os.path.join(self.local, "q")), {"x.log": b"x"})
         self.assertFalse(os.path.exists(state.path("p")))
@@ -1096,7 +1096,7 @@ class MultiJobTest(FakeSshCase):
         code, out, err = self.run_cli("run", "a", "nope")
         self.assertEqual(code, 3)
         self.assertEqual(err.splitlines()[0], "ERROR config: no job named nope in %s"
-                         % os.path.join(self.ferry_home, "ferry.ini"))
+                         % os.path.join(self.vcharon_home, "vcharon.ini"))
 
     def test_a_broken_connection_skips_the_rest_of_its_group(self):
         for how, first_error in (("lost", "ERROR a: lost: "), ("protocol", "ERROR a: protocol: ")):
@@ -1107,17 +1107,17 @@ class MultiJobTest(FakeSshCase):
                     code, out, err = self.run_cli("run", "a", "b", "c")
                 self.assertEqual(code, 1)
                 lines = out.splitlines()
-                self.assertEqual(lines[:2], ["ferry: a  %s/a -> fake-dest:inbox_a" % self.local,
-                                             "ferry: b  skipped: the connection to fake-dest "
+                self.assertEqual(lines[:2], ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local,
+                                             "vcharon: b  skipped: the connection to fake-dest "
                                              "broke"])
-                self.assertEqual(lines[2], "ferry: c  %s/c -> other-dest:inbox_c" % self.local)
+                self.assertEqual(lines[2], "vcharon: c  %s/c -> other-dest:inbox_c" % self.local)
                 self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 3 jobs failed, 1 skipped")
                 self.assertTrue(err.startswith(first_error), err)
                 self.assertEqual(self.dests(), ["fake-dest", "other-dest"])
                 self.assertEqual(self.inbox("c"), {"c.txt": b"c"})
                 self.assertEqual(self.inbox("b"), {})
                 self.assertFalse(os.path.exists(state.path("b")))
-                self.assertIn("ferry: b  skipped: the connection to fake-dest broke",
+                self.assertIn("vcharon: b  skipped: the connection to fake-dest broke",
                               self.job_log("b"))
                 self.assert_locks_free("a", "b", "c")
                 os.remove(state.path("c"))
@@ -1127,7 +1127,7 @@ class MultiJobTest(FakeSshCase):
         code, out, err = self.run_cli("run", "a", "b")
         self.assertEqual(code, 4)
         self.assertEqual(out.splitlines()[1],
-                         "ferry: b  skipped: the connection to fake-dest broke")
+                         "vcharon: b  skipped: the connection to fake-dest broke")
         self.assertRegex(out.splitlines()[-1], SUMMARY_FAILED % "1 of 2 jobs failed, 1 skipped")
         self.assertEqual(self.dests(), ["fake-dest"])
 
@@ -1140,9 +1140,9 @@ class MultiJobTest(FakeSshCase):
 
         with mock.patch.object(engine.Engine, "run", interrupted):
             code, out, err = self.run_cli("run", "a", "b", "c")
-        self.assertEqual((code, err), (130, "ferry: interrupted\n"))
+        self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         self.assertEqual(calls, ["inbox_a"])
-        self.assertEqual(out.splitlines(), ["ferry: a  %s/a -> fake-dest:inbox_a" % self.local])
+        self.assertEqual(out.splitlines(), ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local])
         self.assertIn("  error  interrupted", self.job_log("a"))
         self.assertEqual(self.dests(), ["fake-dest"])
         self.assert_locks_free("a", "b", "c")
@@ -1153,7 +1153,7 @@ class MultiJobTest(FakeSshCase):
 
         def opened(session):
             # fake ssh hands this to the helper it starts
-            os.environ["FERRY_TEST_MACHINE_ID"] = ids[session.dest]
+            os.environ["VCHARON_TEST_MACHINE_ID"] = ids[session.dest]
             return real(session)
 
         with mock.patch.object(ssh.Session, "open", opened):
@@ -1170,7 +1170,7 @@ class MultiJobTest(FakeSshCase):
         self.assertRegex(out.splitlines()[-1], SUMMARY_FAILED % "2 of 2 jobs failed")
         self.assertEqual([l for l in err.splitlines() if l.startswith("ERROR")],
                          ["ERROR %s: state_mismatch: the server fake-dest has no machine id, so "
-                          "ferry can't tie the state of %s to it" % (name, name)
+                          "vcharon can't tie the state of %s to it" % (name, name)
                           for name in "ab"])
         self.assertFalse(os.path.exists(state.path("a")))
         self.assertFalse(os.path.exists(state.path("b")))
@@ -1247,7 +1247,7 @@ class MultiJobTest(FakeSshCase):
             code, out, err = self.run_cli("run", "a", "b", "d", "c")
         self.assertEqual(code, 1)
         lines = out.splitlines()
-        self.assertIn("ferry: d  skipped: the connection to fake-dest broke", lines)
+        self.assertIn("vcharon: d  skipped: the connection to fake-dest broke", lines)
         self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 4 jobs failed, 1 skipped")
         self.assertTrue(err.startswith("ERROR b: protocol: a malformed job.reset result"), err)
         self.assertEqual(self.dests(), ["fake-dest", "other-dest"])
@@ -1273,7 +1273,7 @@ class MultiJobTest(FakeSshCase):
         # decision 1 of M7a: one job prints no summary line, and no skip or share line
         # anywhere; its error goes to stderr alone
         lines = self.run_cli("run", "a")[1].splitlines()
-        self.assertEqual(lines[:2], ["ferry: a  %s/a -> fake-dest:inbox_a" % self.local,
+        self.assertEqual(lines[:2], ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local,
                                      "  put     1 file, 0 dirs (1 B)"])
         self.assertRegex(lines[2], OK_LINE % (1, 0))
         self.assertEqual(len(lines), 3)
@@ -1284,13 +1284,13 @@ class MultiJobTest(FakeSshCase):
         shutil.rmtree(os.path.join(self.home, "inbox_b"))
         code, out, err = self.run_cli("run", "b")
         self.assertEqual(code, 1)
-        self.assertEqual(out, "ferry: b  %s/b -> fake-dest:inbox_b\n" % self.local)
+        self.assertEqual(out, "vcharon: b  %s/b -> fake-dest:inbox_b\n" % self.local)
         err = err.splitlines()
         self.assertTrue(err[0].startswith("ERROR not_found: "), err)
-        self.assertEqual(err[-1], "  log: %s" % os.path.join(self.ferry_home, "logs", "b.log"))
+        self.assertEqual(err[-1], "  log: %s" % os.path.join(self.vcharon_home, "logs", "b.log"))
         self.assertEqual(len(err), 3)
         self.assertNotIn("shares the connection", self.job_log("a") + self.job_log("b"))
-        self.assertIn("ferry 0.1.0 run b; Python ", self.job_log("b"))
+        self.assertIn("vcharon 0.1.0 run b; Python ", self.job_log("b"))
 
 
 class Between:
@@ -1310,7 +1310,7 @@ class Between:
 
 
 class RepeatTest(FakeSshCase):
-    """ferry run --repeat (DESIGN §14 M15): rounds of the jobs on one session, per-round locks,
+    """vcharon run --repeat (DESIGN §14 M15): rounds of the jobs on one session, per-round locks,
     the round's lines on stdout, its exit, and a quiet disk while there's nothing to do. On
     MultiJobTest's jobs and helpers, without its tests."""
 
@@ -1330,7 +1330,7 @@ class RepeatTest(FakeSshCase):
         self.addCleanup(patcher.stop)
 
     def repeat(self, *argv, between=()):
-        """ferry run ARGV --repeat 1, with the actions between its rounds: (exit code, stdout
+        """vcharon run ARGV --repeat 1, with the actions between its rounds: (exit code, stdout
         lines, stderr, the Between)."""
         waits = Between(*between)
         with mock.patch.object(cli, "_wait_or_end", waits):
@@ -1338,7 +1338,7 @@ class RepeatTest(FakeSshCase):
         return code, out.splitlines(), err, waits
 
     def job_log_path(self, name):
-        return os.path.join(self.ferry_home, "logs", name + ".log")
+        return os.path.join(self.vcharon_home, "logs", name + ".log")
 
     def test_refusals(self):
         for extra, what in ((["--full"], "--full"), (["--dry-run"], "--dry-run")):
@@ -1378,7 +1378,7 @@ class RepeatTest(FakeSshCase):
         self.assertEqual(len(set(map(id, resets))), 1)
         a = self.job_log("a")
         self.assertEqual(a.count("hello from fake-dest"), 1)
-        self.assertIn("ferry 0.1.0 run a b --repeat 1; Python ", a)
+        self.assertIn("vcharon 0.1.0 run a b --repeat 1; Python ", a)
         self.assertIn("repeat: stdin ended; stopping after 3 rounds since ", a)
         self.assertIn("ssh exited with code 0", a)
         self.assertEqual(self.inbox("a"), {"a.txt": b"a"})
@@ -1396,7 +1396,7 @@ class RepeatTest(FakeSshCase):
             self.assertEqual(sorted(json.load(f)["source"]["sent"]), ["b.txt", "new.txt"])
         # b's log has its round-1 lines and its round-3 lines; round 2 had nothing to do
         b = self.job_log("b")
-        self.assertEqual(b.count("  info  ferry: b  "), 2)
+        self.assertEqual(b.count("  info  vcharon: b  "), 2)
         self.assertEqual(b.count("saved the state of b"), 2)
         self.assertEqual(len(re.findall(r"  info  OK  1 written, 0 deleted", b)), 2)
 
@@ -1443,7 +1443,7 @@ class RepeatTest(FakeSshCase):
                 self.assertEqual((code, err), (1, ""))
                 self.assertTrue(lines[0].startswith("ERROR a: %s: " % how), lines)
                 self.assertIn("  log: %s" % self.job_log_path("a"), lines)
-                self.assertEqual(lines[-2:], ["ferry: b  skipped: the connection to fake-dest "
+                self.assertEqual(lines[-2:], ["vcharon: b  skipped: the connection to fake-dest "
                                               "broke", "ROUND 1"])
                 # no second round, no second connection
                 self.assertEqual(waits.waits, [])
@@ -1456,7 +1456,7 @@ class RepeatTest(FakeSshCase):
         code, lines, err, waits = self.repeat("a", "b", between=[lambda: None])
         self.assertEqual((code, err), (4, ""))
         self.assertTrue(lines[0].startswith("ERROR a: connect: "), lines)
-        self.assertEqual(lines[-2:], ["ferry: b  skipped: the connection to fake-dest broke",
+        self.assertEqual(lines[-2:], ["vcharon: b  skipped: the connection to fake-dest broke",
                                       "ROUND 4"])
         self.assertEqual(waits.waits, [])
 
@@ -1501,19 +1501,19 @@ class RepeatTest(FakeSshCase):
         self.assertNotIn("repeat: ", self.job_log("b"))
 
     def test_run_timeout_counts_within_a_round(self):
-        self.config("[ferry]\nrun_timeout = 2\n\n", MULTI)
+        self.config("[vcharon]\nrun_timeout = 2\n\n", MULTI)
         # the waits add up past run_timeout; no round comes near it
         code, lines, err, _ = self.repeat("a", "b", between=[lambda: time.sleep(1.5)] * 2)
         self.assertEqual((code, lines, err), (0, ["ROUND 0"] * 3, ""))
         self.assertNotIn("killing ssh", self.job_log("a"))
 
     def child(self, *argv):
-        """ferry run ARGV in a child with the real stdin thread, through the fake ssh."""
+        """vcharon run ARGV in a child with the real stdin thread, through the fake ssh."""
         code = ("import sys\n"
                 "sys.path.insert(0, %r)\n"
                 "from vcharon import cli, ssh\n"
                 "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
-                % (FERRY_DIR, FAKE_SSH) + util.TEST_JOBS_CODE
+                % (VCHARON_DIR, FAKE_SSH) + util.TEST_JOBS_CODE
                 + "sys.exit(cli.main(sys.argv[1:]))\n")
         return subprocess.Popen([sys.executable, "-c", code] + list(argv),
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1545,7 +1545,7 @@ class RepeatTest(FakeSshCase):
                 "sys.path.insert(0, %r)\n"
                 "from vcharon import cli, ssh\n"
                 "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
-                % (FERRY_DIR, FAKE_SSH) + util.TEST_JOBS_CODE
+                % (VCHARON_DIR, FAKE_SSH) + util.TEST_JOBS_CODE
                 + "sys.exit(cli.main(sys.argv[1:]))\n")
         child = subprocess.Popen([sys.executable, "-c", code, "run", "a", "b", "--repeat", "1"],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1571,14 +1571,14 @@ class RepeatTest(FakeSshCase):
 
 
 # A channel section (M10), in channels.d/: the M7b-M9c fixed [mailbox], with a leader, a
-# <channel>.<me> name, a pre-made server folder and MEMBER.md, as ferry channel join leaves them.
+# <channel>.<me> name, a pre-made server folder and MEMBER.md, as vcharon channel join leaves them.
 MAILBOX = """
 [mb.windows]
 ssh            = fake-dest
 mailbox.me     = windows
 mailbox.leader = debian
 mailbox.local  = {local}
-mailbox.remote = ferry_mailbox
+mailbox.remote = vcharon_mailbox
 """
 # the fixture has no record, so a hint can't print the flags that rebuild the name
 NO_FLAGS = "<the --project and --role that make windows>"
@@ -1590,8 +1590,8 @@ REAL_CHECK_PLAN = pathrules.check_plan
 
 
 def write_channel_section(case, text, section="mb.windows"):
-    """text, dedented, as $FERRY_HOME/channels.d/<section>.ini (M10)."""
-    folder = os.path.join(case.ferry_home, "channels.d")
+    """text, dedented, as $VCHARON_HOME/channels.d/<section>.ini (M10)."""
+    folder = os.path.join(case.vcharon_home, "channels.d")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, section + ".ini"), "w", encoding="utf-8") as f:
         f.write(textwrap.dedent(text))
@@ -1599,7 +1599,7 @@ def write_channel_section(case, text, section="mb.windows"):
 
 class MailboxTest(FakeSshCase):
     """A channel section end to end (the M7b plan, ported to M10): the fake server's home
-    holds the channel ferry_mailbox/, led by "debian", and this client is the member
+    holds the channel vcharon_mailbox/, led by "debian", and this client is the member
     "windows", joined: its server folder is made, its local own folder holds MEMBER.md."""
 
     def setUp(self):
@@ -1607,7 +1607,7 @@ class MailboxTest(FakeSshCase):
         util.use_test_jobs(self)
         self.local = os.path.join(self.tmp, "local", "box")
         self.own = os.path.join(self.local, "windows")
-        self.server = os.path.join(self.home, "ferry_mailbox")
+        self.server = os.path.join(self.home, "vcharon_mailbox")
         self.ssh_log = os.path.join(self.tmp, "ssh.log")
         os.environ["FAKE_SSH_ARGV_LOG"] = self.ssh_log
         write_channel_section(self, MAILBOX.format(local=self.local))
@@ -1628,10 +1628,11 @@ class MailboxTest(FakeSshCase):
         lines = self.ok("run", "mb.windows")
         # up sends MEMBER.md, which join wrote (M10: before, the run made the client's folders
         # and up had nothing to send)
-        self.assertEqual(lines[:2], ["ferry: mb.windows.up  %s -> fake-dest:ferry_mailbox/windows"
-                                     % self.own, "  put     1 file, 0 dirs (%d B)" % len(MEMBER)])
+        self.assertEqual(lines[:2], ["vcharon: mb.windows.up  %s -> "
+                                     "fake-dest:vcharon_mailbox/windows" % self.own,
+                                     "  put     1 file, 0 dirs (%d B)" % len(MEMBER)])
         self.assertRegex(lines[2], OK_LINE % (1, 0))
-        self.assertEqual(lines[3], "ferry: mb.windows.down  fake-dest:ferry_mailbox -> %s"
+        self.assertEqual(lines[3], "vcharon: mb.windows.down  fake-dest:vcharon_mailbox -> %s"
                          % self.local)
         self.assertRegex(lines[-1], r"\AOK  2 jobs  \(\d+\.\d s\)\Z")
         self.assertEqual(self.ssh_count(), 1)
@@ -1670,8 +1671,8 @@ class MailboxTest(FakeSshCase):
             "ERROR mb.windows.up: not_found: the own folder %s has no MEMBER.md, which "
             "mb.windows.up has sent: it was emptied or replaced" % self.own,
             "  fix: " + platform.runnable(
-                "ferry channel join mb --ssh fake-dest %s takes its files back from the server "
-                "(a rejoin); MEMBER.md is ferry's: to drop other files, delete them one by one "
+                "vcharon channel join mb --ssh fake-dest %s takes its files back from the server "
+                "(a rejoin); MEMBER.md is vcharon's: to drop other files, delete them one by one "
                 "and keep it" % NO_FLAGS)])
         self.assertEqual(read_tree(os.path.join(self.server, "windows")),
                          {"MEMBER.md": MEMBER, "extra.md": b"extra"})
@@ -1701,7 +1702,7 @@ class MailboxTest(FakeSshCase):
             "ERROR not_found: the root %s doesn't exist" % os.path.join(self.server, "windows"),
             "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", NO_FLAGS))])
         # the job's log keeps the plain text: read later, maybe on another box (M14a)
-        with open(os.path.join(self.ferry_home, "logs", "mb.windows.up.log"),
+        with open(os.path.join(self.vcharon_home, "logs", "mb.windows.up.log"),
                   encoding="utf-8") as f:
             self.assertIn("fix: " + cli.CHANNEL_GONE_HINT % ("mb", NO_FLAGS), f.read())
         self.assertFalse(os.path.exists(os.path.join(self.server, "windows")))
@@ -1718,7 +1719,7 @@ class MailboxTest(FakeSshCase):
         self.addCleanup(patcher.stop)
 
     def down_log(self):
-        with open(os.path.join(self.ferry_home, "logs", "mb.windows.down.log"),
+        with open(os.path.join(self.vcharon_home, "logs", "mb.windows.down.log"),
                   encoding="utf-8") as f:
             return f.read()
 
@@ -1826,13 +1827,13 @@ class MailboxTest(FakeSshCase):
 
     # --- after the M9 real run: fix lines a mailbox writer can follow ---
 
-    DOWN_FIX = ("  fix: the writer of each folder named above %s (MAILBOX.md in the ferry "
+    DOWN_FIX = ("  fix: the writer of each folder named above %s (MAILBOX.md in the vcharon "
                 "folder, §5); your up still runs")
     # with the writer's folder (M9c): MailboxTest's writer is windows
     UP_FIX = "  fix: %s in your own folder (windows/)"
 
     def refused(self, job, error, fix):
-        """ferry run mailbox: job fails with error and fix, on the console and in its log;
+        """vcharon run mailbox: job fails with error and fix, on the console and in its log;
         the other job still runs. The console's ERROR line names the job, as the watcher
         shows it (M9c); the job's own log has the line as before."""
         code, out, err = self.run_cli("run", "mb.windows")
@@ -1841,10 +1842,10 @@ class MailboxTest(FakeSshCase):
         shown = "ERROR mb.windows.%s: %s" % (job, error[len("ERROR "):])
         self.assertIn(shown, lines)
         self.assertEqual(lines[lines.index(shown) + 1], fix)
-        # the watcher's line: ferry's first stderr line
+        # the watcher's line: vcharon's first stderr line
         self.assertEqual(lines[0], shown)
         self.assertEqual(sum(1 for line in lines if "fix:" in line), 1, err)
-        with open(os.path.join(self.ferry_home, "logs", "mb.windows.%s.log" % job),
+        with open(os.path.join(self.vcharon_home, "logs", "mb.windows.%s.log" % job),
                   encoding="utf-8") as f:
             logged = [line.split("  error  ", 1)[1] for line in f.read().splitlines()
                       if "  error  " in line]
@@ -1962,7 +1963,7 @@ class MailboxTest(FakeSshCase):
     def test_other_jobs_keep_the_general_hints(self):
         # a plain pull from the same tree: the general hints, exactly as before
         dst = os.path.join(self.tmp, "pulled")
-        self.write_config(PULL.format(dst=dst).replace("outbox", "ferry_mailbox"))
+        self.write_config(PULL.format(dst=dst).replace("outbox", "vcharon_mailbox"))
         self.folding()
         write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
         code, out, err = self.run_cli("run", "pull")
@@ -2075,7 +2076,7 @@ class MailboxTest(FakeSshCase):
     def test_one_job_alone_and_twice(self):
         shutil.rmtree(self.local)
         lines = self.ok("run", "mb.windows.down")
-        self.assertEqual(lines[0], "ferry: mb.windows.down  fake-dest:ferry_mailbox -> %s"
+        self.assertEqual(lines[0], "vcharon: mb.windows.down  fake-dest:vcharon_mailbox -> %s"
                          % self.local)
         self.assertEqual(len(lines), 3)
         self.assertTrue(os.path.isdir(self.own))
@@ -2086,7 +2087,7 @@ class MailboxTest(FakeSshCase):
     def test_state_and_doctor_scope(self):
         self.ok("run", "mb.windows")
         self.assertEqual(self.ok("state", "show", "mb.windows.up")[0],
-                         "ferry: state of mb.windows.up  (%s)" % state.path("mb.windows.up"))
+                         "vcharon: state of mb.windows.up  (%s)" % state.path("mb.windows.up"))
         self.ok("state", "reset", "mb.windows.down")
         self.assertFalse(os.path.exists(state.path("mb.windows.down")))
         self.assertTrue(os.path.exists(state.path("mb.windows.up")))
@@ -2117,7 +2118,7 @@ class MailboxTest(FakeSshCase):
                     "ERROR mb.windows.%s: not_found: the mailbox's own folder %s is gone, but "
                     "mb.windows.up has sent files from it" % (job, self.own),
                     "  fix: " + platform.runnable("restore the folder; if it's meant to be "
-                                                  "gone: ferry state reset mb.windows.up"))])
+                                                  "gone: vcharon state reset mb.windows.up"))])
             self.assertFalse(os.path.exists(self.local))
             self.assertEqual(read_tree(os.path.join(self.server, "windows")),
                              {"MEMBER.md": MEMBER, "RESULTS.md": b"results"})
@@ -2161,11 +2162,11 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(code, 0, out + err)
         lines = [l.strip() for l in out.splitlines() if "from.path" in l]
         self.assertEqual(len(lines), 2, out)
-        self.assertTrue(lines[0].endswith("%s doesn't exist yet; ferry run mb.windows makes it"
+        self.assertTrue(lines[0].endswith("%s doesn't exist yet; vcharon run mb.windows makes it"
                                           % self.own), lines[0])
         self.assertTrue(lines[1].endswith("%s: a directory" % self.server), lines[1])
         # M10: the server's tree missing is a closed channel, a FAIL that says to leave (before,
-        # "ok, ferry run makes it once your own folder has a file"); so is up's folder there
+        # "ok, vcharon run makes it once your own folder has a file"); so is up's folder there
         shutil.rmtree(self.server)
         code, out, err = self.run_cli("doctor", "mb.windows")
         self.assertEqual(code, 1, out)
@@ -2188,7 +2189,7 @@ class MailboxTest(FakeSshCase):
         job = cli.config.load().jobs["mb.windows.up"]
         self.assertEqual(doctor._made_by_the_run(job, "FAIL", "from.path %s doesn't exist"
                                                  % self.own, "check the path"),
-                         ("ok", "from.path %s doesn't exist yet; ferry run mb.windows makes it"
+                         ("ok", "from.path %s doesn't exist yet; vcharon run mb.windows makes it"
                           % self.own, None))
         failing = ("FAIL", "can't list %s: Permission denied" % self.own, "check it")
         self.assertEqual(doctor._made_by_the_run(job, *failing), failing)
@@ -2199,7 +2200,7 @@ class MailboxTest(FakeSshCase):
         self.ok("run", "mb.windows")
         write_tree(self.home, {"elsewhere/windows/": None})
         write_channel_section(self, MAILBOX.format(local=self.local).replace(
-            "= ferry_mailbox", "= elsewhere"))
+            "= vcharon_mailbox", "= elsewhere"))
         code, out, err = self.run_cli("run", "mb.windows")
         self.assertEqual(code, 3)
         self.assertEqual([l for l in err.splitlines() if l.startswith("ERROR")],
@@ -2296,22 +2297,22 @@ class SizeTextTest(unittest.TestCase):
 
 class EntryPointTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": tmp})
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def run_ferry(self, *args, cwd=None):
+    def run_vcharon(self, *args, cwd=None):
         return subprocess.run([sys.executable] + list(args), cwd=cwd, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, universal_newlines=True, timeout=60,
                               encoding="utf-8")
 
     def test_dash_m(self):
         # from a folder that isn't the repo, so the installed package is the one that runs
-        result = self.run_ferry("-m", "vcharon", "version", cwd=os.environ["FERRY_HOME"])
+        result = self.run_vcharon("-m", "vcharon", "version", cwd=os.environ["VCHARON_HOME"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(result.stdout.startswith("ferry 0.1.0, protocol 3, Python "))
+        self.assertTrue(result.stdout.startswith("vcharon 0.1.0, protocol 3, Python "))
 
 
 if __name__ == "__main__":

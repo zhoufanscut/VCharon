@@ -22,12 +22,12 @@ _UUID = re.compile(r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 _IOREG_UUID = re.compile(r'"IOPlatformUUID" = "([^"]*)"')
 # what needs quoting in a command line: shlex.quote's own test, on both kinds of shell
 _UNSAFE = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
-# ferry's commands, as runnable() takes them: `ferry` at the text's start or after a space, (
-# or `, then one of these and a space, the end, or a mark that ends a clause; never `ferry's`,
-# `ferry/`, `ferry run's` or a path
+# vcharon's commands, as runnable() takes them: `vcharon` at the text's start or after a space, (
+# or `, then one of these and a space, the end, or a mark that ends a clause; never `vcharon's`,
+# `vcharon/`, `vcharon run's`, a path, or the `-m vcharon` of a command runnable() wrote
 COMMANDS = ("run", "state", "doctor", "key", "ping", "version", "channel", "--help")
-_FERRY_WORD = re.compile(r"(?:\A|(?<=[ (`]))ferry (%s)(?=\Z|[\s),.;`])"
-                         % "|".join(re.escape(c) for c in COMMANDS))
+_VCHARON_WORD = re.compile(r"(?:\A|(?<=[ (`]))(?<!-m )vcharon (%s)(?=\Z|[\s),.;`])"
+                           % "|".join(re.escape(c) for c in COMMANDS))
 IOREG = "/usr/sbin/ioreg"
 IOREG_TIMEOUT = 5
 
@@ -49,8 +49,8 @@ def home():
     return os.path.expanduser("~")
 
 
-def _ferry_home():
-    return os.environ.get("FERRY_HOME") or None
+def _vcharon_home():
+    return os.environ.get("VCHARON_HOME") or None
 
 
 def _xdg(var, default):
@@ -67,53 +67,53 @@ def _windows_dir(var, default):
 
 def config_path():
     """DESIGN §11.1."""
-    base = _ferry_home()
+    base = _vcharon_home()
     if base:
-        return _path().join(base, "ferry.ini")
+        return _path().join(base, "vcharon.ini")
     osn = os_name()
     if osn == "windows":
-        return ntpath.join(_windows_dir("APPDATA", "Roaming"), "ferry", "ferry.ini")
+        return ntpath.join(_windows_dir("APPDATA", "Roaming"), "vcharon", "vcharon.ini")
     if osn == "darwin":
-        return posixpath.join(home(), ".config", "ferry", "ferry.ini")
-    return posixpath.join(_xdg("XDG_CONFIG_HOME", ".config"), "ferry", "ferry.ini")
+        return posixpath.join(home(), ".config", "vcharon", "vcharon.ini")
+    return posixpath.join(_xdg("XDG_CONFIG_HOME", ".config"), "vcharon", "vcharon.ini")
 
 
 def state_dir():
-    base = _ferry_home()
+    base = _vcharon_home()
     if base:
         return _path().join(base, "state")
     osn = os_name()
     if osn == "windows":
-        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "ferry", "state")
+        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "vcharon", "state")
     if osn == "darwin":
-        return posixpath.join(home(), "Library", "Application Support", "ferry", "state")
-    return posixpath.join(_xdg("XDG_STATE_HOME", ".local/state"), "ferry", "state")
+        return posixpath.join(home(), "Library", "Application Support", "vcharon", "state")
+    return posixpath.join(_xdg("XDG_STATE_HOME", ".local/state"), "vcharon", "state")
 
 
 def log_dir():
-    base = _ferry_home()
+    base = _vcharon_home()
     if base:
         return _path().join(base, "logs")
     osn = os_name()
     if osn == "windows":
-        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "ferry", "logs")
+        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "vcharon", "logs")
     if osn == "darwin":
-        return posixpath.join(home(), "Library", "Logs", "ferry")
-    return posixpath.join(_xdg("XDG_STATE_HOME", ".local/state"), "ferry", "logs")
+        return posixpath.join(home(), "Library", "Logs", "vcharon")
+    return posixpath.join(_xdg("XDG_STATE_HOME", ".local/state"), "vcharon", "logs")
 
 
 def joined_dir():
     """The base of the channels' local trees (DESIGN §14 M10), as a channel section's
     mailbox.local spells it. Set per OS, not taken from the state dir: macOS's has a space."""
-    base = _ferry_home()
+    base = _vcharon_home()
     if base:
         return _path().join(base, "joined")
     if os_name() == "windows":
-        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "ferry", "joined")
-    return "~/.local/state/ferry/joined"
+        return ntpath.join(_windows_dir("LOCALAPPDATA", "Local"), "vcharon", "joined")
+    return "~/.local/state/vcharon/joined"
 
 
-def ferry_dir():
+def vcharon_dir():
     """The folder that holds the package (src/ in a checkout, or site-packages); None where the
     package has no file (the server's bundled copy). From the package's spec, never __file__
     (DESIGN §16); only the client asks."""
@@ -125,12 +125,12 @@ def ferry_dir():
 
 
 def command_for(executable, folder, osn, which):
-    """How to run the ferry in folder (None: no folder part) with executable, as a command line
+    """How to run the vcharon in folder (None: no folder part) with executable, as a command line
     for a shell on osn (M14a): the executable's base name when which(name) is that same file
     (python3 on a Linux box), else its whole path. On Windows both with /, which Git Bash, cmd
     and py all take (Git Bash reads \\ as an escape). A part that needs it is quoted:
-    shlex.quote off Windows, "..." on Windows. The pure core of ferry_command(): tests run
-    every OS's form anywhere. Not covered, being rare in a Python or ferry path: "..." doesn't
+    shlex.quote off Windows, "..." on Windows. The pure core of vcharon_command(): tests run
+    every OS's form anywhere. Not covered, being rare in a Python or vcharon path: "..." doesn't
     stop Git Bash's $ and `, nor cmd's %VAR%, and PowerShell runs a quoted program only after
     &."""
     pm = ntpath if osn == "windows" else posixpath
@@ -147,23 +147,23 @@ def command_for(executable, folder, osn, which):
     return " ".join(shlex.quote(part) for part in parts)
 
 
-def ferry_command():
-    """How to run this ferry here, `<python> -m vcharon`; None if the package's folder isn't
-    known. No box has a `ferry` command (M14a)."""
-    if ferry_dir() is None or not sys.executable:
+def vcharon_command():
+    """How to run this vcharon here, `<python> -m vcharon`; None if the package's folder isn't
+    known. No box has a `vcharon` command (M14a)."""
+    if vcharon_dir() is None or not sys.executable:
         return None
     return command_for(sys.executable, None, os_name(), shutil.which) + " -m vcharon"
 
 
 def runnable(text, command=None):
-    """text with each `ferry <command>` as this box runs it: ferry_command() in place of
-    `ferry` (M14a), for a fix line someone runs. command: another command line (tests). Text
-    unchanged where ferry_command() is None."""
+    """text with each `vcharon <command>` as this box runs it: vcharon_command() in place of
+    `vcharon` (M14a), for a fix line someone runs. command: another command line (tests). Text
+    unchanged where vcharon_command() is None."""
     if command is None:
-        command = ferry_command()
+        command = vcharon_command()
     if not command or not text:
         return text
-    return _FERRY_WORD.sub(lambda m: "%s %s" % (command, m.group(1)), text)
+    return _VCHARON_WORD.sub(lambda m: "%s %s" % (command, m.group(1)), text)
 
 
 def is_wow64():
@@ -214,9 +214,9 @@ def _machine_guid():
 
 
 def _hashed(uuid):
-    """A device id as ferry keeps it (DESIGN §14 M11a): a record stores the id and a refusal
+    """A device id as vcharon keeps it (DESIGN §14 M11a): a record stores the id and a refusal
     prints it, so never the OS's own id; 32 hex digits, as /etc/machine-id has."""
-    return hashlib.sha256(("ferry:" + uuid.lower()).encode("ascii")).hexdigest()[:32]
+    return hashlib.sha256(("vcharon:" + uuid.lower()).encode("ascii")).hexdigest()[:32]
 
 
 def machine_id(paths=("/etc/machine-id", "/var/lib/dbus/machine-id"), ioreg=_ioreg_uuid,
@@ -224,7 +224,7 @@ def machine_id(paths=("/etc/machine-id", "/var/lib/dbus/machine-id"), ioreg=_ior
     """This machine's id, which ties state to the actual server; None if it has none. Where
     the files are missing, macOS's IOPlatformUUID or Windows' MachineGuid, hashed. ioreg and
     machine_guid: the readers of those (test seams)."""
-    test_id = os.environ.get("FERRY_TEST_MACHINE_ID")
+    test_id = os.environ.get("VCHARON_TEST_MACHINE_ID")
     if test_id:
         return test_id
     for path in paths:
@@ -253,9 +253,9 @@ def no_machine_hint():
     """What to do when machine_id() is None on this box."""
     osn = os_name()
     if osn == "darwin":
-        return "ferry couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
+        return "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
     if osn == "windows":
-        return "ferry couldn't read this box's MachineGuid (the registry): ask the user"
+        return "vcharon couldn't read this box's MachineGuid (the registry): ask the user"
     return None
 
 

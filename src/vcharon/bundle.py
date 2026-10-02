@@ -1,4 +1,4 @@
-"""The bootstrap line, the loader and the bundle that carry ferry's code to the server; client."""
+"""The bootstrap line, the loader and the bundle that carry vcharon's code to the server; client."""
 
 from __future__ import annotations
 
@@ -72,13 +72,13 @@ def _sources(root=None):
 _LOADER = r'''import sys
 
 if sys.version_info[:2] < FLOOR:
-    sys.stderr.write("ferry: the server's Python is %d.%d; ferry needs %d.%d or newer\n"
+    sys.stderr.write("vcharon: the server's Python is %d.%d; vcharon needs %d.%d or newer\n"
                      % (sys.version_info[0], sys.version_info[1], FLOOR[0], FLOOR[1]))
     sys.stderr.flush()
     sys.exit(90)
 
 
-def _ferry_main():
+def _vcharon_main():
     import importlib.util
     import json
     import re
@@ -86,7 +86,7 @@ def _ferry_main():
     import zlib
 
     def bad(why):
-        sys.stderr.write("ferry: bad bundle: %s\n" % why)
+        sys.stderr.write("vcharon: bad bundle: %s\n" % why)
         sys.stderr.flush()
         sys.exit(91)
 
@@ -116,7 +116,7 @@ def _ferry_main():
         bad("wrong fields")
 
     class Finder(object):
-        # Serves ferry's modules from memory. It goes first in sys.meta_path, so no file on the
+        # Serves vcharon's modules from memory. It goes first in sys.meta_path, so no file on the
         # server can stand in for them.
         def find_spec(self, name, path=None, target=None):
             if name not in modules:
@@ -137,18 +137,18 @@ def _ferry_main():
 
         def filename(self, name):
             tail = "/__init__.py" if name in packages else ".py"
-            return "ferry-bundle/" + name.replace(".", "/") + tail
+            return "vcharon-bundle/" + name.replace(".", "/") + tail
 
     sys.meta_path.insert(0, Finder())
     try:
         import vcharon.helper
     except Exception:
-        # Bundled code that won't compile or import is a ferry bug, not a startup-file problem.
+        # Bundled code that won't compile or import is a vcharon bug, not a startup-file problem.
         import traceback
         traceback.print_exc()
         bad("vcharon.helper didn't import")
     return vcharon.helper.main(nonce)
 
 
-sys.exit(_ferry_main())
+sys.exit(_vcharon_main())
 '''

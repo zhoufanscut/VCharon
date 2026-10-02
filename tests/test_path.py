@@ -55,7 +55,7 @@ class PathCases:
     impl = None
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.src = os.path.join(self.tmp, "src")
         self.outside = os.path.join(self.tmp, "outside")
@@ -175,7 +175,7 @@ class PathCases:
     def test_identity(self):
         write_tree(self.src, {"a": b"a"})
         self.assertEqual(self.plan().identity, {"end": "local", "path": self.src, "kind": "dir"})
-        with mock.patch.dict(os.environ, {"FERRY_TEST_MACHINE_ID": "f" * 32}):
+        with mock.patch.dict(os.environ, {"VCHARON_TEST_MACHINE_ID": "f" * 32}):
             # relative to the remote end's home
             p = self.source("src", end="remote").plan(None)
         self.assertEqual(p.identity, {"end": "remote", "machine": "f" * 32, "path": self.src,
@@ -269,8 +269,8 @@ class PathCases:
         self.assertEqual(entered, ["real", "real"])
 
     def test_stage_dirs_are_left_out(self):
-        write_tree(self.src, {".ferry-stage-x/0": b"s", "d/.FERRY-STAGE-y/lock": b"",
-                              "d/f": b"f", ".Ferry-Stage-file": b"x"})
+        write_tree(self.src, {".vcharon-stage-x/0": b"s", "d/.VCHARON-STAGE-y/lock": b"",
+                              "d/f": b"f", ".VCharon-Stage-file": b"x"})
         p = self.plan()
         self.assertEqual(paths(p), ["d", "d/f"])
         self.assertEqual(p.notes, [])
@@ -864,7 +864,7 @@ class PathCases:
         self.assertEqual(e.hint, "check that its disk is mounted; if it's really empty, set "
                                  "from.allow_empty = yes")
         # only excluded entries, stage dirs and skipped links: still empty
-        write_tree(self.src, {"x.log": b"l", ".ferry-stage-0123/lock": b""})
+        write_tree(self.src, {"x.log": b"l", ".vcharon-stage-0123/lock": b""})
         if POSIX:
             os.symlink(self.outside, self.at("link"))
         self.refused_with(state, "empty_source", prune="yes", exclude="*.log", symlinks="skip")
@@ -980,7 +980,7 @@ class PathCases:
                  {"sent": {"../x": good}}, {"sent": {"a/../../x": "d"}}, {"sent": {"a//b": good}},
                  {"sent": {"/a": good}}, {"sent": {"a/./b": good}}, {"sent": {"a/": "d"}},
                  {"sent": {".": "d"}}, {"sent": {"a\x00b": good}}, {"sent": {"a\udcffb": good}},
-                 {"sent": {".ferry-stage-0123/x": good}}, {"sent": {"d/.FERRY-STAGE-x": "d"}}]
+                 {"sent": {".vcharon-stage-0123/x": good}}, {"sent": {"d/.VCHARON-STAGE-x": "d"}}]
         for state in cases:
             with self.subTest(state=state):
                 e = self.refused_with(state, "state_mismatch")
@@ -1037,7 +1037,7 @@ class PathDoctorTest(unittest.TestCase):
     """The path source's doctor (decision 21 of the M5 plan): it only reads."""
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def doctor(self, path):

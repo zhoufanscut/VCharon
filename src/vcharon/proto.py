@@ -6,7 +6,7 @@ import json
 import struct
 import traceback
 
-# Error code -> ferry's exit code (DESIGN §7.5).
+# Error code -> vcharon's exit code (DESIGN §7.5).
 EXIT = {"config": 3, "bad_options": 3, "missing_capability": 3, "state_mismatch": 3,
         "busy": 2, "connect": 4, "timeout": 1, "lost": 1, "protocol": 1, "not_found": 1,
         "unsafe_path": 1, "unsafe_dir": 1, "collision": 1, "kind_change": 1,
@@ -97,7 +97,7 @@ def encode_json(obj):
                       allow_nan=False).encode("utf-8")
     if len(data) > MAX_JSON:
         # Nothing was sent, so both sides are still in step. In practice it's a huge plan.
-        raise VCharonError("too_big", "a message of %s MiB is over ferry's %s MiB limit"
+        raise VCharonError("too_big", "a message of %s MiB is over vcharon's %s MiB limit"
                            % (_mib(len(data)), _mib(MAX_JSON)),
                            "the plan is too big: exclude part of the tree, or copy it in parts")
     return data

@@ -34,16 +34,16 @@ SAVED = r"\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\Z"
 
 class StateCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        patcher = mock.patch.dict(os.environ, {"FERRY_HOME": self.tmp})
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": self.tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.dir = os.path.join(self.tmp, "state")
         use_test_jobs(self)
 
     def job(self, text=JOB, name="j"):
-        with open(os.path.join(self.tmp, "ferry.ini"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.tmp, "vcharon.ini"), "w", encoding="utf-8") as f:
             f.write(textwrap.dedent(text))
         return config.load().jobs[name]
 
@@ -152,8 +152,8 @@ class SaveLoadTest(StateCase):
                 self.assertEqual((e.code, e.exit_code), ("state_mismatch", 3))
                 self.assertTrue(e.message.startswith("the state file %s can't be read: "
                                                      % state.path("j")), e.message)
-                self.assertEqual(e.hint, "check the target; then: ferry state reset j, and "
-                                         "ferry run j --full")
+                self.assertEqual(e.hint, "check the target; then: vcharon state reset j, and "
+                                         "vcharon run j --full")
                 st, why = state.read("j")
                 self.assertIsNone(st)
                 self.assertTrue(why)

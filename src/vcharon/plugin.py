@@ -114,7 +114,7 @@ class Plugin:
         """Releases what the plugin holds; safe to call twice."""
 
     def doctor(self):
-        """ferry doctor's checks of this side on its own end: [(level, message, hint)], level
+        """vcharon doctor's checks of this side on its own end: [(level, message, hint)], level
         ok, warn or FAIL, hint a string or None. Only reads: never creates a root, a stage
         dir or any file."""
         return []
@@ -319,7 +319,7 @@ def make(end, name, role, raw, ctx):
 
 
 def doctor(end, name, role, raw, ctx):
-    """ferry doctor's checks of one side on its own end (DESIGN §9.1, §13): make()'s checks,
+    """vcharon doctor's checks of one side on its own end (DESIGN §9.1, §13): make()'s checks,
     which raise, then the NEEDS commands, then the plugin's own doctor()."""
     if ctx.end != end:
         raise VCharonError("internal", "a %s plugin with a %s Ctx" % (end, ctx.end))

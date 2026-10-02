@@ -19,7 +19,7 @@ def files(*paths):
 class SplitTest(unittest.TestCase):
     def test_refused(self):
         for path in ["", "/a", "a/", "a//b", ".", "..", "a/./b", "a/../b", "a\0b", "a\udc80",
-                     ".ferry-stage-x", "x/.FERRY-STAGE-1", None]:
+                     ".vcharon-stage-x", "x/.VCHARON-STAGE-1", None]:
             with self.subTest(path=path):
                 with self.assertRaises(VCharonError) as cm:
                     pathrules.split(path)
@@ -27,7 +27,7 @@ class SplitTest(unittest.TestCase):
 
     def test_normal(self):
         self.assertEqual(pathrules.split("a/b c/中.txt"), ("a", "b c", "中.txt"))
-        self.assertEqual(pathrules.split(".ferry-stag"), (".ferry-stag",))
+        self.assertEqual(pathrules.split(".vcharon-stag"), (".vcharon-stag",))
 
 
 class PartTest(unittest.TestCase):

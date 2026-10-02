@@ -240,7 +240,7 @@ class SessionTest(FakeSshCase):
 
     # 2
     def test_shell_text_before_the_marker(self):
-        head = (b"motd-start\nFERRY-READY " + b"f" * 32 + b"\n" + bytes(range(256))
+        head = (b"motd-start\nVCHARON-READY " + b"f" * 32 + b"\n" + bytes(range(256))
                 + b"\n")
         junk = head + b"." * (4096 - len(head)) + b"after-4k"
         junk += b"-" * (5000 - len(junk))
@@ -250,14 +250,14 @@ class SessionTest(FakeSshCase):
         self.assert_echoes(s)
         self.assertEqual(s.junk_bytes, 5000)
         log = self.log_text()
-        self.assertIn("the server's shell printed 5000 bytes before ferry started:", log)
+        self.assertIn("the server's shell printed 5000 bytes before vcharon started:", log)
         self.assertIn("| motd-start", log)
-        self.assertIn("FERRY-READY " + "f" * 32, log)
+        self.assertIn("VCHARON-READY " + "f" * 32, log)
         self.assertIn("....", log)
         self.assertNotIn("after-4k", log)
 
     # 3
-    def test_files_in_the_home_dont_shadow_ferry(self):
+    def test_files_in_the_home_dont_shadow_vcharon(self):
         flag = os.path.join(self.tmp, "SHADOWED")
         evil = "open(%r, 'w').close()\nimport os\nos._exit(66)\n" % flag
         os.mkdir(os.path.join(self.home, "vcharon"))
@@ -284,7 +284,7 @@ class SessionTest(FakeSshCase):
         self.assertEqual((err.code, err.exit_code), ("connect", 4))
         self.assertIn("too old", err.message)
         self.assertIn("install Python 3.9 or newer", err.hint)
-        self.assertTrue(any("ferry needs 99.0 or newer" in line for line in err.tail), err.tail)
+        self.assertTrue(any("vcharon needs 99.0 or newer" in line for line in err.tail), err.tail)
 
     # 5
     def test_exits_before_the_marker(self):
@@ -293,8 +293,8 @@ class SessionTest(FakeSshCase):
                  (126, "bash: /usr/bin/python3: Permission denied", "isn't runnable",
                   "check remote_python"),
                  (255, "Permission denied (publickey).", "(Permission denied)",
-                  "ferry key fake-dest"),
-                 (1, "boom", "ssh exited with code 1 before ferry started",
+                  "vcharon key fake-dest"),
+                 (1, "boom", "ssh exited with code 1 before vcharon started",
                   "a shell startup file")]
         for rc, stderr, message, hint in cases:
             with self.subTest(rc=rc):
@@ -312,7 +312,7 @@ class SessionTest(FakeSshCase):
         os.environ["FAKE_SSH_EAT_STDIN"] = "100"
         err = self.failure(self.session().open)
         self.assertEqual(err.code, "connect")
-        self.assertIn("before ferry started", err.message)
+        self.assertIn("before vcharon started", err.message)
         self.assertIn("a shell startup file on the server may have read stdin", err.hint)
 
     # 6
@@ -327,7 +327,7 @@ class SessionTest(FakeSshCase):
                 err = self.failure(s.open)
                 self.assertLess(time.monotonic() - started, 5)
                 self.assertEqual((err.code, err.exit_code), ("connect", 4))
-                self.assertEqual(err.message, "no answer from ferry on fake-dest within 1 s")
+                self.assertEqual(err.message, "no answer from vcharon on fake-dest within 1 s")
                 self.assertIn("authentication or a jump host may be stuck", err.hint)
 
     # 7
@@ -471,8 +471,8 @@ class SessionTest(FakeSshCase):
         s = self.session(extra_modules={"vcharon.helper": "def main(nonce):\n    return (\n"})
         err = self.failure(s.open)
         self.assertEqual((err.code, err.exit_code), ("connect", 4))
-        self.assertEqual(err.message, "the server couldn't load ferry's code")
-        self.assertIn("bug in ferry", err.hint)
+        self.assertEqual(err.message, "the server couldn't load vcharon's code")
+        self.assertIn("bug in vcharon", err.hint)
         self.assertTrue(any("SyntaxError" in line for line in err.tail), err.tail)
 
     def test_error_text_that_isnt_utf8(self):
@@ -539,7 +539,7 @@ class SessionTest(FakeSshCase):
         self.assertEqual(err.code, "internal")
         self.assertIn("ZeroDivisionError", err.message)
         # the traceback shows the bundled source
-        self.assertIn("ferry-bundle/vcharon/helper.py", err.detail)
+        self.assertIn("vcharon-bundle/vcharon/helper.py", err.detail)
         self.assertIn("return 1 / 0", err.detail)
         self.assert_echoes(s)
         s.close()

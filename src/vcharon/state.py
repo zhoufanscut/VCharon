@@ -53,7 +53,8 @@ class State:
 
 def reset_hint(name):
     """The hint of every state_mismatch of the job name."""
-    return "check the target; then: ferry state reset %s, and ferry run %s --full" % (name, name)
+    return ("check the target; then: vcharon state reset %s, and vcharon run %s --full"
+            % (name, name))
 
 
 def config_changed(job):
@@ -153,7 +154,7 @@ def read(name):
 
 
 def load(name):
-    """The State of the job name, or None if it has none. ferry never guesses: a file that
+    """The State of the job name, or None if it has none. vcharon never guesses: a file that
     can't be read is state_mismatch."""
     st, why = read(name)
     if why is not None:

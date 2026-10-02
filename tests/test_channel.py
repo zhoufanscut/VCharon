@@ -1,4 +1,4 @@
-"""ferry channel and the channel root (M10): names, the claim, records, sections, close and
+"""vcharon channel and the channel root (M10): names, the claim, records, sections, close and
 leave, the helper's channel calls, and channels.d/ through the commands."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from vcharon import channel_cmd, channels, config, entries, platform
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.test_cli import FERRY_DIR
+from tests.test_cli import VCHARON_DIR
 from tests.test_lock import hold_in_child, stop_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
@@ -40,15 +40,15 @@ def release(child):
 
 
 class ChannelCase(FakeSshCase):
-    """One fake server (its root under the fake home) and boxes, each a FERRY_HOME of its own
-    with [ferry] box set. The current directory is a git checkout named Web."""
+    """One fake server (its root under the fake home) and boxes, each a VCHARON_HOME of its own
+    with [vcharon] box set. The current directory is a git checkout named Web."""
 
     def setUp(self):
         FakeSshCase.setUp(self)
         self.root = os.path.join(self.home, "channels")
-        os.environ["FERRY_CHANNELS_ROOT"] = self.root
+        os.environ["VCHARON_CHANNELS_ROOT"] = self.root
         self.homes = {}
-        self.use_box("mac", self.ferry_home)
+        self.use_box("mac", self.vcharon_home)
         self.project = os.path.join(self.tmp, "work", "Web")
         os.makedirs(os.path.join(self.project, ".git"))
         cwd = os.getcwd()
@@ -56,14 +56,14 @@ class ChannelCase(FakeSshCase):
         self.addCleanup(os.chdir, cwd)
 
     def use_box(self, box, home=None):
-        """Switches to the box named box (a FERRY_HOME of its own, made on first use)."""
+        """Switches to the box named box (a VCHARON_HOME of its own, made on first use)."""
         if box not in self.homes:
             home = home or os.path.join(self.tmp, "box-" + box)
             os.makedirs(home, exist_ok=True)
-            with open(os.path.join(home, "ferry.ini"), "w", encoding="utf-8") as f:
-                f.write("[ferry]\nbox = %s\n" % box)
+            with open(os.path.join(home, "vcharon.ini"), "w", encoding="utf-8") as f:
+                f.write("[vcharon]\nbox = %s\n" % box)
             self.homes[box] = home
-        os.environ["FERRY_HOME"] = self.homes[box]
+        os.environ["VCHARON_HOME"] = self.homes[box]
         return self.homes[box]
 
     def channel(self, *argv):
@@ -84,10 +84,10 @@ class ChannelCase(FakeSshCase):
 
     def joined(self, section, box=None):
         """A remote member's local tree on the current box."""
-        return os.path.join(os.environ["FERRY_HOME"], "joined", section)
+        return os.path.join(os.environ["VCHARON_HOME"], "joined", section)
 
     def record(self, section):
-        with open(os.path.join(os.environ["FERRY_HOME"], "state", "channels",
+        with open(os.path.join(os.environ["VCHARON_HOME"], "state", "channels",
                                section + ".json"), encoding="utf-8") as f:
             return json.load(f)
 
@@ -101,11 +101,11 @@ class ChannelCase(FakeSshCase):
 
 class NamesTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def cfg(self, box="mac"):
-        return config.Config("/x/ferry.ini", True, config.Settings(), box=box)
+        return config.Config("/x/vcharon.ini", True, config.Settings(), box=box)
 
     def test_project_from_git(self):
         repo = os.path.join(self.tmp, "My Repo.v2")
@@ -161,8 +161,8 @@ class CreateJoinTest(ChannelCase):
     """create and join, remote members over the fake ssh and server members (--local)."""
 
     def test_create_remote(self):
-        os.environ.pop("FERRY_CHANNELS_ROOT")
-        self.root = os.path.join(self.home, ".local", "state", "ferry", "channels")
+        os.environ.pop("VCHARON_CHANNELS_ROOT")
+        self.root = os.path.join(self.home, ".local", "state", "vcharon", "channels")
         self.use_box("laptop")
         out = self.ok("create", "game", "--ssh", "fake-dest", "--project", "ui")
         self.assertIn("OK  created game", out)
@@ -170,7 +170,7 @@ class CreateJoinTest(ChannelCase):
         # the record, the section, the local tree; the run pushed both files
         self.assertEqual(self.record("game.laptop-ui"), {
             "version": 1, "channel": "game", "name": "laptop-ui", "leader": "laptop-ui",
-            "ssh": "fake-dest", "remote": "~/.local/state/ferry/channels/game",
+            "ssh": "fake-dest", "remote": "~/.local/state/vcharon/channels/game",
             "machine": TEST_MACHINE_ID, "project": "ui", "role": None})
         with open(os.path.join(self.homes["laptop"], "channels.d", "game.laptop-ui.ini"),
                   encoding="utf-8") as f:
@@ -180,7 +180,7 @@ class CreateJoinTest(ChannelCase):
                 mailbox.me     = laptop-ui
                 mailbox.leader = laptop-ui
                 mailbox.local  = %s
-                mailbox.remote = ~/.local/state/ferry/channels/game
+                mailbox.remote = ~/.local/state/vcharon/channels/game
                 """) % self.joined("game.laptop-ui"))
         self.assertEqual(sorted(os.listdir(own)), ["CHANNEL.md", "MEMBER.md"])
         self.assertEqual(sorted(read_tree(self.root)), [
@@ -195,8 +195,9 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual([k for k, v in ch[0].header],
                          ["leader", "server host", "created", "rules"])
         self.assertEqual(dict(ch[0].header)["rules"], channel_cmd.RULES)
-        # ferry is self-contained: the rules are found by the ferry folder, not a checkout
-        self.assertEqual(channel_cmd.RULES, "MAILBOX.md in the ferry folder (the ferry-mailbox skill)")
+        # vcharon is self-contained: the rules are found by the vcharon folder, not a checkout
+        self.assertEqual(channel_cmd.RULES,
+                         "MAILBOX.md in the vcharon folder (the vcharon skill)")
 
     def test_create_local_and_join(self):
         # a server member leads; a Mac member joins over ssh
@@ -258,8 +259,8 @@ class CreateJoinTest(ChannelCase):
             self.assertTrue(os.path.isdir(os.path.join(self.root, channel, "mac-web")))
 
     def test_box_missing(self):
-        with open(os.path.join(self.ferry_home, "ferry.ini"), "w") as f:
-            f.write("[ferry]\n")
+        with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\n")
         got, out, err = self.channel("create", "game", "--ssh", "fake-dest")
         self.assertEqual(got, 3)
         self.assertEqual(err.splitlines()[0], "ERROR config: " + channel_cmd.BOX_HINT)
@@ -272,7 +273,7 @@ class CreateJoinTest(ChannelCase):
                          "ERROR channel: the channel game already exists: join it, or pick "
                          "another name")
         self.assertFalse(os.path.exists(os.path.join(self.root, "game", "win-web")))
-        for name in ("Game", "a.b", "x" * 25, "con", "..", ".ferry-closed-x"):
+        for name in ("Game", "a.b", "x" * 25, "con", "..", ".vcharon-closed-x"):
             with self.subTest(name=name):
                 self.assertTrue(self.refused("create", name, "--local", code=3).startswith(
                     "ERROR config: "))
@@ -281,7 +282,7 @@ class CreateJoinTest(ChannelCase):
     def test_no_channel_or_no_leader_refused_before_the_claim(self):
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest"),
                          "ERROR channel: there is no channel game on fake-dest: check its name "
-                         "(ferry channel list)")
+                         "(vcharon channel list)")
         write_tree(self.root, {"game/a/MEMBER.md": b"m"})
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest"),
                          "ERROR channel: game has no leader (no member's folder holds "
@@ -291,16 +292,16 @@ class CreateJoinTest(ChannelCase):
                          "ERROR channel: game has 2 leaders (a/, b/ hold CHANNEL.md): ask the "
                          "user")
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["a", "b"])
-        self.assertFalse(os.path.exists(os.path.join(self.ferry_home, "state", "channels")))
-        self.assertFalse(os.path.exists(os.path.join(self.ferry_home, "joined")))
+        self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "state", "channels")))
+        self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "joined")))
 
     def test_a_name_taken_rejoin_and_another_server(self):
         self.lead()
         self.ok("join", "game", "--ssh", "fake-dest")
         # the same name from another box: told to pass --role
         self.use_box("mac2", os.path.join(self.tmp, "second-mac"))
-        with open(os.path.join(self.homes["mac2"], "ferry.ini"), "w") as f:
-            f.write("[ferry]\nbox = mac\n")
+        with open(os.path.join(self.homes["mac2"], "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = mac\n")
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest"),
                          "ERROR channel: the name mac-web is taken in game: pass --role")
         self.assertFalse(os.path.exists(os.path.join(self.homes["mac2"], "state", "channels")))
@@ -310,10 +311,10 @@ class CreateJoinTest(ChannelCase):
         out = self.ok("join", "game", "--ssh", "fake-dest")
         self.assertIn("  took back game/mac-web; the leader is laptop-ui", out)
         # the record is for another server: refused before any claim
-        os.environ["FERRY_TEST_MACHINE_ID"] = OTHER_MACHINE
+        os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest"),
                          "ERROR channel: you are in game on another server: pass --role")
-        os.environ["FERRY_TEST_MACHINE_ID"] = TEST_MACHINE_ID
+        os.environ["VCHARON_TEST_MACHINE_ID"] = TEST_MACHINE_ID
         # with --rejoin and no record: the user said it's this agent's
         os.remove(os.path.join(self.homes["mac"], "state", "channels", "game.mac-web.json"))
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest"),
@@ -327,20 +328,20 @@ class CreateJoinTest(ChannelCase):
                    "as a remote end")
         fix = "  fix: only a Linux server takes remote members: check the alias"
         self.use_box("laptop")
-        os.environ["FERRY_TEST_OS"] = "darwin"
+        os.environ["VCHARON_TEST_OS"] = "darwin"
         code, out, err = self.channel("create", "game", "--ssh", "fake-dest", "--project", "ui")
         self.assertEqual((code, err.splitlines()[:2]), (3, [refused % "darwin", fix]))
         self.assertEqual(self.server_tree(), {})
         self.assertFalse(os.path.exists(channel_cmd.record_path("game", "laptop-ui")))
-        os.environ["FERRY_TEST_OS"] = "linux"
+        os.environ["VCHARON_TEST_OS"] = "linux"
         self.lead()
-        os.environ["FERRY_TEST_OS"] = "windows"
+        os.environ["VCHARON_TEST_OS"] = "windows"
         self.assertEqual(self.refused("join", "game", "--ssh", "fake-dest", code=3),
                          refused % "windows")
         self.assertFalse(os.path.exists(os.path.join(self.root, "game", "mac-web")))
-        os.environ["FERRY_TEST_OS"] = "linux"
+        os.environ["VCHARON_TEST_OS"] = "linux"
         self.ok("join", "game", "--ssh", "fake-dest")
-        os.environ["FERRY_TEST_OS"] = "darwin"
+        os.environ["VCHARON_TEST_OS"] = "darwin"
         before = self.server_tree()
         code, out, err = self.channel("leave", "game")
         self.assertEqual((code, err.splitlines()[:2]), (3, [refused % "darwin", fix]))
@@ -348,12 +349,12 @@ class CreateJoinTest(ChannelCase):
         self.assertTrue(os.path.exists(channel_cmd.record_path("game", "mac-web")))
 
     def test_no_machine_id_here_has_its_os_hint(self):
-        hint = "ferry couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
+        hint = "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
         with mock.patch.object(channel_cmd.platform, "machine_id", return_value=None), \
                 mock.patch.object(channel_cmd.platform, "no_machine_hint", return_value=hint):
             code, out, err = self.channel("create", "game", "--local", "--project", "ui")
         self.assertEqual((code, err.splitlines()[:2]),
-                         (3, ["ERROR state_mismatch: this machine has no machine id, so ferry "
+                         (3, ["ERROR state_mismatch: this machine has no machine id, so vcharon "
                               "can't tie a channel's record to it", "  fix: " + hint]))
         self.assertEqual(self.server_tree(), {})
 
@@ -409,18 +410,18 @@ class CreateJoinTest(ChannelCase):
     def test_a_failed_join_leaves_no_folder(self):
         self.lead()
         # the record can't be written: the claim is released
-        write_tree(self.ferry_home, {"state/channels": b"a file in the way"})
+        write_tree(self.vcharon_home, {"state/channels": b"a file in the way"})
         code, out, err = self.channel("join", "game", "--ssh", "fake-dest")
         self.assertNotEqual(code, 0)
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["laptop-ui"])
-        self.assertFalse(os.path.exists(os.path.join(self.ferry_home, "joined")))
+        self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "joined")))
 
     def test_a_failed_run_keeps_the_join(self):
         self.lead()
         with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
             code, out, err = self.channel("join", "game", "--ssh", "fake-dest")
         self.assertEqual(code, 4)
-        self.assertIn(platform.runnable("ferry: the run failed; you are in game: run ferry run "
+        self.assertIn(platform.runnable("vcharon: the run failed; you are in game: run vcharon run "
                                         "game.mac-web --full again"), out)
         self.assertEqual(self.record("game.mac-web")["name"], "mac-web")
         self.assertEqual(self.run_cli("run", "game.mac-web", "--full")[0], 0)
@@ -431,17 +432,17 @@ def _script(argv):
             "sys.path[:0] = [%r]\n"
             "from vcharon import cli, ssh\n"
             "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
-            "sys.exit(cli.main(%r))\n" % (FERRY_DIR, FAKE_SSH, list(argv)))
+            "sys.exit(cli.main(%r))\n" % (VCHARON_DIR, FAKE_SSH, list(argv)))
 
 
 class ConcurrencyTest(ChannelCase):
-    """Two ferry processes at once, each with its own fake ssh and helper: the claim's one
+    """Two vcharon processes at once, each with its own fake ssh and helper: the claim's one
     mkdir lets exactly one win."""
 
     def both(self, homes, argv):
         procs = []
         for home in homes:
-            env = dict(os.environ, FERRY_HOME=home)
+            env = dict(os.environ, VCHARON_HOME=home)
             # the child writes UTF-8 (cli.py _utf8_console), never the locale's code page
             procs.append(subprocess.Popen([sys.executable, "-c", _script(argv)], env=env,
                                           cwd=self.project, stdout=subprocess.PIPE,
@@ -467,8 +468,8 @@ class ConcurrencyTest(ChannelCase):
         a = self.homes["mac"]
         b = os.path.join(self.tmp, "second-mac")
         os.makedirs(b)
-        with open(os.path.join(b, "ferry.ini"), "w") as f:
-            f.write("[ferry]\nbox = mac\n")
+        with open(os.path.join(b, "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = mac\n")
         got = self.both([a, b], ["channel", "join", "game", "--ssh", "fake-dest"])
         self.assertEqual(sorted(g[0] for g in got), [0, 1], got)
         loser = [g for g in got if g[0] == 1][0]
@@ -503,7 +504,7 @@ class ServerCallsTest(ChannelCase):
         self.assertEqual(got["existed"], False)
         self.assertEqual(got["machine"], TEST_MACHINE_ID)
         self.assertTrue(got["host"])
-        # the helper's own root text, FERRY_CHANNELS_ROOT here
+        # the helper's own root text, VCHARON_CHANNELS_ROOT here
         self.assertEqual(got["root"], self.root)
         with self.assertRaises(VCharonError) as cm:
             s.call("channel.claim", {"channel": "..", "name": "a", "create": False})
@@ -551,11 +552,11 @@ class ServerCallsTest(ChannelCase):
         write_tree(self.root, {"game/lead/CHANNEL.md": b"c", "game/a/MEMBER.md": b"m",
                                "game/notes.md": b"n", "two/x/CHANNEL.md": b"c",
                                "two/y/CHANNEL.md": b"c", "empty/": None, "file": b"f",
-                               "Bad/": None, ".ferry-closed-old-1/": None})
+                               "Bad/": None, ".vcharon-closed-old-1/": None})
         self.lead("docs", where=("--local",))
         out = self.ok("list", "--ssh", "fake-dest")
         lines = out.splitlines()
-        self.assertEqual(lines[0], "ferry: channel list  (fake-dest)")
+        self.assertEqual(lines[0], "vcharon: channel list  (fake-dest)")
         game = [l for l in lines if l.startswith("  game  ")][0]
         self.assertIn("  leader lead  members a, lead  newest ", game)
         self.assertIn("    note: notes.md at its top isn't a member's folder", lines)
@@ -563,7 +564,7 @@ class ServerCallsTest(ChannelCase):
         self.assertIn("    note: x/, y/ all hold CHANNEL.md: ask the user", lines)
         self.assertTrue(any(l.startswith("  empty  leader ?  members none  newest -")
                             for l in lines), out)
-        self.assertIn("  note: .ferry-closed-old-1: a closed channel that wasn't deleted", lines)
+        self.assertIn("  note: .vcharon-closed-old-1: a closed channel that wasn't deleted", lines)
         self.assertIn("  note: Bad: not a channel's folder", lines)
         self.assertIn("  note: file: not a channel's folder", lines)
         self.assertTrue(any(l.startswith("  docs  leader laptop-ui") for l in lines), out)
@@ -585,7 +586,7 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(self.run_cli("run", "game.mac-web-b")[0], 0)
 
     def box_files(self, box="mac"):
-        return sorted(p for p in read_tree(self.homes[box]) if not p.startswith("logs/ferry.log"))
+        return sorted(p for p in read_tree(self.homes[box]) if not p.startswith("logs/vcharon.log"))
 
     def everything(self):
         return self.box_files("mac"), self.box_files("laptop"), self.server_tree()
@@ -647,7 +648,7 @@ class LeaveCloseTest(ChannelCase):
         before = self.everything()
         self.use_box("laptop")
         self.assertEqual(self.refused("leave", "game", "--project", "ui"),
-                         "ERROR channel: you lead game: close it instead (ferry channel close "
+                         "ERROR channel: you lead game: close it instead (vcharon channel close "
                          "game --project ui)")
         self.use_box("mac")
         for lock in locks:
@@ -703,12 +704,12 @@ class LeaveCloseTest(ChannelCase):
             "stop the watcher first"))
         release(child)
         # another server than the record's
-        os.environ["FERRY_TEST_MACHINE_ID"] = OTHER_MACHINE
+        os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE
         self.assertEqual(self.refused("close", "game", "--project", "ui"),
                          "ERROR channel: fake-dest isn't the server game is on (its machine id "
                          "is %s, the record's %s): check the alias" % (OTHER_MACHINE,
                                                                         TEST_MACHINE_ID))
-        os.environ["FERRY_TEST_MACHINE_ID"] = TEST_MACHINE_ID
+        os.environ["VCHARON_TEST_MACHINE_ID"] = TEST_MACHINE_ID
         # a second CHANNEL.md, then a stray file at the top: the server refuses
         write_tree(self.root, {"game/mac-web/CHANNEL.md": b"c"})
         self.assertEqual(self.refused("close", "game", "--project", "ui"),
@@ -738,9 +739,9 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(code, 1)
         self.assertEqual(os.listdir(self.root), [])
         fixes = [l for l in err.splitlines() if l.startswith("  fix: ")]
-        # the leave command as this box runs ferry (M14a)
+        # the leave command as this box runs vcharon (M14a)
         self.assertEqual(fixes, ["  fix: " + platform.runnable(
-            "the channel is closed, or your folder in it is gone: ferry channel leave game "
+            "the channel is closed, or your folder in it is gone: vcharon channel leave game "
             "--project web")] * 2)
         self.assertNotIn("create it", err)
         # its sign to leave
@@ -752,7 +753,7 @@ class LeaveCloseTest(ChannelCase):
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
         self.assertEqual(self.refused("leave", "docs", "--project", "d"),
-                         "ERROR channel: you lead docs: close it instead (ferry channel close "
+                         "ERROR channel: you lead docs: close it instead (vcharon channel close "
                          "docs --project d)")
         # its watcher ran (server mode, keyed by the channel folder) and it posted
         snapshot = channel_cmd.watcher_snapshot(None, "docs.linux-d", "linux-d",
@@ -797,7 +798,7 @@ class SkippedTest(ChannelCase):
     """channels.d/ files that are broken, and the retired [mailbox], through the commands."""
 
     PUSH = textwrap.dedent("""\
-        [ferry]
+        [vcharon]
         box = mac
 
         [mailbox]
@@ -821,21 +822,22 @@ class SkippedTest(ChannelCase):
         self.src = os.path.join(self.tmp, "src.txt")
         with open(self.src, "w") as f:
             f.write("hi")
-        with open(os.path.join(self.ferry_home, "ferry.ini"), "w") as f:
+        with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
             f.write(self.PUSH.format(src=self.src))
-        write_tree(self.ferry_home, {"channels.d/game.mac-x.ini": b"[game.mac-x]\nssh = \n"})
+        write_tree(self.vcharon_home, {"channels.d/game.mac-x.ini": b"[game.mac-x]\nssh = \n"})
 
-    def ferry_log(self):
-        with open(os.path.join(self.ferry_home, "logs", "ferry.log"), encoding="utf-8") as f:
+    def vcharon_log(self):
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             return f.read()
 
     def test_other_jobs_run(self):
         code, out, err = self.run_cli("run", "push")
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
-        log = self.ferry_log()
-        self.assertIn("skipped ferry.ini [mailbox]: the fixed mailbox is retired (M10): delete "
-                      "[mailbox] from ferry.ini (MAILBOX.md in the ferry folder, \"Retired\")", log)
+        log = self.vcharon_log()
+        self.assertIn("skipped vcharon.ini [mailbox]: the fixed mailbox is retired (M10): delete "
+                      "[mailbox] from vcharon.ini (MAILBOX.md in the vcharon folder, "
+                      "\"Retired\")", log)
         self.assertIn("skipped channels.d/game.mac-x.ini: [game.mac-x]: holds only a channel "
                       "section, with mailbox keys", log)
 
@@ -845,14 +847,14 @@ class SkippedTest(ChannelCase):
                 code, out, err = self.run_cli("run", name)
                 self.assertEqual(code, 3)
                 self.assertEqual(err.splitlines()[0], "ERROR config: the fixed mailbox is "
-                                 "retired (M10): delete [mailbox] from ferry.ini "
-                                 "(MAILBOX.md in the ferry folder, \"Retired\")")
+                                 "retired (M10): delete [mailbox] from vcharon.ini "
+                                 "(MAILBOX.md in the vcharon folder, \"Retired\")")
         code, out, err = self.run_cli("run", "game.mac-x.down")
         self.assertEqual(code, 3)
         self.assertTrue(err.startswith("ERROR config: channels.d/game.mac-x.ini [game.mac-x]: "
                                        "holds only a channel section"), err)
         self.assertIn("  fix: fix %s, or delete it" % os.path.join(
-            self.ferry_home, "channels.d", "game.mac-x.ini"), err)
+            self.vcharon_home, "channels.d", "game.mac-x.ini"), err)
 
     def test_doctor_lists_them(self):
         os.environ.pop("SSH_AUTH_SOCK", None)
@@ -860,7 +862,7 @@ class SkippedTest(ChannelCase):
         self.assertEqual(code, 0, out)
         warns = [" ".join(l.split()) for l in out.splitlines() if l.startswith("  warn  config")]
         self.assertEqual([w.split(":")[0] for w in warns], [
-            "warn config skipped ferry.ini [mailbox]",
+            "warn config skipped vcharon.ini [mailbox]",
             "warn config skipped channels.d/game.mac-x.ini"])
         code, out, err = self.run_cli("doctor", "game.mac-x")
         self.assertEqual(code, 1, out)
@@ -869,7 +871,7 @@ class SkippedTest(ChannelCase):
                                  "only a channel section, with mailbox keys"])
 
 
-POST_TOOL = os.path.join(os.path.dirname(FERRY_DIR), "tools", "mailbox_post.py")
+POST_TOOL = os.path.join(os.path.dirname(VCHARON_DIR), "tools", "mailbox_post.py")
 
 
 class ReviewTest(ChannelCase):
@@ -904,7 +906,7 @@ class ReviewTest(ChannelCase):
         self.assertEqual(code, 1, err)
         self.assertFalse(os.path.exists(self.own))
         base = os.path.join(self.homes["mac"], "joined")
-        self.assertEqual([f for f in os.listdir(base) if f.startswith(".ferry-pull-")], [])
+        self.assertEqual([f for f in os.listdir(base) if f.startswith(".vcharon-pull-")], [])
         # the next plain run refuses (up has sent files from the missing folder), and the
         # server's copy stays whole
         code, out, err = self.run_cli("run", "game.mac-web")
@@ -982,7 +984,7 @@ class ReviewTest(ChannelCase):
             "through it" % os.path.join(self.own, "sub"), "  fix: " + channel_cmd.LINK_HINT])
         self.assertEqual(os.listdir(outside), [])
         self.assertEqual([f for f in os.listdir(os.path.dirname(self.local))
-                          if f.startswith(".ferry-pull-")], [])
+                          if f.startswith(".vcharon-pull-")], [])
 
     @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0, "needs POSIX modes, not root")
     def test_a_failed_move_is_a_plain_error(self):
@@ -1001,7 +1003,7 @@ class ReviewTest(ChannelCase):
         # what moved before the failure stays (MEMBER.md sorts before sub/)
         self.assertTrue(os.path.isfile(os.path.join(self.own, "MEMBER.md")))
         self.assertEqual([f for f in os.listdir(os.path.dirname(self.local))
-                          if f.startswith(".ferry-pull-")], [])
+                          if f.startswith(".vcharon-pull-")], [])
 
     def test_hints_rebuild_a_role_members_name(self):
         # the re-review's Q6: the -b member's fix line must not claim mac-web
@@ -1015,13 +1017,13 @@ class ReviewTest(ChannelCase):
         code, out, err = self.run_cli("run", "game.mac-web-b")
         fix = [l for l in err.splitlines() if l.startswith("  fix: ")][0]
         self.assertEqual(fix, "  fix: " + platform.runnable(
-            "ferry channel join game --ssh fake-dest --project web --role b takes its files "
-            "back from the server (a rejoin); MEMBER.md is ferry's: to drop other files, delete "
+            "vcharon channel join game --ssh fake-dest --project web --role b takes its files "
+            "back from the server (a rejoin); MEMBER.md is vcharon's: to drop other files, delete "
             "them one by one and keep it"))
         # followed as printed: it takes back mac-web-b, and claims nothing new
         command = fix.split("fix: ", 1)[1]
-        self.assertTrue(command.startswith(platform.ferry_command() + " channel "), command)
-        argv = command[len(platform.ferry_command()):].split(" takes ")[0].split()[1:]
+        self.assertTrue(command.startswith(platform.vcharon_command() + " channel "), command)
+        argv = command[len(platform.vcharon_command()):].split(" takes ")[0].split()[1:]
         out = self.ok(*argv)
         self.assertIn("  took back game/mac-web-b", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "game", "mac-web")))
@@ -1049,8 +1051,8 @@ class ReviewTest(ChannelCase):
         self.member()
         other = os.path.join(self.tmp, "other-root")
         os.makedirs(other)
-        with mock.patch.dict(os.environ, {"FERRY_TEST_MACHINE_ID": OTHER_MACHINE,
-                                          "FERRY_CHANNELS_ROOT": other}):
+        with mock.patch.dict(os.environ, {"VCHARON_TEST_MACHINE_ID": OTHER_MACHINE,
+                                          "VCHARON_CHANNELS_ROOT": other}):
             self.assertEqual(self.refused("leave", "game"),
                              "ERROR channel: fake-dest isn't the server game is on (its machine "
                              "id is %s, the record's %s): check the alias"

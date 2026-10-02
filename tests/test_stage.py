@@ -64,7 +64,7 @@ class StagerCases:
     def setUp(self):
         fsops._private_groups.clear()
         self.addCleanup(fsops._private_groups.clear)
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = os.path.join(self.tmp, "root")
         self.outside = os.path.join(self.tmp, "outside")
@@ -357,7 +357,7 @@ class StagerCases:
             with self.subTest(entries=entries):
                 e = self.refused_at_check(entries, "unsafe_path")
                 self.assertEqual(e.message,
-                                 "l is a symlink or junction; ferry never goes through one")
+                                 "l is a symlink or junction; vcharon never goes through one")
         # a link that the plan replaces or deletes is fine: it's never followed
         self.run_plan([delete("l")])
         self.assertEqual(read_tree(self.outside), {"z.txt": b"z", "b/": None})
@@ -445,7 +445,8 @@ class StagerCases:
         entries, data = fputs({"a/b/x": b"x"})
         if self.impl == "path":
             e = self.refused(entries, "unsafe_path", data)
-            self.assertEqual(e.message, "a is a symlink or junction; ferry never goes through one")
+            self.assertEqual(e.message,
+                             "a is a symlink or junction; vcharon never goes through one")
         else:
             self.run_plan(entries, data)
             self.assertEqual(read_tree(self.path("a2")), {"b/": None, "b/x": b"x"})
@@ -1129,7 +1130,7 @@ class JsonFormTest(unittest.TestCase):
 @unittest.skipUnless(WINDOWS, "Windows only")
 class WindowsStagerTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(self.remove_all)
         self.root = os.path.join(self.tmp, "root")
         os.mkdir(self.root)

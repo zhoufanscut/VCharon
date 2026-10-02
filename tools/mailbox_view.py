@@ -1,18 +1,18 @@
-"""Show a whole ferry channel, every member's entries merged in one order (DESIGN §14 M12,
-MAILBOX.md in the ferry folder). Read-only: it writes nothing and runs no ferry.
+"""Show a whole vcharon channel, every member's entries merged in one order (DESIGN §14 M12,
+MAILBOX.md in the vcharon folder). Read-only: it writes nothing and runs no vcharon.
 
 For a local member, or any copy of a channel's tree:
 
-    python3 mailbox_view.py --dir ~/.local/state/ferry/channels/<C> [--full] [--last N]
+    python3 mailbox_view.py --dir ~/.local/state/vcharon/channels/<C> [--full] [--last N]
 
 For a client, its local tree of the channel section <C>.<name> (channels.d/), as of this box's
-last sync; it runs no ferry run, so ferry run <C>.<name> first for a fresh view:
+last sync; it runs no vcharon run, so vcharon run <C>.<name> first for a fresh view:
 
     python3 mailbox_view.py --job <C>.<name> [--config PATH] [--full] [--last N]
 
 It reads every top-level folder whose name is a writer's (the member's own folder too; other
 names, symlinks and stage dirs are left out, as the watcher leaves them out), and below each the
-entries of every .md file (ferry/entries.py's format) but the folder's MEMBER.md, whose #1 only
+entries of every .md file (vcharon/entries.py's format) but the folder's MEMBER.md, whose #1 only
 marks the folder. Lines, in this order:
 
     <C>: <n> entries from <m> members (<dir>)
@@ -40,8 +40,8 @@ make a cycle within a minute, which then goes by number only.
 
 Exit 0; 2 for a usage error (argparse's); 1 when the channel's folder can't be read (`ERROR
 can't read <dir>: ...`) or --job's section can't be resolved (`mailbox_view: ...`), on stderr.
-Standard library only, Python 3.9 or newer. It lives outside the ferry package, as
-mailbox_watch.py does, and reads through ferry's entries and pathrules modules.
+Standard library only, Python 3.9 or newer. It lives outside the vcharon package, as
+mailbox_watch.py does, and reads through vcharon's entries and pathrules modules.
 """
 
 from __future__ import annotations
@@ -56,15 +56,15 @@ import time
 # this tool's folder, which holds mailbox_watch.py, and the repo's src folder, which holds the
 # vcharon package
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-FERRY_DIR = os.path.join(os.path.dirname(TOOLS_DIR), "src")
+VCHARON_DIR = os.path.join(os.path.dirname(TOOLS_DIR), "src")
 PROG = "mailbox_view"
 INDENT = "    "
 
 
-def _ferry_import():
-    # the ferry package next to this tool, never one on PATH (DESIGN §13)
-    if FERRY_DIR not in sys.path:
-        sys.path.insert(0, FERRY_DIR)
+def _vcharon_import():
+    # the vcharon package next to this tool, never one on PATH (DESIGN §13)
+    if VCHARON_DIR not in sys.path:
+        sys.path.insert(0, VCHARON_DIR)
 
 
 def _watch():
@@ -108,7 +108,7 @@ class Item:
 def read_tree(root):
     """(member folders, [Item] in path order, notes) of the channel tree root. An error on the
     root itself raises OSError; below it, what can't be read is a note."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import entries, pathrules
     notes = []
 
@@ -174,7 +174,7 @@ def _kahn(nodes, edges):
 def order(items, now):
     """(items in the view's order, the notes of the minutes): the rules of the docstring. now
     is this box's current time, a datetime. Each item's own notes go on item.notes."""
-    _ferry_import()
+    _vcharon_import()
     from vcharon import entries
     placed = {}
     in_tree = set()
@@ -286,14 +286,14 @@ def view(root, channel, synced=False, full=False, last=None, now=None, out=print
 def main(argv=None, now=None):
     watch = _watch()
     watch._utf8_output()
-    parser = argparse.ArgumentParser(prog="mailbox_view.py", description="Show a ferry "
+    parser = argparse.ArgumentParser(prog="mailbox_view.py", description="Show a vcharon "
                                      "channel's entries, every member's, in one order.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dir", help="a channel's folder: in the channel root on this machine, "
                       "or any copy of its tree")
     mode.add_argument("--job", help="a client's channel section (channels.d/), <C>.<name>: "
                       "its local tree, as of this box's last sync")
-    parser.add_argument("--config", help="with --job: ferry's config file")
+    parser.add_argument("--config", help="with --job: vcharon's config file")
     parser.add_argument("--full", action="store_true", help="each entry's other header "
                         "lines and its body too")
     parser.add_argument("--last", type=watch._number(1, 1000000, "entries"), help="only the "

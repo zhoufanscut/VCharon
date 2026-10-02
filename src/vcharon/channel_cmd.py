@@ -1,4 +1,4 @@
-"""ferry channel list, create, join, leave and close (DESIGN §14 M10): members' names, their
+"""vcharon channel list, create, join, leave and close (DESIGN §14 M10): members' names, their
 records and section files, and the steps of each command in the design's order; client, and a
 server member's box (--local). The channel root's own calls are in channels.py."""
 
@@ -23,23 +23,23 @@ from .proto import VCharonError
 
 RECORD_VERSION = 1
 RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine")
-# the parts that rebuild the name, for the hints that tell a member to run ferry channel; a
+# the parts that rebuild the name, for the hints that tell a member to run vcharon channel; a
 # record written before the M10 re-review has neither, and is read as before
 RECORD_OPTIONAL = ("project", "role")
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
 _NOT_NAME = re.compile(r"[^a-z0-9_]+")
-BOX_HINT = "set box in [ferry] of ferry.ini (the user picks it: mac, win, linux, laptop)"
-RULES = "MAILBOX.md in the ferry folder (the ferry-mailbox skill)"
+BOX_HINT = "set box in [vcharon] of vcharon.ini (the user picks it: mac, win, linux, laptop)"
+RULES = "MAILBOX.md in the vcharon folder (the vcharon skill)"
 # A channel section's up never creates (M10): a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
-# make the closed channel again by hand. ferry run and doctor (cli.channel_gone_hint) and
+# make the closed channel again by hand. vcharon run and doctor (cli.channel_gone_hint) and
 # mailbox_watch.py's --dir (M13) print it, with the channel and name_flags. Its start is a
 # constant of its own: the watcher tells a gone channel by it (EXIT closed, M14b), and the
-# leave command after it is printed as the box runs ferry (platform.runnable), not as written.
+# leave command after it is printed as the box runs vcharon (platform.runnable), not as written.
 CHANNEL_GONE_PREFIX = "the channel is closed, or your folder in it is gone: "
-CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "ferry channel leave %s %s"
+CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon channel leave %s %s"
 
 
 # --- names ---
@@ -66,7 +66,7 @@ def clean_project(text):
 
 
 def member_name(cfg, project=None, role=None, cwd=None):
-    """<box>-<project>[-<role>]: ferry channel builds a member's name, nothing else does. An
+    """<box>-<project>[-<role>]: vcharon channel builds a member's name, nothing else does. An
     exception to "never rely on the current directory" (DESIGN §13), on purpose: the name says
     where the agent works."""
     return member_parts(cfg, project, role, cwd)[0]
@@ -92,7 +92,7 @@ def member_parts(cfg, project=None, role=None, cwd=None):
 
 
 def name_flags(channel, name, record=None):
-    """The flags that rebuild name in a ferry channel command: --project P [--role R], from
+    """The flags that rebuild name in a vcharon channel command: --project P [--role R], from
     the record. A record without them (written before the M10 re-review), or none at all,
     gets a placeholder that says so, never flags that would build another name."""
     if record is None:
@@ -125,7 +125,7 @@ def record_path(channel, name):
 
 
 def read_record(channel, name):
-    """The member's record (a dict), or None. One that can't be read is an error: ferry never
+    """The member's record (a dict), or None. One that can't be read is an error: vcharon never
     guesses which server a membership is on."""
     path = record_path(channel, name)
     hint = "check it; if the membership is gone, delete it"
@@ -218,14 +218,14 @@ def _watch_tool():
     """tools/mailbox_watch.py at the repo root (two folders above the package, src/vcharon),
     loaded by its path: join's lock check takes the lock's name from the watcher's own
     snapshot_path (one rule, never a copy)."""
-    module = sys.modules.get("ferry_mailbox_watch")
+    module = sys.modules.get("vcharon_mailbox_watch")
     if module is None:
         package = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(os.path.dirname(os.path.dirname(package)), "tools", "mailbox_watch.py")
-        spec = importlib.util.spec_from_file_location("ferry_mailbox_watch", path)
+        spec = importlib.util.spec_from_file_location("vcharon_mailbox_watch", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        sys.modules["ferry_mailbox_watch"] = module
+        sys.modules["vcharon_mailbox_watch"] = module
     return module
 
 
@@ -268,7 +268,7 @@ def _check_locks(record, section, channel):
         paths += _job_locks(section)
     for path in paths:
         if held(path):
-            raise channels.refused("%s is held (a watcher, or a ferry run, of %s in %s): stop "
+            raise channels.refused("%s is held (a watcher, or a vcharon run, of %s in %s): stop "
                                    "the watcher first" % (path, record["name"], channel))
 
 
@@ -363,19 +363,19 @@ def _need_machine(server):
         if server.ssh is None:
             # this machine: a Mac or Windows box has a hint of its own
             hint = platform.no_machine_hint() or hint
-        raise VCharonError("state_mismatch", "%s has no machine id, so ferry can't tie a "
+        raise VCharonError("state_mismatch", "%s has no machine id, so vcharon can't tie a "
                            "channel's record to it" % server.where, hint)
 
 
 # --- the command ---
 
 def main(args, run):
-    """ferry channel <action>: exit 0, or that of the error."""
+    """vcharon channel <action>: exit 0, or that of the error."""
     cfg = config.load(args.config)
-    log = run.log = Log(os.path.join(platform.log_dir(), "ferry.log"), console=args.verbose)
-    log.info("ferry channel %s%s; config %s" % (args.action, " " + args.channel
-                                                if getattr(args, "channel", None) else "",
-                                                cfg.path))
+    log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
+    log.info("vcharon channel %s%s; config %s" % (args.action, " " + args.channel
+                                                  if getattr(args, "channel", None) else "",
+                                                  cfg.path))
     for skip in cfg.skipped:
         log.info(skip.line)
 
@@ -401,7 +401,7 @@ def _list(args, cfg, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         listing = server.list()
-    say("ferry: channel list  (%s)" % server.where)
+    say("vcharon: channel list  (%s)" % server.where)
     if not listing["channels"] and not listing["others"]:
         say("  no channels")
     for ch in listing["channels"]:
@@ -436,7 +436,7 @@ def _create(args, cfg, name, log, say):
         server = _server(args, cfg, log, stack)
         _need_machine(server)
         _another_server(record, server, channel)
-        say("ferry: channel create %s  as %s on %s" % (channel, name, server.where))
+        say("vcharon: channel create %s  as %s on %s" % (channel, name, server.where))
         got = server.claim(channel, name, True)
         made = []
         try:
@@ -456,7 +456,7 @@ def _create(args, cfg, name, log, say):
         return 0
     code = _run_section(args, section, full=True)
     if code != 0:
-        say(platform.runnable("ferry: the run failed; %s is created: run ferry run %s --full "
+        say(platform.runnable("vcharon: the run failed; %s is created: run vcharon run %s --full "
                               "again" % (channel, section)))
         return code
     say("OK  created %s; your folder is %s" % (channel, own))
@@ -535,11 +535,11 @@ def _join(args, cfg, name, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         _need_machine(server)
-        say("ferry: channel join %s  as %s on %s" % (channel, name, server.where))
+        say("vcharon: channel join %s  as %s on %s" % (channel, name, server.where))
         # 1. the leader, before any claim: a refused join leaves nothing behind
         found = _find(server.list(), channel, server.where)
         if found is None:
-            raise channels.refused("there is no channel %s on %s: check its name (ferry channel "
+            raise channels.refused("there is no channel %s on %s: check its name (vcharon channel "
                                    "list)" % (channel, server.where))
         leaders = found["leaders"]
         if not leaders:
@@ -591,10 +591,10 @@ def _join(args, cfg, name, log, say):
     if server.ssh is not None:
         code = _run_section(args, section, full=True)
         if code == 130:
-            # a Ctrl-C stops everything at once, as in ferry run
+            # a Ctrl-C stops everything at once, as in vcharon run
             return code
         if code != 0:
-            say(platform.runnable("ferry: the run failed; you are in %s: run ferry run %s "
+            say(platform.runnable("vcharon: the run failed; you are in %s: run vcharon run %s "
                                   "--full again" % (channel, section)))
     entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
                  ["@" + leader], body="%s %s %s." % (name, "rejoined" if rejoin else "joined",
@@ -656,14 +656,14 @@ def _pull_own(server, remote_text, name, own, log, say):
     """A one-off pull of <remote>/<name>/ before the section's first run (down never plans the
     own folder, M9): into a temp folder next to the local tree, then each file this box lacks
     moves into the own folder. A file already here is kept: the pull only adds. A pull that
-    fails before the move changes nothing here, so it never leaves an own folder that ferry
+    fails before the move changes nothing here, so it never leaves an own folder that vcharon
     made; one that fails while moving leaves the files already moved. Never through a link.
     The checks go by path, one lstat per part: a link swapped in between a check and the move
     isn't caught (the own folder is the member's own, not another user's)."""
     from . import cli
     path = posixpath.join(remote_text, name)
     local = os.path.dirname(own)
-    temp = tempfile.mkdtemp(prefix=".ferry-pull-", dir=os.path.dirname(local))
+    temp = tempfile.mkdtemp(prefix=".vcharon-pull-", dir=os.path.dirname(local))
     try:
         source = engine.Side("remote", "path", {"path": path, "keep_name": "yes",
                                                 "symlinks": "error"})
@@ -755,7 +755,7 @@ def _print_entries(tree, name, leader, channel, say):
 
 
 def _run_section(args, section, full):
-    """ferry run <section> [--full], as its own command would: its lines, its exit code."""
+    """vcharon run <section> [--full], as its own command would: its lines, its exit code."""
     from . import cli
     argv = ["run", section] + (["--full"] if full else [])
     if args.config:
@@ -777,7 +777,7 @@ def _leave(args, cfg, name, log, say, close):
         raise channels.refused("only the leader closes %s, and that is %s"
                                % (channel, record["leader"]))
     if not close and leads:
-        raise channels.refused("you lead %s: close it instead (ferry channel close %s %s)"
+        raise channels.refused("you lead %s: close it instead (vcharon channel close %s %s)"
                                % (channel, channel, name_flags(channel, name, record)))
     # before anything on the server changes: a held lock can't leave a half-closed channel
     _check_locks(record, section, channel)
@@ -790,8 +790,8 @@ def _leave(args, cfg, name, log, say, close):
             ssh.check_dest(record["ssh"])
             session = stack.enter_context(ssh.Session(settings, record["ssh"], log))
             server = _Remote(session, record["ssh"], session.open(), log)
-        say("ferry: channel %s %s  as %s on %s" % ("close" if close else "leave", channel, name,
-                                                   server.where))
+        say("vcharon: channel %s %s  as %s on %s" % ("close" if close else "leave", channel, name,
+                                                     server.where))
         # the record's server, compared before any call: leave too, or another server's
         # missing channel would pass for a gone one
         _need_machine(server)
@@ -826,8 +826,8 @@ def _leave(args, cfg, name, log, say, close):
             code = _run_section(args, section, full=False)
             if code != 0:
                 say(platform.runnable(
-                    "ferry: the run failed, so nothing was removed: run ferry channel leave %s %s "
-                    "again once ferry run %s works"
+                    "vcharon: the run failed, so nothing was removed: run vcharon channel leave "
+                    "%s %s again once vcharon run %s works"
                     % (channel, name_flags(channel, name, record), section)))
                 return code
     _remove_membership(cfg, record, section, say)

@@ -338,12 +338,12 @@ class DoctorTest(PluginCase):
                              plugin.Ctx(end, home="/h"))
 
     def test_needs(self):
-        self.module(needs=("ferry-test-no-such-command",))
-        self.assertEqual(self.doctor(), [("FAIL", "ferry-test-no-such-command isn't on this "
-                                          "end's PATH", "install ferry-test-no-such-command on "
+        self.module(needs=("vcharon-test-no-such-command",))
+        self.assertEqual(self.doctor(), [("FAIL", "vcharon-test-no-such-command isn't on this "
+                                          "end's PATH", "install vcharon-test-no-such-command on "
                                           "the local end")])
         self.assertEqual(self.doctor(end="remote")[0][2],
-                         "install ferry-test-no-such-command on the remote end")
+                         "install vcharon-test-no-such-command on the remote end")
 
     @unittest.skipUnless(os.name == "posix", "sh")
     def test_needs_found(self):

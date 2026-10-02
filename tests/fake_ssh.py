@@ -19,11 +19,11 @@
 # | FAKE_SSH_EXIT         | exit with this code now, before starting Python                |
 # | FAKE_SSH_HOME         | HOME, USERPROFILE and the current directory for the helper;    |
 # |                       | default: a new temp dir, removed at exit                       |
-# | FERRY_TEST_MACHINE_ID | passed on; default 0123456789abcdef0123456789abcdef            |
-# | FERRY_TEST_OS         | passed on; default linux, the os the helper's hello names      |
+# | VCHARON_TEST_MACHINE_ID | passed on; default 0123456789abcdef0123456789abcdef            |
+# | VCHARON_TEST_OS         | passed on; default linux, the os the helper's hello names      |
 #
-# The rest of the environment reaches the helper as it is, FERRY_TEST_CLOCK_SHIFT and
-# FERRY_TEST_UTC_OFFSET among it (the hello's clock and zone, M12b).
+# The rest of the environment reaches the helper as it is, VCHARON_TEST_CLOCK_SHIFT and
+# VCHARON_TEST_UTC_OFFSET among it (the hello's clock and zone, M12b).
 #
 # It then runs [sys.executable, "-I", "-c", code] with its own stdin and stdout pipes and relays
 # bytes both ways, the way ssh does: a thread copies fd 0 to the child and closes the child's
@@ -72,11 +72,11 @@ def relay_stdin(child_stdin):
 def main():
     argv = sys.argv[1:]
     if argv == ["-V"]:
-        sys.stderr.write("OpenSSH_fake 1.0, for ferry's tests\n")
+        sys.stderr.write("OpenSSH_fake 1.0, for vcharon's tests\n")
         return 0
     m = re.fullmatch(r"(\S+) -I -c '([^']*)'", argv[-1]) if argv else None
     if not m:
-        sys.stderr.write("fake_ssh: the last argument isn't ferry's remote command: %r\n"
+        sys.stderr.write("fake_ssh: the last argument isn't vcharon's remote command: %r\n"
                          % argv[-1:])
         return 2
     code = m.group(2)
@@ -112,9 +112,9 @@ def main():
     try:
         # PYTHONPATH points at the home, where tests plant modules; -I must ignore it.
         child_env = dict(env, HOME=home, USERPROFILE=home, PYTHONPATH=home,
-                         FERRY_TEST_MACHINE_ID=env.get("FERRY_TEST_MACHINE_ID",
-                                                       TEST_MACHINE_ID),
-                         FERRY_TEST_OS=env.get("FERRY_TEST_OS", "linux"))
+                         VCHARON_TEST_MACHINE_ID=env.get("VCHARON_TEST_MACHINE_ID",
+                                                         TEST_MACHINE_ID),
+                         VCHARON_TEST_OS=env.get("VCHARON_TEST_OS", "linux"))
         # Relay rather than hand our pipes down, the way ssh does: killing us then closes the
         # controller's pipes at once, and the child sees end of file on stdin and exits.
         child = subprocess.Popen([sys.executable, "-I", "-c", code], stdin=subprocess.PIPE,

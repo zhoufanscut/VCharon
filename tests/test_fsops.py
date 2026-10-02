@@ -129,7 +129,7 @@ class RetryTest(unittest.TestCase):
 
     def test_touch_opens_with_retries_on_windows(self):
         # a virus scanner may hold the file for a moment, as for moves and deletes
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
         path = os.path.join(tmp, "f")
         open(path, "wb").close()
@@ -242,7 +242,7 @@ class DirProblemTest(unittest.TestCase):
 @unittest.skipIf(os.name == "nt", "Windows uses os.path.realpath")
 class ResolveRootTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         write_tree(self.tmp, {"real/sub/": None, "file": b"f"})
 
@@ -300,7 +300,7 @@ class HandleCases:
     cls = None
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="ferry-test-"))
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = os.path.join(self.tmp, "root")
         self.outside = os.path.join(self.tmp, "outside")
@@ -318,7 +318,7 @@ class HandleCases:
             self.open_root().enter("l")
         self.assertEqual(cm.exception.code, "unsafe_path")
         self.assertEqual(cm.exception.message,
-                         "l is a symlink or junction; ferry never goes through one")
+                         "l is a symlink or junction; vcharon never goes through one")
 
     def test_enter_file(self):
         write_tree(self.root, {"d/f": b"f"})
@@ -556,7 +556,7 @@ class PathDirTest(HandleCases, unittest.TestCase):
                 a.scan()
         self.assertEqual(cm.exception.code, "unsafe_path")
         self.assertEqual(cm.exception.message,
-                         "a is a symlink or junction; ferry never goes through one")
+                         "a is a symlink or junction; vcharon never goes through one")
 
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_recheck(self):
@@ -595,13 +595,13 @@ class RunTest(unittest.TestCase):
 
     def test_env(self):
         # decision 8 of the M6 plan: None inherits; a dict is the whole environment
-        code = "import os; print(os.environ.get('FERRY_TEST_RUN_ENV'))"
-        with mock.patch.dict(os.environ, {"FERRY_TEST_RUN_ENV": "inherited"}):
+        code = "import os; print(os.environ.get('VCHARON_TEST_RUN_ENV'))"
+        with mock.patch.dict(os.environ, {"VCHARON_TEST_RUN_ENV": "inherited"}):
             self.assertEqual(fsops.run(self.py(code), timeout=30).out.strip(), b"inherited")
-            env = dict(os.environ, FERRY_TEST_RUN_ENV="given")
+            env = dict(os.environ, VCHARON_TEST_RUN_ENV="given")
             self.assertEqual(fsops.run(self.py(code), timeout=30, env=env).out.strip(),
                              b"given")
-            env.pop("FERRY_TEST_RUN_ENV")
+            env.pop("VCHARON_TEST_RUN_ENV")
             self.assertEqual(fsops.run(self.py(code), timeout=30, env=env).out.strip(), b"None")
 
     def test_stdin_is_at_end_of_file(self):
@@ -618,7 +618,7 @@ class RunTest(unittest.TestCase):
 
     @unittest.skipUnless(POSIX, "process groups")
     def test_timeout_kills_the_group(self):
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
         pid_file = os.path.join(tmp, "pid")
         # a grandchild that holds the pipes, as ssh's ProxyCommand would
@@ -636,7 +636,7 @@ class RunTest(unittest.TestCase):
 
     def test_missing_program(self):
         with self.assertRaises(OSError):
-            fsops.run([os.path.join(tempfile.gettempdir(), "ferry-no-such-program")], timeout=5)
+            fsops.run([os.path.join(tempfile.gettempdir(), "vcharon-no-such-program")], timeout=5)
 
     @unittest.skipUnless(POSIX, "dup2 on fd 0")
     def test_stdin_isnt_inherited(self):

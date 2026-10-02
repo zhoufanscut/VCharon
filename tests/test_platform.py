@@ -32,47 +32,47 @@ class PatchedCase(unittest.TestCase):
 
 
 class PathsTest(PatchedCase):
-    def test_ferry_home(self):
+    def test_vcharon_home(self):
         for osn in ("linux", "darwin"):
-            self.patch(on(osn, FERRY_HOME="/tmp/fh", HOME="/home/me"))
-            self.assertEqual(platform.config_path(), "/tmp/fh/ferry.ini")
+            self.patch(on(osn, VCHARON_HOME="/tmp/fh", HOME="/home/me"))
+            self.assertEqual(platform.config_path(), "/tmp/fh/vcharon.ini")
             self.assertEqual(platform.state_dir(), "/tmp/fh/state")
             self.assertEqual(platform.log_dir(), "/tmp/fh/logs")
-        self.patch(on("windows", FERRY_HOME="D:\\fh"))
-        self.assertEqual(platform.config_path(), "D:\\fh\\ferry.ini")
+        self.patch(on("windows", VCHARON_HOME="D:\\fh"))
+        self.assertEqual(platform.config_path(), "D:\\fh\\vcharon.ini")
         self.assertEqual(platform.log_dir(), "D:\\fh\\logs")
 
     def test_darwin(self):
         self.patch(on("darwin", HOME="/Users/me", XDG_CONFIG_HOME="/x"))
-        self.assertEqual(platform.config_path(), "/Users/me/.config/ferry/ferry.ini")
+        self.assertEqual(platform.config_path(), "/Users/me/.config/vcharon/vcharon.ini")
         self.assertEqual(platform.state_dir(),
-                         "/Users/me/Library/Application Support/ferry/state")
-        self.assertEqual(platform.log_dir(), "/Users/me/Library/Logs/ferry")
+                         "/Users/me/Library/Application Support/vcharon/state")
+        self.assertEqual(platform.log_dir(), "/Users/me/Library/Logs/vcharon")
 
     def test_linux_defaults(self):
         self.patch(on("linux", HOME="/home/me"))
-        self.assertEqual(platform.config_path(), "/home/me/.config/ferry/ferry.ini")
-        self.assertEqual(platform.state_dir(), "/home/me/.local/state/ferry/state")
-        self.assertEqual(platform.log_dir(), "/home/me/.local/state/ferry/logs")
+        self.assertEqual(platform.config_path(), "/home/me/.config/vcharon/vcharon.ini")
+        self.assertEqual(platform.state_dir(), "/home/me/.local/state/vcharon/state")
+        self.assertEqual(platform.log_dir(), "/home/me/.local/state/vcharon/logs")
 
     def test_linux_xdg(self):
         self.patch(on("linux", HOME="/home/me", XDG_CONFIG_HOME="/cfg", XDG_STATE_HOME="/st"))
-        self.assertEqual(platform.config_path(), "/cfg/ferry/ferry.ini")
-        self.assertEqual(platform.state_dir(), "/st/ferry/state")
-        self.assertEqual(platform.log_dir(), "/st/ferry/logs")
+        self.assertEqual(platform.config_path(), "/cfg/vcharon/vcharon.ini")
+        self.assertEqual(platform.state_dir(), "/st/vcharon/state")
+        self.assertEqual(platform.log_dir(), "/st/vcharon/logs")
 
     def test_linux_relative_xdg_is_ignored(self):
         self.patch(on("linux", HOME="/home/me", XDG_CONFIG_HOME="cfg", XDG_STATE_HOME="st"))
-        self.assertEqual(platform.config_path(), "/home/me/.config/ferry/ferry.ini")
-        self.assertEqual(platform.log_dir(), "/home/me/.local/state/ferry/logs")
+        self.assertEqual(platform.config_path(), "/home/me/.config/vcharon/vcharon.ini")
+        self.assertEqual(platform.log_dir(), "/home/me/.local/state/vcharon/logs")
 
     def test_windows(self):
         self.patch(on("windows", APPDATA="C:\\Users\\me\\AppData\\Roaming",
                       LOCALAPPDATA="C:\\Users\\me\\AppData\\Local"))
         self.assertEqual(platform.config_path(),
-                         "C:\\Users\\me\\AppData\\Roaming\\ferry\\ferry.ini")
-        self.assertEqual(platform.state_dir(), "C:\\Users\\me\\AppData\\Local\\ferry\\state")
-        self.assertEqual(platform.log_dir(), "C:\\Users\\me\\AppData\\Local\\ferry\\logs")
+                         "C:\\Users\\me\\AppData\\Roaming\\vcharon\\vcharon.ini")
+        self.assertEqual(platform.state_dir(), "C:\\Users\\me\\AppData\\Local\\vcharon\\state")
+        self.assertEqual(platform.log_dir(), "C:\\Users\\me\\AppData\\Local\\vcharon\\logs")
 
 
 class SshPathTest(PatchedCase):
@@ -124,7 +124,7 @@ class CapsTest(PatchedCase):
 
 class FilesTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def file(self, name, text):
@@ -145,14 +145,14 @@ class FilesTest(unittest.TestCase):
                              "3ac29748d7984ad7ba3568bd550567f5")
             self.assertIsNone(platform.machine_id((missing, bad), **none))
             self.assertIsNone(platform.machine_id((), **none))
-        with mock.patch.dict(os.environ, {"FERRY_TEST_MACHINE_ID": "f" * 32}, clear=True):
+        with mock.patch.dict(os.environ, {"VCHARON_TEST_MACHINE_ID": "f" * 32}, clear=True):
             self.assertEqual(platform.machine_id((good,)), "f" * 32)
 
     def test_machine_id_from_the_os(self):
         # M11a: macOS's IOPlatformUUID and Windows' MachineGuid, hashed, where the files are
         # missing
         uuid = "4C4C4544-0042-3510-8051-B4C04F4D4D32"
-        hashed = hashlib.sha256(b"ferry:4c4c4544-0042-3510-8051-b4c04f4d4d32").hexdigest()[:32]
+        hashed = hashlib.sha256(b"vcharon:4c4c4544-0042-3510-8051-b4c04f4d4d32").hexdigest()[:32]
         missing = (os.path.join(self.tmp, "missing"),)
         good = self.file("good", "3ac29748d7984ad7ba3568bd550567f5\n")
 
@@ -175,7 +175,7 @@ class FilesTest(unittest.TestCase):
                 self.assertEqual(platform.machine_id((good,), **{reader: must_not_run}),
                                  "3ac29748d7984ad7ba3568bd550567f5")
             with mock.patch.object(platform, "os_name", return_value=osn), \
-                    mock.patch.dict(os.environ, {"FERRY_TEST_MACHINE_ID": "f" * 32}, clear=True):
+                    mock.patch.dict(os.environ, {"VCHARON_TEST_MACHINE_ID": "f" * 32}, clear=True):
                 self.assertEqual(platform.machine_id(missing, **{reader: must_not_run}), "f" * 32)
         # Linux reads only the files
         with mock.patch.object(platform, "os_name", return_value="linux"), \
@@ -265,31 +265,31 @@ def no_which(name):
     return None
 
 
-class FerryCommandTest(unittest.TestCase):
-    """How a fix line runs ferry on this box (M14a): the pure core for every OS, on any OS."""
+class VCharonCommandTest(unittest.TestCase):
+    """How a fix line runs vcharon on this box (M14a): the pure core for every OS, on any OS."""
 
     def test_posix_quotes_a_space_and_shell_marks(self):
-        self.assertEqual(platform.command_for("/opt/my py/bin/python3", "/home/me/my ferry",
+        self.assertEqual(platform.command_for("/opt/my py/bin/python3", "/home/me/my vcharon",
                                               "linux", no_which),
-                         "'/opt/my py/bin/python3' '/home/me/my ferry'")
-        self.assertEqual(platform.command_for("/usr/bin/python3", "/home/me/a$b/ferry",
+                         "'/opt/my py/bin/python3' '/home/me/my vcharon'")
+        self.assertEqual(platform.command_for("/usr/bin/python3", "/home/me/a$b/vcharon",
                                               "darwin", no_which),
-                         "/usr/bin/python3 '/home/me/a$b/ferry'")
-        self.assertEqual(platform.command_for("/usr/bin/python3", "/home/me/ferry", "linux",
-                                              no_which), "/usr/bin/python3 /home/me/ferry")
+                         "/usr/bin/python3 '/home/me/a$b/vcharon'")
+        self.assertEqual(platform.command_for("/usr/bin/python3", "/home/me/vcharon", "linux",
+                                              no_which), "/usr/bin/python3 /home/me/vcharon")
 
     def test_windows_forward_slashes_and_double_quotes(self):
         exe = "C:\\Program Files\\Python39\\python.exe"
-        self.assertEqual(platform.command_for(exe, "C:\\Users\\me\\ferry", "windows",
+        self.assertEqual(platform.command_for(exe, "C:\\Users\\me\\vcharon", "windows",
                                               no_which),
-                         '"C:/Program Files/Python39/python.exe" C:/Users/me/ferry')
+                         '"C:/Program Files/Python39/python.exe" C:/Users/me/vcharon')
         self.assertEqual(platform.command_for("C:\\Python39\\python.exe",
-                                              "D:\\my work\\ferry", "windows", no_which),
-                         'C:/Python39/python.exe "D:/my work/ferry"')
+                                              "D:\\my work\\vcharon", "windows", no_which),
+                         'C:/Python39/python.exe "D:/my work/vcharon"')
         # PATH's python.exe is that same file: its name
-        self.assertEqual(platform.command_for(exe, "C:\\Users\\me\\ferry", "windows",
+        self.assertEqual(platform.command_for(exe, "C:\\Users\\me\\vcharon", "windows",
                                               lambda name: exe if name == "python.exe" else None),
-                         "python.exe C:/Users/me/ferry")
+                         "python.exe C:/Users/me/vcharon")
 
     def test_which_match_or_not(self):
         def which(found):
@@ -305,7 +305,7 @@ class FerryCommandTest(unittest.TestCase):
                          "/usr/bin/python3 /f")
 
     def test_which_through_a_link(self):
-        tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
         real = os.path.join(tmp, "python3.11")
         open(real, "w").close()
@@ -324,34 +324,45 @@ class FerryCommandTest(unittest.TestCase):
     def test_runnable(self):
         cmd = "py /f"
         for text, want in (
-                ("ferry channel leave mb --project p", "py /f channel leave mb --project p"),
-                ("run: ferry key dest", "run: py /f key dest"),
-                ("(ferry channel close mb x)", "(py /f channel close mb x)"),
-                ("use `ferry run a.up`", "use `py /f run a.up`"),
-                ("ferry --help", "py /f --help"),
-                ("ferry state reset a, and ferry run a --full",
+                ("vcharon channel leave mb --project p", "py /f channel leave mb --project p"),
+                ("run: vcharon key dest", "run: py /f key dest"),
+                ("(vcharon channel close mb x)", "(py /f channel close mb x)"),
+                ("use `vcharon run a.up`", "use `py /f run a.up`"),
+                ("vcharon --help", "py /f --help"),
+                ("vcharon state reset a, and vcharon run a --full",
                  "py /f state reset a, and py /f run a --full")):
             with self.subTest(text=text):
                 self.assertEqual(platform.runnable(text, cmd), want)
-        for text in ("ferry's rules", "ferry/README.md", "see /x/ferry run", "ferry run's fix",
-                     "MEMBER.md is ferry's", "ferry channel's to write", "ferry runner",
-                     "(ferry cp: --skip-symlinks)", "a ferry", "xferry run a", "ferry  run",
-                     ""):
+        for text in ("vcharon's rules", "vcharon/README.md", "see /x/vcharon run",
+                     "vcharon run's fix", "MEMBER.md is vcharon's", "vcharon channel's to write",
+                     "vcharon runner", "(vcharon cp: --skip-symlinks)", "a vcharon",
+                     "xvcharon run a", "vcharon  run", ""):
             with self.subTest(text=text):
                 self.assertEqual(platform.runnable(text, cmd), text)
 
-    def test_this_ferry(self):
-        folder = platform.ferry_dir()
+    def test_runnable_twice_is_once(self):
+        # the command is `<python> -m vcharon`: its own `vcharon <command>` is never taken again
+        text = "run vcharon channel leave mb x, then vcharon run mb.x --full"
+        for cmd in ("python3 -m vcharon", '"C:/my py/python.exe" -m vcharon', None):
+            with self.subTest(cmd=cmd):
+                once = platform.runnable(text, cmd)
+                self.assertEqual(platform.runnable(once, cmd), once)
+        self.assertEqual(platform.runnable(text, "python3 -m vcharon"),
+                         "run python3 -m vcharon channel leave mb x, then python3 -m vcharon run "
+                         "mb.x --full")
+
+    def test_this_vcharon(self):
+        folder = platform.vcharon_dir()
         self.assertTrue(os.path.isfile(os.path.join(folder, "vcharon", "__main__.py")), folder)
         self.assertTrue(os.path.isabs(folder))
-        self.assertEqual(platform.ferry_command(), platform.command_for(
+        self.assertEqual(platform.vcharon_command(), platform.command_for(
             sys.executable, None, platform.os_name(), shutil.which) + " -m vcharon")
-        self.assertEqual(platform.runnable("ferry run a"),
-                         platform.ferry_command() + " run a")
+        self.assertEqual(platform.runnable("vcharon run a"),
+                         platform.vcharon_command() + " run a")
         # no folder (the server's bundled copy): as written
-        with mock.patch.object(platform, "ferry_dir", return_value=None):
-            self.assertIsNone(platform.ferry_command())
-            self.assertEqual(platform.runnable("ferry run a"), "ferry run a")
+        with mock.patch.object(platform, "vcharon_dir", return_value=None):
+            self.assertIsNone(platform.vcharon_command())
+            self.assertEqual(platform.runnable("vcharon run a"), "vcharon run a")
 
 if __name__ == "__main__":
     unittest.main()

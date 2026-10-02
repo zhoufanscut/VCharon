@@ -18,9 +18,9 @@ LINE = r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d  \d{8}-\d{6}-[0-9a-f]{6}  %s  %s\Z"
 
 class LogTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ferry-test-")
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.path = os.path.join(self.tmp, "logs", "ferry.log")
+        self.path = os.path.join(self.tmp, "logs", "vcharon.log")
 
     def lines(self, path=None):
         with open(path or self.path, encoding="utf-8") as f:
@@ -89,13 +89,13 @@ class LogTest(unittest.TestCase):
         with open(blocker, "w") as f:
             f.write("x")
         # a directory can't be made under a file
-        Log(os.path.join(blocker, "logs", "ferry.log")).info("lost")
+        Log(os.path.join(blocker, "logs", "vcharon.log")).info("lost")
         locked = os.path.join(self.tmp, "locked")
         os.mkdir(locked, 0o500)
         self.addCleanup(os.chmod, locked, 0o700)
-        Log(os.path.join(locked, "ferry.log")).error("lost too")
+        Log(os.path.join(locked, "vcharon.log")).error("lost too")
         if os.name == "posix" and os.geteuid() != 0:
-            self.assertFalse(os.path.exists(os.path.join(locked, "ferry.log")))
+            self.assertFalse(os.path.exists(os.path.join(locked, "vcharon.log")))
 
     def test_console(self):
         err = io.StringIO()

@@ -1,6 +1,6 @@
-"""ferry key: unlock a passphrase key into the OS's own agent or keychain (DESIGN §6.5); client.
+"""vcharon key: unlock a passphrase key into the OS's own agent or keychain (DESIGN §6.5); client.
 
-ferry never reads, stores or logs a passphrase: ssh-add asks for it on the terminal. It never
+vcharon never reads, stores or logs a passphrase: ssh-add asks for it on the terminal. It never
 writes in ~/.ssh either: on macOS it prints the config lines to add.
 """
 
@@ -15,7 +15,7 @@ import time
 from . import fsops, platform, ssh
 from .proto import VCharonError
 
-KEY_EXAMPLE = "for example: ferry key devbox"
+KEY_EXAMPLE = "for example: vcharon key devbox"
 ADMIN_HINT = ("once, in an admin PowerShell: Get-Service ssh-agent | Set-Service -StartupType "
               "Automatic; Start-Service ssh-agent")
 START_AGENT = 'eval "$(ssh-agent -s)"'
@@ -23,7 +23,7 @@ APPLE_SSH = "/usr/bin/ssh"
 
 
 def terminal():
-    """True when stdin and stdout are a terminal: only then may ferry key, or doctor's offer
+    """True when stdin and stdout are a terminal: only then may vcharon key, or doctor's offer
     to run it, prompt (launch rules, DESIGN §13). Tests patch it."""
     try:
         return bool(sys.stdin and sys.stdin.isatty() and sys.stdout and sys.stdout.isatty())
@@ -129,8 +129,8 @@ def _config_lines(dest, key_file):
 
 
 def needs_terminal():
-    """ferry key's refusal when stdin and stdout aren't a terminal."""
-    return VCharonError("config", "ferry key needs a terminal: ssh-add asks for your passphrase "
+    """vcharon key's refusal when stdin and stdout aren't a terminal."""
+    return VCharonError("config", "vcharon key needs a terminal: ssh-add asks for your passphrase "
                         "there", hint="run it in a terminal window")
 
 
@@ -155,7 +155,7 @@ def _tool(settings, key_file, agent, say, log):
         sock = os.environ.get("SSH_AUTH_SOCK")
         if not sock:
             raise VCharonError("config", "there's no ssh agent here: SSH_AUTH_SOCK is unset",
-                               hint="start one in this shell: %s, then run ferry key again"
+                               hint="start one in this shell: %s, then run vcharon key again"
                                % START_AGENT)
         if state == "none":
             raise VCharonError("config", "no agent answers at %s" % sock,
@@ -163,7 +163,7 @@ def _tool(settings, key_file, agent, say, log):
                                "start one: %s" % START_AGENT)
         argv = add + [key_file]
     say("  run     %s" % show_argv(argv))
-    log.info("running ssh-add on the terminal; ferry never sees the passphrase")
+    log.info("running ssh-add on the terminal; vcharon never sees the passphrase")
     try:
         rc = fsops.run_terminal(argv)
     except OSError as e:
@@ -172,7 +172,7 @@ def _tool(settings, key_file, agent, say, log):
     log.info("ssh-add exited with code %s" % rc)
     if rc != 0:
         raise VCharonError("config", "ssh-add didn't add %s (exit %s)" % (ssh.shown(key_file), rc),
-                           hint="check the passphrase, then run ferry key again")
+                           hint="check the passphrase, then run vcharon key again")
 
 
 def _agent_only(key, say):
@@ -182,11 +182,11 @@ def _agent_only(key, say):
     if platform.os_name() == "linux":
         say("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
             "login that brought it is open; for cron, use a key without a passphrase on this "
-            "machine (see ferry/README.md)")
+            "machine (see vcharon/README.md)")
 
 
 def unlock(settings, dest, key_file, log, say):
-    """ferry key (decisions 10-14 of the M5 plan): finds the key, unlocks it with the OS's
+    """vcharon key (decisions 10-14 of the M5 plan): finds the key, unlocks it with the OS's
     own tool when it's locked, and tests a BatchMode login to dest. Returns 0 or raises.
     dest may be None when key_file is given; key_file is absolute, or None to find the key
     with a -v probe."""
@@ -194,7 +194,7 @@ def unlock(settings, dest, key_file, log, say):
     if not terminal():
         raise needs_terminal()
     started = time.monotonic()
-    say("ferry: key %s" % (dest or ssh.shown(key_file)))
+    say("vcharon: key %s" % (dest or ssh.shown(key_file)))
     agent = agent_state(settings)
     state = agent[0]
     say("  agent   %s" % agent_text(*agent))
@@ -252,6 +252,6 @@ def unlock(settings, dest, key_file, log, say):
         except VCharonError:
             say("  test    FAIL")
             raise
-        say("  test    ok: ferry logs in to %s with no prompt" % dest)
+        say("  test    ok: vcharon logs in to %s with no prompt" % dest)
     say("OK  (%.1f s)" % (time.monotonic() - started))
     return 0

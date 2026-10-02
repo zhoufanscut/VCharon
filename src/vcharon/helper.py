@@ -1,4 +1,4 @@
-"""The helper: ferry's code on the server for one run; it answers the controller's calls."""
+"""The helper: vcharon's code on the server for one run; it answers the controller's calls."""
 
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ class Helper:
                 obj.close()
             except Exception:
                 try:
-                    sys.stderr.write("ferry: closing a plugin failed:\n%s"
+                    sys.stderr.write("vcharon: closing a plugin failed:\n%s"
                                      % traceback.format_exc())
                     sys.stderr.flush()
                 except Exception:
@@ -158,19 +158,19 @@ class Helper:
 
 
 def hello():
-    """DESIGN §7.3. FERRY_TEST_OS stands in for the OS's name in it, as FERRY_TEST_MACHINE_ID
+    """DESIGN §7.3. VCHARON_TEST_OS stands in for the OS's name in it, as VCHARON_TEST_MACHINE_ID
     does for the id: tests on a Mac or Windows run their helper there, and the client takes
-    only a Linux one (M11a). FERRY_TEST_CLOCK_SHIFT (seconds) moves the clock, and
-    FERRY_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests (M12b)."""
-    offset = os.environ.get("FERRY_TEST_UTC_OFFSET")
+    only a Linux one (M11a). VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
+    VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests (M12b)."""
+    offset = os.environ.get("VCHARON_TEST_UTC_OFFSET")
     msg = {"t": "hello", "protocol": PROTOCOL, "version": VERSION,
            "python": platform.python_version(),
-           "os": os.environ.get("FERRY_TEST_OS") or platform.os_name(),
+           "os": os.environ.get("VCHARON_TEST_OS") or platform.os_name(),
            "distro": platform.distro(), "machine": platform.machine_id(),
            "user": platform.user(), "home": platform.home(),
            "utc_offset": int(offset) if offset else time.localtime().tm_gmtoff}
     # last, so the gap leaves out the time the other fields took
-    msg["time"] = time.time() + float(os.environ.get("FERRY_TEST_CLOCK_SHIFT") or 0)
+    msg["time"] = time.time() + float(os.environ.get("VCHARON_TEST_CLOCK_SHIFT") or 0)
     return msg
 
 
@@ -249,7 +249,7 @@ def _is_role(value):
 
 
 def plugin_doctor(h, call_id, args):
-    # Any number of times, and it sets neither h.source nor h.sink: ferry doctor only reads.
+    # Any number of times, and it sets neither h.source nor h.sink: vcharon doctor only reads.
     _check_args("plugin.doctor", args, {"plugin": _is_str, "role": _is_role,
                                         "options": _is_options})
     checks = plugin.doctor("remote", args["plugin"], args["role"], args["options"], h.ctx)
@@ -337,7 +337,7 @@ def sink_abort(h, call_id, args):
 
 
 def job_reset(h, call_id, args):
-    """Between two jobs on one connection (ferry run a b): closes this job's plugins as the
+    """Between two jobs on one connection (vcharon run a b): closes this job's plugins as the
     helper's exit does, so a sink that didn't commit drops its stage dir, then forgets them
     and the calls made, so the next job may plan and check again. Fine when nothing was
     planned."""
@@ -349,7 +349,7 @@ def job_reset(h, call_id, args):
 
 
 # The channel root's calls (DESIGN §14 M10). The root is never an argument: the helper uses the
-# fixed root, or FERRY_CHANNELS_ROOT in its environment (tests). Each function checks the names
+# fixed root, or VCHARON_CHANNELS_ROOT in its environment (tests). Each function checks the names
 # again and works only directly below the root.
 
 def channel_list(h, call_id, args):
@@ -424,7 +424,7 @@ def main(nonce):
     conn = HelperConn(sys.stdin.buffer, out)
     h = None
     try:
-        conn.write_raw(("FERRY-READY %s\n" % nonce).encode("ascii"))
+        conn.write_raw(("VCHARON-READY %s\n" % nonce).encode("ascii"))
         conn.send_json(hello())
         h = Helper(conn, sys.stdin.buffer)
         return serve(h)
