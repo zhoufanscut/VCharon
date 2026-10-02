@@ -3,12 +3,18 @@ line each (DESIGN §13); client. It only reads, apart from a temp file in the st
 dirs, and its log. It never prompts.
 
 --json prints one object instead: {"version", "protocol", "python", "executable", "os",
-"command", "ok", "failed", "warnings", "checks"}. "command" is how this box runs vcharon (the
-fix lines' spelling); "ok" is true when no check failed; "failed" and "warnings" count the
-checks of those levels; each of "checks" is {"level", "subject", "text", "fix", "note"}, in
-the order the lines would print: "level" is "ok", "warn" or "FAIL", "subject" what was checked
-(python, config, a server's alias, a job's name, …), "fix" the fix line's text (as this box
-runs vcharon) and "note" an ok line's note, each null when there is none."""
+"command", "box", "box_source", "claimer_source", "ok", "failed", "warnings", "checks"}.
+"command" is how this box runs vcharon (the fix lines' spelling); "box" this machine's part of
+member names and "box_source" "config" ([vcharon] box) or "os" (the default), both null when
+the config can't be read; "claimer_source" what the id this machine claims member folders with
+comes from: "client-id file (from the machine id)" or "client-id file (random)"; before the
+first join has made that file, the source it will be made from; null when the file can't be
+read, or can't be made (a Mac or Windows box whose id couldn't be read); "ok" is true when no
+check failed; "failed" and "warnings" count the checks of those levels; each of "checks" is
+{"level", "subject", "text", "fix", "note"}, in the order the lines would print: "level" is
+"ok", "warn" or "FAIL", "subject" what was checked (python, config, a server's alias, a job's
+name, …), "fix" the fix line's text (as this box runs vcharon) and "note" an ok line's note,
+each null when there is none."""
 
 from __future__ import annotations
 
@@ -26,7 +32,7 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("vcharon", "python", "config", "ssh", "agent", "dirs", "machine")
+CLIENT_SUBJECTS = ("vcharon", "python", "config", "box", "ssh", "agent", "dirs", "machine")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one (M12b): headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
@@ -149,6 +155,11 @@ def _config(rep, cfg, err, no_scope):
         rep.check("warn", "config", skip.line, skip.error.hint)
 
 
+def _box(rep, cfg):
+    if cfg is not None:
+        rep.check("ok", "box", cfg.box_text())
+
+
 def _ssh(rep, settings):
     hint = ssh.START_HINT
     argv = ssh.ssh_prefix(settings) + ["-V"]
@@ -215,15 +226,26 @@ def _dirs(rep):
 
 
 def _machine(rep):
-    """This machine's id (M11d), so an agent checking it needs no python3 -c. Only a warn
-    without one: a client of remote jobs needs none."""
+    """This machine's id (M11d), so an agent checking it needs no python3 -c, and the
+    client-id file the claimer id in MEMBER.md comes from. Only a warn without a machine id:
+    a client of remote jobs needs none. Returns the claimer's source, as --json gives it, or
+    None when the file can't be read."""
     mid = platform.machine_id()
     if mid:
         rep.check("ok", "machine", mid)
-        return
-    hint = platform.no_machine_hint() or "give it one: systemd-machine-id-setup, as root"
-    rep.check("warn", "machine", "no machine id: this machine can't hold a channel (--local), "
-              "nor keep jobs' state as a server", hint)
+    else:
+        hint = platform.no_machine_hint() or "give it one: systemd-machine-id-setup, as root"
+        rep.check("warn", "machine", "no machine id: this machine can't hold a channel "
+                  "(--local), nor keep jobs' state as a server", hint)
+    path = platform.client_id_path()
+    try:
+        cid, origin = platform.client_id(make=False)
+    except VCharonError as e:
+        rep.check("FAIL", "machine", e.message, e.hint)
+        return None
+    rep.check("ok", "machine", "member folders are claimed with the client-id file %s (%s%s)"
+              % (path, "" if cid else "made at the first join, ", origin))
+    return "client-id file (%s)" % origin
 
 
 # --- a destination (decision 19) ---
@@ -455,11 +477,12 @@ def main(args, run):
     _vcharon(rep)
     _python(rep)
     _config(rep, cfg, cfg_err, not dests)
+    _box(rep, cfg)
     _ssh(rep, base)
     agent = keys.agent_state(base)
     _agent(rep, agent, dests)
     _dirs(rep)
-    _machine(rep)
+    claimer_source = _machine(rep)
     for d in dests:
         # a locked key's FAIL line says to run vcharon key: the doctor never prompts
         logged_in, _ = _login(rep, d, agent, log)
@@ -473,6 +496,9 @@ def main(args, run):
         print(json.dumps({"version": VERSION, "protocol": PROTOCOL,
                           "python": platform.python_version(), "executable": sys.executable,
                           "os": platform.os_name(), "command": platform.self_command(),
+                          "box": cfg.box_name if cfg is not None else None,
+                          "box_source": cfg.box_source if cfg is not None else None,
+                          "claimer_source": claimer_source,
                           "ok": not rep.failed, "failed": rep.failed,
                           "warnings": rep.warnings, "checks": rep.checks},
                          ensure_ascii=False))

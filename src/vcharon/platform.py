@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import getpass
 import hashlib
 import ntpath
@@ -14,8 +15,11 @@ import site
 import struct
 import sys
 import sysconfig
+import tempfile
+import time
 
 from . import fsops
+from .proto import VCharonError
 
 _MACHINE_ID = re.compile(r"\A[0-9a-f]{32}\Z")
 # macOS's IOPlatformUUID and Windows' MachineGuid: a UUID, in either case
@@ -27,7 +31,7 @@ _UNSAFE = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
 # vcharon's commands, as runnable() takes them: `vcharon` at the text's start or after a space, (
 # or `, then one of these and a space, the end, or a mark that ends a clause; never `vcharon's`,
 # `vcharon/`, `vcharon sync's`, a path, or the `-m vcharon` of a command runnable() wrote
-COMMANDS = ("key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
+COMMANDS = ("setup", "key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
             "post", "read", "watch", "sync", "--version", "--help")
 _VCHARON_WORD = re.compile(r"(?:\A|(?<=[ (`]))(?<!-m )vcharon (%s)(?=\Z|[\s),.;`])"
                            % "|".join(re.escape(c) for c in COMMANDS))
@@ -41,6 +45,12 @@ def os_name():
     if sys.platform == "darwin":
         return "darwin"
     return "linux"
+
+
+def os_word():
+    """This OS as a member's name and MEMBER.md spell it: mac, win or linux. Never a host
+    name: one can name an employer or a network."""
+    return {"darwin": "mac", "windows": "win"}.get(os_name(), "linux")
 
 
 def _path():
@@ -344,6 +354,171 @@ def machine_id(paths=("/etc/machine-id", "/var/lib/dbus/machine-id"), ioreg=_ior
     if not isinstance(uuid, str) or not _UUID.match(uuid):
         return None
     return _hashed(uuid)
+
+
+CLIENT_ID_FILE = "client-id"
+# where a client-id file's id came from: its second line
+FROM_MACHINE = "from the machine id"
+FROM_RANDOM = "random"
+# an empty client-id file is another run writing it (or was, before the link): read again
+# this many times, this far apart, before refusing it
+CLIENT_ID_TRIES = 5
+CLIENT_ID_PAUSE = 0.1
+
+
+def client_id_path():
+    return _path().join(state_dir(), CLIENT_ID_FILE)
+
+
+def _read_client_id(path):
+    """(id, origin) of the client-id file, or None when it's missing; an empty file is read
+    again a few times (a writer racing us), then refused like any other malformed one."""
+    hint = ("if your user confirms it, delete it; this machine then looks new to the "
+            "channels it is in")
+    for left in range(CLIENT_ID_TRIES - 1, -1, -1):
+        try:
+            with open(path, "rb") as f:
+                text = f.read(256).decode("ascii", "replace")
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            raise fsops.error(e, path)
+        if text.strip() or not left:
+            break
+        time.sleep(CLIENT_ID_PAUSE)
+    lines = text.split("\n")
+    cid = lines[0].strip()
+    if not _MACHINE_ID.match(cid):
+        raise VCharonError("config", "%s isn't a client id (32 hex digits)" % path, hint)
+    origin = lines[1].strip() if len(lines) > 1 else ""
+    return cid, origin if origin in (FROM_MACHINE, FROM_RANDOM) else "unknown"
+
+
+# os.link's errors on a file system without hard links (FAT, exFAT, some SMB and FUSE mounts)
+NO_LINK_ERRNOS = frozenset(getattr(errno, name) for name in (
+    "EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS") if hasattr(errno, name))
+
+
+def _create_excl(path, data):
+    """path made with O_EXCL and data written into it: FileExistsError when it's there. A
+    reader that comes between the create and the write sees it empty, and reads again
+    (_read_client_id)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def client_id(make=True):
+    """(this client's id, where it came from): always the state dir's client-id file, made at
+    first use from machine_id() (sha256 of "vcharon:" and it, 32 hex digits) or, on a Linux
+    box with no machine id, at random; a Mac or Windows box always has one, so there a missing
+    id is a failed read, refused. After that the file alone counts, so a machine id that turns up
+    later, or one ioreg or the registry fails to give once, changes nothing; a wiped state
+    dir gets the same id back while the machine id is there. Only a hash of it with a
+    channel's name ever leaves this machine (claimer). make=False (doctor, which changes
+    nothing): (None, where a new one would come from) when the file isn't there yet. A
+    malformed file is an error: a new id would make this machine look like another one."""
+    path = client_id_path()
+    found = _read_client_id(path)
+    if found is not None:
+        return found
+    mid = machine_id()
+    if mid:
+        cid = hashlib.sha256(("vcharon:" + mid).encode("ascii")).hexdigest()[:32]
+        origin = FROM_MACHINE
+    elif os_name() in ("darwin", "windows"):
+        # these always have one: None is a read that failed this time, and a random id made
+        # now would be kept for good
+        raise VCharonError("io", "couldn't read this machine's id (%s), so no client id is "
+                           "made" % ("ioreg's IOPlatformUUID" if os_name() == "darwin"
+                                     else "the registry's MachineGuid"),
+                           "run the command again; if it keeps failing, your user can write "
+                           "%s by hand: 32 hex digits (0-9, a-f), then a line: %s"
+                           % (path, FROM_RANDOM))
+    else:
+        # a Linux box without /etc/machine-id (some containers)
+        cid, origin = os.urandom(16).hex(), FROM_RANDOM
+    if not make:
+        return None, origin
+    folder = os.path.dirname(path)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        fd, temp = tempfile.mkstemp(dir=folder, prefix=".client-id-", suffix=".tmp")
+    except OSError as e:
+        raise fsops.error(e, folder)
+    try:
+        data = ("%s\n%s\n" % (cid, origin)).encode("ascii")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        # the whole file appears at once, and never over another run's: a hard link fails
+        # when path exists; Windows' rename does too. By this host's own OS: a POSIX rename
+        # would replace the file.
+        try:
+            if fsops.WINDOWS:
+                os.rename(temp, path)
+            else:
+                try:
+                    os.link(temp, path)
+                except OSError as e:
+                    if e.errno not in NO_LINK_ERRNOS:
+                        raise
+                    _create_excl(path, data)
+        except FileExistsError:
+            pass
+    except OSError as e:
+        raise fsops.error(e, path)
+    finally:
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
+    # ours, or the one another run linked first
+    found = _read_client_id(path)
+    if found is None:
+        raise VCharonError("io", "couldn't make %s" % path, "run the command again")
+    return found
+
+
+def claimer(channel, make=True):
+    """The claimer id this machine writes into MEMBER.md in channel: sha256 of "<channel>:"
+    and client_id(), 16 hex digits. With the channel's name in the hash, no raw id reaches a
+    shared file, and one machine looks different in different channels."""
+    cid, _ = client_id(make)
+    if cid is None:
+        return None
+    return hashlib.sha256(("%s:%s" % (channel, cid)).encode("utf-8")).hexdigest()[:16]
+
+
+# The agent that runs vcharon, from what each one sets in the shells it starts; only what its
+# own docs or source say. More than one found (one agent started inside another's shell) gives
+# None: the user passes --agent.
+AGENTS = ("claude", "codex", "opencode", "other")
+AGENT_ENV = (
+    # Claude Code: "Set to `1` in subprocesses Claude Code spawns (Bash and PowerShell tools,
+    # ...)", https://code.claude.com/docs/en/env-vars (CLAUDECODE)
+    ("claude", "CLAUDECODE"),
+    # Codex CLI: its shell tool sets CODEX_THREAD_ID (codex-rs/core/src/unified_exec/
+    # process_manager.rs, open_session_with_sandbox; codex-rs/protocol/src/
+    # shell_environment.rs), https://github.com/openai/codex/blob/
+    # 9d2b60303e83198905604e704116daa8998c3c47/codex-rs/protocol/src/shell_environment.rs
+    ("codex", "CODEX_THREAD_ID"),
+    # OpenCode: `process.env.OPENCODE = "1"` at start (packages/opencode/src/index.ts), and its
+    # shell tool passes process.env on (packages/opencode/src/tool/shell.ts, shellEnv),
+    # https://github.com/anomalyco/opencode/blob/c42ae0d56b6f86f8df39d451d6d2cfe6414b3928/
+    # packages/opencode/src/index.ts
+    ("opencode", "OPENCODE"),
+)
+
+
+def detect_agent(env=None):
+    """The agent whose variable is set in env (os.environ), or None: none, or several."""
+    env = os.environ if env is None else env
+    found = [agent for agent, var in AGENT_ENV if env.get(var)]
+    return found[0] if len(found) == 1 else None
 
 
 def no_machine_hint():

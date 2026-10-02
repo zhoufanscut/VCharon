@@ -30,7 +30,6 @@ RECORD_OPTIONAL = ("project", "role")
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
 _NOT_NAME = re.compile(r"[^a-z0-9_]+")
-BOX_HINT = "set box in [vcharon] of vcharon.ini (the user picks it: mac, win, linux, laptop)"
 RULES = "MAILBOX.md in the vcharon folder (the vcharon skill)"
 # A channel section's up never creates (M10): a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
@@ -73,12 +72,11 @@ def member_name(cfg, project=None, role=None, cwd=None):
 
 
 def member_parts(cfg, project=None, role=None, cwd=None):
-    """(the member's name, its cleaned project, its role or None)."""
-    if not cfg.box:
-        raise VCharonError("config", BOX_HINT, hint="fix %s" % cfg.path)
+    """(the member's name, its cleaned project, its role or None). The box is [vcharon] box,
+    else the OS's word (cfg.box_name): never a host name."""
     check_role(role)
     p = project_part(project, cwd)
-    name = "%s-%s" % (cfg.box, p) + ("-%s" % role if role else "")
+    name = "%s-%s" % (cfg.box_name, p) + ("-%s" % role if role else "")
     problem = pathrules.writer_problem(name)
     if problem:
         raise VCharonError("config", "the member's name %s: %s" % (name, problem),
@@ -168,9 +166,9 @@ def _is(record, project, role, cfg):
     would build."""
     if isinstance(record.get("project"), str):
         return record["project"] == project and (record.get("role") or None) == role
-    if cfg is None or not cfg.box:
+    if cfg is None:
         return False
-    return record["name"] == "%s-%s" % (cfg.box, project) + ("-%s" % role if role else "")
+    return record["name"] == "%s-%s" % (cfg.box_name, project) + ("-%s" % role if role else "")
 
 
 def find(cfg, channel, project, role):
@@ -496,6 +494,16 @@ def main(args, run):
                         else "the member without a role"))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}
+        if getattr(args, "takeover", False) and not args.rejoin:
+            raise VCharonError("config", "--takeover goes with --rejoin",
+                               hint="add --rejoin, and only when your user confirms that this "
+                               "machine made that folder")
+        detected = platform.detect_agent()
+        # agent_given: --agent, or found in the environment; a rejoin updates agent: only then.
+        # The claimer is set after _need_machine: a Mac or Windows box without its id gets
+        # that check's own refusal first
+        args.fields = {"agent": args.agent or detected or "other",
+                       "agent_given": bool(args.agent or detected), "claimer": None}
         if args.command == "create":
             return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
@@ -527,6 +535,9 @@ def _list(args, cfg, log, say):
         elif len(leaders) > 1:
             say("    note: %s all hold %s: ask the user"
                 % (", ".join(l + "/" for l in leaders), entries.CHANNEL_FILE))
+        for one in member_info(ch):
+            say("    %s  box %s  os %s  agent %s  project %s"
+                % tuple([one["name"]] + [one[k] or "-" for k in channels.LIST_FIELDS]))
         for stray in ch.get("strays", []):
             say("    note: %s at its top isn't a member's folder" % pathrules.show(stray))
     for other in listing["others"]:
@@ -534,18 +545,34 @@ def _list(args, cfg, log, say):
     return 0
 
 
+def member_info(ch):
+    """[{"name", "box", "os", "agent", "project"}] of a listed channel's members, in its
+    members' order: from their MEMBER.md, None for each field it lacks."""
+    fields = ch.get("fields") if isinstance(ch.get("fields"), dict) else {}
+    out = []
+    for name in ch["members"]:
+        one = fields.get(name) if isinstance(fields.get(name), dict) else {}
+        out.append(dict([("name", name)] + [
+            (k, one.get(k) if isinstance(one.get(k), str) else None)
+            for k in channels.LIST_FIELDS]))
+    return out
+
+
 def list_json(server, listing):
     """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
-    for --local; each channel is {"name", "leader", "leaders", "members", "newest", "strays"}:
-    "leader" is the one leader, or null when there are none or several ("leaders" lists them),
-    "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null; each of "others" is
-    {"name", "why"}, a name at the root that isn't a usable channel."""
+    for --local; each channel is {"name", "leader", "leaders", "members", "member_info",
+    "newest", "strays"}: "leader" is the one leader, or null when there are none or several
+    ("leaders" lists them), "member_info" each member's {"name", "box", "os", "agent",
+    "project"} from its MEMBER.md (null for a field it lacks), "newest" the newest entry's
+    local time (YYYY-mm-dd HH:MM) or null; each of "others" is {"name", "why"}, a name at the
+    root that isn't a usable channel."""
     out = []
     for ch in listing["channels"]:
         leaders = list(ch["leaders"])
         newest = ch.get("newest")
         out.append({"name": ch["name"], "leader": leaders[0] if len(leaders) == 1 else None,
                     "leaders": leaders, "members": list(ch["members"]),
+                    "member_info": member_info(ch),
                     "newest": entries.stamp(newest) if isinstance(newest, (int, float))
                     else None,
                     "strays": list(ch.get("strays", []))})
@@ -566,13 +593,16 @@ def _create(args, cfg, name, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         _need_machine(server)
+        # before any claim: a client-id file that can't be read or made stops here
+        args.fields["claimer"] = platform.claimer(args.channel)
         _another_server(record, server, channel)
         say("vcharon: create %s  as %s on %s" % (channel, name, server.where))
         got = server.claim(channel, name, True)
         made = []
         try:
-            own, remote_text = _write_member(cfg, server, channel, name, name, section, made,
-                                             got, args.ident, create=True)
+            own, remote_text, _ = _write_member(cfg, server, channel, name, name, section,
+                                                made, got, args.ident, args.fields,
+                                                create=True)
         except BaseException:
             # while the folder holds only those files: release removes nothing else
             _undo(made)
@@ -594,11 +624,11 @@ def _create(args, cfg, name, log, say):
     return 0
 
 
-def _write_member(cfg, server, channel, name, leader, section, made, got, ident, create=False,
-                  rejoin=False):
+def _write_member(cfg, server, channel, name, leader, section, made, got, ident, fields,
+                  create=False, rejoin=False):
     """The record, MEMBER.md (and CHANNEL.md for create), a remote member's section file:
-    returns (the own folder, mailbox.remote's text or the channel folder). made collects what
-    it wrote, for _undo."""
+    returns (the own folder, mailbox.remote's text or the channel folder, MEMBER.md's fields
+    after leader:). made collects what it wrote, for _undo."""
     remote = server.ssh is not None
     if remote:
         # the root as the helper spelled it: ~/… for the fixed one
@@ -608,6 +638,7 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
     doc = {"version": RECORD_VERSION, "channel": channel, "name": name, "leader": leader,
            "ssh": server.ssh, "remote": remote_text, "machine": server.machine}
     doc.update(ident)
+    fields = member_header(name, ident, fields, cfg)
     if not rejoin or read_record(channel, name) is None:
         made.append(record_path(channel, name))
     write_record(doc)
@@ -623,28 +654,41 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
     else:
         own = os.path.join(remote_text, name)
     if not rejoin:
-        _member_md(own, channel, name, leader, made)
+        _member_md(own, channel, name, leader, made, fields)
     if create:
         made.append(os.path.join(own, entries.CHANNEL_FILE))
+        # no host name of either end: a channel's files are shared
         entries.post(os.path.join(own, entries.CHANNEL_FILE), own, name,
                      "channel %s created" % channel, [entries.ALL],
-                     header=[("leader", name), ("server host", got.get("host") or "?"),
-                             ("created", entries.stamp(time.time())), ("rules", RULES)],
+                     header=[("leader", name), ("created", entries.stamp(time.time())),
+                             ("rules", RULES)],
                      number=2)
     if remote:
         if not os.path.exists(section_path(cfg, section)):
             made.append(section_path(cfg, section))
         write_section(cfg, section, server.ssh, name, leader, remote_text)
-    return own, remote_text
+    return own, remote_text, fields
 
 
-def _member_md(own, channel, name, leader, made):
+def member_header(name, ident, fields, cfg):
+    """MEMBER.md's fields after leader: (box, os, agent, project, claimer), as (key, value):
+    the box is the name's own (a name kept from before a box change keeps its box), the OS
+    this one's word; no host name, path, user name or raw machine id."""
+    suffix = "-%s" % ident["project"] + ("-%s" % ident["role"] if ident.get("role") else "")
+    box = name[:-len(suffix)] if name.endswith(suffix) and len(name) > len(suffix) else None
+    return [("box", box or cfg.box_name), ("os", platform.os_word()),
+            ("agent", fields["agent"]), ("project", ident["project"]),
+            ("claimer", fields["claimer"])]
+
+
+def _member_md(own, channel, name, leader, made, fields):
     path = os.path.join(own, entries.MEMBER_FILE)
     if os.path.exists(path):
         return
     made.append(path)
     entries.post(path, own, name, "member", ["@" + leader],
-                 header=[("channel", channel), ("name", name), ("leader", leader)], number=1)
+                 header=[("channel", channel), ("name", name), ("leader", leader)] + fields,
+                 number=1)
 
 
 def _undo(made):
@@ -666,6 +710,8 @@ def _join(args, cfg, name, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         _need_machine(server)
+        # before any claim: a client-id file that can't be read or made stops here
+        args.fields["claimer"] = platform.claimer(args.channel)
         say("vcharon: join %s  as %s on %s" % (channel, name, server.where))
         # 1. the leader, before any claim: a refused join leaves nothing behind
         found = _find(server.list(), channel, server.where)
@@ -696,15 +742,21 @@ def _join(args, cfg, name, log, say):
         # 3. one mkdir
         got = server.claim(channel, name, False)
         rejoin = got["existed"]
+        # 4. a folder that was there: whose (its MEMBER.md's claimer:)
+        takeover = rejoin and _claimed_elsewhere(args, server, got, name, record)
         if rejoin and record is None and not args.rejoin:
             raise channels.refused("the name %s is taken in %s" % (name, channel),
                                    "pass --role R to join as another member; --rejoin only when "
                                    "the user says that folder is yours")
+        if rejoin:
+            # before the record: a MEMBER.md that is a link fails here, not halfway through
+            _check_member_file(_own_path(server, got, channel, name, section))
         made = []
         try:
-            # 4. the record first; before it is written, a failure releases the claim
-            own, remote_text = _write_member(cfg, server, channel, name, leader, section, made,
-                                             got, args.ident, rejoin=rejoin)
+            # 5. the record first; before it is written, a failure releases the claim
+            own, remote_text, fields = _write_member(cfg, server, channel, name, leader,
+                                                     section, made, got, args.ident,
+                                                     args.fields, rejoin=rejoin)
         except BaseException:
             if not rejoin:
                 _undo(made)
@@ -715,13 +767,22 @@ def _join(args, cfg, name, log, say):
             raise
         say("  %s %s/%s; the leader is %s" % ("took back" if rejoin else "claimed", channel,
                                               name, leader))
-        # 5. a rejoin pulls back what this box lacks of its own folder first: up from a folder
+        # 6. a rejoin pulls back what this box lacks of its own folder first: up from a folder
         # missing files it sent would delete them at the server, and posts would restart at #1
         if rejoin and server.ssh is not None and needs_pull(section, own):
             _pull_own(server, remote_text, name, own, log, say)
         if rejoin:
             os.makedirs(own, exist_ok=True)
-            _member_md(own, channel, name, leader, [])
+            _member_md(own, channel, name, leader, [], fields)
+        if takeover:
+            # after the pull, which brought the old claimer: back; the sync below sends it
+            _check_member_file(own)
+            entries.set_header(os.path.join(own, entries.MEMBER_FILE), own, name, 1,
+                               "claimer", args.fields["claimer"])
+            say("  took over %s/%s: its claimer is this machine's now" % (channel, name))
+        if rejoin:
+            # the same checkout may run another agent now: its name isn't tied to one
+            _update_agent(own, name, args.fields, say)
     code = 0
     if server.ssh is not None:
         code = _run_section(args, section, full=True)
@@ -735,12 +796,84 @@ def _join(args, cfg, name, log, say):
     entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
                  ["@" + leader], body="%s %s %s." % (name, "rejoined" if rejoin else "joined",
                                                      channel))
-    # 6. the member's first watcher start is a baseline and never prints these
+    # 7. the member's first watcher start is a baseline and never prints these
     tree = os.path.dirname(own)
     _print_entries(tree, name, leader, channel, say)
     if code == 0:
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
+
+
+def _own_path(server, got, channel, name, section):
+    """The own folder a join of name would use, as _write_member makes it."""
+    if server.ssh is not None:
+        return os.path.join(plugin.Ctx("local").resolve(local_text(section), "mailbox.local"),
+                            name)
+    return os.path.join(server.root, channel, name)
+
+
+def _check_member_file(own):
+    """own's MEMBER.md is a regular file, or missing: a symlink or anything else is refused
+    (unsafe_path) before a rejoin writes into it."""
+    path = os.path.join(own, entries.MEMBER_FILE)
+    try:
+        st = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except OSError as e:
+        raise fsops.error(e, path)
+    if fsops.kind(st) != fsops.FILE:
+        raise VCharonError("unsafe_path", "%s isn't a regular file (a symlink, or a folder): "
+                           "vcharon writes MEMBER.md itself, and never through a link" % path,
+                           "remove it by hand, then join again")
+
+
+def _update_agent(own, name, fields, say):
+    """MEMBER.md's agent: set to the agent of this run when it says another (or none), in
+    place; only when one was found or --agent given: a rejoin from a plain terminal leaves it.
+    A MEMBER.md without vcharon's entry #1 is left as it is: the rejoin goes on."""
+    if not fields["agent_given"]:
+        return
+    agent = fields["agent"]
+    path = os.path.join(own, entries.MEMBER_FILE)
+    try:
+        found = entries.parse_file(path)
+    except OSError:
+        return
+    first = [e for e in found if e.name == name and e.number == 1]
+    if not first:
+        return
+    was = dict(first[0].header).get("agent")
+    if was == agent:
+        return
+    entries.set_header(path, own, name, 1, "agent", agent)
+    say("  agent: %s (was %s)" % (agent, was or "not set"))
+
+
+def _claimed_elsewhere(args, server, got, name, record):
+    """For a member folder that was there: refused when its MEMBER.md names another machine's
+    claimer, unless --takeover (with --rejoin, checked before); True then, for the rewrite.
+    False for the same claimer or none: the record, or --rejoin, decides as before (a new
+    remote member's first push may have failed: its MEMBER.md isn't at the server yet)."""
+    theirs = got.get("claimer")
+    if not isinstance(theirs, str) or theirs == args.fields["claimer"]:
+        return False
+    if args.takeover:
+        return True
+    channel = args.channel
+    again = "vcharon join %s %s --rejoin --takeover %s" % (
+        channel, _where_flag(server), flags(args.ident["project"], args.ident["role"]))
+    if record is None:
+        raise channels.refused(
+            "another machine holds %s in %s" % (name, channel),
+            "on this machine, run: vcharon setup --box NAME (ask your user for one), then join "
+            "again; only if your user confirms that this machine made that folder (its state "
+            "was wiped), run: %s" % again)
+    raise channels.refused(
+        "another machine holds %s in %s, though this box has a join record of it"
+        % (name, channel),
+        "ask your user; only if they confirm that this machine made that folder (its machine "
+        "id or client-id file changed), run: %s" % again)
 
 
 def needs_pull(section, own):

@@ -105,6 +105,10 @@ def _parser():
     def as_json(one):
         one.add_argument("--json", action="store_true", help="print one JSON object instead")
 
+    one = verb("setup", "write the config; without --box, print what this machine uses",
+               "vcharon setup --box laptop")
+    one.add_argument("--box", metavar="NAME", help="this machine's part of every member name, "
+                     "at most %d of a-z0-9_- (default: the OS: mac, win, linux)" % config.BOX_MAX)
     key = verb("key", "unlock an ssh key into this OS's agent or keychain, so runs stop failing "
                "after a reboot", "vcharon key dev")
     key.add_argument("dest", metavar="ALIAS", nargs="?",
@@ -123,16 +127,26 @@ def _parser():
                "vcharon list --server dev")
     where(one)
     as_json(one)
+    def agent(one):
+        one.add_argument("--agent", choices=platform.AGENTS, help="the agent you are, for "
+                         "MEMBER.md and vcharon list (default: found from the environment, "
+                         "else other)")
+
     one = verb("create", "create a channel; you lead it", "vcharon create game --server dev")
     channel(one)
     where(one)
     ident(one)
+    agent(one)
     one = verb("join", "join a channel as a member", "vcharon join game --server dev")
     channel(one)
     where(one)
     ident(one)
+    agent(one)
     one.add_argument("--rejoin", action="store_true", help="take an existing folder of your "
                      "name without a record here; only when the user says it's yours")
+    one.add_argument("--takeover", action="store_true", help="with --rejoin: take the folder "
+                     "though another machine's id holds it; only when the user confirms this "
+                     "is that machine")
     one = verb("leave", "leave a channel (a member; the leader closes it)", "vcharon leave game")
     channel(one)
     ident(one)
@@ -303,36 +317,40 @@ def _member_doc(cfg, record):
 
 def _whoami(args, run):
     """vcharon whoami [C] [--json]. With C, one object: {"channel", "name", "project", "role",
-    "leader", "leads", "mode", "server", "folder", "tree"}: "mode" is "local" or "remote",
-    "server" the alias (null for a local member), "folder" your own folder on this box and
-    "tree" the channel's (a remote member's copy); "role" is null without one. Without C:
-    {"box", "project", "role", "name", "channels"}: "name" is the name a join from here would
-    take (null without a box), "channels" every membership of this project on this box (of
-    this role too, with --role), each an object as with C."""
+    "leader", "leads", "mode", "server", "folder", "tree", "box", "box_source"}: "mode" is
+    "local" or "remote", "server" the alias (null for a local member), "folder" your own
+    folder on this box and "tree" the channel's (a remote member's copy); "role" is null
+    without one. "box" is this machine's box now (a membership keeps the name it joined
+    with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
+    Without C: {"box", "box_source", "project", "role", "name", "channels"}: "name" is the
+    name a join from here would take, "channels" every membership of this project on this box
+    (of this role too, with --role), each an object as with C, without "box" and
+    "box_source"."""
     cfg = load_config()
+    box = {"box": cfg.box_name, "box_source": cfg.box_source}
     if args.channel is not None:
         record, _ = _membership(args, cfg)
         doc = _member_doc(cfg, record)
         if args.json:
-            return _print_json(doc)
+            return _print_json(dict(doc, **box))
         _say("vcharon: whoami %s" % args.channel)
         _whoami_lines(doc)
+        _say("  box      %s" % cfg.box_text())
         return 0
     channel_cmd.check_role(args.role)
     project = channel_cmd.project_part(args.project)
-    name = channel_cmd.member_name(cfg, project, args.role) if cfg.box else None
+    name = channel_cmd.member_name(cfg, project, args.role)
     mine = [r for r in channel_cmd.records()
             if r.get("project") == project and (args.role is None
                                                 or r.get("role") == args.role)]
-    doc = {"box": cfg.box, "project": project, "role": args.role, "name": name,
-           "channels": [_member_doc(cfg, r) for r in mine]}
+    doc = dict(box, project=project, role=args.role, name=name,
+               channels=[_member_doc(cfg, r) for r in mine])
     if args.json:
         return _print_json(doc)
     _say("vcharon: whoami")
-    _say("  box      %s" % (cfg.box or "none: set box in [vcharon] of %s" % cfg.path))
+    _say("  box      %s" % cfg.box_text())
     _say("  project  %s%s" % (project, "  role %s" % args.role if args.role else ""))
-    if name:
-        _say("  name     %s (a join from here)" % name)
+    _say("  name     %s (a join from here)" % name)
     if not mine:
         _say("  no channels joined from this project")
     for one in doc["channels"]:
@@ -393,8 +411,9 @@ def _post(args, run):
             "%s is the leader's (%s): its plan" % (post_mod.STEPS_FILE, record["leader"]),
             "leave out %s: your entries go into %s"
             % ("--steps" if args.steps else "--file %s" % file, post_mod.RESULTS_FILE))
-    tree, _ = _tree(cfg, record)
+    tree, synced = _tree(cfg, record)
     own = os.path.join(tree, name)
+    post_mod.check_own(own, tree if synced else None)
     # a missing own folder is post()'s to refuse, with the rejoin as its fix
     path = (post_mod.file_below(own, parts) if os.path.isdir(own)
             else os.path.join(own, *parts))
@@ -506,7 +525,25 @@ def _doctor(args, run):
     return doctor.main(args, run)
 
 
+def _setup(args, run):
+    """vcharon setup [--box NAME]: the config file made when missing; --box sets [vcharon]
+    box in it. Prints the box this machine uses and where the config is. Never prompts."""
+    wrote = config.setup_file(args.box)
+    cfg = load_config()
+    _say("vcharon: setup")
+    _say("  config   %s%s" % (cfg.path, " (written)" if wrote else ""))
+    _say("  box      %s" % cfg.box_text())
+    if args.box is None and cfg.box is None:
+        _say(platform.runnable("  note: to name this machine otherwise (laptop, a name each "
+                               "of your machines has its own of): vcharon setup --box NAME"))
+    if args.box is not None and channel_cmd.records():
+        _say("  note: your channels keep the names you joined with")
+    _say("OK")
+    return 0
+
+
 COMMANDS = {
+    "setup": _setup,
     "key": lambda args, run: _key(args, run),
     "doctor": _doctor,
     "ping": lambda args, run: _ping(args, run),

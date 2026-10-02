@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import cli, config, run, ssh, stage
+from vcharon import cli, config, platform, run, ssh, stage
 from vcharon.log import Log
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -71,7 +71,10 @@ class FakeSshCase(unittest.TestCase):
         os.mkdir(self.vcharon_home)
         self.log_path = os.path.join(self.tmp, "test.log")
         self.log = Log(self.log_path)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("FAKE_SSH_")}
+        # nor the agent this suite runs under: MEMBER.md's agent: is a test's to set
+        agent_vars = {var for _, var in platform.AGENT_ENV}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("FAKE_SSH_") and k not in agent_vars}
         env.update(FAKE_SSH_HOME=self.home, VCHARON_TEST_MACHINE_ID=TEST_MACHINE_ID,
                    VCHARON_HOME=self.vcharon_home)
         patcher = mock.patch.dict(os.environ, env, clear=True)

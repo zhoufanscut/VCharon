@@ -588,6 +588,27 @@ class ChannelsDirTest(MailboxCase):
                 self.assertIn("such as mac, win, linux or laptop", e.message)
 
 
+class TextWithBoxTest(unittest.TestCase):
+    """vcharon setup --box's edit: one line changed or added, the rest byte for byte."""
+
+    def test_edits(self):
+        comment = config.BOX_COMMENT % "linux"
+        for before, after in (
+                ("", "[vcharon]\nbox = mac\n"),
+                ("# mine\n[other]\nx = 1\n", "[vcharon]\nbox = mac\n\n# mine\n[other]\nx = 1\n"),
+                ("[vcharon]\ncompress = yes\n", "[vcharon]\nbox = mac\ncompress = yes\n"),
+                ("[vcharon]", "[vcharon]\nbox = mac\n"),
+                ("; top\n[vcharon]\n# keep\nBOX : old\n[x]\nbox = other\n",
+                 "; top\n[vcharon]\n# keep\nbox = mac\n[x]\nbox = other\n"),
+                ("[vcharon]\n%s\nssh_path = /x\n" % comment,
+                 "[vcharon]\nbox = mac\nssh_path = /x\n"),
+                ("[vcharon]\r\n# c\r\nbox = a\r\n", "[vcharon]\r\n# c\r\nbox = mac\r\n"),
+                ("[x]\nbox = 1\n[vcharon]\n", "[x]\nbox = 1\n[vcharon]\nbox = mac\n"),
+                ("[vcharon]\nboxes = 1\n", "[vcharon]\nbox = mac\nboxes = 1\n")):
+            with self.subTest(before=before):
+                self.assertEqual(config.text_with_box(before, "mac"), after)
+
+
 # a retired fixed mailbox's section, with mailbox keys: the only section besides [vcharon] that
 # vcharon.ini still takes (skipped, its names taken)
 RETIRED = "[%s]\nssh = devbox\nmailbox.me = windows\nmailbox.local = ~/m\nmailbox.remote = m\n"

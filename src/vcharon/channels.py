@@ -5,12 +5,12 @@ folders, directly below the root; on both ends (the helper's channel.* calls, an
 from __future__ import annotations
 
 import os
-import socket
+import re
 import stat
 import time
 
 from . import fsops, pathrules, platform
-from .entries import CHANNEL_FILE, MEMBER_FILE
+from .entries import CHANNEL_FILE, MEMBER_FILE, header_of
 from .proto import VCharonError
 
 # The fixed root; VCHARON_CHANNELS_ROOT replaces it (tests only, through the fake ssh). Never a
@@ -26,10 +26,66 @@ CLOSED_PREFIX = ".vcharon-closed-"
 RELEASABLE = frozenset([MEMBER_FILE, CHANNEL_FILE])
 
 _DIR = fsops.PathDir if fsops.WINDOWS else fsops.FdDir
+# a MEMBER.md bigger than this isn't read at all: vcharon's is a few hundred bytes
+MEMBER_READ_MAX = 64 << 10
+# the fields of MEMBER.md's #1 that vcharon list shows, and their shape: a value of another
+# shape (a hand edit, an older or newer writer) is shown as missing, never printed
+LIST_FIELDS = ("box", "os", "agent", "project")
+_FIELD = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,31}\Z")
+CLAIMER_LEN = 16
+_CLAIMER = re.compile(r"\A[0-9a-f]{%d}\Z" % CLAIMER_LEN)
 
 
 def _no_tick():
     pass
+
+
+def member_fields(data, name):
+    """MEMBER.md's bytes: {"box", "os", "agent", "project", "claimer"} from the header of its
+    entry name#1, each None when missing or not in the shape vcharon writes."""
+    header = header_of(data.decode("utf-8", "replace"), name, 1)
+    out = {}
+    for key in LIST_FIELDS:
+        value = header.get(key)
+        out[key] = value if value is not None and _FIELD.match(value) else None
+    value = header.get("claimer")
+    out["claimer"] = value if value is not None and _CLAIMER.match(value) else None
+    return out
+
+
+def _read_head(reader):
+    """reader's bytes, or None when there are more than MEMBER_READ_MAX (vcharon writes
+    MEMBER.md far smaller: a bigger one isn't its); reader is closed."""
+    with reader as f:
+        data = b""
+        while len(data) <= MEMBER_READ_MAX:
+            got = f.read(MEMBER_READ_MAX + 1 - len(data))
+            if not got:
+                break
+            data += got
+    return data if len(data) <= MEMBER_READ_MAX else None
+
+
+def _member_file(folder):
+    """folder's MEMBER.md, or None: missing, not a regular file (never read through a link),
+    bigger than MEMBER_READ_MAX, or unreadable."""
+    path = os.path.join(folder, MEMBER_FILE)
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                os.close(fd)
+                return None
+            reader = open(fd, "rb", buffering=0)
+        except BaseException:
+            os.close(fd)
+            raise
+        return _read_head(reader)
+    except OSError:
+        return None
 
 
 def refused(text, hint):
@@ -120,9 +176,11 @@ def _close_all(*handles):
 # --- channel.list ---
 
 def list_channels(root, tick=_no_tick):
-    """{"channels": [{"name", "members", "leaders", "strays", "newest"}], "others": [{"name",
-    "why"}]}, in name order. leaders: the members whose folder holds CHANNEL.md; newest: the
-    newest file's mtime, or None. A missing root holds no channel."""
+    """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest"}], "others":
+    [{"name", "why"}]}, in name order. fields: for each member, {"box", "os", "agent",
+    "project"} from its MEMBER.md (None each when it's missing); leaders: the members whose
+    folder holds CHANNEL.md; newest: the newest file's mtime, or None. A missing root holds
+    no channel."""
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
@@ -154,10 +212,14 @@ def list_channels(root, tick=_no_tick):
 
 def _channel_info(path, name, tick):
     members, leaders, strays = [], [], []
+    fields = {}
     newest = None
     for entry in sorted(os.scandir(path), key=lambda e: e.name):
         if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
             members.append(entry.name)
+            data = _member_file(entry.path)
+            found = member_fields(data, entry.name) if data is not None else {}
+            fields[entry.name] = {k: found.get(k) for k in LIST_FIELDS}
             try:
                 st = os.lstat(os.path.join(entry.path, CHANNEL_FILE))
             except OSError:
@@ -176,8 +238,8 @@ def _channel_info(path, name, tick):
                 continue
             if stat.S_ISREG(st.st_mode) and (newest is None or st.st_mtime > newest):
                 newest = st.st_mtime
-    return {"name": name, "members": members, "leaders": leaders, "strays": strays,
-            "newest": newest}
+    return {"name": name, "members": members, "fields": fields, "leaders": leaders,
+            "strays": strays, "newest": newest}
 
 
 # --- channel.claim, channel.release ---
@@ -185,8 +247,10 @@ def _channel_info(path, name, tick):
 def claim(root, channel, name, create, tick=_no_tick):
     """mkdir <root>/<channel>/<name>, and with create <root>/<channel> first (and the root's
     missing parents): one mkdir each, so of two creators or two joiners with one name only one
-    wins. Returns {"existed": the member folder was there already, "machine", "host", "root":
-    the root as a section's mailbox.remote spells it}."""
+    wins. Returns {"existed": the member folder was there already, "machine", "root": the
+    root as a section's mailbox.remote spells it, "claimer": the claimer: of the existing
+    folder's MEMBER.md, or None (a new folder, no MEMBER.md, none in it)}. Never a host
+    name: the reply's values go into the channel's files."""
     _check_names(channel, name)
     if create:
         try:
@@ -228,10 +292,25 @@ def claim(root, channel, name, create, tick=_no_tick):
                 raise fsops.error(e, os.path.join(root, channel, name))
             raise
         _real_dir(ch, name, "%s/%s" % (channel, name))
+        claimer = _claimer_of(ch, name) if existed else None
     finally:
         _close_all(ch, top)
-    return {"existed": existed, "machine": platform.machine_id(),
-            "host": socket.gethostname(), "root": root_text()}
+    return {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
+            "claimer": claimer}
+
+
+def _claimer_of(ch, name):
+    """The claimer: of ch/name/MEMBER.md's entry name#1, or None: no such file, a link, one
+    that can't be read, or no claimer: line in vcharon's shape."""
+    member = None
+    try:
+        member = ch.enter(name, owner_rule=False)
+        data = _read_head(member.open_read(MEMBER_FILE))
+    except (OSError, VCharonError):
+        return None
+    finally:
+        _close_all(member)
+    return member_fields(data, name)["claimer"] if data is not None else None
 
 
 def release(root, channel, name, tick=_no_tick):

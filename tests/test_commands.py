@@ -15,11 +15,11 @@ import shutil
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, keys, platform
+from vcharon import channel_cmd, cli, config, keys, platform
 from vcharon.proto import VCharonError
 
 from tests.test_channel import ChannelCase
-from tests.util import PACKAGE_DIR, read_tree, write_tree
+from tests.util import CAN_SYMLINK, PACKAGE_DIR, read_tree, write_tree
 
 
 class IdentityTest(ChannelCase):
@@ -162,14 +162,16 @@ class WhoamiTest(ChannelCase):
         self.assertEqual(json.loads(out), {
             "channel": "game", "name": "mac-web-b", "project": "web", "role": "b",
             "leader": "laptop-ui", "leads": False, "mode": "remote", "server": "fake-dest",
-            "folder": os.path.join(tree, "mac-web-b"), "tree": tree})
+            "folder": os.path.join(tree, "mac-web-b"), "tree": tree, "box": "mac",
+            "box_source": "config"})
         code, out, err = self.run_cli("whoami", "game", "--role", "b")
         self.assertEqual(out.splitlines(), [
             "vcharon: whoami game",
             "  channel  game, led by laptop-ui",
             "  name     mac-web-b  (--project web --role b)",
             "  mode     remote, server fake-dest",
-            "  folder   %s" % os.path.join(tree, "mac-web-b")])
+            "  folder   %s" % os.path.join(tree, "mac-web-b"),
+            "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini")])
         # the leader, a local member
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
@@ -185,9 +187,10 @@ class WhoamiTest(ChannelCase):
         code, out, err = self.run_cli("whoami", "--json")
         self.assertEqual((code, err), (0, ""))
         doc = json.loads(out)
-        self.assertEqual(sorted(doc), ["box", "channels", "name", "project", "role"])
-        self.assertEqual((doc["box"], doc["project"], doc["role"], doc["name"]),
-                         ("mac", "web", None, "mac-web"))
+        self.assertEqual(sorted(doc), ["box", "box_source", "channels", "name", "project",
+                                       "role"])
+        self.assertEqual((doc["box"], doc["box_source"], doc["project"], doc["role"],
+                          doc["name"]), ("mac", "config", "web", None, "mac-web"))
         self.assertEqual([(c["channel"], c["name"]) for c in doc["channels"]],
                          [("docs", "mac-web-r"), ("game", "mac-web")])
         # --role narrows it to that role's
@@ -195,22 +198,190 @@ class WhoamiTest(ChannelCase):
         self.assertEqual((doc["name"], [c["name"] for c in doc["channels"]]),
                          ("mac-web-r", ["mac-web-r"]))
         lines = self.run_cli("whoami")[1].splitlines()
-        self.assertEqual(lines[:4], ["vcharon: whoami", "  box      mac", "  project  web",
-                                     "  name     mac-web (a join from here)"])
-        # no box, no channels
+        self.assertEqual(lines[:4], [
+            "vcharon: whoami",
+            "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini"),
+            "  project  web", "  name     mac-web (a join from here)"])
+        # no box set, no channels: the OS's
         self.use_box("nobox")
         with open(os.path.join(self.homes["nobox"], "vcharon.ini"), "w") as f:
             f.write("[vcharon]\n")
+        with mock.patch.object(platform, "os_word", return_value="win"):
+            doc = json.loads(self.run_cli("whoami", "--json")[1])
+            lines = self.run_cli("whoami")[1].splitlines()
+        self.assertEqual(doc, {"box": "win", "box_source": "os", "project": "web",
+                               "role": None, "name": "win-web", "channels": []})
+        self.assertEqual(lines[1], "  box      win (default, from the OS)")
+
+
+class SetupTest(ChannelCase):
+    """vcharon setup [--box NAME]: writes the config, never prompts, names where it is."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        self.home_ = self.use_box("fresh")
+        self.ini = os.path.join(self.home_, "vcharon.ini")
+        os.remove(self.ini)
+
+    def text(self):
+        with open(self.ini, "rb") as f:
+            return f.read().decode("utf-8")
+
+    def test_bare_setup_makes_the_file_once(self):
+        with mock.patch.object(platform, "os_word", return_value="win"):
+            out = self.ok("setup")
+            self.assertEqual(out.splitlines()[:3], [
+                "vcharon: setup", "  config   %s (written)" % self.ini,
+                "  box      win (default, from the OS)"])
+            # the box line commented out: the default stays the OS's
+            self.assertEqual(self.text(), "[vcharon]\n# box = win   (the default: this OS); to "
+                             "set another: vcharon setup --box NAME\n")
+            out = self.ok("setup")
+            self.assertEqual(out.splitlines()[1], "  config   %s" % self.ini)
+            self.assertEqual(json.loads(self.run_cli("whoami", "--json")[1])["box"], "win")
+
+    def test_box_write_update_and_invalid(self):
+        out = self.ok("setup", "--box", "laptop")
+        self.assertEqual(out.splitlines()[2], "  box      laptop (set in %s)" % self.ini)
+        self.assertEqual(self.text(), "[vcharon]\nbox = laptop\n")
+        # an existing file: one line changed, comments and other keys kept
+        with open(self.ini, "w", encoding="utf-8") as f:
+            f.write("# my notes\n[vcharon]\n; old box\nbox = laptop\ncompress = yes\n")
+        self.ok("setup", "--box", "desk")
+        self.assertEqual(self.text(), "# my notes\n[vcharon]\n; old box\nbox = desk\n"
+                         "compress = yes\n")
         doc = json.loads(self.run_cli("whoami", "--json")[1])
-        self.assertEqual(doc, {"box": None, "project": "web", "role": None, "name": None,
-                               "channels": []})
+        self.assertEqual((doc["box"], doc["box_source"], doc["name"]),
+                         ("desk", "config", "desk-web"))
+        # invalid: a usage error, the file unchanged
+        for box in ("x" * 11, "Mac", "con", "a.b", ""):
+            with self.subTest(box=box):
+                line, fix = self.refusal("setup", "--box", box, code=3)
+                self.assertTrue(line.startswith("ERROR config: --box "), line)
+                self.assertEqual(fix, platform.runnable("pick another name: vcharon setup "
+                                                        "--box NAME"))
+                self.assertEqual(self.text(), "# my notes\n[vcharon]\n; old box\nbox = desk\n"
+                                 "compress = yes\n")
+        # a broken file is the user's to fix: never rewritten
+        with open(self.ini, "w", encoding="utf-8") as f:
+            f.write("[vcharon]\ncompress = maybe\n")
+        self.assertTrue(self.refused("setup", "--box", "desk", code=3).startswith(
+            "ERROR config: vcharon.ini [vcharon] compress"))
+        self.assertEqual(self.text(), "[vcharon]\ncompress = maybe\n")
+
+    @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
+    def test_a_symlinked_config_stays_a_link(self):
+        # a dotfiles manager's link: the file it points at is written, the link kept
+        target = os.path.join(self.tmp, "dotfiles", "vcharon.ini")
+        os.makedirs(os.path.dirname(target))
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("[vcharon]\nbox = old\n")
+        os.symlink(target, self.ini)
+        out = self.ok("setup", "--box", "desk")
+        self.assertEqual(out.splitlines()[1], "  config   %s (written)" % self.ini)
+        self.assertTrue(os.path.islink(self.ini))
+        with open(target, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "[vcharon]\nbox = desk\n")
+        self.assertEqual(os.listdir(os.path.dirname(target)), ["vcharon.ini"])
+
+    def test_a_bom_and_the_mode_are_kept(self):
+        with open(self.ini, "wb") as f:
+            f.write(b"\xef\xbb\xbf[vcharon]\r\ncompress = yes\r\n")
+        os.chmod(self.ini, 0o640)
+        self.ok("setup", "--box", "desk")
+        with open(self.ini, "rb") as f:
+            self.assertEqual(f.read(), b"\xef\xbb\xbf[vcharon]\r\nbox = desk\r\n"
+                             b"compress = yes\r\n")
+        if os.name != "nt":
+            self.assertEqual(os.stat(self.ini).st_mode & 0o777, 0o640)
+
+    def test_a_read_only_config_on_windows(self):
+        # Windows can't replace a read-only file: its flag is cleared first, then set again
+        with open(self.ini, "w", encoding="utf-8") as f:
+            f.write("[vcharon]\n")
+        os.chmod(self.ini, 0o444)
+        self.addCleanup(lambda: os.path.exists(self.ini) and os.chmod(self.ini, 0o644))
+        made_writable = []
+        real_chmod = os.chmod
+
+        def chmod(path, mode):
+            if path == os.path.realpath(self.ini):
+                made_writable.append(mode)
+            return real_chmod(path, mode)
+        with mock.patch.object(config.fsops, "WINDOWS", True), \
+                mock.patch.object(config.os, "chmod", chmod):
+            self.ok("setup", "--box", "desk")
+        self.assertEqual(made_writable, [0o444 | 0o200])
+        self.assertEqual(self.text(), "[vcharon]\nbox = desk\n")
+        if os.name != "nt":
+            self.assertEqual(os.stat(self.ini).st_mode & 0o777, 0o444)
+
+    def test_a_box_change_after_a_join_keeps_the_name(self):
+        self.lead()
+        # no box set: the OS's
+        self.use_box("fresh")
+        name = platform.os_word() + "-web"
+        self.ok("join", "game", "--server", "fake-dest")
+        out = self.ok("setup", "--box", "desk")
+        self.assertIn("  note: your channels keep the names you joined with", out)
+        doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
+        self.assertEqual((doc["name"], doc["box"]), (name, "desk"))
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("as %s on" % name, out)
+
+
+@unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
+class PostLinkTest(ChannelCase):
+    """post never writes through a link at the own folder itself, nor at a remote member's
+    tree above it."""
+
+    def post(self):
+        return self.refusal("post", "game", "--to", "@laptop-ui", "--title", "t", "--body", "b")
+
+    def swap(self, path):
+        """path moved aside, and a symlink to it put in its place; the moved folder's
+        contents."""
+        moved = os.path.join(self.tmp, "elsewhere")
+        shutil.move(path, moved)
+        os.symlink(moved, path)
+        return moved, read_tree(moved)
+
+    def test_a_local_members_own_folder(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        own = os.path.join(self.root, "game", "mac-web")
+        moved, before = self.swap(own)
+        self.assertEqual(self.post(), (
+            "ERROR unsafe_path: %s is a symlink: a post never writes through one" % own,
+            "remove the link by hand (vcharon never makes one there), then post again"))
+        self.assertEqual(read_tree(moved), before)
+
+    def test_a_remote_members_own_folder_and_tree(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        tree = self.joined("game.mac-web")
+        for path in (os.path.join(tree, "mac-web"), tree):
+            with self.subTest(path=path):
+                moved, before = self.swap(path)
+                self.assertEqual(self.post()[0], "ERROR unsafe_path: %s is a symlink: a post "
+                                 "never writes through one" % path)
+                self.assertEqual(read_tree(moved), before)
+                os.remove(path)
+                shutil.move(moved, path)
+        self.assertEqual(self.run_cli("post", "game", "--to", "@laptop-ui", "--title", "t",
+                                      "--body", "b")[0], 0)
 
 
 class ListJsonTest(ChannelCase):
     def test_list_json(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
-        write_tree(self.root, {"game/Stray/": None, "notes": b"n"})
+        # a member whose MEMBER.md has none of the fields, and one with a value of another
+        # shape: blanks
+        write_tree(self.root, {"game/Stray/": None, "notes": b"n",
+                               "game/old/MEMBER.md": b"# MEMBER\n\n## t \xe2\x80\x94 old#1 "
+                               b"\xe2\x80\x94 member\nto: @laptop-ui\nchannel: game\n"
+                               b"box: Bad Box\n"})
         code, out, err = self.run_cli("list", "--server", "fake-dest", "--json")
         self.assertEqual((code, err), (0, ""))
         [line] = out.splitlines()
@@ -218,11 +389,22 @@ class ListJsonTest(ChannelCase):
         self.assertEqual(sorted(doc), ["channels", "others", "server"])
         self.assertEqual(doc["server"], "fake-dest")
         [ch] = doc["channels"]
-        self.assertEqual(sorted(ch), ["leader", "leaders", "members", "name", "newest",
-                                      "strays"])
+        self.assertEqual(sorted(ch), ["leader", "leaders", "member_info", "members", "name",
+                                      "newest", "strays"])
         self.assertEqual((ch["name"], ch["leader"], ch["leaders"], ch["members"], ch["strays"]),
-                         ("game", "laptop-ui", ["laptop-ui"], ["laptop-ui", "mac-web"],
+                         ("game", "laptop-ui", ["laptop-ui"], ["laptop-ui", "mac-web", "old"],
                           ["Stray"]))
+        osw = platform.os_word()
+        self.assertEqual(ch["member_info"], [
+            {"name": "laptop-ui", "box": "laptop", "os": osw, "agent": "other",
+             "project": "ui"},
+            {"name": "mac-web", "box": "mac", "os": osw, "agent": "other", "project": "web"},
+            {"name": "old", "box": None, "os": None, "agent": None, "project": None}])
+        lines = self.run_cli("list", "--server", "fake-dest")[1].splitlines()
+        self.assertEqual(lines[2:5], [
+            "    laptop-ui  box laptop  os %s  agent other  project ui" % osw,
+            "    mac-web  box mac  os %s  agent other  project web" % osw,
+            "    old  box -  os -  agent -  project -"])
         self.assertRegex(ch["newest"], r"\A\d{4}-\d\d-\d\d \d\d:\d\d\Z")
         self.assertEqual([sorted(o) for o in doc["others"]], [["name", "why"]])
         self.assertEqual(doc["others"][0]["name"], "notes")
@@ -358,6 +540,16 @@ class FixRoundTripTest(ChannelCase):
         self.lines("join", "game", "--server", "fake-dest", code=1)
         self.lead()
         self.ok("join", "game", "--server", "fake-dest", "--role", "b")
+        # another machine holds the folder: with this box's record, and from a box without
+        other = ("f" * 32, "machine id")
+        with mock.patch.object(platform, "client_id", return_value=other):
+            self.lines("join", "game", "--server", "fake-dest", "--role", "b", code=1)
+            self.use_box("mac2")
+            with open(os.path.join(self.homes["mac2"], "vcharon.ini"), "w") as f:
+                f.write("[vcharon]\nbox = mac\n")
+            self.lines("join", "game", "--server", "fake-dest", "--role", "b", code=1)
+        self.lines("setup", "--box", "Bad", code=3)
+        self.use_box("mac")
         # the leader leaves, a member closes
         self.use_box("laptop")
         self.lines("leave", "game", "--project", "ui", code=1)
@@ -402,10 +594,11 @@ class FixRoundTripTest(ChannelCase):
         self.lines("ping", "fake-dest", code=4)
         n = self.assert_parses(self.seen)
         # what the cases above printed: each command (twice for reset_hint's)
-        self.assertGreaterEqual(n, 16, self.seen)
+        self.assertGreaterEqual(n, 20, self.seen)
         verbs = {argv[0] for text in self.seen for argv in commands(text)}
-        self.assertEqual(verbs, {"post", "join", "list", "close", "leave", "sync", "read", "key"},
-                         self.seen)
+        self.assertEqual(verbs, {"post", "join", "list", "close", "leave", "sync", "read", "key",
+                                 "setup"}, self.seen)
+        self.assertEqual(len([t for t in self.seen if "--takeover" in t]), 2, self.seen)
 
     def test_the_help_examples_parse(self):
         parser = cli._parser()
@@ -442,9 +635,16 @@ HINTS = {
         ("vcharon: the sync failed, so nothing was removed: run vcharon leave %s %s again once "
          "vcharon sync %s %s works", ("game", FLAGS, "game", FLAGS)),
         ("vcharon join %s --server %s %s takes its files back from the server (a rejoin)",
-         ("game", "dev", FLAGS))],
+         ("game", "dev", FLAGS)),
+        # another machine's claimer
+        ("vcharon join %s %s --rejoin --takeover %s", ("game", "--server dev", FLAGS)),
+        ("on this machine, run: vcharon setup --box NAME (ask your user for one), then join "
+         "again; only if your user confirms that this machine made that folder (its state "
+         "was wiped), run: %s", ("vcharon join game --local --rejoin --takeover " + FLAGS,))],
     "cli.py": [
         ("vcharon --help", ()),
+        ("  note: to name this machine otherwise (laptop, a name each of your machines has its "
+         "own of): vcharon setup --box NAME", ()),
         ("vcharon read %s %s", ("game", FLAGS))],
     "doctor.py": [
         ("no channels joined over ssh; to check a server: vcharon doctor --server ALIAS", ()),
@@ -461,7 +661,10 @@ HINTS = {
     "state.py": [("check the target, then run both: vcharon sync %s --reset %s %s ; vcharon "
                   "sync %s --full %s", ("game", "up", FLAGS, "game", FLAGS))],
     "config.py": [("%s [%s]: %s holds only [vcharon]; a channel's section goes in %s, which "
-                   "vcharon join writes", None)],
+                   "vcharon join writes", None),
+                  ("# box = %s   (the default: this OS); to set another: vcharon setup --box "
+                   "NAME", ("linux",)),
+                  ("pick another name: vcharon setup --box NAME", ())],
     "mailbox/watch.py": [
         ("ERROR vcharon sync of ", None), ("ERROR vcharon sync of %s exited with %d", None),
         ("ERROR vcharon sync of %s didn't finish within %d s", None),

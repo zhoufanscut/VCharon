@@ -7,8 +7,10 @@ import dataclasses
 import os
 import posixpath
 import re
+import stat
+import tempfile
 
-from . import channels, pathrules, platform, ssh
+from . import channels, fsops, pathrules, platform, ssh
 from .helper import TICK_EVERY
 from .proto import VCharonError
 from .run import Side
@@ -95,10 +97,27 @@ class Config:
     jobs: dict = dataclasses.field(default_factory=dict)
     # mailbox section -> the names of its jobs, up first
     mailboxes: dict = dataclasses.field(default_factory=dict)
-    # [vcharon] box: this box's name in channel members' names (M10), or None
+    # [vcharon] box: this box's name in channel members' names, or None: the OS's (box_name)
     box: str = None
     # [Skipped], vcharon.ini's first, then channels.d/'s in name order
     skipped: list = dataclasses.field(default_factory=list)
+
+    @property
+    def box_name(self):
+        """The box in members' names: [vcharon] box, else this OS's word (mac, win,
+        linux)."""
+        return self.box or platform.os_word()
+
+    @property
+    def box_source(self):
+        """Where box_name comes from: "config" or "os"."""
+        return "config" if self.box else "os"
+
+    def box_text(self):
+        """box_name, and where it comes from, as whoami, doctor and setup print it."""
+        if self.box:
+            return "%s (set in %s)" % (self.box, self.path)
+        return "%s (default, from the OS)" % self.box_name
 
     def named(self, name):
         """The jobs a name on the command line runs: a job's, or a mailbox section's two;
@@ -246,6 +265,145 @@ def box_problem(box):
         return None
     return ("%s; a box's name is a writer's name of at most %d characters, such as mac, win, "
             "linux or laptop" % (problem, BOX_MAX))
+
+
+# configparser's own section line (SECTCRE), after leading blanks
+_SECTION = re.compile(r"\A\s*\[(.+)\]")
+_BOX_LINE = re.compile(r"\A\s*box\s*[=:]", re.I)
+# the commented line a bare vcharon setup writes; setup --box replaces it
+BOX_COMMENT = "# box = %s   (the default: this OS); to set another: vcharon setup --box NAME"
+_BOX_COMMENT = re.compile(r"\A# box = ")
+
+
+def text_with_box(text, box):
+    """vcharon.ini's text with [vcharon] box = box: a box line of [vcharon] replaced, else the
+    commented one setup wrote, else a line added below [vcharon]; no [vcharon] gets one at the
+    top. Edited line by line, not through configparser, which would drop the comments; every
+    other line stays as it was, line ends too (\\r\\n kept)."""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    # split after each "\\n" only: a value's other line breaks stay inside its line
+    lines = re.findall(r"[^\n]*\n|[^\n]+\Z", text)
+    line = "box = %s%s" % (box, newline)
+    header = None
+    comment = None
+    section = None
+    for i, one in enumerate(lines):
+        m = _SECTION.match(one)
+        if m:
+            section = m.group(1)
+            if section == "vcharon" and header is None:
+                header = i
+            continue
+        if section != "vcharon":
+            continue
+        if _BOX_LINE.match(one):
+            lines[i] = line
+            return "".join(lines)
+        if comment is None and _BOX_COMMENT.match(one):
+            comment = i
+    if comment is not None:
+        lines[comment] = line
+    elif header is not None:
+        if not lines[header].endswith(("\n", "\r")):
+            lines[header] += newline
+        lines.insert(header + 1, line)
+    else:
+        lines.insert(0, "[vcharon]%s%s%s" % (newline, line, newline if lines else ""))
+    return "".join(lines)
+
+
+SETUP_HINT = "pick another name: vcharon setup --box NAME"
+
+
+def check_box(box):
+    """--box's usage error, or nothing."""
+    problem = box_problem(box)
+    if problem:
+        raise VCharonError("config", "--box %s: %s" % (pathrules.show(box), problem),
+                           hint=SETUP_HINT)
+
+
+def setup_file(box=None):
+    """vcharon setup's write: with box, [vcharon] box = box in the config file (made when
+    missing); without, the file made when missing, its box line commented out (the default
+    stays the OS's), and an existing file left alone. The file must load before and after:
+    a broken one is the user's to fix, never rewritten. Returns True if it wrote."""
+    if box is not None:
+        check_box(box)
+    path = platform.config_path()
+    hint = "fix %s" % path
+    load()
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        mode = os.stat(path).st_mode & 0o7777
+    except FileNotFoundError:
+        raw = None
+        mode = None
+    except OSError as e:
+        raise VCharonError("config", "couldn't read %s: %s" % (path, e.strerror or e), hint=hint)
+    if raw is None:
+        text = "[vcharon]\n%s\n" % (BOX_COMMENT % platform.os_word() if box is None
+                                     else "box = %s" % box)
+        bom = b""
+    elif box is None:
+        return False
+    else:
+        bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""
+        text = text_with_box(raw.decode("utf-8-sig"), box)
+        if text == raw.decode("utf-8-sig"):
+            return False
+    data = bom + text.encode("utf-8")
+    # what load() would read back
+    parser = _parse(data, os.path.basename(path), path, hint)
+    if box is not None and _read_vcharon(parser, os.path.basename(path), hint,
+                                         Settings()) != box:
+        raise VCharonError("internal", "setup's edit of %s doesn't read back box = %s"
+                           % (path, box), hint="set box in [vcharon] of %s by hand" % path)
+    # through a symlinked config (a dotfiles manager's): the file it points at is written,
+    # the link stays
+    _write_file(os.path.realpath(path), data, mode)
+    return True
+
+
+def _write_file(path, data, mode):
+    """data to path through a temp file in its folder, then one os.replace; mode kept. On
+    Windows a read-only file can't be replaced: its read-only flag is cleared first, and the
+    new file gets the old mode back (read-only again)."""
+    folder = os.path.dirname(path)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        fd, temp = tempfile.mkstemp(dir=folder, prefix=".vcharon-", suffix=".tmp")
+    except OSError as e:
+        raise fsops.error(e, folder)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        # mkstemp's 0600; an existing file keeps its own
+        if mode is not None:
+            os.chmod(temp, mode)
+        if fsops.WINDOWS and mode is not None and not mode & stat.S_IWRITE:
+            os.chmod(path, mode | stat.S_IWRITE)
+            try:
+                fsops.retry_in_use(os.replace, temp, path)
+            except BaseException:
+                try:
+                    os.chmod(path, mode)
+                except OSError:
+                    pass
+                raise
+        else:
+            fsops.retry_in_use(os.replace, temp, path)
+    except BaseException as e:
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
+        if isinstance(e, OSError):
+            raise fsops.error(e, path)
+        raise
 
 
 def _setting(settings, key, value, where, hint):

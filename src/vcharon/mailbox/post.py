@@ -199,6 +199,24 @@ def file_parts(file):
     return parts
 
 
+def check_own(own, tree=None):
+    """The own folder itself, and tree (a remote member's local tree) above it, lstat'ed: a
+    symlink (or a Windows junction) there is refused (unsafe_path), as file_below refuses one
+    below it: the post would write wherever it points. A missing one is post()'s to
+    refuse."""
+    for path in ([tree] if tree is not None else []) + [own]:
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            raise fsops.error(e, path)
+        if fsops.kind(st) == fsops.LINK:
+            raise VCharonError("unsafe_path", "%s is a symlink: a post never writes through "
+                               "one" % path, "remove the link by hand (vcharon never makes "
+                               "one there), then post again")
+
+
 def file_below(own, parts):
     """The path of --file's parts below the existing own folder own, checked part by part
     with lstat: a symlink anywhere on the way, or something that isn't a folder, is refused

@@ -4,6 +4,8 @@ commands."""
 
 from __future__ import annotations
 
+import errno
+import hashlib
 import json
 import os
 import shutil
@@ -163,9 +165,19 @@ class NamesTest(unittest.TestCase):
         with self.assertRaises(VCharonError) as cm:
             channel_cmd.member_name(self.cfg("x" * 11), project="p" * 14, role="r" * 6)
         self.assertIn("at most 32 characters", cm.exception.message)
-        with self.assertRaises(VCharonError) as cm:
-            channel_cmd.member_name(self.cfg(None), project="ui")
-        self.assertEqual(cm.exception.message, channel_cmd.BOX_HINT)
+
+    def test_the_box_defaults_to_the_os(self):
+        for osn, word in (("linux", "linux"), ("darwin", "mac"), ("windows", "win")):
+            with self.subTest(osn=osn):
+                with mock.patch.object(platform, "os_name", return_value=osn):
+                    self.assertEqual(platform.os_word(), word)
+                    cfg = self.cfg(None)
+                    self.assertEqual((cfg.box_name, cfg.box_source), (word, "os"))
+                    self.assertEqual(cfg.box_text(), "%s (default, from the OS)" % word)
+                    self.assertEqual(channel_cmd.member_name(cfg, project="UI"), word + "-ui")
+        cfg = self.cfg("laptop")
+        self.assertEqual((cfg.box_name, cfg.box_source), ("laptop", "config"))
+        self.assertEqual(cfg.box_text(), "laptop (set in /x/vcharon.ini)")
 
 
 class CreateJoinTest(ChannelCase):
@@ -197,14 +209,17 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(sorted(read_tree(self.root)), [
             "game/", "game/laptop-ui/", "game/laptop-ui/CHANNEL.md", "game/laptop-ui/MEMBER.md"])
         member = entries.parse_file(os.path.join(own, "MEMBER.md"))
+        claimer = platform.claimer("game")
+        self.assertRegex(claimer, r"\A[0-9a-f]{16}\Z")
         self.assertEqual([(e.id, e.title, e.to, e.header) for e in member], [
             ("laptop-ui#1", "member", ("@laptop-ui",),
-             [("channel", "game"), ("name", "laptop-ui"), ("leader", "laptop-ui")])])
+             [("channel", "game"), ("name", "laptop-ui"), ("leader", "laptop-ui"),
+              ("box", "laptop"), ("os", platform.os_word()), ("agent", "other"),
+              ("project", "ui"), ("claimer", claimer)])])
         ch = entries.parse_file(os.path.join(own, "CHANNEL.md"))
         self.assertEqual([(e.id, e.title, e.to) for e in ch],
                          [("laptop-ui#2", "channel game created", ("@all",))])
-        self.assertEqual([k for k, v in ch[0].header],
-                         ["leader", "server host", "created", "rules"])
+        self.assertEqual([k for k, v in ch[0].header], ["leader", "created", "rules"])
         self.assertEqual(dict(ch[0].header)["rules"], channel_cmd.RULES)
         # vcharon is self-contained: the rules are found by the vcharon folder, not a checkout
         self.assertEqual(channel_cmd.RULES,
@@ -269,13 +284,19 @@ class CreateJoinTest(ChannelCase):
         for channel in ("game", "docs"):
             self.assertTrue(os.path.isdir(os.path.join(self.root, channel, "mac-web")))
 
-    def test_box_missing(self):
+    def test_no_box_set_is_the_os(self):
+        # no [vcharon] box, then no config file at all: the OS's word, never a refusal
         with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
             f.write("[vcharon]\n")
-        got, out, err = self.channel("create", "game", "--server", "fake-dest")
-        self.assertEqual(got, 3)
-        self.assertEqual(err.splitlines()[0], "ERROR config: " + channel_cmd.BOX_HINT)
-        self.assertFalse(os.path.exists(self.root))
+        with mock.patch.object(platform, "os_word", return_value="mac"):
+            out = self.ok("create", "game", "--server", "fake-dest")
+        self.assertIn("vcharon: create game  as mac-web on fake-dest", out)
+        os.remove(os.path.join(self.vcharon_home, "vcharon.ini"))
+        with mock.patch.object(platform, "os_word", return_value="win"):
+            out = self.ok("join", "game", "--server", "fake-dest", "--project", "api")
+        self.assertIn("vcharon: join game  as win-api on fake-dest", out)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))),
+                         ["mac-web", "win-api"])
 
     def test_create_twice_and_bad_names(self):
         self.lead()
@@ -359,14 +380,24 @@ class CreateJoinTest(ChannelCase):
         self.assertTrue(os.path.exists(channel_cmd.record_path("game", "mac-web")))
 
     def test_no_machine_id_here_has_its_os_hint(self):
+        # a Mac: this check's refusal and hint come before the client id's (made after it)
         hint = "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
-        with mock.patch.object(channel_cmd.platform, "machine_id", return_value=None), \
-                mock.patch.object(channel_cmd.platform, "no_machine_hint", return_value=hint):
-            code, out, err = self.channel("create", "game", "--local", "--project", "ui")
-        self.assertEqual((code, err.splitlines()[:2]),
-                         (3, ["ERROR state_mismatch: this machine has no machine id, so vcharon "
-                              "can't tie a channel's record to it", "  fix: " + hint]))
-        self.assertEqual(self.server_tree(), {})
+        self.lead()
+        before = self.server_tree()
+        for verb in ("create", "join"):
+            with self.subTest(verb=verb):
+                with mock.patch.object(channel_cmd.platform, "machine_id", return_value=None), \
+                        mock.patch.object(channel_cmd.platform, "os_name",
+                                          return_value="darwin"), \
+                        mock.patch.object(channel_cmd.platform, "no_machine_hint",
+                                          return_value=hint):
+                    code, out, err = self.channel(verb, "game", "--local", "--project", "x")
+                self.assertEqual((code, err.splitlines()[:2]),
+                                 (3, ["ERROR state_mismatch: this machine has no machine id, so "
+                                      "vcharon can't tie a channel's record to it",
+                                      "  fix: " + hint]))
+        self.assertEqual(self.server_tree(), before)
+        self.assertFalse(os.path.exists(platform.client_id_path()))
 
     def test_rejoin_without_a_local_tree_pulls_the_own_folder(self):
         self.lead()
@@ -510,17 +541,39 @@ class ServerCallsTest(ChannelCase):
         s.open()
         self.assertEqual(s.call("channel.list", {}), {"channels": [], "others": []})
         got = s.call("channel.claim", {"channel": "game", "name": "a", "create": True})
-        self.assertEqual(got["existed"], False)
-        self.assertEqual(got["machine"], TEST_MACHINE_ID)
-        self.assertTrue(got["host"])
-        # the helper's own root text, VCHARON_CHANNELS_ROOT here
-        self.assertEqual(got["root"], self.root)
+        # no host name in the reply: its values go into the channel's files
+        self.assertEqual(got, {"existed": False, "machine": TEST_MACHINE_ID,
+                               "root": self.root, "claimer": None})
+        # an existing folder: its MEMBER.md's claimer:, read at the server
+        entries.post(os.path.join(self.root, "game", "a", "MEMBER.md"),
+                     os.path.join(self.root, "game", "a"), "a", "member", ["@a"],
+                     header=[("leader", "a"), ("claimer", "0123456789abcdef")], number=1)
+        got = s.call("channel.claim", {"channel": "game", "name": "a", "create": False})
+        self.assertEqual((got["existed"], got["claimer"]), (True, "0123456789abcdef"))
         with self.assertRaises(VCharonError) as cm:
             s.call("channel.claim", {"channel": "..", "name": "a", "create": False})
         self.assertEqual(cm.exception.code, "channel")
         with self.assertRaises(VCharonError) as cm:
             s.call("channel.claim", {"channel": "game", "name": "a"})
         self.assertEqual(cm.exception.code, "protocol")
+
+    def test_member_fields_come_from_the_members_own_first_entry(self):
+        # another member's #1 first in the file (copied in by hand): the claim and the list
+        # read a#1, as set_header and the rejoin do
+        text = ("# MEMBER\n\n## t \u2014 b#1 \u2014 member\nto: @b\nbox: bbb\n"
+                "claimer: %s\n\n## t \u2014 a#1 \u2014 member\nto: @a\nbox: aaa\n"
+                "claimer: %s\n" % ("b" * 16, "a" * 16))
+        write_tree(self.root, {"game/a/MEMBER.md": text.encode("utf-8")})
+        got = channels.claim(self.root, "game", "a", False)
+        self.assertEqual((got["existed"], got["claimer"]), (True, "a" * 16))
+        [ch] = channels.list_channels(self.root)["channels"]
+        self.assertEqual(ch["fields"]["a"]["box"], "aaa")
+        # no a#1 at all: nothing
+        write_tree(self.root, {"game/c/MEMBER.md": text.replace("a#1", "a#2").encode("utf-8")})
+        self.assertIsNone(channels.claim(self.root, "game", "c", False)["claimer"])
+        [ch] = channels.list_channels(self.root)["channels"]
+        self.assertEqual(ch["fields"]["c"], {"box": None, "os": None, "agent": None,
+                                             "project": None})
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
     def test_symlinks_refused(self):
@@ -784,7 +837,9 @@ class LeaveCloseTest(ChannelCase):
         for path in (record, snapshot, snapshot + ".lock", post_lock):
             self.assertFalse(os.path.exists(path), path)
             self.assertIn("  removed %s" % path, out.splitlines())
-        self.assertEqual(os.listdir(os.path.join(self.homes["linux"], "state")), ["channels"])
+        # the client-id file stays: it's this machine's, not the channel's
+        self.assertEqual(sorted(os.listdir(os.path.join(self.homes["linux"], "state"))),
+                         ["channels", "client-id"])
 
     def test_a_held_post_lock_stays(self):
         # a post running in the own folder: its lock isn't taken from under it (a leave posts
@@ -1328,3 +1383,503 @@ class ReviewTest(ChannelCase):
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertIn("channel game created", out)
         self.assertNotIn("a member's all", out)
+
+
+OTHER_CLIENT = "f" * 32
+
+
+class ClaimerTest(ChannelCase):
+    """Whose a member folder is: MEMBER.md's claimer:, a hash of the channel's name and this
+    machine's id; another machine's is refused, --takeover the only way past it."""
+
+    def another_machine(self, cid=OTHER_CLIENT, key="mac2", box="mac"):
+        """A second machine with box box: a VCHARON_HOME of its own and its own client id."""
+        home = self.use_box(key)
+        with open(os.path.join(home, "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = %s\n" % box)
+        patcher = mock.patch.object(platform, "client_id", return_value=(cid, "machine id"))
+        patcher.start()
+        # a patch the test stopped already is a no-op here
+        self.addCleanup(patcher.stop)
+        return patcher
+
+    def server_member(self, name="mac-web"):
+        return entries.header_of(entries.read_text(
+            os.path.join(self.root, "game", name, "MEMBER.md")), name)
+
+    def test_the_claimer_id(self):
+        mine = platform.claimer("game")
+        cid = hashlib.sha256(("vcharon:" + TEST_MACHINE_ID).encode()).hexdigest()[:32]
+        self.assertEqual(platform.client_id(), (cid, "from the machine id"))
+        self.assertEqual(mine, hashlib.sha256(("game:" + cid).encode()).hexdigest()[:16])
+        # another channel, another id; no raw id in it
+        self.assertNotEqual(platform.claimer("docs"), mine)
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.assertEqual(self.server_member()["claimer"], mine)
+        self.assertNotIn(TEST_MACHINE_ID, entries.read_text(
+            os.path.join(self.root, "game", "mac-web", "MEMBER.md")))
+
+    def test_another_machine_is_refused(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        before = self.server_tree()
+        self.another_machine()
+        for extra in ((), ("--rejoin",)):
+            with self.subTest(extra=extra):
+                line, fix = self.refusal("join", "game", "--server", "fake-dest", *extra)
+                self.assertEqual(line, "ERROR channel: another machine holds mac-web in game")
+                self.assertEqual(fix, platform.runnable(
+                    "on this machine, run: vcharon setup --box NAME (ask your user for one), then "
+                    "join again; only if your user confirms that this machine made that folder "
+                    "(its state was wiped), run: vcharon join game --server fake-dest --rejoin "
+                    "--takeover --project web"))
+        self.assertEqual(self.server_tree(), before)
+        self.assertFalse(os.path.exists(os.path.join(self.homes["mac2"], "state", "channels")))
+        # its own box name: another member
+        with open(os.path.join(self.homes["mac2"], "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = mac2\n")
+        self.ok("join", "game", "--server", "fake-dest")
+        self.assertEqual(self.server_member("mac2-web")["claimer"],
+                         hashlib.sha256(
+                             ("game:" + OTHER_CLIENT).encode()).hexdigest()[:16])
+
+    def test_a_local_member_too(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        self.another_machine()
+        self.assertEqual(self.refusal("join", "game", "--local", "--rejoin")[0],
+                         "ERROR channel: another machine holds mac-web in game")
+
+    def test_with_a_record_here(self):
+        # the folder was taken over from elsewhere: this box's record doesn't take it back
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        with mock.patch.object(platform, "client_id", return_value=(OTHER_CLIENT, "x")):
+            line, fix = self.refusal("join", "game", "--server", "fake-dest")
+        self.assertEqual(line, "ERROR channel: another machine holds mac-web in game, though "
+                               "this box has a join record of it")
+        self.assertTrue(fix.startswith("ask your user; only if they confirm"), fix)
+
+    def test_same_or_no_claimer_is_the_record_or_rejoin(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        # the same machine, another state folder: the same claimer, but no record
+        self.use_box("mac2")
+        with open(os.path.join(self.homes["mac2"], "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = mac\n")
+        self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
+                         "ERROR channel: the name mac-web is taken in game")
+        out = self.ok("join", "game", "--server", "fake-dest", "--rejoin")
+        self.assertIn("took back game/mac-web", out)
+        # no claimer: (a MEMBER.md from before it): the record, or --rejoin, as before
+        srv = os.path.join(self.root, "game", "mac-web", "MEMBER.md")
+        with open(srv, encoding="utf-8") as f:
+            text = f.read()
+        with open(srv, "w", encoding="utf-8") as f:
+            f.write("\n".join(l for l in text.split("\n") if not l.startswith("claimer:")))
+        self.another_machine(key="mac3")
+        self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
+                         "ERROR channel: the name mac-web is taken in game")
+        self.ok("join", "game", "--server", "fake-dest", "--rejoin")
+
+    def test_a_failed_first_push_gets_back_in_through_the_record(self):
+        self.lead()
+        with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
+            self.assertEqual(self.channel("join", "game", "--server", "fake-dest")[0], 4)
+        # no MEMBER.md at the server: no claimer
+        self.assertEqual(os.listdir(os.path.join(self.root, "game", "mac-web")), [])
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("took back game/mac-web", out)
+        self.assertEqual(self.server_member()["claimer"], platform.claimer("game"))
+
+    def test_takeover(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        own = os.path.join(self.joined("game.mac-web"), "mac-web")
+        entries.post(os.path.join(own, "RESULTS.md"), own, "mac-web", "work", ["@laptop-ui"],
+                     body="b")
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        srv = os.path.join(self.root, "game", "mac-web", "MEMBER.md")
+        with open(srv, "rb") as f:
+            old = f.read()
+        mine = platform.claimer("game")
+        # this machine, its state wiped: a new client id
+        other = self.another_machine()
+        theirs = platform.claimer("game")
+        # --takeover only with --rejoin
+        self.assertEqual(self.refusal("join", "game", "--server", "fake-dest", "--takeover",
+                                      code=3)[0], "ERROR config: --takeover goes with --rejoin")
+        out = self.ok("join", "game", "--server", "fake-dest", "--rejoin", "--takeover")
+        self.assertIn("  took over game/mac-web: its claimer is this machine's now", out)
+        # only the claimer: line changed, at the server too; the old entries are kept
+        with open(srv, "rb") as f:
+            new = f.read()
+        self.assertEqual(new, old.replace(("claimer: %s" % mine).encode(),
+                                          ("claimer: %s" % theirs).encode()))
+        self.assertIn("work", entries.read_text(
+            os.path.join(self.root, "game", "mac-web", "RESULTS.md")))
+        # the first machine is now the other one
+        self.use_box("mac")
+        other.stop()
+        self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
+                         "ERROR channel: another machine holds mac-web in game, though this "
+                         "box has a join record of it")
+
+    def test_takeover_local(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        self.another_machine()
+        self.ok("join", "game", "--local", "--rejoin", "--takeover")
+        self.assertEqual(self.server_member()["claimer"], platform.claimer("game"))
+
+    def test_set_header(self):
+        own = os.path.join(self.tmp, "own")
+        os.makedirs(own)
+        path = os.path.join(own, "MEMBER.md")
+        entries.post(path, own, "a", "member", ["@a"], header=[("box", "x")], number=1)
+        entries.post(path, own, "a", "two", ["@a"], header=[("claimer", "keep")])
+        with open(path, "rb") as f:
+            before = f.read()
+        os.chmod(path, 0o640)
+        # added at the header's end, then replaced; the other entry's line untouched
+        entries.set_header(path, own, "a", 1, "claimer", "1" * 16)
+        self.assertEqual(entries.header_of(entries.read_text(path), "a"),
+                         {"box": "x", "claimer": "1" * 16})
+        entries.set_header(path, own, "a", 1, "claimer", "2" * 16)
+        with open(path, "rb") as f:
+            after = f.read()
+        self.assertEqual(after, before.replace(b"box: x\n", b"box: x\nclaimer: " + b"2" * 16
+                                               + b"\n", 1))
+        if os.name != "nt":
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
+        with self.assertRaises(VCharonError):
+            entries.set_header(path, own, "b", 1, "claimer", "x")
+        # CRLF kept
+        with open(path, "wb") as f:
+            f.write(b"# MEMBER\r\n\r\n## t \xe2\x80\x94 a#1 \xe2\x80\x94 member\r\nto: @a\r\n"
+                    b"claimer: old\r\n\r\nbody\r\n")
+        entries.set_header(path, own, "a", 1, "claimer", "new")
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"# MEMBER\r\n\r\n## t \xe2\x80\x94 a#1 \xe2\x80\x94 "
+                             b"member\r\nto: @a\r\nclaimer: new\r\n\r\nbody\r\n")
+
+    def test_set_header_stops_at_the_next_heading(self):
+        own = os.path.join(self.tmp, "own2")
+        os.makedirs(own)
+        path = os.path.join(own, "MEMBER.md")
+        text = ("# MEMBER\n\n## t \u2014 a#1 \u2014 member\nto: @a\nbox: x\n"
+                "## t \u2014 a#2 \u2014 two\nto: @a\nagent: keep\n")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        entries.set_header(path, own, "a", 1, "agent", "codex")
+        found = entries.parse_file(path)
+        self.assertEqual([e.header for e in found], [[("box", "x"), ("agent", "codex")],
+                                                     [("agent", "keep")]])
+        self.assertEqual(entries.read_text(path), text.replace(
+            "box: x\n", "box: x\nagent: codex\n"))
+
+    def test_the_client_id_file(self):
+        # a Linux box with no machine id: a random id, made once in the state folder, used for
+        # the claimer
+        with mock.patch.object(platform, "machine_id", return_value=None), \
+                mock.patch.object(platform, "os_name", return_value="linux"):
+            self.assertEqual(platform.client_id(make=False), (None, "random"))
+            self.assertIsNone(platform.claimer("game", make=False))
+            self.lead()
+            self.ok("join", "game", "--server", "fake-dest")
+            path = platform.client_id_path()
+            with open(path) as f:
+                cid, origin = f.read().split("\n")[:2]
+            self.assertEqual(origin, "random")
+            self.assertRegex(cid, r"\A[0-9a-f]{32}\Z")
+            self.assertEqual(platform.client_id(), (cid, "random"))
+            self.assertEqual(self.server_member()["claimer"], hashlib.sha256(
+                ("game:" + cid).encode()).hexdigest()[:16])
+        # a machine id that turns up later, or fails once, changes nothing: the file counts
+        self.assertEqual(platform.client_id(), (cid, "random"))
+        with mock.patch.object(platform, "machine_id", side_effect=[None, "1" * 32]):
+            self.assertEqual(platform.client_id(), (cid, "random"))
+        # a broken file is refused, never replaced: a new id would look like another machine
+        with open(path, "w") as f:
+            f.write("x\n")
+        line = self.refused("join", "game", "--server", "fake-dest", "--role", "b", code=3)
+        self.assertEqual(line, "ERROR config: %s isn't a client id (32 hex digits)" % path)
+
+    def test_a_wiped_state_folder_gets_the_same_id(self):
+        # from the machine id: made again the same; it stays after the machine id is gone
+        cid, origin = platform.client_id()
+        self.assertEqual(origin, "from the machine id")
+        os.remove(platform.client_id_path())
+        self.assertEqual(platform.client_id(), (cid, origin))
+        # whatever the OS: the file counts, so not even a Mac's failed read refuses
+        for osn in ("linux", "darwin"):
+            with mock.patch.object(platform, "machine_id", return_value=None), \
+                    mock.patch.object(platform, "os_name", return_value=osn):
+                self.assertEqual(platform.client_id(), (cid, origin))
+        os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE
+        self.assertEqual(platform.client_id(), (cid, origin))
+
+    def test_an_empty_client_id_file(self):
+        # read again a few times (a writer racing), then refused; never written over
+        path = platform.client_id_path()
+        os.makedirs(os.path.dirname(path))
+        open(path, "wb").close()
+        sleeps = []
+        with mock.patch.object(platform.time, "sleep", sleeps.append):
+            with self.assertRaises(VCharonError) as cm:
+                platform.client_id()
+        self.assertEqual(cm.exception.message, "%s isn't a client id (32 hex digits)" % path)
+        self.assertEqual(sleeps, [platform.CLIENT_ID_PAUSE] * (platform.CLIENT_ID_TRIES - 1))
+        self.assertEqual(os.path.getsize(path), 0)
+        # filled in by the other writer between two reads: taken
+        calls = []
+
+        def fill(seconds):
+            calls.append(seconds)
+            with open(path, "w") as f:
+                f.write("a" * 32 + "\nrandom\n")
+        with mock.patch.object(platform.time, "sleep", fill):
+            self.assertEqual(platform.client_id(), ("a" * 32, "random"))
+        self.assertEqual(len(calls), 1)
+        # no temp file left beside it
+        self.assertEqual(os.listdir(os.path.dirname(path)), ["client-id"])
+
+    def test_no_hard_links_falls_back_to_an_exclusive_create(self):
+        # FAT, exFAT, some SMB and FUSE mounts: os.link fails with EPERM and the like
+        def no_link(src, dst):
+            raise OSError(errno.EPERM, "Operation not permitted")
+        with mock.patch.object(platform.os, "link", no_link):
+            cid, origin = platform.client_id()
+            self.assertEqual(origin, "from the machine id")
+            path = platform.client_id_path()
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["client-id"])
+            with open(path) as f:
+                self.assertEqual(f.read(), "%s\nfrom the machine id\n" % cid)
+            # another run's file there: kept, and read
+            os.remove(path)
+            with open(path, "w") as f:
+                f.write("c" * 32 + "\nrandom\n")
+            self.assertEqual(platform.client_id(), ("c" * 32, "random"))
+        # any other link error is an error
+        with mock.patch.object(platform.os, "link",
+                               side_effect=OSError(errno.EIO, "I/O error")):
+            os.remove(path)
+            with self.assertRaises(VCharonError):
+                platform.client_id()
+        self.assertFalse(os.path.exists(path))
+
+    def test_the_host_os_picks_link_or_rename(self):
+        # a test that declares Windows on a POSIX host still links: a POSIX rename would
+        # replace another run's file
+        if os.name == "nt":
+            self.skipTest("this host renames")
+        with mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.object(platform.os, "rename",
+                                  side_effect=AssertionError("renamed")):
+            self.assertEqual(platform.client_id()[1], "from the machine id")
+
+    def test_a_mac_or_windows_without_its_id_is_refused(self):
+        # those always have one: a missing id is a failed read, never a random id kept
+        for osn in ("darwin", "windows"):
+            with self.subTest(osn=osn):
+                with mock.patch.object(platform, "os_name", return_value=osn), \
+                        mock.patch.object(platform, "machine_id", return_value=None):
+                    path = platform.client_id_path()
+                    for make in (True, False):
+                        with self.assertRaises(VCharonError) as cm:
+                            platform.client_id(make)
+                        self.assertTrue(cm.exception.message.startswith(
+                            "couldn't read this machine's id ("), cm.exception.message)
+                        self.assertEqual(cm.exception.hint, "run the command again; if it "
+                                         "keeps failing, your user can write %s by hand: 32 "
+                                         "hex digits (0-9, a-f), then a line: random" % path)
+                    self.assertFalse(os.path.exists(path))
+                    # the way out the fix names: a file written by hand is taken
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "w") as f:
+                        f.write("d" * 32 + "\nrandom\n")
+                    self.assertEqual(platform.client_id(), ("d" * 32, "random"))
+                    os.remove(path)
+        with mock.patch.object(platform, "machine_id", return_value=None), \
+                mock.patch.object(platform, "os_name", return_value="linux"):
+            self.assertEqual(platform.client_id()[1], "random")
+
+    @unittest.skipIf(os.name == "nt", "a hard link here; Windows renames")
+    def test_two_first_runs_one_id(self):
+        # the second run's link fails: it reads the first one's id, and drops its temp file
+        path = platform.client_id_path()
+        os.makedirs(os.path.dirname(path))
+        real_link = os.link
+
+        def first_wins(src, dst):
+            with open(dst, "w") as f:
+                f.write("b" * 32 + "\nrandom\n")
+            return real_link(src, dst)
+        with mock.patch.object(platform.os, "link", first_wins):
+            self.assertEqual(platform.client_id(), ("b" * 32, "random"))
+        self.assertEqual(os.listdir(os.path.dirname(path)), ["client-id"])
+
+
+class MemberFieldsTest(ChannelCase):
+    """MEMBER.md's fields, the agent, and no host name or path in a channel's files."""
+
+    def test_agent_flag_and_detection(self):
+        self.lead(where=("--local",))
+        own = os.path.join(self.root, "game")
+        self.ok("join", "game", "--local", "--agent", "codex")
+        self.assertEqual(entries.header_of(entries.read_text(
+            os.path.join(own, "mac-web", "MEMBER.md")), "mac-web")["agent"], "codex")
+        for env, want in (({"CLAUDECODE": "1"}, "claude"), ({"CODEX_THREAD_ID": "t"}, "codex"),
+                          ({"OPENCODE": "1"}, "opencode"),
+                          ({"CLAUDECODE": "1", "OPENCODE": "1"}, "other"), ({}, "other")):
+            with self.subTest(env=env):
+                role = "r%d" % len(os.listdir(own))
+                with mock.patch.dict(os.environ, env):
+                    self.ok("join", "game", "--local", "--role", role)
+                self.assertEqual(entries.header_of(entries.read_text(
+                    os.path.join(own, "mac-web-" + role, "MEMBER.md")),
+                    "mac-web-" + role)["agent"], want)
+        # --agent wins over the environment; a name that isn't one is a usage error
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--local", "--role", "x", "--agent", "opencode")
+        self.assertEqual(self.channel("join", "game", "--local", "--agent", "vim")[0], 3)
+
+    def test_detect_agent(self):
+        self.assertIsNone(platform.detect_agent({}))
+        self.assertEqual(platform.detect_agent({"CLAUDECODE": "1"}), "claude")
+        self.assertEqual(platform.detect_agent({"CODEX_THREAD_ID": "x"}), "codex")
+        self.assertEqual(platform.detect_agent({"OPENCODE": "1"}), "opencode")
+        self.assertIsNone(platform.detect_agent({"CLAUDECODE": "", "OPENCODE": ""}))
+        self.assertIsNone(platform.detect_agent({"CLAUDECODE": "1", "CODEX_THREAD_ID": "x"}))
+
+    def test_no_host_name_or_path_in_channel_files(self):
+        host = "zz-host-7f3q"
+        with mock.patch("socket.gethostname", return_value=host), \
+                mock.patch("platform.node", return_value=host):
+            self.lead(where=("--local",))
+            self.ok("join", "game", "--local", "--project", "local")
+            self.ok("join", "game", "--server", "fake-dest")
+            self.assertEqual(self.run_cli("post", "game", "--to", "@laptop-ui", "--title", "t",
+                                          "--body", "b")[0], 0)
+            self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        import socket
+        words = [host, socket.gethostname(), self.tmp, os.path.realpath(self.tmp),
+                 self.home, os.path.expanduser("~"), TEST_MACHINE_ID]
+        tree = read_tree(self.root)
+        files = [p for p, data in tree.items() if data is not None]
+        self.assertEqual(sorted(p.rsplit("/", 1)[1] for p in files),
+                         ["CHANNEL.md", "MEMBER.md", "MEMBER.md", "MEMBER.md", "RESULTS.md",
+                          "RESULTS.md"])
+        for path in files:
+            text = tree[path].decode("utf-8")
+            self.assertNotIn("server host", text, path)
+            for word in words:
+                self.assertNotIn(word, text, (path, word))
+        header = entries.header_of(tree["game/mac-web/MEMBER.md"].decode("utf-8"), "mac-web")
+        self.assertEqual(sorted(header), ["agent", "box", "channel", "claimer", "leader", "name",
+                                          "os", "project"])
+        self.assertEqual((header["box"], header["os"], header["project"]),
+                         ("mac", platform.os_word(), "web"))
+
+    def test_a_rejoin_updates_the_agent(self):
+        # one checkout, Claude Code one day and Codex the next: the folder keeps its name
+        self.lead()
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--server", "fake-dest")
+        self.assertEqual(self.member_header()["agent"], "claude")
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}):
+            out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("  agent: codex (was claude)", out)
+        # sent by the rejoin's sync
+        self.assertEqual(self.member_header()["agent"], "codex")
+        out = self.ok("join", "game", "--server", "fake-dest", "--agent", "codex")
+        self.assertNotIn("  agent: ", out)
+        # a local member, --agent; and with the pull of a lost tree first
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.ok("join", "docs", "--local")
+        self.ok("join", "docs", "--local", "--agent", "opencode")
+        self.assertEqual(self.member_header("docs")["agent"], "opencode")
+        shutil.rmtree(self.joined("game.mac-web"))
+        os.remove(os.path.join(os.environ["VCHARON_HOME"], "state", "game.mac-web.up.json"))
+        out = self.ok("join", "game", "--server", "fake-dest", "--agent", "claude")
+        self.assertIn("pulled your folder from the server", out)
+        self.assertIn("  agent: claude (was codex)", out)
+        self.assertEqual(self.member_header()["agent"], "claude")
+
+    def test_a_rejoin_from_a_plain_terminal_keeps_the_agent(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local", "--agent", "codex")
+        out = self.ok("join", "game", "--local")
+        self.assertNotIn("  agent: ", out)
+        self.assertEqual(self.member_header()["agent"], "codex")
+
+    @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
+    def test_a_symlinked_member_md_is_refused_before_the_record(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        path = os.path.join(self.root, "game", "mac-web", "MEMBER.md")
+        elsewhere = os.path.join(self.tmp, "elsewhere.md")
+        shutil.move(path, elsewhere)
+        os.symlink(elsewhere, path)
+        with open(elsewhere, "rb") as f:
+            before = f.read()
+        record = channel_cmd.record_path("game", "mac-web")
+        os.remove(record)
+        for extra in ((), ("--agent", "claude"), ("--takeover",)):
+            with self.subTest(extra=extra):
+                line, fix = self.refusal("join", "game", "--local", "--rejoin", *extra)
+                self.assertEqual(line, "ERROR unsafe_path: %s isn't a regular file (a symlink, "
+                                 "or a folder): vcharon writes MEMBER.md itself, and never "
+                                 "through a link" % path)
+                self.assertEqual(fix, "remove it by hand, then join again")
+                self.assertFalse(os.path.exists(record))
+        with open(elsewhere, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def member_header(self, channel="game"):
+        return entries.header_of(entries.read_text(
+            os.path.join(self.root, channel, "mac-web", "MEMBER.md")), "mac-web")
+
+    def test_member_file_reads_only_a_plain_small_file(self):
+        folder = os.path.join(self.tmp, "m")
+        os.makedirs(folder)
+        path = os.path.join(folder, "MEMBER.md")
+        body = b"# MEMBER\n\n## t \xe2\x80\x94 m#1 \xe2\x80\x94 member\nto: @m\nbox: x\n"
+        self.assertIsNone(channels._member_file(folder))
+        with open(path, "wb") as f:
+            f.write(body)
+        self.assertEqual(channels._member_file(folder), body)
+        # over 64 KiB: not vcharon's, not read
+        with open(path, "wb") as f:
+            f.write(body + b"x" * channels.MEMBER_READ_MAX)
+        self.assertIsNone(channels._member_file(folder))
+        with open(path, "wb") as f:
+            f.write(body.ljust(channels.MEMBER_READ_MAX, b"x"))
+        self.assertEqual(len(channels._member_file(folder)), channels.MEMBER_READ_MAX)
+        os.remove(path)
+        if CAN_SYMLINK:
+            other = os.path.join(self.tmp, "other.md")
+            with open(other, "wb") as f:
+                f.write(body)
+            os.symlink(other, path)
+            self.assertIsNone(channels._member_file(folder))
+            os.remove(path)
+        if hasattr(os, "mkfifo"):
+            os.mkfifo(path)
+            self.assertIsNone(channels._member_file(folder))
+            os.remove(path)
+        os.mkdir(path)
+        self.assertIsNone(channels._member_file(folder))
+
+    def test_the_box_of_a_name_kept_after_a_box_change(self):
+        # the record keeps mac-web; a MEMBER.md made again says box mac, not the new box
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        with open(os.path.join(self.homes["mac"], "vcharon.ini"), "w") as f:
+            f.write("[vcharon]\nbox = laptop2\n")
+        os.remove(os.path.join(self.root, "game", "mac-web", "MEMBER.md"))
+        out = self.ok("join", "game", "--local")
+        self.assertIn("took back game/mac-web", out)
+        self.assertEqual(entries.header_of(entries.read_text(
+            os.path.join(self.root, "game", "mac-web", "MEMBER.md")), "mac-web")["box"], "mac")

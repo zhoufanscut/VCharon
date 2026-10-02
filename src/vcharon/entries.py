@@ -310,11 +310,17 @@ def append(path, text):
         mode = 0o666 & ~umask
     if old and not old.endswith(b"\n"):
         old += b"\n"
+    _swap(path, folder, old + text.encode("utf-8"), mode)
+
+
+def _swap(path, folder, data, mode):
+    """data as path's whole new content: a stage-named temp file in folder, then one replace;
+    mode is the file's."""
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=pathrules.STAGE_PREFIX + "post-",
                                suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(old + text.encode("utf-8"))
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         # mkstemp makes it 0600; keep the file's own mode (Windows keeps only read-only)
@@ -326,6 +332,65 @@ def append(path, text):
         except OSError:
             pass
         raise
+
+
+def header_of(text, name, number=1):
+    """The other header lines (to: and re: aside) of the entry name#number in text, as a dict,
+    the first value of each key; {} when text has no such entry. MEMBER.md's name#1 holds
+    the member's fields: the claim, vcharon list and set_header all read that one entry."""
+    for entry in parse(text):
+        if entry.name == name and entry.number == number:
+            out = {}
+            for key, value in entry.header:
+                if key and key not in out:
+                    out[key] = value
+            return out
+    return {}
+
+
+def set_header(path, own, name, number, key, value):
+    """Sets key: value in the header of the entry name#number of path (MEMBER.md's #1), in
+    place, under the own folder's lock: the key's line replaced, or added at the header's end
+    when it has none. Every other byte stays; the new file replaces the old in one step, as
+    append's. Refused when path has no such entry."""
+    problem = one_line_problem(value)
+    if problem:
+        raise VCharonError("config", "a header value is one line: %s" % problem)
+    folder = os.path.dirname(os.path.abspath(path))
+    with lock(own):
+        if not _is_file(path):
+            raise VCharonError("unsafe_path", "%s isn't a regular file (a symlink, or gone)"
+                               % path, "ask the user")
+        with open(path, "rb") as f:
+            raw = f.read()
+        mode = os.stat(path).st_mode & 0o7777
+        # each line with its own end; split after "\n" only, as split_lines
+        lines = re.findall(rb"[^\n]*\n|[^\n]+\Z", raw)
+        start = None
+        for i, line in enumerate(lines):
+            text = line.decode("utf-8", "replace").rstrip("\r\n")
+            if text.startswith("## "):
+                when, who, n, title = parse_heading(text[3:])
+                if who == name and n == number:
+                    start = i
+                    break
+        if start is None:
+            raise VCharonError("channel", "%s has no entry %s#%d" % (path, name, number),
+                               "ask the user")
+        end = b"\r\n" if lines[start].endswith(b"\r\n") else b"\n"
+        new = ("%s: %s" % (key, value)).encode("utf-8") + end
+        i = start + 1
+        # the header ends at a blank line, or at the next heading (parse's rule too)
+        while i < len(lines) and lines[i].strip() and not lines[i].startswith(b"## "):
+            if lines[i].decode("utf-8", "replace").partition(":")[0].strip() == key:
+                lines[i] = new
+                break
+            i += 1
+        else:
+            if i == len(lines) and lines and not lines[-1].endswith(b"\n"):
+                lines[-1] += end
+            lines.insert(i, new)
+        _swap(path, folder, b"".join(lines), mode)
 
 
 def post(path, own, name, title, to, re_=None, body="", header=(), clock=time.time,
