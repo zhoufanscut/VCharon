@@ -145,12 +145,14 @@ class KeyTest(KeyCase):
 
     def test_locked_macos_other_ssh(self):
         self.os_name("darwin")
+        # any absolute path but Apple's; a host path, since ssh_path is checked as one
+        other = os.path.join(self.tmp, "ssh")
         with open(os.path.join(self.ferry_home, "ferry.ini"), "w") as f:
-            f.write("[ferry]\nssh_path = /opt/homebrew/bin/ssh\n")
+            f.write("[ferry]\nssh_path = %s\n" % other)
         self.locked()
         out, err = self.key_cli("fake-dest")
         self.assertIn("  warn    only Apple's ssh (/usr/bin/ssh) reads the Keychain; ssh_path is "
-                      "/opt/homebrew/bin/ssh", out)
+                      + other, out)
 
     def test_locked_windows(self):
         self.os_name("windows")

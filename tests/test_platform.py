@@ -314,8 +314,10 @@ class FerryCommandTest(unittest.TestCase):
             os.symlink(real, link)
         except (OSError, NotImplementedError):
             self.skipTest("no symlinks here")
-        # by realpath: PATH's python3 is a link to this very file
-        self.assertEqual(platform.command_for(real, "/f", "linux",
+        # by realpath: PATH's python3 is a link to this very file. The host's own OS form,
+        # since real and link are this host's paths (a Linux form can't split C:\...).
+        osn = "windows" if os.name == "nt" else "linux"
+        self.assertEqual(platform.command_for(real, "/f", osn,
                                               lambda name: link if name == "python3.11" else None),
                          "python3.11 /f")
 
