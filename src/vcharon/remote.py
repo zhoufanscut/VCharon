@@ -17,7 +17,8 @@ class RemoteSource:
 
     def __init__(self, session, name, options, log=None):
         # options: the raw strings; the helper converts and checks them itself. log: the
-        # running job's own; the session's belongs to the job that opened it (vcharon run a b).
+        # running job's own; the session's belongs to the job that opened it (a sync's up, of
+        # up and down).
         self.session = session
         self.log = log if log is not None else session.log
         self.name = name

@@ -37,7 +37,7 @@ LIST_HINT = "fix its permissions, or exclude it"
 ROOT_LIST_HINT = "fix its permissions"
 # a missing root; a channel section's down swaps it (channel_cmd.CHANNEL_GONE_HINT)
 MISSING_HINT = "check the path"
-# vcharon run gives every state_mismatch its own hint, which names the job
+# a sync gives every state_mismatch its own hint, which names the job
 STATE_HINT = "check the target; then reset the job's state, and run it with --full"
 EMPTY_HINT = "check that its disk is mounted; if it's really empty, set from.allow_empty = yes"
 

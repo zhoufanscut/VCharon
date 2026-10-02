@@ -1,6 +1,5 @@
 """Channel entries (DESIGN §14 M10): their text, parsing them, their numbers, and appending one
-under a lock; client and server member (vcharon channel, tools/mailbox_post.py,
-tools/mailbox_watch.py).
+under a lock; client and server member (vcharon join, post and watch).
 
 An entry is a heading with the poster's ID, a header up to the first blank line, and a body:
 
@@ -25,7 +24,7 @@ from . import pathrules, platform
 from .lock import Lock
 from .proto import VCharonError
 
-# the heading's time: local, to the minute (mailbox_post.py's since M7b)
+# the heading's time: local, to the minute (post's since M7b)
 TIME_FORMAT = "%Y-%m-%d %H:%M"
 MEMBER_FILE = "MEMBER.md"
 CHANNEL_FILE = "CHANNEL.md"
@@ -45,7 +44,7 @@ ALL = "@all"
 # another reader either.
 LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
 # os.replace on Windows: tries, and the pause between them, while another program has the
-# file open (a vcharon run reading it)
+# file open (a sync reading it)
 REPLACE_TRIES = 5
 REPLACE_PAUSE = 0.2
 # how long a post waits for another post into the same folder
@@ -209,7 +208,7 @@ def own_folder(path, top=None):
 def md_files(folder, onerror=None):
     """Every .md file in folder and its subfolders, sorted; symlinks and stage files left
     out. os.walk skips a folder it can't list without a word; onerror(OSError), if given, is
-    told (mailbox_view.py names it)."""
+    told (vcharon read names it)."""
     found = []
     for dirpath, dirnames, filenames in os.walk(folder, onerror=onerror):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(pathrules.STAGE_PREFIX))

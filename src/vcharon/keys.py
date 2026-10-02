@@ -23,8 +23,8 @@ APPLE_SSH = "/usr/bin/ssh"
 
 
 def terminal():
-    """True when stdin and stdout are a terminal: only then may vcharon key, or doctor's offer
-    to run it, prompt (launch rules, DESIGN §13). Tests patch it."""
+    """True when stdin and stdout are a terminal: only then may vcharon key prompt (launch
+    rules, DESIGN §13). Tests patch it."""
     try:
         return bool(sys.stdin and sys.stdin.isatty() and sys.stdout and sys.stdout.isatty())
     except (AttributeError, ValueError, OSError):

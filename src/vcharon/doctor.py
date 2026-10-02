@@ -1,14 +1,24 @@
-"""vcharon doctor: checks of the client, each server and each job, one line each (DESIGN §13);
-client. It only reads, apart from a temp file in the state and log dirs, and its log."""
+"""vcharon doctor: checks of this machine, each server and each channel section's jobs, one
+line each (DESIGN §13); client. It only reads, apart from a temp file in the state and log
+dirs, and its log. It never prompts.
+
+--json prints one object instead: {"version", "protocol", "python", "executable", "os",
+"command", "ok", "failed", "warnings", "checks"}. "command" is how this box runs vcharon (the
+fix lines' spelling); "ok" is true when no check failed; "failed" and "warnings" count the
+checks of those levels; each of "checks" is {"level", "subject", "text", "fix", "note"}, in
+the order the lines would print: "level" is "ok", "warn" or "FAIL", "subject" what was checked
+(python, config, a server's alias, a job's name, …), "fix" the fix line's text (as this box
+runs vcharon) and "note" an ok line's note, each null when there is none."""
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
 import time
 
-from . import VERSION, config, fsops, keys, platform, plugin, ssh, state
+from . import PROTOCOL, VERSION, config, fsops, keys, platform, plugin, ssh, state
 from .log import Log
 from .proto import VCharonError
 
@@ -16,8 +26,8 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("python", "config", "ssh", "agent", "dirs", "machine")
-NO_JOBS_NOTE = "no jobs; to check a server: vcharon doctor <dest>"
+CLIENT_SUBJECTS = ("vcharon", "python", "config", "ssh", "agent", "dirs", "machine")
+NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one (M12b): headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
 CLOCK_WARN = 30
@@ -42,6 +52,8 @@ class Report:
         self.width = min(SUBJECT_MAX, max(len(s) for s in subjects))
         self.failed = 0
         self.warnings = 0
+        # every check, as --json gives them
+        self.checks = []
 
     def check(self, level, subject, text, hint=None, note=None):
         head = "  %s  %s  " % (level.ljust(4), subject.ljust(self.width))
@@ -50,11 +62,15 @@ class Report:
             self.failed += 1
         elif level == "warn":
             self.warnings += 1
+        # as this box runs vcharon (M14a)
+        fix = platform.runnable(hint) if level != "ok" and hint else None
+        note = note if level == "ok" and note else None
+        self.checks.append({"level": level, "subject": subject, "text": text, "fix": fix,
+                            "note": note})
         # the fix or the note starts under the text
-        if level != "ok" and hint:
-            # as this box runs vcharon (M14a)
-            self.say(" " * len(head) + "fix: " + platform.runnable(hint))
-        if level == "ok" and note:
+        if fix:
+            self.say(" " * len(head) + "fix: " + fix)
+        if note:
             self.say(" " * len(head) + "note: " + note)
 
     def last_line(self, seconds):
@@ -74,14 +90,9 @@ class _Dest:
 
 
 def _scope(target, cfg):
-    """[_Dest] in the order they're checked (decision 16 of the M5 plan). A target that is
-    no job must be a good destination: a bad one is a usage error, before any line."""
-    jobs = cfg.named(target) if target is not None and cfg is not None else None
-    if jobs is not None:
-        # a job, or a mailbox section's two, which share a destination and settings
-        d = _Dest(jobs[0].ssh, jobs[0].settings)
-        d.jobs.extend(jobs)
-        return [d]
+    """[_Dest] in the order they're checked (decision 16 of the M5 plan): the server target
+    (--server) alone, or every channel section's. A target must be a good destination: a bad
+    one is a usage error, before any line."""
     if target is not None:
         ssh.check_dest(target)
         settings = cfg.settings if cfg is not None else config.Settings()
@@ -103,6 +114,12 @@ def _scope(target, cfg):
 
 
 # --- the client (decision 18) ---
+
+def _vcharon(rep):
+    """This vcharon's version, and how it's run here: the spelling of every fix line."""
+    rep.check("ok", "vcharon", "%s, protocol %d; runs as %s"
+              % (VERSION, PROTOCOL, platform.self_command()))
+
 
 def _python(rep):
     osn = platform.os_name()
@@ -164,7 +181,7 @@ def _agent(rep, agent, dests):
         # ssh-add itself is missing: no agent question can be answered (review W3)
         rep.check("warn", "agent", text, ssh.START_HINT)
         return
-    dest = dests[0].dest if len(dests) == 1 else "<dest>"
+    dest = dests[0].dest if len(dests) == 1 else "ALIAS"
     if state_ == "empty":
         rep.check("warn", "agent", text, "a key with a passphrase works only once it's in the "
                   "agent: run vcharon key %s" % dest)
@@ -265,7 +282,7 @@ def _login(rep, d, agent, log):
     if ssh.denied(probe) and kind == "file":
         # DESIGN §6.4's third row
         rep.check("FAIL", dest, "ssh can't use your key %s: the server accepts it, but it's "
-                  "locked by a passphrase" % ssh.shown(key.ident), "run: vcharon key %s" % dest)
+                  "locked by a passphrase" % ssh.shown(key.ident), "vcharon key %s" % dest)
         return False, True
     if ssh.denied(probe) and key is None:
         err = keys.no_key_error(dest, agent[0])
@@ -376,7 +393,7 @@ def _job(rep, job, session, hello, log):
                 checks = [("FAIL", e.message, e.hint)]
         for level, message, fix in checks:
             if job.mailbox is not None and side.end == "remote" and level == "FAIL":
-                # the closed channel's hint, as vcharon run shows it (M10)
+                # the closed channel's hint, as a sync shows it (M10)
                 from . import cli
                 fix = cli.channel_gone_hint(job, "not_found", fix) or fix
             elif job.mailbox is not None and role == "source":
@@ -396,31 +413,29 @@ def _made_by_the_run(job, level, message, fix):
         saved = state.load(section + ".up")
     except VCharonError:
         saved = None
+    from . import channel_cmd
+    channel = job.mailbox.channel
+    flags = channel_cmd.name_flags(channel, job.mailbox.me)
     if saved is not None and isinstance(saved.source, dict) and saved.source.get("sent"):
         return (level, "%s, but %s.up has sent files from it" % (message, section),
-                "restore the folder; if it's meant to be gone: vcharon state reset %s.up"
-                % section)
-    return "ok", "%s yet; vcharon run %s makes it" % (message, section), None
+                channel_cmd.rejoin_hint(channel, job.ssh, job.mailbox.me))
+    return "ok", "%s yet; vcharon sync %s %s makes it" % (message, channel, flags), None
 
 
 # --- the command ---
 
 def main(args, run):
-    """vcharon doctor [<target>]: exit 0 when no check failed, else 1 (decisions 16-22 of the
-    M5 plan)."""
+    """vcharon doctor [--server ALIAS] [--json]: exit 0 when no check failed, else 1
+    (decisions 16-22 of the M5 plan)."""
     started = time.monotonic()
     log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
-    target = args.target
+    target = args.server
     try:
-        cfg, cfg_err = config.load(args.config), None
+        cfg, cfg_err = config.load(), None
     except VCharonError as e:
         # a FAIL line, not exit 3; a target is then a destination with the default settings
         cfg, cfg_err = None, e
-    skip = None
-    if target is not None and cfg is not None and cfg.named(target) is None:
-        skip = cfg.skipped_for(target)
-    # a skipped section's own config error is a FAIL line, and nothing is in scope
-    dests = _scope(target, cfg) if skip is None else []
+    dests = _scope(target, cfg)
     base = cfg.settings if cfg is not None else config.Settings()
     log.info("vcharon %s doctor%s; Python %s (%s) on %s; config %s"
              % (VERSION, " " + target if target is not None else "",
@@ -428,55 +443,38 @@ def main(args, run):
                 cfg.path if cfg is not None else "broken"))
 
     def say(line):
-        print(line)
-        sys.stdout.flush()
+        if not args.json:
+            print(line)
+            sys.stdout.flush()
         log.info(line)
 
     subjects = list(CLIENT_SUBJECTS) + [d.dest for d in dests] + [job.name for d in dests
                                                                  for job in d.jobs]
     rep = Report(say, subjects)
-    say("vcharon: doctor%s" % (" " + target if target is not None else ""))
+    say("vcharon: doctor%s" % (" --server " + target if target is not None else ""))
+    _vcharon(rep)
     _python(rep)
-    _config(rep, cfg, cfg_err, not dests and skip is None)
-    if skip is not None:
-        rep.check("FAIL", "config", skip.error.message, skip.error.hint)
+    _config(rep, cfg, cfg_err, not dests)
     _ssh(rep, base)
     agent = keys.agent_state(base)
     _agent(rep, agent, dests)
     _dirs(rep)
     _machine(rep)
-    locked = []
     for d in dests:
-        logged_in, is_locked = _login(rep, d, agent, log)
-        if is_locked:
-            locked.append(d)
+        # a locked key's FAIL line says to run vcharon key: the doctor never prompts
+        logged_in, _ = _login(rep, d, agent, log)
         # ControlMaster off, as in the probe (DESIGN §6.1)
         with ssh.Session(d.settings, d.dest, log, probe=True) as session:
             hello = _server(rep, d, session) if logged_in else None
             for job in d.jobs:
                 _job(rep, job, session if hello is not None else None, hello, log)
     say(rep.last_line(time.monotonic() - started))
-    code = 1 if rep.failed else 0
-    _offer(locked, log, say, run)
-    return code
-
-
-def _offer(locked, log, say, run):
-    """In a terminal, offers to run vcharon key for each destination whose key is locked
-    (DESIGN §6.5); the default is no. The doctor's exit code stays its own."""
-    for d in locked:
-        if not keys.terminal():
-            return
-        try:
-            answer = input("run vcharon key %s now? [y/N] " % d.dest)
-        except EOFError:
-            continue
-        yes = answer.strip().lower() in ("y", "yes")
-        # never the answer's text: it's typed on the terminal
-        log.info("offer to run vcharon key %s: %s" % (d.dest, "yes" if yes else "no"))
-        if not yes:
-            continue
-        try:
-            keys.unlock(d.settings, d.dest, None, log, say)
-        except VCharonError as e:
-            run.show_error(e)
+    if args.json:
+        print(json.dumps({"version": VERSION, "protocol": PROTOCOL,
+                          "python": platform.python_version(), "executable": sys.executable,
+                          "os": platform.os_name(), "command": platform.self_command(),
+                          "ok": not rep.failed, "failed": rep.failed,
+                          "warnings": rep.warnings, "checks": rep.checks},
+                         ensure_ascii=False))
+        sys.stdout.flush()
+    return 1 if rep.failed else 0

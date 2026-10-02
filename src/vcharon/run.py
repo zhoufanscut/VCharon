@@ -51,7 +51,7 @@ class Engine:
     def _make(self, side, role):
         if side.end == "remote":
             cls = remote.RemoteSource if role == "source" else remote.RemoteSink
-            # Its warnings go to this job's log, not the session's (vcharon run a b).
+            # Its warnings go to this job's log, not the session's (a sync of up and down).
             return cls(self.session, side.plugin, side.options, self.log)
         log, prefix = self.log, role + ": "
         # No tick: local work never counts as idle (DESIGN §6.3).

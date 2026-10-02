@@ -1,29 +1,23 @@
-"""tools/mailbox_view.py: a channel's entries, every member's, in one order (DESIGN §14 M12a)."""
+"""vcharon read: a channel's entries, every member's, in one order (DESIGN §14 M12a)."""
 
 from __future__ import annotations
 
 import datetime
-import importlib.util
 import io
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from unittest import mock
 
-from tests.util import CAN_SYMLINK, write_tree
+from vcharon import channel_cmd, cli
+from vcharon.mailbox import read as view
 
-TOOLS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
+from tests.util import CAN_SYMLINK, TEST_MACHINE_ID, write_tree
 
-
-def _load(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(TOOLS, name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-view = _load("mailbox_view")
+# a member of the channel, for the record that finds it (DESIGN §7.2)
+READ = ["read", "mb", "--project", "p"]
 
 # this box's clock for every view here
 NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)
@@ -41,7 +35,7 @@ mailbox.remote = ~/.local/state/vcharon/channels/mb
 
 
 def entry(eid, title="t", when=MINUTE, to="@all", re_=None, extra=(), body=""):
-    """One entry's text, as mailbox_post.py writes it; eid None for a heading without one."""
+    """One entry's text, as vcharon post writes it; eid None for a heading without one."""
     head = "## %s — %s — %s" % (when, eid, title) if eid else "## %s — %s" % (when, title)
     lines = ["", head, "to: " + to] + (["re: " + re_] if re_ else []) + list(extra)
     text = "\n".join(lines) + "\n"
@@ -56,25 +50,31 @@ class ViewCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": os.path.join(self.tmp, "home")})
+        self.home = os.path.join(self.tmp, "home")
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": self.home})
         patch.start()
         self.addCleanup(patch.stop)
         self.tree = os.path.join(self.tmp, "mb")
         os.mkdir(self.tree)
+        # a local member of mb: its tree is the channel's folder
+        self.record("zz", None, self.tree)
+
+    def record(self, name, ssh, remote):
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": name, "leader": "aa",
+                                  "ssh": ssh, "remote": remote, "machine": TEST_MACHINE_ID,
+                                  "project": "p", "role": None})
 
     def main(self, *argv):
-        """(exit code, stdout lines, stderr)."""
+        """vcharon read mb ARGV at NOW: (exit code, stdout lines, stderr)."""
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
-            try:
-                code = view.main(list(argv), now=NOW)
-            except SystemExit as e:
-                code = e.code
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
+                mock.patch.object(view, "_now", lambda: NOW):
+            code = cli.main(READ + list(argv))
         return code, out.getvalue().splitlines(), err.getvalue()
 
     def view(self, *argv):
         """The lines of a view of self.tree that must exit 0."""
-        code, lines, err = self.main("--dir", self.tree, *argv)
+        code, lines, err = self.main(*argv)
         self.assertEqual((code, err), (0, ""), lines)
         return lines
 
@@ -232,13 +232,34 @@ class OutputTest(ViewCase):
             "    > # quoted",
             "2026-10-02 10:02  aa#3  @all  three  (aa/R.md)"])
 
+    def test_json(self):
+        code, lines, err = self.main("--json", "--last", "2")
+        self.assertEqual((code, err), (0, ""))
+        [line] = lines
+        doc = json.loads(line)
+        self.assertEqual(doc, {
+            "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
+            "count": 4, "notes": [],
+            "entries": [
+                {"time": "2026-10-02 10:01", "id": "aa#2", "name": "aa", "number": 2,
+                 "to": ["@bb", "@cc"], "re": "bb#1", "title": "two", "file": "aa/R.md",
+                 "header": None, "body": None},
+                {"time": "2026-10-02 10:02", "id": "aa#3", "name": "aa", "number": 3,
+                 "to": ["@all"], "re": None, "title": "three", "file": "aa/R.md",
+                 "header": None, "body": None}]})
+        doc = json.loads(self.main("--json", "--full", "--last", "2")[1][0])
+        self.assertEqual((doc["entries"][0]["header"], doc["entries"][0]["body"]),
+                         ([["kind", "steps"]], "line 1\n\n> # quoted"))
+        self.assertEqual((doc["entries"][1]["header"], doc["entries"][1]["body"]), ([], ""))
+
     def test_usage_and_a_missing_dir(self):
-        for argv in ([], ["--dir", self.tree, "--job", "mb.windows"],
-                     ["--dir", self.tree, "--config", "x"], ["--dir", self.tree, "--last", "0"]):
+        for argv in (["--dir", self.tree], ["--job", "mb.windows"], ["--config", "x"],
+                     ["--last", "0"], ["--last", "x"]):
             with self.subTest(argv=argv):
-                self.assertEqual(self.main(*argv)[0], 2)
+                self.assertEqual(self.main(*argv)[0], 3)
         missing = os.path.join(self.tmp, "nope")
-        code, lines, err = self.main("--dir", missing)
+        self.record("zz", None, missing)
+        code, lines, err = self.main()
         self.assertEqual((code, lines), (1, []))
         # the text after the colon is the OS's, localized on Windows (MAILBOX §5)
         self.assertTrue(err.startswith("ERROR can't read %s: " % missing), err)
@@ -248,25 +269,30 @@ class OutputTest(ViewCase):
 class JobTest(ViewCase):
     def setUp(self):
         ViewCase.setUp(self)
-        self.config = os.path.join(self.tmp, "vcharon.ini")
-        with open(self.config, "w", encoding="utf-8") as f:
-            f.write("[vcharon]\n")
-        write_tree(self.tmp, {"channels.d/mb.windows.ini":
-                              MAILBOX.format(local=self.tree).encode("utf-8")})
+        write_tree(self.home, {"vcharon.ini": b"[vcharon]\n", "channels.d/mb.windows.ini":
+                               MAILBOX.format(local=self.tree).encode("utf-8")})
+        # a remote member, windows: its local tree, as of the last sync
+        os.remove(channel_cmd.record_path("mb", "zz"))
+        self.record("windows", "devbox", "~/.local/state/vcharon/channels/mb")
         write_tree(self.tree, {"debian/R.md": md(entry("debian#2", "steps")),
                                "windows/R.md": md(entry("windows#2", "mine"))})
 
     def test_a_channel_section(self):
-        code, lines, err = self.main("--job", "mb.windows", "--config", self.config)
+        code, lines, err = self.main()
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(lines[0], "mb: 2 entries from 2 members (%s), as of this box's last "
                          "sync" % self.tree)
         self.assertEqual(self.ids(lines), ["debian#2", "windows#2"])
 
-    def test_a_bad_section(self):
-        code, lines, err = self.main("--job", "nope", "--config", self.config)
-        self.assertEqual((code, lines), (1, []))
-        self.assertEqual(err, "mailbox_view: %s has no channel section [nope]\n" % self.config)
+    def test_a_missing_section(self):
+        os.remove(os.path.join(self.home, "channels.d", "mb.windows.ini"))
+        code, lines, err = self.main()
+        self.assertEqual((code, lines), (3, []))
+        self.assertEqual(err.splitlines()[:2], [
+            "ERROR config: %s has no channel section [mb.windows]"
+            % os.path.join(self.home, "channels.d"),
+            "  fix: join the channel again, with the --project and --role you joined with: it "
+            "writes the section"])
 
 
 if __name__ == "__main__":

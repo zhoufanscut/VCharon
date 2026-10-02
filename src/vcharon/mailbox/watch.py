@@ -1,31 +1,26 @@
-"""Watch a vcharon channel and print what reached you, one line per entry (DESIGN §14 M10,
-MAILBOX.md and WATCHING.md in the vcharon folder).
+"""vcharon watch C: print what reached you in a channel, one line per entry (DESIGN §14 M10,
+the guide's watch topic).
 
 Two ways to run it. Continuous, the default, for a Claude Code Monitor: it prints only when
 something changed and runs until --max-minutes, a usage error or Ctrl-C. --until-change, for a
 session without a Monitor (a background command, which notifies only when it exits): it exits
 after the first round that printed something that counts, or whose error counts (see
-status()). Standard library only, Python 3.9 or newer. It lives outside the vcharon package:
-DESIGN §1 keeps watching out of vcharon itself.
+status()).
 
-Server mode, for a server member, on the server box, where the channel is plain files; its own
-folder <dir>/<me>/ must hold MEMBER.md (vcharon channel join --local wrote it):
+A local member (joined with --local, on the machine that holds the channel root) watches the
+channel's folder as plain files; its own folder <dir>/<me>/ must hold MEMBER.md. Every 10 s by
+default (watch_dir).
 
-    python3 mailbox_watch.py --dir ~/.local/state/vcharon/channels/<C> --me <name> [--every 10]
-
-Client mode: each round is a `vcharon run <job>` (the channel section's up and down jobs), then
-compares the client's copy of the channel with the round before:
-
-    python3 mailbox_watch.py --job <C>.<name> [--config PATH] [--every 2] [--no-stream]
-
-It streams by default (DESIGN §14 M15): one long-lived child, `vcharon run <job> --repeat
-<every>`, keeps one ssh connection and prints `ROUND <code>` after each round; each ROUND line
-is one round here. When the child exits it is started again after 2, 4, 8, 16, 30, 30… s (back
-to 2 after a round that worked); every way out of the watch closes its stdin, waits up to 10 s,
-then kills it. Streaming, the wake rules count time: an error of RETRY_KEYS counts once it has
-held 60 s in a row, and --until-change's EXIT error comes after --max-errors × 30 s of failing
-that woke nobody. --no-stream runs `vcharon run <job>` each round, every 30 s by default, with
-the rules in rounds, as before M15.
+A remote member: each round is a sync of the channel (its section's up and down jobs), then a
+comparison of this box's copy of the channel with the round before (watch_job). It streams by
+default (DESIGN §14 M15): one long-lived child, `vcharon sync C --repeat <every>`, keeps one
+ssh connection and prints `ROUND <code>` after each round; each ROUND line is one round here.
+When the child exits it is started again after 2, 4, 8, 16, 30, 30… s (back to 2 after a round
+that worked); every way out of the watch closes its stdin, waits up to 10 s, then kills it.
+Streaming, the wake rules count time: an error of RETRY_KEYS counts once it has held 60 s in a
+row, and --until-change's EXIT error comes after --max-errors × 30 s of failing that woke
+nobody. --no-stream runs `vcharon sync C` each round, every 30 s by default, with the rules in
+rounds, as before M15.
 
 Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
 it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
@@ -38,7 +33,7 @@ Lines; * marks the ones that count for --until-change:
                                    <time>` when it goes on from a saved snapshot (the last
                                    round that changed it), `, fresh
                                    start` with --fresh; then `, streaming every <n> s` for a
-                                   streaming --job
+                                   streaming remote member
     note: ignoring the saved snapshot <path>: <why>
                                    at the start, for a snapshot it can't use
   * to you: <id> — <title>  (<path>)
@@ -61,9 +56,9 @@ Lines; * marks the ones that count for --until-change:
   * ERROR ...                      a failed round's first error line, once, and again only
                                    when it changes (status() says when it counts)
       fix: <text>                  what to do, right after its ERROR line when there is one:
-                                   vcharon run's fix line, or with --dir the leave command for a
-                                   channel folder that's gone (a closed channel); a command in
-                                   it is as this box runs vcharon, `python3 <vcharon> ...`
+                                   the sync's fix line, or for a local member the leave command
+                                   for a channel folder that's gone (a closed channel); a command
+                                   in it is as this box runs vcharon
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed
                                    the last line, when it exits on its own (exit 0, 10, 11,
@@ -73,7 +68,7 @@ Lines; * marks the ones that count for --until-change:
                                    it stays gone: don't restart, run the fix line's leave
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
-scan worked (a failed vcharon run doesn't stop that), after the round's lines are printed, so a
+scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
 restart prints what came while no watcher ran; a round that changed nothing in it (its saved
 time aside) doesn't write it again (M15), so its saved time, the watching line's `since`, is
 that of the last round that changed it. Per member folder it holds the entry numbers
@@ -90,7 +85,6 @@ keeps a second watcher of the same membership from starting (exit 12).
 
 from __future__ import annotations
 
-import argparse
 import collections
 import hashlib
 import json
@@ -103,35 +97,39 @@ import tempfile
 import threading
 import time
 
-# the repo's src folder, which holds the vcharon package
-VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-# how the watcher starts the command line as a child: this Python, the installed package
-SELF_ARGV = (sys.executable, "-m", "vcharon")
+# Imported here, not in the functions: a long-running watch has every module it needs loaded
+# before anything can change the files under it (DESIGN, running watchers).
+from .. import channel_cmd, config, entries, fsops, pathrules, platform, plugin
+from ..lock import Lock
+from ..proto import VCharonError
+
 # vcharon's stage dirs, in any case (DESIGN §10.3)
 STAGE_PREFIX = ".vcharon-stage-"
-# how vcharon run's fix and log lines start, among its ERROR line's own (cli.py's show_error)
+# how the sync's fix and log lines start, among its ERROR line's own (cli.py's show_error)
 FIX = "  fix: "
 LOG = "  log: "
-# between a fix's text and its log path, in the fix that run_vcharon returns and the snapshot
+# between a fix's text and its log path, in the fix that run_sync returns and the snapshot
 # keeps; status() prints them as two lines
 LOG_SEP = "\n"
-# A round's vcharon run has its own timeouts; this only keeps a stuck one from stopping the watch.
+# A round's sync has its own timeouts; this only keeps a stuck one from stopping the watch.
 RUN_TIMEOUT = 900
-# --job's default seconds between rounds: streaming, and with --no-stream (M15)
+# a remote member's default seconds between rounds: streaming, and with --no-stream (M15)
 STREAM_EVERY, RUN_EVERY = 2, 30
-# a streaming --job's --every, which is vcharon run --repeat's SECONDS: 1 to this
+# a local member's
+DIR_EVERY = 10
+# a streaming watch's --every, which is vcharon sync --repeat's SECONDS: 1 to this
 STREAM_EVERY_MAX = 300
 # Streaming, a round is seconds, so M9's wake rules count time, not rounds (M15): an error of
 # RETRY_KEYS counts once it has held this long in a row (as its second 30-s round did), and
 # with --until-change each --max-errors round is this many seconds of failing that woke nobody.
 STREAM_HOLD = 60
 STREAM_ERROR_ROUND = 30
-# the waits before starting the vcharon run --repeat child again after it exited; back to the
+# the waits before starting the vcharon sync --repeat child again after it exited; back to the
 # first after a round that worked
 BACKOFF = (2, 4, 8, 16, 30)
 # how long the child may take to end after its stdin closes, before it's killed
 STOP_WAIT = 10
-# the child's line that ends one round: vcharon run's exit code for it
+# the child's line that ends one round: the sync's exit code for it
 _ROUND = re.compile(r"\AROUND (\d+)\Z")
 # Windows and macOS clients ignore case in names, so Windows/ there is the own folder.
 FOLDS = sys.platform in ("win32", "darwin")
@@ -147,8 +145,8 @@ HEAD_HEX = 12
 TRANSPORT = "transport"
 # keys that count only in their second failed round in a row: a one-round blip wakes nobody
 RETRY_KEYS = frozenset([TRANSPORT, "vanished", "aborted"])
-# ERROR <code>: ..., or ERROR <job>: <code>: ... from a vcharon run of several jobs (M9c), as a
-# mailbox section's run is. A mailbox job's name, S.up or S.down, holds a dot; a code never does.
+# ERROR <code>: ..., or ERROR <job>: <code>: ... from a sync of a section's two jobs (M9c). A
+# mailbox job's name, S.up or S.down, holds a dot; a code never does.
 _CODE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:up|down): )?([a-z_]+): ")
 _MORE = re.compile(r" \(and \d+ more; see the log\)")
 
@@ -164,7 +162,7 @@ def error_key(line):
     m = _CODE.match(line)
     code = m.group(1) if m else None
     if (code in ("connect", "timeout", "lost") or line.startswith("ERROR couldn't start vcharon")
-            or (line.startswith("ERROR vcharon run ") and " didn't finish within " in line)):
+            or (line.startswith("ERROR vcharon sync of ") and " didn't finish within " in line)):
         return TRANSPORT
     if code in ("too_many_deletes", "vanished", "aborted"):
         return code
@@ -234,8 +232,6 @@ def warnings(root, me):
     or special file, which fails every client's run. Stage dirs and symlinks are never
     entered. An error on the root raises OSError, as scan's does; below it, an entry that
     vanishes is left out."""
-    _vcharon_import()
-    from vcharon import pathrules
     out = []
     with os.scandir(root) as it:
         top = sorted(it, key=lambda e: e.name)
@@ -382,8 +378,6 @@ def read_entries(root, paths, marks, me, leader, baseline=False):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
     member's is ignored, since any member can write anything into its own folder."""
-    _vcharon_import()
-    from vcharon import entries
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -448,12 +442,6 @@ def say(line):
     sys.stdout.flush()
 
 
-def _vcharon_import():
-    # the vcharon package next to this tool, never one on PATH (DESIGN §13)
-    if VCHARON_DIR not in sys.path:
-        sys.path.insert(0, VCHARON_DIR)
-
-
 def _root_key(root):
     return os.path.normcase(os.path.realpath(root))
 
@@ -461,13 +449,11 @@ def _root_key(root):
 def snapshot_path(root, me, job=None):
     """Where the saved snapshot lives: vcharon's state dir, one file per mailbox job on a client,
     one per writer and tree on the server."""
-    _vcharon_import()
-    from vcharon import platform
     if job is not None:
         name = "mailbox-watch-%s.json" % job
     else:
         # normcase(realpath), as the post lock: two spellings of one folder (a link, and on
-        # Windows another case) get one lock, so exit 12 and vcharon channel's lock checks see
+        # Windows another case) get one lock, so exit 12 and leave's and close's lock checks see
         # every watcher of it (M11a). On Linux with no links the name is as before.
         key = _root_key(root)
         digest = hashlib.sha256(os.fsencode(key)).hexdigest()[:12]
@@ -608,8 +594,6 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
 def take_lock(path):
     """The held lock on <snapshot>.lock, or None if another watcher holds it. vcharon's own
     lock: the OS drops it when the process dies (DESIGN §11.3)."""
-    _vcharon_import()
-    from vcharon.lock import Lock
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lk = Lock.open(path + ".lock")
     try:
@@ -708,7 +692,7 @@ class _Watch:
             self.entries(self.snap, list(self.snap), baseline=True)
             warns = self.check(self.root, self.me) if self.check is not None else []
         except FileNotFoundError:
-            # not there yet: the first vcharon run makes it
+            # not there yet: the first sync makes it
             self.snap = {}
             warns = []
         except OSError as e:
@@ -919,7 +903,7 @@ def _locked(w, state):
     try:
         lk = take_lock(state)
     except OSError as e:
-        raise SystemExit("mailbox_watch: can't lock %s.lock: %s" % (state, _why(e)))
+        raise fsops.error(e, state + ".lock")
     if lk is None:
         w.say("ERROR another watcher is running on this mailbox (%s.lock)" % state)
     return lk
@@ -930,7 +914,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
               max_errors=10):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). Returns the exit code.
-    Refused (SystemExit) unless root/me/ holds MEMBER.md; root gone (a closed channel) is
+    Refused (VCharonError) unless root/me/ holds MEMBER.md; root gone (a closed channel) is
     the ERROR and fix lines and EXIT closed, before any lock or snapshot (M14b)."""
     gone = gone_fix(root, me)
     try:
@@ -966,23 +950,22 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         lk.release()
 
 
-def vcharon_argv(job, config_path, repeat=None):
-    """vcharon run <job>, with this Python and SELF_ARGV, never PATH (DESIGN §13); with
-    repeat, vcharon run <job> --repeat <repeat> (M15)."""
-    argv = list(SELF_ARGV) + ["run", job]
+def sync_argv(sync_args, repeat=None):
+    """The child's argv: vcharon sync <sync_args>, started as this vcharon is (self_argv),
+    never through PATH (DESIGN §13); with repeat, --repeat <repeat> (M15). sync_args: the
+    channel, and the --project and --role that find this membership."""
+    argv = platform.self_argv() + ["sync"] + list(sync_args)
     if repeat is not None:
         argv += ["--repeat", str(repeat)]
-    if config_path:
-        argv += ["--config", config_path]
     return argv
 
 
 def parse_failure(code, lines, job):
-    """(exit code, its error line, that line's fix) of vcharon run's output lines: the first
+    """(exit code, its error line, that line's fix) of a sync's output lines: the first
     line that starts with ERROR, else the first that isn't blank; the fix is the text of that
     ERROR line's "  fix: " line (M13), with its "  log: " path after it, since a fix can point
     at lines the watcher doesn't show ("see ssh's messages above"); a log with no fix gives one
-    that names the log; else None. Both are None for code 0. One parser for a vcharon run's
+    that names the log; else None. Both are None for code 0. One parser for a sync's
     stderr and a streamed round's lines (M15)."""
     if code == 0:
         return 0, None, None
@@ -1004,18 +987,18 @@ def parse_failure(code, lines, job):
     for line in lines:
         if line.strip():
             return code, line.strip(), None
-    return code, "ERROR vcharon run %s exited with %d" % (job, code), None
+    return code, "ERROR vcharon sync of %s exited with %d" % (job, code), None
 
 
-def run_vcharon(job, config_path):
-    """(exit code, its error line, that line's fix) of one vcharon run, from its stderr
-    (parse_failure). All but the code are None on success."""
+def run_sync(job, sync_args):
+    """(exit code, its error line, that line's fix) of one sync of the section job, from its
+    stderr (parse_failure). All but the code are None on success."""
     try:
-        ran = subprocess.run(vcharon_argv(job, config_path), stdin=subprocess.DEVNULL,
+        ran = subprocess.run(sync_argv(sync_args), stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             timeout=RUN_TIMEOUT)
+                             timeout=RUN_TIMEOUT, env=platform.child_env())
     except subprocess.TimeoutExpired:
-        return 1, "ERROR vcharon run %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
+        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
     except OSError as e:
         return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
     return parse_failure(ran.returncode, ran.stderr.decode("utf-8", "replace").splitlines(),
@@ -1043,21 +1026,21 @@ class _ErrTail:
         return list(self.lines)[-n:] if n > 0 else []
 
 
-# vcharon run's codes for the errors that break its connection (cli.py's _still_usable): after
-# a round that ended with one, vcharon run --repeat exits by design
+# the sync's codes for the errors that break its connection (cli.py's _still_usable): after
+# a round that ended with one, vcharon sync --repeat exits by design
 _BROKE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*: )?(connect|timeout|lost|protocol): ")
 
 
 class Stream:
-    """A streaming --job's child (DESIGN §14 M15): one long-lived `vcharon run <job> --repeat
+    """A streaming watch's child (DESIGN §14 M15): one long-lived `vcharon sync C --repeat
     <every>`. A reader thread puts its stdout's lines in a queue, another keeps stderr's last
     20. Each ROUND <code> line ends one round; when the child exits, it's started again after
     BACKOFF's wait. spawn, sleep and timer are the tests' to replace."""
 
-    def __init__(self, job, config_path, every, spawn=_spawn, sleep=time.sleep,
+    def __init__(self, job, sync_args, every, spawn=_spawn, sleep=time.sleep,
                  timer=time.monotonic, stop_wait=STOP_WAIT):
         self.job = job
-        self.argv = vcharon_argv(job, config_path, repeat=every)
+        self.argv = sync_argv(sync_args, repeat=every)
         self.every = every
         self.spawn = spawn
         self.sleep = sleep
@@ -1079,8 +1062,9 @@ class Stream:
         self._broke = False
 
     def _start(self):
-        # vcharon's own prints in UTF-8, on Windows too (the gbk lesson)
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        # vcharon's own prints in UTF-8, on Windows too (the gbk lesson); a binary's child
+        # unpacks its own copy (platform.child_env)
+        env = platform.child_env(dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1"))
         proc = self.spawn(self.argv, env)
         self.proc = proc
         self._lines = queue.Queue()
@@ -1116,7 +1100,7 @@ class Stream:
             pass
 
     def next_round(self, deadline=None):
-        """(code, error line, fix) of the child's next round, as run_vcharon gives them, after
+        """(code, error line, fix) of the child's next round, as run_sync gives them, after
         starting the child if none runs; None when deadline (by timer, --max-minutes) passes
         before the round: during the wait before a start, or before its ROUND line, when the
         child is stopped. A child that exits after a ROUND line whose error breaks the
@@ -1151,7 +1135,7 @@ class Stream:
                 # no round for too long: the child is stuck; vcharon's own timeouts didn't end it
                 self.stop()
                 self.exits += 1
-                return 1, ("ERROR vcharon run %s didn't finish within %d s"
+                return 1, ("ERROR vcharon sync of %s didn't finish within %d s"
                            % (self.job, RUN_TIMEOUT)), None
             if line is None:
                 err = self._err
@@ -1247,65 +1231,53 @@ _LATE = object()
 _STUCK = object()
 
 
-def mailbox_of(job, config_path, prog="mailbox_watch"):
+def mailbox_of(job):
     """(local tree, me, leader) of the channel section job, read through vcharon's own config
-    code. prog starts the error's text: the calling tool's name (mailbox_view.py uses it
-    too)."""
-    _vcharon_import()
-    from vcharon import config, plugin
-    from vcharon.proto import VCharonError
-    try:
-        cfg = config.load(config_path)
-    except VCharonError as e:
-        raise SystemExit("%s: %s" % (prog, e.message))
+    code."""
+    cfg = config.load()
     if job not in cfg.mailboxes:
         skip = cfg.skipped_for(job)
         if skip is not None:
-            # a broken channels.d/ file: its own error, as vcharon run's
-            raise SystemExit("%s: %s" % (prog, skip.error.message))
-        raise SystemExit("%s: %s has no channel section [%s]" % (prog, cfg.path, job))
+            # a broken channels.d/ file: its own error, as the sync's
+            raise skip.error
+        raise VCharonError("config", "%s has no channel section [%s]"
+                           % (config.channels_dir(cfg.path), job),
+                           hint="join the channel again, with the --project and --role you "
+                           "joined with: it writes the section")
     box = cfg.jobs[cfg.mailboxes[job][0]].mailbox
     return plugin.Ctx("local").resolve(box.local, "mailbox.local"), box.me, box.leader
 
 
 def server_leader(root, me):
-    """The leader of a server member's channel: its record's (vcharon channel join --local
-    wrote it), else its MEMBER.md's. SystemExit if root/me/ holds no MEMBER.md: server mode
-    watches a channel member's folder only (DESIGN §14 M10)."""
-    _vcharon_import()
-    from vcharon import channel_cmd, entries, pathrules, platform
-    from vcharon.proto import VCharonError
+    """The leader of a local member's channel: its record's (vcharon join --local wrote it),
+    else its MEMBER.md's. Refused if root/me/ holds no MEMBER.md: a local member's watch reads
+    a channel member's folder only (DESIGN §14 M10)."""
     member = os.path.join(root, me, entries.MEMBER_FILE)
     channel = os.path.basename(root)
     if not entries.own_folder(member, top=os.path.join(root, me)):
         # a root that's gone never gets here: watch_dir ends with EXIT closed (M14b)
-        raise SystemExit(platform.runnable(
-            "mailbox_watch: %s isn't there: --dir is a channel's folder and --me a member "
-            "whose folder in it holds MEMBER.md (vcharon channel join --local)" % member))
-    try:
-        record = None if pathrules.writer_problem(channel) else channel_cmd.read_record(
-            channel, me)
-    except VCharonError as e:
-        raise SystemExit("mailbox_watch: %s" % e.message)
+        raise VCharonError("channel", "%s isn't there: your folder in the channel holds it, once "
+                           "vcharon join --local has written it" % member,
+                           "ask the user: your folder in %s lost its %s"
+                           % (channel, entries.MEMBER_FILE))
+    record = None if pathrules.writer_problem(channel) else channel_cmd.read_record(channel, me)
     if record is not None:
         return record["leader"]
     try:
         found = entries.parse_file(member)
     except OSError as e:
-        raise SystemExit("mailbox_watch: can't read %s: %s" % (member, _why(e)))
+        raise fsops.error(e, member)
     for key, value in (found[0].header if found else []):
         if key == "leader" and pathrules.writer_problem(value) is None:
             return value
-    raise SystemExit("mailbox_watch: %s names no leader, and there's no record of %s in %s"
-                     % (member, me, channel))
+    raise VCharonError("channel", "%s names no leader, and there's no record of %s in %s"
+                       % (member, me, channel), "ask the user")
 
 
 def gone_fix(root, me):
-    """Server mode's fix line for a channel folder that's gone (M13): vcharon run's text for a
+    """A local member's fix line for a channel folder that's gone (M13): the sync's text for a
     closed channel, with the leave command's flags from me's record (a placeholder without
     one: name_flags never raises), and the command as this box runs vcharon (M14a)."""
-    _vcharon_import()
-    from vcharon import channel_cmd, platform
     channel = os.path.basename(root)
     return platform.runnable(channel_cmd.CHANNEL_GONE_HINT
                              % (channel, channel_cmd.name_flags(channel, me)))
@@ -1313,25 +1285,24 @@ def gone_fix(root, me):
 
 def is_gone(fix):
     """Whether a fix line is the one for a channel that's gone (M14b): CHANNEL_GONE_HINT's,
-    told by its start, which neither platform.runnable nor run_vcharon's log part changes.
-    vcharon run swaps that hint in only for a channel job's not_found on up's sink root or
-    down's source root (M10); server mode's scan gives it only for FileNotFoundError on the
-    channel's folder."""
+    told by its start, which neither platform.runnable nor run_sync's log part changes.
+    The sync swaps that hint in only for a channel job's not_found on up's sink root or
+    down's source root (M10); a local member's scan gives it only for FileNotFoundError on
+    the channel's folder."""
     if not fix:
         return False
-    _vcharon_import()
-    from vcharon import channel_cmd
     return fix.startswith(channel_cmd.CHANNEL_GONE_PREFIX)
 
 
-def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_vcharon, rounds=None,
+def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT):
-    """Client mode: run the job, then compare the local tree with the round before. Returns
-    the exit code. stream (M15): the rounds are those of one long-lived `vcharon run <job>
-    --repeat <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
-    run(job, config_path) every `every` seconds; the wake rules then count time by timer."""
-    local, me, leader = mailbox_of(job, config_path)
+    """A remote member: sync the channel section job, then compare the local tree with the
+    round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
+    membership. stream (M15): the rounds are those of one long-lived `vcharon sync C --repeat
+    <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
+    run(job, sync_args) every `every` seconds; the wake rules then count time by timer."""
+    local, me, leader = mailbox_of(job)
     state = snapshot_path(local, me, job)
     w = _Watch(local, me, out, clock, fold=FOLDS, state=state, leader=leader, timer=timer,
                hold=STREAM_HOLD if stream else None,
@@ -1348,12 +1319,12 @@ def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_vcharo
         # again at the deadline
         start = timer()
         if stream:
-            child = Stream(job, config_path, every, spawn=spawn, sleep=sleep, timer=timer,
+            child = Stream(job, sync_args, every, spawn=spawn, sleep=sleep, timer=timer,
                            stop_wait=stop_wait)
             deadline = None if max_minutes is None else start + max_minutes * 60
             error_seconds = max_errors * STREAM_ERROR_ROUND
 
-            def run(job, config_path):
+            def run(job, sync_args):
                 return child.next_round(deadline)
 
             # the child waits between rounds itself
@@ -1361,7 +1332,7 @@ def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_vcharo
                 return None
 
         def step():
-            got = run(job, config_path)
+            got = run(job, sync_args)
             if got is None:
                 # --max-minutes passed before the child's round: no round
                 return 0, None, True
@@ -1397,20 +1368,7 @@ def watch_job(job, config_path, every, out=say, sleep=time.sleep, run=run_vcharo
             lk.release()
 
 
-def _number(low, high, what):
-    def parse(text):
-        # ASCII digits only: str.isdigit() also takes "²", which int() refuses
-        if not text or any(c not in "0123456789" for c in text) or not low <= int(text) <= high:
-            raise argparse.ArgumentTypeError("must be a whole number of %s, %d to %d"
-                                             % (what, low, high))
-        return int(text)
-    return parse
-
-
-_every = _number(1, 86400, "seconds")
-
-
-def _utf8_output():
+def utf8_output():
     """Every line in UTF-8, whatever the console's code page (a Windows client's may be 936):
     a name the code page can't hold must not stop the watch."""
     for stream in (sys.stdout, sys.stderr):
@@ -1418,64 +1376,3 @@ def _utf8_output():
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
         except (AttributeError, ValueError, OSError):
             pass
-
-
-def main(argv=None):
-    _utf8_output()
-    parser = argparse.ArgumentParser(prog="mailbox_watch.py", description="Print what reached "
-                                     "you in a vcharon channel, one line per entry.")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--dir", help="a local member (--local): the channel's folder in the "
-                      "channel root on this machine")
-    mode.add_argument("--job", help="client mode: the channel section (channels.d/) to run")
-    parser.add_argument("--me", help="with --dir: this member's name; its folder, which "
-                        "holds MEMBER.md, is skipped")
-    parser.add_argument("--config", help="client mode: vcharon's config file")
-    parser.add_argument("--every", type=_every, help="seconds between rounds (--dir 10; "
-                        "--job %d, 1 to %d; --job --no-stream %d)"
-                        % (STREAM_EVERY, STREAM_EVERY_MAX, RUN_EVERY))
-    parser.add_argument("--no-stream", action="store_true", help="with --job: a vcharon run "
-                        "each round, as before streaming, in place of one long-lived vcharon "
-                        "run --repeat")
-    parser.add_argument("--until-change", action="store_true", help="exit after the first "
-                        "round that printed a change or an error that counts (for a background "
-                        "command)")
-    parser.add_argument("--max-minutes", type=_number(1, 1440, "minutes"), help="exit between "
-                        "rounds after this many minutes (default: none; 25 with "
-                        "--until-change)")
-    parser.add_argument("--max-errors", type=_number(1, 1000, "rounds"), help="with "
-                        "--until-change: exit after this many failed rounds in a row "
-                        "(default 10); a streaming --job counts %d s of failing as one"
-                        % STREAM_ERROR_ROUND)
-    parser.add_argument("--fresh", action="store_true", help="ignore the saved snapshot")
-    args = parser.parse_args(argv)
-    if args.max_errors is not None and not args.until_change:
-        parser.error("--max-errors needs --until-change")
-    limits = {"fresh": args.fresh, "until_change": args.until_change,
-              "max_minutes": args.max_minutes or (25 if args.until_change else None),
-              "max_errors": args.max_errors or 10}
-    try:
-        if args.dir is not None:
-            if not args.me or args.config or args.no_stream:
-                parser.error("--dir needs --me, and takes no --config or --no-stream")
-            _vcharon_import()
-            from vcharon import pathrules
-            problem = pathrules.writer_problem(args.me)
-            if problem:
-                parser.error("--me: %s" % problem)
-            return watch_dir(os.path.abspath(os.path.expanduser(args.dir)), args.me,
-                             args.every or 10, **limits)
-        if args.me:
-            parser.error("--job takes no --me: the section's mailbox.me says it")
-        stream = not args.no_stream
-        if stream and args.every is not None and args.every > STREAM_EVERY_MAX:
-            parser.error("--every: 1 to %d seconds when streaming (or --no-stream)"
-                         % STREAM_EVERY_MAX)
-        every = args.every or (STREAM_EVERY if stream else RUN_EVERY)
-        return watch_job(args.job, args.config, every, stream=stream, **limits)
-    except KeyboardInterrupt:
-        return 130
-
-
-if __name__ == "__main__":
-    sys.exit(main())

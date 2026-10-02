@@ -10,8 +10,10 @@ import posixpath
 import re
 import shlex
 import shutil
+import site
 import struct
 import sys
+import sysconfig
 
 from . import fsops
 
@@ -24,8 +26,9 @@ _IOREG_UUID = re.compile(r'"IOPlatformUUID" = "([^"]*)"')
 _UNSAFE = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
 # vcharon's commands, as runnable() takes them: `vcharon` at the text's start or after a space, (
 # or `, then one of these and a space, the end, or a mark that ends a clause; never `vcharon's`,
-# `vcharon/`, `vcharon run's`, a path, or the `-m vcharon` of a command runnable() wrote
-COMMANDS = ("run", "state", "doctor", "key", "ping", "version", "channel", "--help")
+# `vcharon/`, `vcharon sync's`, a path, or the `-m vcharon` of a command runnable() wrote
+COMMANDS = ("key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
+            "post", "read", "watch", "sync", "--version", "--help")
 _VCHARON_WORD = re.compile(r"(?:\A|(?<=[ (`]))(?<!-m )vcharon (%s)(?=\Z|[\s),.;`])"
                            % "|".join(re.escape(c) for c in COMMANDS))
 IOREG = "/usr/sbin/ioreg"
@@ -113,54 +116,148 @@ def joined_dir():
     return "~/.local/state/vcharon/joined"
 
 
-def vcharon_dir():
-    """The folder that holds the package (src/ in a checkout, or site-packages); None where the
-    package has no file (the server's bundled copy). From the package's spec, never __file__
-    (DESIGN §16); only the client asks."""
-    package = sys.modules.get(__package__)
-    origin = getattr(getattr(package, "__spec__", None), "origin", None)
-    if not origin or not os.path.isabs(origin):
-        return None
-    return os.path.dirname(os.path.dirname(origin))
+def is_frozen():
+    """True in a PyInstaller binary, which sets both sys.frozen and sys._MEIPASS."""
+    return bool(getattr(sys, "frozen", False)) and hasattr(sys, "_MEIPASS")
 
 
-def command_for(executable, folder, osn, which):
+def self_argv():
+    """The argv that starts this vcharon again as a child: the binary itself, or this Python
+    with -m vcharon. -P keeps a vcharon/ folder in the current directory from shadowing the
+    package."""
+    if is_frozen():
+        return [sys.executable]
+    return [sys.executable, "-P", "-m", "vcharon"]
+
+
+def child_env(env=None):
+    """The environment for a child started with self_argv(): a frozen binary's child unpacks
+    its own copy, never reusing the parent's folder (PyInstaller 6.9+), so it outlives the
+    parent safely."""
+    env = dict(os.environ if env is None else env)
+    if is_frozen():
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def command_for(executable, folder, osn, which, venv=None):
     """How to run the vcharon in folder (None: no folder part) with executable, as a command line
-    for a shell on osn (M14a): the executable's base name when which(name) is that same file
-    (python3 on a Linux box), else its whole path. On Windows both with /, which Git Bash, cmd
-    and py all take (Git Bash reads \\ as an escape). A part that needs it is quoted:
-    shlex.quote off Windows, "..." on Windows. The pure core of vcharon_command(): tests run
-    every OS's form anywhere. Not covered, being rare in a Python or vcharon path: "..." doesn't
+    for a shell on osn: the executable's base name when which(name) is that same file (python3
+    on a Linux box), else its whole path. On Windows both with /, which Git Bash, cmd and py all
+    take (Git Bash reads \\ as an escape). A part that needs it is quoted: shlex.quote off
+    Windows, "..." on Windows. Not covered, being rare in a Python or vcharon path: "..." doesn't
     stop Git Bash's $ and `, nor cmd's %VAR%, and PowerShell runs a quoted program only after
-    &."""
+    &. venv: whether executable is a venv's python (None: this one's), which only that very
+    path runs with the venv's packages."""
     pm = ntpath if osn == "windows" else posixpath
     python = executable
     name = pm.basename(executable)
     found = which(name) if name else None
-    if found and (os.path.normcase(os.path.realpath(found))
-                  == os.path.normcase(os.path.realpath(executable))):
+    if venv is None:
+        venv = sys.prefix != sys.base_prefix
+    if found and (_same_path(found, executable) if venv else _same_file(found, executable)):
         python = name
     parts = [python] + ([folder] if folder else [])
+    return _quoted(parts, osn)
+
+
+def _quoted(parts, osn):
     if osn == "windows":
         parts = [part.replace("\\", "/") for part in parts]
         return " ".join('"%s"' % part if _UNSAFE.search(part) else part for part in parts)
     return " ".join(shlex.quote(part) for part in parts)
 
 
-def vcharon_command():
-    """How to run this vcharon here, `<python> -m vcharon`; None if the package's folder isn't
-    known. No box has a `vcharon` command (M14a)."""
-    if vcharon_dir() is None or not sys.executable:
+def _same_path(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _same_file(a, b):
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def _scripts_dirs():
+    """The folders an entry point of this environment can be in: this Python's own folder (a
+    venv's bin/ or Scripts\\, pipx's and uv's too), its default scheme's scripts folder, and,
+    outside a venv with user site-packages on, the user scheme's (pip install --user). Inside a
+    venv the user's ~/.local/bin isn't this environment's: a vcharon there is another
+    install."""
+    dirs = [os.path.dirname(sys.executable), sysconfig.get_path("scripts")]
+    if site.ENABLE_USER_SITE and sys.prefix == sys.base_prefix:
+        # 3.10+; only the client asks, and the server's copy of this module never does
+        preferred = getattr(sysconfig, "get_preferred_scheme", None)
+        try:
+            user = preferred("user") if preferred else "%s_user" % os.name
+            dirs.append(sysconfig.get_path("scripts", user))
+        except (KeyError, ValueError):
+            pass
+    return [d for d in dirs if d]
+
+
+# pip's form for an interpreter path too long for a #! line: a /bin/sh script that execs it
+_SH_EXEC = re.compile(r"""\A'''exec' ("[^"]+"|\S+) """)
+
+
+def shebang_python(path):
+    """The interpreter an entry-point script at path names on its #! line (or in pip's
+    /bin/sh exec form); None when it names none."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096).decode("utf-8", "replace")
+    except OSError:
         return None
-    return command_for(sys.executable, None, os_name(), shutil.which) + " -m vcharon"
+    lines = head.splitlines()
+    if not lines or not lines[0].startswith("#!"):
+        return None
+    line = lines[0][2:].strip()
+    if line == "/bin/sh" and len(lines) > 1:
+        m = _SH_EXEC.match(lines[1])
+        return m.group(1).strip('"') if m else None
+    if line.startswith('"'):
+        return line[1:].partition('"')[0] or None
+    return line.split()[0] if line else None
+
+
+def runs_this_package(found, scripts_dirs=None):
+    """Whether the vcharon command at found is an entry point of this environment: a file whose
+    real path is in one of this environment's scripts folders, and (off Windows, where it's an
+    .exe launcher) whose #! line names this Python, by real path. pipx and uv link
+    ~/.local/bin/vcharon to their own venv's bin/vcharon, whose folder holds the venv's python,
+    sys.executable."""
+    if not os.path.isfile(found):
+        return False
+    real = os.path.normcase(os.path.dirname(os.path.realpath(found)))
+    folders = scripts_dirs if scripts_dirs is not None else _scripts_dirs()
+    if not any(real == os.path.normcase(os.path.realpath(folder)) for folder in folders):
+        return False
+    if os.name == "nt":
+        return True
+    python = shebang_python(found)
+    return python is not None and _same_file(python, sys.executable)
+
+
+def self_command(which=shutil.which, osn=None):
+    """How this vcharon is run on this box, as the start of a command line a person or an
+    agent types: `vcharon` when that name on PATH runs this very install (the binary itself,
+    or an entry point of this environment), else the binary's full path, or `<python> -P -m
+    vcharon`, quoted for this OS's shell. which: shutil.which (tests fake it)."""
+    osn = osn or os_name()
+    found = which("vcharon")
+    if is_frozen():
+        if found and _same_file(found, sys.executable):
+            return "vcharon"
+        return _quoted([sys.executable], osn)
+    if found and runs_this_package(found):
+        return "vcharon"
+    return command_for(sys.executable, None, osn, which) + " -P -m vcharon"
 
 
 def runnable(text, command=None):
-    """text with each `vcharon <command>` as this box runs it: vcharon_command() in place of
-    `vcharon` (M14a), for a fix line someone runs. command: another command line (tests). Text
-    unchanged where vcharon_command() is None."""
+    """text with each `vcharon <command>` as this box runs it (self_command()), for a fix line
+    someone runs. command: another spelling (tests). Applying it twice changes nothing more:
+    the `-m vcharon` it writes is never matched again."""
     if command is None:
-        command = vcharon_command()
+        command = self_command()
     if not command or not text:
         return text
     return _VCHARON_WORD.sub(lambda m: "%s %s" % (command, m.group(1)), text)

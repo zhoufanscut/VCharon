@@ -40,6 +40,10 @@ def build(nonce, extra_modules=None):
     return struct.pack(">Q", len(blob)) + blob
 
 
+# subpackages that only the client runs (post, read, watch), left out of the bundle
+CLIENT_ONLY = ("mailbox",)
+
+
 def _sources(root=None):
     """{module name: source} for every module under the package directory, and the packages.
     root: another directory to read as the package; a test seam."""
@@ -53,6 +57,9 @@ def _sources(root=None):
         # (a macOS AppleDouble file, binary).
         dirnames[:] = sorted(d for d in dirnames if d.isidentifier() and d != "__pycache__")
         rel = os.path.relpath(dirpath, root)
+        if rel == os.curdir:
+            # the client's own subpackages: the helper never imports them
+            dirnames[:] = [d for d in dirnames if d not in CLIENT_ONLY]
         parts = ["vcharon"] + ([] if rel == os.curdir else rel.split(os.sep))
         if "__init__.py" in filenames:
             packages.append(".".join(parts))

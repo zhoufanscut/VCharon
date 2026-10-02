@@ -445,7 +445,7 @@ class UndecodableKeyNameTest(KeyCase):
             line.encode("utf-8")
 
     def test_doctor(self):
-        result = self.child("doctor", "fake-dest")
+        result = self.child("doctor", "--server", "fake-dest")
         out = result.stdout.decode("utf-8")
         self.assertEqual(result.returncode, 1, out + result.stderr.decode("utf-8", "replace"))
         self.assertNotIn(b"ERROR internal", result.stderr)

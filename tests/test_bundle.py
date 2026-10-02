@@ -41,7 +41,9 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(doc["packages"], ["vcharon", "vcharon.plugins"])
         expected = {}
         for dirpath, dirnames, filenames in os.walk(PACKAGE_DIR):
-            dirnames[:] = [d for d in dirnames if d.isidentifier() and d != "__pycache__"]
+            # the client's mailbox commands stay home (bundle.CLIENT_ONLY)
+            dirnames[:] = [d for d in dirnames if d.isidentifier() and d != "__pycache__"
+                           and not (dirpath == PACKAGE_DIR and d == "mailbox")]
             for filename in filenames:
                 # editor litter such as .#helper.py isn't a module
                 if filename.endswith(".py") and filename[:-3].isidentifier():
@@ -56,6 +58,7 @@ class BundleTest(unittest.TestCase):
         for name in ("vcharon", "vcharon.helper", "vcharon.proto", "vcharon.plugins", "vcharon.ssh",
                      "vcharon.plugins.path", "vcharon.plugins.dir"):
             self.assertIn(name, doc["modules"])
+        self.assertFalse([m for m in doc["modules"] if m.startswith("vcharon.mailbox")])
 
     @unittest.skipUnless(hasattr(os, "symlink") and os.name == "posix", "needs symlinks")
     def test_skips_names_python_cant_import(self):

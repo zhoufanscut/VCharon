@@ -75,20 +75,6 @@ class ConfigTest(ConfigCase):
         self.assertTrue(cfg.exists)
         self.assertEqual(cfg.settings.idle_timeout, 70)
 
-    def test_missing_config_option_file(self):
-        with self.assertRaises(VCharonError) as cm:
-            config.load(os.path.join(self.tmp, "nope.ini"))
-        self.assertEqual(cm.exception.code, "config")
-        self.assertIn("nope.ini", cm.exception.message)
-
-    def test_explicit_path(self):
-        other = os.path.join(self.tmp, "other.ini")
-        with open(other, "w") as f:
-            f.write("[vcharon]\ncompress = yes\n")
-        cfg = config.load(other)
-        self.assertEqual(cfg.path, other)
-        self.assertTrue(cfg.settings.compress)
-
     def test_bom(self):
         cfg = self.load(b"\xef\xbb\xbf[vcharon]\nremote_python = python3.13\n")
         self.assertEqual(cfg.settings.remote_python, "python3.13")
@@ -194,7 +180,7 @@ class ConfigTest(ConfigCase):
                 section = "[ch.windows]" if "[ch.windows]" in text else "[j]"
                 self.assertEqual(e.message, "vcharon.ini %s: vcharon.ini holds only [vcharon]; a "
                                             "channel's section goes in channels.d, which vcharon "
-                                            "channel writes" % section)
+                                            "join writes" % section)
 
 
 # A channel section (M10): the retired fixed mailbox's [mailbox], now in channels.d/, with a
@@ -515,7 +501,7 @@ class ChannelsDirTest(MailboxCase):
         self.assertEqual(cfg.skipped[0].names, ("a.windows", "a.windows.up", "a.windows.down"))
 
     def test_next_to_the_config_file(self):
-        # --config's directory, not VCHARON_HOME's
+        # VCHARON_HOME's: the config file's folder
         other = os.path.join(self.tmp, "elsewhere")
         os.makedirs(os.path.join(other, "channels.d"))
         with open(os.path.join(other, "vcharon.ini"), "w", encoding="utf-8") as f:
@@ -524,7 +510,8 @@ class ChannelsDirTest(MailboxCase):
                   encoding="utf-8") as f:
             f.write(MAILBOX)
         self.write_channel(MAILBOX.replace("ch.windows", "home.windows"), "home.windows.ini")
-        cfg = config.load(os.path.join(other, "vcharon.ini"))
+        with mock.patch.dict(os.environ, {"VCHARON_HOME": other}):
+            cfg = config.load()
         self.assertEqual(list(cfg.jobs), ["ch.windows.up", "ch.windows.down"])
         self.assertEqual(config.channels_dir(cfg.path), os.path.join(other, "channels.d"))
 
@@ -616,7 +603,7 @@ class VCharonIniSectionsTest(MailboxCase):
                 e = self.refused(VCHARON + "[%s]\nx = 1\n" % name)
                 self.assertEqual(e.message, "vcharon.ini [%s]: vcharon.ini holds only [vcharon]; a "
                                             "channel's section goes in channels.d, which vcharon "
-                                            "channel writes" % name)
+                                            "join writes" % name)
                 self.assertEqual(e.hint, "fix %s" % self.path)
 
     def test_the_global_section_spelling(self):

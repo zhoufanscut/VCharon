@@ -115,12 +115,62 @@ class FakeSshCase(unittest.TestCase):
             f.write(textwrap.dedent(text))
         return path
 
-    def run_cli(self, *argv):
-        """cli.main(argv) in this process: (exit code, stdout, stderr)."""
+    def run_cli(self, *argv, stdin=None):
+        """cli.main(argv) in this process: (exit code, stdout, stderr). stdin: bytes for a
+        command that reads it (post without --body)."""
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            if stdin is not None:
+                stack.enter_context(mock.patch.object(cli, "_stdin_bytes", lambda: stdin))
             code = cli.main(list(argv))
         return code, out.getvalue(), err.getvalue()
+
+    def run_jobs(self, *argv):
+        """The sync's runner (cli.run_jobs) for the jobs named, in this process, with the
+        errors shown as every command shows them: (exit code, stdout, stderr). argv: job names,
+        and --full, --dry-run, --repeat S, -v. The engine's own tests drive jobs this way:
+        vcharon sync runs only a channel section's two."""
+        names, kw = [], {}
+        args = iter(argv)
+        for arg in args:
+            if arg == "--full":
+                kw["full"] = True
+            elif arg == "--dry-run":
+                kw["dry_run"] = True
+            elif arg == "--repeat":
+                kw["repeat"] = int(next(args))
+            elif arg in ("-v", "--verbose"):
+                kw["verbose"] = True
+            else:
+                names.append(arg)
+        out, err = io.StringIO(), io.StringIO()
+        run = cli._Run()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli._guarded(lambda: cli.run_jobs(names, run=run, **kw), run)
+        return code, out.getvalue(), err.getvalue()
+
+    def reset_job(self, name, verbose=False):
+        """vcharon sync C --reset's work for the job name, in this process: (exit code, stdout,
+        stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        run = cli._Run()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli._guarded(lambda: cli._reset(name, verbose, run), run)
+        return code, out.getvalue(), err.getvalue()
+
+    def write_record(self, channel, name, leader, ssh="fake-dest", remote="vcharon_mailbox",
+                     project="p", role=None):
+        """A join record, as vcharon join writes it, for a membership a test made by hand: so
+        the commands that find it by channel, project and role (DESIGN §7.2) find it."""
+        from vcharon import channel_cmd
+        doc = {"version": channel_cmd.RECORD_VERSION, "channel": channel, "name": name,
+               "leader": leader, "ssh": ssh, "remote": remote,
+               "machine": os.environ.get("VCHARON_TEST_MACHINE_ID", TEST_MACHINE_ID),
+               "project": project, "role": role}
+        channel_cmd.write_record(doc)
+        return doc
 
     def log_text(self):
         try:
@@ -136,8 +186,9 @@ _REAL_READ_JOBS = config._read_jobs
 def _read_jobs_with_test_jobs(parser, name, hint, settings, path):
     """config._read_jobs, where a section with ssh, from and to (and no mailbox keys) is also
     a job, in file order. The config file holds no jobs of its own; the engine's tests use
-    these to drive `run` with jobs a channel section doesn't make (other options, other
-    names). Not checked like a channel section: the fixtures are trusted."""
+    these to drive the sync's runner (FakeSshCase.run_jobs) with jobs a channel section
+    doesn't make (other options, other names). Not checked like a channel section: the
+    fixtures are trusted."""
     jobs = {}
     folded = {}
     for section in parser.sections():
@@ -167,17 +218,10 @@ def _read_jobs_with_test_jobs(parser, name, hint, settings, path):
     return jobs, mailboxes, folded, skipped
 
 
-# use_test_jobs for a child that runs cli.main: lines for its -c code, after its imports
-TEST_JOBS_CODE = ("sys.path.insert(0, %r)\n"
-                  "from tests import util as _util\n"
-                  "from vcharon import config as _config\n"
-                  "_config._read_jobs = _util._read_jobs_with_test_jobs\n"
-                  % os.path.dirname(TESTS_DIR))
-
-
 def use_test_jobs(case):
     """Lets the config file hold test jobs (_read_jobs_with_test_jobs) for the rest of case;
-    in this process only."""
+    in this process only. The engine's tests (the job runner, state, doctor's job checks) use
+    it: a channel section makes only its own two jobs, with their fixed options."""
     patcher = mock.patch.object(config, "_read_jobs", _read_jobs_with_test_jobs)
     patcher.start()
     case.addCleanup(patcher.stop)

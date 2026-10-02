@@ -52,9 +52,27 @@ class State:
 
 
 def reset_hint(name):
-    """The hint of every state_mismatch of the job name."""
-    return ("check the target; then: vcharon state reset %s, and vcharon run %s --full"
-            % (name, name))
+    """The hint of every state_mismatch of the job name: for a channel section's job
+    <C>.<name>.up or .down, the sync commands that forget its state and send by content."""
+    job = split_job(name)
+    if job is None:
+        return "check the target; then reset the job's state, and sync it with --full"
+    from . import channel_cmd
+    channel, me, which = job
+    flags = channel_cmd.name_flags(channel, me)
+    # two commands, set apart by " ; " so that no mark sticks to a flag's value
+    return ("check the target, then run both: vcharon sync %s --reset %s %s ; vcharon sync %s "
+            "--full %s" % (channel, which, flags, channel, flags))
+
+
+def split_job(name):
+    """(channel, member, "up" or "down") of a channel section's job name <C>.<member>.up or
+    .down; None for any other name."""
+    section, dot, which = name.rpartition(".")
+    channel, dot2, me = section.partition(".")
+    if not (dot and dot2 and which in ("up", "down") and channel and me and "." not in me):
+        return None
+    return channel, me, which
 
 
 def config_changed(job):

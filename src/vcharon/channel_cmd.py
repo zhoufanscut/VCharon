@@ -1,11 +1,11 @@
-"""vcharon channel list, create, join, leave and close (DESIGN §14 M10): members' names, their
-records and section files, and the steps of each command in the design's order; client, and a
-server member's box (--local). The channel root's own calls are in channels.py."""
+"""vcharon list, create, join, leave and close (DESIGN §14 M10): members' names, their records
+and section files, which membership a command means (DESIGN §7.2), and the steps of each command
+in the design's order; client, and a local member's box (--local). The channel root's own calls
+are in channels.py."""
 
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import json
 import os
 import posixpath
@@ -23,8 +23,8 @@ from .proto import VCharonError
 
 RECORD_VERSION = 1
 RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine")
-# the parts that rebuild the name, for the hints that tell a member to run vcharon channel; a
-# record written before the M10 re-review has neither, and is read as before
+# the parts that rebuild the name, and find the membership again (DESIGN §7.2); a record
+# written before the M10 re-review has neither, and is read as before
 RECORD_OPTIONAL = ("project", "role")
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
@@ -34,12 +34,12 @@ BOX_HINT = "set box in [vcharon] of vcharon.ini (the user picks it: mac, win, li
 RULES = "MAILBOX.md in the vcharon folder (the vcharon skill)"
 # A channel section's up never creates (M10): a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
-# make the closed channel again by hand. vcharon run and doctor (cli.channel_gone_hint) and
-# mailbox_watch.py's --dir (M13) print it, with the channel and name_flags. Its start is a
+# make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint) and a
+# local member's watch (M13) print it, with the channel and name_flags. Its start is a
 # constant of its own: the watcher tells a gone channel by it (EXIT closed, M14b), and the
 # leave command after it is printed as the box runs vcharon (platform.runnable), not as written.
 CHANNEL_GONE_PREFIX = "the channel is closed, or your folder in it is gone: "
-CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon channel leave %s %s"
+CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon leave %s %s"
 
 
 # --- names ---
@@ -66,7 +66,7 @@ def clean_project(text):
 
 
 def member_name(cfg, project=None, role=None, cwd=None):
-    """<box>-<project>[-<role>]: vcharon channel builds a member's name, nothing else does. An
+    """<box>-<project>[-<role>]: join and create build a member's name, nothing else does. An
     exception to "never rely on the current directory" (DESIGN §13), on purpose: the name says
     where the agent works."""
     return member_parts(cfg, project, role, cwd)[0]
@@ -76,13 +76,8 @@ def member_parts(cfg, project=None, role=None, cwd=None):
     """(the member's name, its cleaned project, its role or None)."""
     if not cfg.box:
         raise VCharonError("config", BOX_HINT, hint="fix %s" % cfg.path)
-    if role is not None and not _ROLE.match(role):
-        raise VCharonError("config", "--role %s: 1 to 6 characters, a-z and 0-9"
-                           % pathrules.show(role), hint="pick another role")
-    p = clean_project(project if project is not None else project_of(cwd or os.getcwd()))
-    if not p:
-        raise VCharonError("config", "the project's name comes out empty: give --project",
-                           hint="for example: --project web")
+    check_role(role)
+    p = project_part(project, cwd)
     name = "%s-%s" % (cfg.box, p) + ("-%s" % role if role else "")
     problem = pathrules.writer_problem(name)
     if problem:
@@ -91,8 +86,24 @@ def member_parts(cfg, project=None, role=None, cwd=None):
     return name, p, role or None
 
 
+def check_role(role):
+    if role is not None and not _ROLE.match(role):
+        raise VCharonError("config", "--role %s: 1 to 6 characters, a-z and 0-9"
+                           % pathrules.show(role), hint="pick another role")
+
+
+def project_part(project=None, cwd=None):
+    """The name's project part: --project's, else the folder that holds .git (project_of),
+    cleaned."""
+    p = clean_project(project if project is not None else project_of(cwd or os.getcwd()))
+    if not p:
+        raise VCharonError("config", "the project's name comes out empty: give --project",
+                           hint="for example: --project web")
+    return p
+
+
 def name_flags(channel, name, record=None):
-    """The flags that rebuild name in a vcharon channel command: --project P [--role R], from
+    """The flags that find name's membership in a vcharon command: --project P [--role R], from
     the record. A record without them (written before the M10 re-review), or none at all,
     gets a placeholder that says so, never flags that would build another name."""
     if record is None:
@@ -106,11 +117,102 @@ def name_flags(channel, name, record=None):
     return "<the --project and --role that make %s>" % name
 
 
+def rejoin_hint(channel, alias, name):
+    """The fix for a remote member's own folder that lost its files on this box: a rejoin,
+    which pulls back from the server what this box lacks of it."""
+    return ("vcharon join %s --server %s %s takes its files back from the server (a rejoin)"
+            % (channel, alias, name_flags(channel, name)))
+
+
 def check_channel(channel):
     problem = channels.channel_problem(channel)
     if problem:
         raise VCharonError("config", "%s: %s" % (pathrules.show(channel), problem),
                            hint="pick another channel name")
+
+
+# --- which membership: channel + project + role (DESIGN §7.2) ---
+
+def records(channel=None):
+    """Every join record on this box, of channel if given, in file name order. A record that
+    can't be read is an error, as read_record's: vcharon never guesses."""
+    try:
+        files = sorted(os.listdir(records_dir()))
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        raise fsops.error(e, records_dir())
+    out = []
+    for f in files:
+        if f.startswith(".") or not f.endswith(".json"):
+            continue
+        ch, dot, name = f[:-len(".json")].partition(".")
+        if not dot or (channel is not None and ch != channel):
+            continue
+        if channels.channel_problem(ch) or pathrules.writer_problem(name):
+            continue
+        record = read_record(ch, name)
+        if record is not None:
+            out.append(record)
+    return out
+
+
+def flags(project, role):
+    """--project P [--role R]."""
+    return "--project %s%s" % (project, " --role %s" % role if role else "")
+
+
+def _is(record, project, role, cfg):
+    """Whether record is the membership of (its channel, project, role). A record without
+    its project and role (written before the M10 re-review) is matched by the name this box
+    would build."""
+    if isinstance(record.get("project"), str):
+        return record["project"] == project and (record.get("role") or None) == role
+    if cfg is None or not cfg.box:
+        return False
+    return record["name"] == "%s-%s" % (cfg.box, project) + ("-%s" % role if role else "")
+
+
+def find(cfg, channel, project, role):
+    """The record of (channel, project, role) on this box, or None (DESIGN §7.2's step 1).
+    join and create look here before they build a new name, so a box renamed after a join
+    still finds the name it joined with."""
+    mine = [r for r in records(channel) if _is(r, project, role, cfg)]
+    if len(mine) > 1:
+        raise channels.refused("%d records on this box are for %s %s: %s"
+                               % (len(mine), channel, flags(project, role),
+                                  ", ".join(r["name"] for r in mine)),
+                               "ask the user which membership is this one")
+    return mine[0] if mine else None
+
+
+def membership(cfg, channel, project=None, role=None):
+    """The record of the membership a command means, from the channel, the project
+    (--project, else the current directory's) and the role (--role; none means the role-less
+    membership): DESIGN §7.2's three steps. Refused, with a fix line, when there is none or
+    the role is missing."""
+    check_channel(channel)
+    check_role(role)
+    project = project_part(project)
+    record = find(cfg, channel, project, role)
+    if record is not None:
+        return record
+    if role is None:
+        roles = sorted(r["role"] for r in records(channel)
+                       if r.get("project") == project and r.get("role"))
+        if roles:
+            raise channels.refused("you are in %s from %s only with a role"
+                                   % (channel, project),
+                                   "pass %s" % " or ".join("--role %s" % r for r in roles))
+    others = [r for r in records(channel) if isinstance(r.get("project"), str)]
+    if others:
+        hint = ("pass the --project and --role you joined with: %s"
+                % "; ".join(flags(r["project"], r.get("role")) for r in others))
+    else:
+        hint = ("join it first, with --server ALIAS (or --local on the machine that holds the "
+                "channel): vcharon join %s --server ALIAS %s" % (channel, flags(project, role)))
+    raise channels.refused("you aren't in %s as %s (no join record on this box)"
+                           % (channel, flags(project, role)), hint)
 
 
 # --- records ---
@@ -214,29 +316,16 @@ def write_section(cfg, section, alias, name, leader, remote_text):
 
 # --- locks ---
 
-def _watch_tool():
-    """tools/mailbox_watch.py at the repo root (two folders above the package, src/vcharon),
-    loaded by its path: join's lock check takes the lock's name from the watcher's own
-    snapshot_path (one rule, never a copy)."""
-    module = sys.modules.get("vcharon_mailbox_watch")
-    if module is None:
-        package = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(os.path.dirname(os.path.dirname(package)), "tools", "mailbox_watch.py")
-        spec = importlib.util.spec_from_file_location("vcharon_mailbox_watch", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        sys.modules["vcharon_mailbox_watch"] = module
-    return module
-
-
 def watcher_snapshot(record_or_none, section, name, channel_dir=None):
-    """The watcher's snapshot path of this membership: the client mode's for a remote member,
-    the server mode's for a server member, whose --dir main passes as
-    os.path.abspath(os.path.expanduser(dir)) and snapshot_path keys by its realpath."""
-    tool = _watch_tool()
+    """The watcher's snapshot path of this membership, from the watcher's own snapshot_path
+    (one rule, never a copy): a remote member's by its section, a local member's by its
+    channel folder, which the watch passes as os.path.abspath(os.path.expanduser(dir)) and
+    snapshot_path keys by its realpath."""
+    # here, not at the top: the watch module imports this one
+    from .mailbox import watch
     if channel_dir is None:
-        return tool.snapshot_path(None, name, section)
-    return tool.snapshot_path(os.path.abspath(os.path.expanduser(channel_dir)), name)
+        return watch.snapshot_path(None, name, section)
+    return watch.snapshot_path(os.path.abspath(os.path.expanduser(channel_dir)), name)
 
 
 def held(path):
@@ -268,8 +357,8 @@ def _check_locks(record, section, channel):
         paths += _job_locks(section)
     for path in paths:
         if held(path):
-            raise channels.refused("%s is held (a watcher, or a vcharon run, of %s in %s): stop "
-                                   "the watcher first" % (path, record["name"], channel))
+            raise channels.refused("%s is held (a watcher, or a sync, of %s in %s)"
+                                   % (path, record["name"], channel), "stop the watcher first")
 
 
 # --- the server: over ssh, or this machine ---
@@ -340,17 +429,21 @@ def _find(listing, channel, where):
             return ch
     for other in listing["others"]:
         if other.get("name") == channel:
-            raise channels.refused("%s on %s isn't usable as a channel (%s): ask the user"
-                                   % (channel, where, other.get("why")))
+            raise channels.refused("%s on %s isn't usable as a channel (%s)"
+                                   % (channel, where, other.get("why")), "ask the user")
     return None
 
 
 def _server(args, cfg, log, stack):
     if args.local:
         return _Local(log)
-    ssh.check_dest(args.ssh)
-    session = stack.enter_context(ssh.Session(cfg.settings, args.ssh, log))
-    return _Remote(session, args.ssh, session.open(), log)
+    ssh.check_dest(args.server)
+    session = stack.enter_context(ssh.Session(cfg.settings, args.server, log))
+    return _Remote(session, args.server, session.open(), log)
+
+
+def _where_flag(server):
+    return "--local" if server.ssh is None else "--server %s" % server.ssh
 
 
 def _need_machine(server):
@@ -370,12 +463,11 @@ def _need_machine(server):
 # --- the command ---
 
 def main(args, run):
-    """vcharon channel <action>: exit 0, or that of the error."""
-    cfg = config.load(args.config)
+    """vcharon list, create, join, leave and close: exit 0, or that of the error."""
+    cfg = config.load()
     log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
-    log.info("vcharon channel %s%s; config %s" % (args.action, " " + args.channel
-                                                  if getattr(args, "channel", None) else "",
-                                                  cfg.path))
+    log.info("vcharon %s%s; config %s" % (args.command, " " + args.channel
+                                          if getattr(args, "channel", None) else "", cfg.path))
     for skip in cfg.skipped:
         log.info(skip.line)
 
@@ -384,24 +476,43 @@ def main(args, run):
         sys.stdout.flush()
         log.info(line)
 
-    if args.action == "list":
+    if args.command == "list":
         return _list(args, cfg, log, say)
-    check_channel(args.channel)
-    name, project, role = member_parts(cfg, args.project, args.role)
-    # stored in the record, so a hint can print the flags that rebuild the name
-    args.ident = {"project": project, "role": role}
-    if args.action == "create":
-        return _create(args, cfg, name, log, say)
-    if args.action == "join":
+    if args.command in ("create", "join"):
+        check_channel(args.channel)
+        check_role(args.role)
+        project = project_part(args.project)
+        # a membership this box has already keeps the name it joined with (DESIGN §7.2)
+        record = find(cfg, args.channel, project, args.role)
+        if record is not None:
+            name = record["name"]
+        else:
+            name = member_parts(cfg, project, args.role)[0]
+            # a role forgotten, or one too many: said, never refused (only step 1 of §7.2)
+            for other in records(args.channel):
+                if other.get("project") == project and (other.get("role") or None) != args.role:
+                    say("note: you also hold %s here as %s" % (
+                        args.channel, "--role %s" % other["role"] if other.get("role")
+                        else "the member without a role"))
+        # stored in the record, so a hint can print the flags that find the membership
+        args.ident = {"project": project, "role": args.role}
+        if args.command == "create":
+            return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
-    return _leave(args, cfg, name, log, say, close=args.action == "close")
+    record = membership(cfg, args.channel, args.project, args.role)
+    return _leave(args, cfg, record, log, say, close=args.command == "close")
 
 
 def _list(args, cfg, log, say):
+    """vcharon list; with --json one object (list_json)."""
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         listing = server.list()
-    say("vcharon: channel list  (%s)" % server.where)
+    if args.json:
+        print(json.dumps(list_json(server, listing), ensure_ascii=False))
+        sys.stdout.flush()
+        return 0
+    say("vcharon: list  (%s)" % server.where)
     if not listing["channels"] and not listing["others"]:
         say("  no channels")
     for ch in listing["channels"]:
@@ -423,9 +534,29 @@ def _list(args, cfg, log, say):
     return 0
 
 
+def list_json(server, listing):
+    """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
+    for --local; each channel is {"name", "leader", "leaders", "members", "newest", "strays"}:
+    "leader" is the one leader, or null when there are none or several ("leaders" lists them),
+    "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null; each of "others" is
+    {"name", "why"}, a name at the root that isn't a usable channel."""
+    out = []
+    for ch in listing["channels"]:
+        leaders = list(ch["leaders"])
+        newest = ch.get("newest")
+        out.append({"name": ch["name"], "leader": leaders[0] if len(leaders) == 1 else None,
+                    "leaders": leaders, "members": list(ch["members"]),
+                    "newest": entries.stamp(newest) if isinstance(newest, (int, float))
+                    else None,
+                    "strays": list(ch.get("strays", []))})
+    return {"server": server.ssh, "channels": out,
+            "others": [{"name": o["name"], "why": o["why"]} for o in listing["others"]]}
+
+
 def _another_server(record, server, channel):
     if record is not None and (record["machine"] != server.machine or record["ssh"] != server.ssh):
-        raise channels.refused("you are in %s on another server: pass --role" % channel)
+        raise channels.refused("you are in %s on another server" % channel,
+                               "pass --role R to join from here as another member")
 
 
 def _create(args, cfg, name, log, say):
@@ -436,7 +567,7 @@ def _create(args, cfg, name, log, say):
         server = _server(args, cfg, log, stack)
         _need_machine(server)
         _another_server(record, server, channel)
-        say("vcharon: channel create %s  as %s on %s" % (channel, name, server.where))
+        say("vcharon: create %s  as %s on %s" % (channel, name, server.where))
         got = server.claim(channel, name, True)
         made = []
         try:
@@ -456,8 +587,8 @@ def _create(args, cfg, name, log, say):
         return 0
     code = _run_section(args, section, full=True)
     if code != 0:
-        say(platform.runnable("vcharon: the run failed; %s is created: run vcharon run %s --full "
-                              "again" % (channel, section)))
+        say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
+                              "--full %s again" % (channel, channel, name_flags(channel, name))))
         return code
     say("OK  created %s; your folder is %s" % (channel, own))
     return 0
@@ -535,20 +666,21 @@ def _join(args, cfg, name, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         _need_machine(server)
-        say("vcharon: channel join %s  as %s on %s" % (channel, name, server.where))
+        say("vcharon: join %s  as %s on %s" % (channel, name, server.where))
         # 1. the leader, before any claim: a refused join leaves nothing behind
         found = _find(server.list(), channel, server.where)
         if found is None:
-            raise channels.refused("there is no channel %s on %s: check its name (vcharon channel "
-                                   "list)" % (channel, server.where))
+            raise channels.refused("there is no channel %s on %s: check its name"
+                                   % (channel, server.where),
+                                   "vcharon list %s" % _where_flag(server))
         leaders = found["leaders"]
         if not leaders:
-            raise channels.refused("%s has no leader (no member's folder holds %s): ask the "
-                                   "user" % (channel, entries.CHANNEL_FILE))
+            raise channels.refused("%s has no leader (no member's folder holds %s)"
+                                   % (channel, entries.CHANNEL_FILE), "ask the user")
         if len(leaders) > 1:
-            raise channels.refused("%s has %d leaders (%s hold %s): ask the user"
+            raise channels.refused("%s has %d leaders (%s hold %s)"
                                    % (channel, len(leaders), ", ".join(l + "/" for l in leaders),
-                                      entries.CHANNEL_FILE))
+                                      entries.CHANNEL_FILE), "ask the user")
         leader = leaders[0]
         # 2. a live session already is <name>
         if server.ssh is None:
@@ -557,14 +689,17 @@ def _join(args, cfg, name, log, say):
         else:
             lock = watcher_snapshot(None, section, name) + ".lock"
         if held(lock):
-            raise channels.refused("a live session holds %s in %s: if that watcher is yours, "
-                                   "keep using it; else pass --role" % (name, channel))
+            raise channels.refused("a live session holds %s in %s" % (name, channel),
+                                   "if that watcher is yours, keep using it; else pass --role R "
+                                   "to join as another member")
         _another_server(record, server, channel)
         # 3. one mkdir
         got = server.claim(channel, name, False)
         rejoin = got["existed"]
         if rejoin and record is None and not args.rejoin:
-            raise channels.refused("the name %s is taken in %s: pass --role" % (name, channel))
+            raise channels.refused("the name %s is taken in %s" % (name, channel),
+                                   "pass --role R to join as another member; --rejoin only when "
+                                   "the user says that folder is yours")
         made = []
         try:
             # 4. the record first; before it is written, a failure releases the claim
@@ -591,11 +726,12 @@ def _join(args, cfg, name, log, say):
     if server.ssh is not None:
         code = _run_section(args, section, full=True)
         if code == 130:
-            # a Ctrl-C stops everything at once, as in vcharon run
+            # a Ctrl-C stops everything at once, as in vcharon sync
             return code
         if code != 0:
-            say(platform.runnable("vcharon: the run failed; you are in %s: run vcharon run %s "
-                                  "--full again" % (channel, section)))
+            say(platform.runnable("vcharon: the sync failed; you are in %s: run vcharon sync %s "
+                                  "--full %s again" % (channel, channel,
+                                                       name_flags(channel, name))))
     entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
                  ["@" + leader], body="%s %s %s." % (name, "rejoined" if rejoin else "joined",
                                                      channel))
@@ -755,30 +891,24 @@ def _print_entries(tree, name, leader, channel, say):
 
 
 def _run_section(args, section, full):
-    """vcharon run <section> [--full], as its own command would: its lines, its exit code."""
+    """A sync of the section [--full], in this process, as vcharon sync would run it: its
+    lines, its exit code."""
     from . import cli
-    argv = ["run", section] + (["--full"] if full else [])
-    if args.config:
-        argv += ["--config", args.config]
-    if args.verbose:
-        argv.append("-v")
-    return cli._main(argv, cli._Run())
+    return cli.sync_section(section, full=full, verbose=args.verbose)
 
 
-def _leave(args, cfg, name, log, say, close):
+def _leave(args, cfg, record, log, say, close):
     channel = args.channel
+    name = record["name"]
     section = "%s.%s" % (channel, name)
-    record = read_record(channel, name)
-    if record is None:
-        raise channels.refused("you aren't in %s as %s (no record at %s)"
-                               % (channel, name, record_path(channel, name)))
     leads = record["leader"] == name
     if close and not leads:
         raise channels.refused("only the leader closes %s, and that is %s"
-                               % (channel, record["leader"]))
+                               % (channel, record["leader"]),
+                               "vcharon leave %s %s" % (channel, name_flags(channel, name, record)))
     if not close and leads:
-        raise channels.refused("you lead %s: close it instead (vcharon channel close %s %s)"
-                               % (channel, channel, name_flags(channel, name, record)))
+        raise channels.refused("you lead %s: close it instead" % channel,
+                               "vcharon close %s %s" % (channel, name_flags(channel, name, record)))
     # before anything on the server changes: a held lock can't leave a half-closed channel
     _check_locks(record, section, channel)
     job = cfg.named(section)
@@ -790,16 +920,16 @@ def _leave(args, cfg, name, log, say, close):
             ssh.check_dest(record["ssh"])
             session = stack.enter_context(ssh.Session(settings, record["ssh"], log))
             server = _Remote(session, record["ssh"], session.open(), log)
-        say("vcharon: channel %s %s  as %s on %s" % ("close" if close else "leave", channel, name,
-                                                     server.where))
+        say("vcharon: %s %s  as %s on %s" % ("close" if close else "leave", channel, name,
+                                             server.where))
         # the record's server, compared before any call: leave too, or another server's
         # missing channel would pass for a gone one
         _need_machine(server)
         if server.machine != record["machine"]:
             raise channels.refused("%s isn't the server %s is on (its machine id is %s, "
-                                   "the record's %s): check the alias"
+                                   "the record's %s)"
                                    % (server.where, channel, server.machine,
-                                      record["machine"]))
+                                      record["machine"]), "check the alias")
         if close:
             try:
                 done = server.remove(channel, name)
@@ -825,10 +955,10 @@ def _leave(args, cfg, name, log, say, close):
         if record["ssh"] is not None:
             code = _run_section(args, section, full=False)
             if code != 0:
+                flags_ = name_flags(channel, name, record)
                 say(platform.runnable(
-                    "vcharon: the run failed, so nothing was removed: run vcharon channel leave "
-                    "%s %s again once vcharon run %s works"
-                    % (channel, name_flags(channel, name, record), section)))
+                    "vcharon: the sync failed, so nothing was removed: run vcharon leave %s %s "
+                    "again once vcharon sync %s %s works" % (channel, flags_, channel, flags_)))
                 return code
     _remove_membership(cfg, record, section, say)
     say("OK  %s %s" % ("closed" if close else "left", channel))
@@ -863,7 +993,7 @@ def _remove_membership(cfg, record, section, say):
     """leave's and close's removal on this box: a remote member's local tree (only when its
     mailbox.local is exactly the computed joined/ path), its jobs' state, log and lock files;
     the watcher snapshot and its lock (a server member's keyed by the channel folder, as the
-    watcher's --dir), the own folder's post lock, the record, and a remote member's section
+    local member's watch), the own folder's post lock, the record, and a remote member's section
     file last. Locks only when no one holds them. A server member's folder stays on the server
     (leave) or went with the channel (close). One `removed <path>` line each."""
     name = record["name"]

@@ -337,7 +337,7 @@ def sink_abort(h, call_id, args):
 
 
 def job_reset(h, call_id, args):
-    """Between two jobs on one connection (vcharon run a b): closes this job's plugins as the
+    """Between two jobs on one connection (a sync of up and down): closes this job's plugins as the
     helper's exit does, so a sink that didn't commit drops its stage dir, then forgets them
     and the calls made, so the next job may plan and check again. Fine when nothing was
     planned."""

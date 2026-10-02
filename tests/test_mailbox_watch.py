@@ -1,11 +1,10 @@
-"""tools/mailbox_watch.py: scans, the lines it prints, both modes (the M7b plan); the time on
-each line, the saved snapshot, its lock, --until-change and the limits (the M8 plan); a
-channel's entries, snapshot version 2 (DESIGN §14 M10)."""
+"""vcharon watch: scans, the lines it prints, both modes (the M7b plan); the time on each line,
+the saved snapshot, its lock, --until-change and the limits (the M8 plan); a channel's entries,
+snapshot version 2 (DESIGN §14 M10)."""
 
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -19,23 +18,15 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, entries, platform
+from vcharon import channel_cmd, cli, entries, platform
+from vcharon.mailbox import watch
+from vcharon.proto import VCharonError
 
 from tests import util
 from tests.util import write_tree
 
-TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools",
-                    "mailbox_watch.py")
-
-
-def _load():
-    spec = importlib.util.spec_from_file_location("mailbox_watch", TOOL)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-watch = _load()
+# what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
+SYNC = ["mb", "--project", "p"]
 
 # 2026-10-01 09:05:46 on this machine's clock, whatever its zone
 T0 = time.mktime((2026, 10, 1, 9, 5, 46, 0, 0, -1))
@@ -78,7 +69,7 @@ def never(seconds):
 
 
 def member_md(name, leader, channel="mb"):
-    """MEMBER.md as vcharon channel writes it."""
+    """MEMBER.md as vcharon join writes it."""
     return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
             "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
 
@@ -130,6 +121,22 @@ class WatchCase(unittest.TestCase):
 
     def state(self, me="debian", job=None, root=None):
         return watch.snapshot_path(self.tree if root is None else root, me, job)
+
+    def local_record(self, me="debian", leader="debian", project="q", role=None):
+        """me's join record as a local member of mb, whose folder is self.tree: vcharon watch
+        mb --project <project> then watches it as me (DESIGN §7.2)."""
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": me, "leader": leader,
+                                  "ssh": None, "remote": self.tree,
+                                  "machine": util.TEST_MACHINE_ID, "project": project,
+                                  "role": role})
+
+    def cli(self, *argv, project="q"):
+        """vcharon watch mb --project <project> ARGV in this process: (exit code, stdout,
+        stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            code = cli.main(["watch", "mb", "--project", project] + list(argv))
+        return code, out.getvalue(), err.getvalue()
 
 
 class ScanTest(WatchCase):
@@ -286,22 +293,22 @@ class RootTest(WatchCase):
             "2026-10-01 09:05:46 " + watching(self.tree, 1),
             "2026-10-01 09:05:47 ERROR can't read %s: %s" % (self.tree, why[0]),
             "2026-10-01 09:05:47   fix: " + platform.runnable(
-                "the channel is closed, or your folder in it is gone: vcharon channel leave mb "
+                "the channel is closed, or your folder in it is gone: vcharon leave mb "
                 "<the --project and --role that make debian>"),
             "2026-10-01 09:05:47 EXIT closed"]))
 
     def test_missing_at_the_start_is_empty(self):
         # M10: in client mode, before the first run (server mode's tree holds the member's
         # MEMBER.md, so it's there); what the first run brings is all new
-        config = ClientModeTest.write_config(self)
+        sync_args = ClientModeTest.write_config(self)
         shutil.rmtree(self.tree)
 
-        def run(job, config_path):
+        def run(job, sync_args):
             self.post("debian", 2, "first", to="@windows")
             write_tree(self.tree, {"mac/x": b"x"})
             return 0, None, None
 
-        watch.watch_job("mb.windows", config, 1, out=self.lines.append, sleep=never, run=run,
+        watch.watch_job("mb.windows", sync_args, 1, out=self.lines.append, sleep=never, run=run,
                         rounds=1)
         self.assertEqual(self.said(), [watching(self.tree, 0),
                                        "to you: debian#2 — first  (debian/RESULTS.md)",
@@ -469,16 +476,16 @@ class SnapshotTest(WatchCase):
         self.assertEqual(lines, [watching(self.tree, 1), line, "new mac/y"])
 
     def test_client_mode_restart(self):
-        config = ClientModeTest.write_config(self)
+        sync_args = ClientModeTest.write_config(self)
         brings = [lambda: self.post("debian", 2, "steps", to="@all", file="STEPS.md"),
                   lambda: None, lambda: self.post("debian", 4, "results", to="@windows")]
 
-        def run(job, config_path):
+        def run(job, sync_args):
             brings.pop(0)()
             return 0, None, None
 
         lines = []
-        watch.watch_job("mb.windows", config, 30, out=lines.append, sleep=never, run=run,
+        watch.watch_job("mb.windows", sync_args, 30, out=lines.append, sleep=never, run=run,
                         rounds=1)
         self.assertEqual(self.said(lines), [watching(self.tree, 0),
                                             "to all: debian#2 — steps  (debian/STEPS.md)"])
@@ -488,7 +495,7 @@ class SnapshotTest(WatchCase):
         # a manual run while no watcher ran brought an entry
         self.post("debian", 3, "answers", to="@windows", file="ANSWERS.md")
         lines = []
-        watch.watch_job("mb.windows", config, 30, out=lines.append, sleep=Rounds(lambda: None),
+        watch.watch_job("mb.windows", sync_args, 30, out=lines.append, sleep=Rounds(lambda: None),
                         run=run, rounds=2)
         self.assertEqual(self.said(lines), [
             watching(self.tree, 1, ", since " + saved),
@@ -523,18 +530,17 @@ class LockTest(WatchCase):
         self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
                                          rounds=0), 0)
 
-    def test_main_exits_12(self):
+    def test_the_command_exits_12(self):
         write_tree(self.tree, {"mac/x": b"x"})
+        self.local_record()
         codes = []
 
         def second():
             # a lock that let it through fails here, not by watching for 25 minutes
             ran = AssertionError("the second watch started")
-            with mock.patch("sys.stdout", io.StringIO()) as out, \
-                    mock.patch.object(watch, "_loop", side_effect=ran):
-                codes.append(watch.main(["--dir", self.tree, "--me", "debian",
-                                         "--until-change"]))
-            codes.append(out.getvalue())
+            with mock.patch.object(watch, "_loop", side_effect=ran):
+                code, out, err = self.cli("--until-change")
+            codes.extend([code, out])
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
         self.assertEqual(codes[0], 12)
@@ -767,13 +773,13 @@ class WarnTest(WatchCase):
                                    "shape" % self.state())
 
     def test_client_mode_warns_nothing(self):
-        config = ClientModeTest.write_config(self)
+        sync_args = ClientModeTest.write_config(self)
 
-        def run(job, config_path):
+        def run(job, sync_args):
             write_tree(self.tree, {"debian/Notes.md": b"N", "Debian/x": b"x", "notes.md": b"n"})
             return 0, None, None
 
-        watch.watch_job("mb.windows", config, 30, out=self.lines.append, sleep=never, run=run,
+        watch.watch_job("mb.windows", sync_args, 30, out=self.lines.append, sleep=never, run=run,
                         rounds=1)
         self.assertFalse(any("WARN" in line for line in self.said()), self.lines)
 
@@ -781,7 +787,7 @@ class WarnTest(WatchCase):
 class UntilChangeTest(WatchCase):
     def setUp(self):
         WatchCase.setUp(self)
-        self.config = ClientModeTest.write_config(self)
+        self.sync_args = ClientModeTest.write_config(self)
 
     def test_exits_after_the_first_change(self):
         self.member()
@@ -826,7 +832,7 @@ class UntilChangeTest(WatchCase):
         os.makedirs(self.tree, exist_ok=True)
         runs = []
 
-        def run(job, config_path):
+        def run(job, sync_args):
             # (code, line, what it brings) and, if given, the fix line's text (M13)
             result = results.pop(0)
             code, line, spec = result[:3]
@@ -859,7 +865,7 @@ class UntilChangeTest(WatchCase):
         without the watching line, the runs made)."""
         run, runs = self.fake_runs(results)
         lines = []
-        code = watch.watch_job("mb.windows", self.config, 30, out=lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=lines.append,
                                sleep=Rounds(*[lambda: None] * (len(results) - 1)), run=run,
                                until_change=True, max_minutes=25, max_errors=max_errors,
                                rounds=rounds)
@@ -881,7 +887,7 @@ class UntilChangeTest(WatchCase):
 
         run, runs = self.fake_runs([(1, t, {}) if r is None else r for r in results])
         with mock.patch.object(watch, "scan", scan):
-            code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+            code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                    sleep=Rounds(*[lambda: None] * (len(results) - 1)), run=run,
                                    until_change=True, max_minutes=25, fresh=True, **kw)
         return code, self.said(), runs, t
@@ -914,7 +920,7 @@ class UntilChangeTest(WatchCase):
         run, runs = self.fake_runs([(1, lost, {}), (2, busy, {}), (2, busy, {}),
                                     (2, busy, lambda: self.post("debian", 2, "steps",
                                                                 to="@all", file="STEPS.md"))])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(*[lambda: None] * 3), run=run, until_change=True,
                                max_minutes=25, max_errors=2)
         # two busy rounds after an error: no line, no error count, no "ok again"; the scan
@@ -928,7 +934,7 @@ class UntilChangeTest(WatchCase):
         os.remove(os.path.join(self.tree, "debian", "STEPS.md"))
         self.saved_error(lost)
         run, runs = self.fake_runs([(2, busy, {}), (1, lost, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(lambda: None), run=run, until_change=True,
                                max_minutes=25, rounds=2)
         self.assertEqual(code, 0)
@@ -947,7 +953,7 @@ class UntilChangeTest(WatchCase):
         collision = ("ERROR collision: debian/twin/Notes.md and debian/twin/notes.md are the "
                      "same path on Windows")
         run, runs = self.fake_runs([(0, None, {}), (1, collision, {}), (1, collision, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(*[lambda: None] * 2), run=run, until_change=True,
                                max_minutes=25)
         self.assertEqual(code, 0)
@@ -962,7 +968,7 @@ class UntilChangeTest(WatchCase):
         run, runs = self.fake_runs([(1, collision, {})] * 2
                                    + [(1, collision, lambda: self.post("debian", 2, "a",
                                                                        to="@windows"))])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(*[lambda: None] * 2), run=run, until_change=True,
                                max_minutes=25)
         self.assertEqual(code, 0)
@@ -977,14 +983,14 @@ class UntilChangeTest(WatchCase):
         self.lines = []
         other = "ERROR unsafe_path: debian/lnk: a symlink"
         run, runs = self.fake_runs([(1, other, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=never, run=run, until_change=True, max_minutes=25)
         self.assertEqual(code, 0)
         self.assertEqual(self.said()[1:], [other, "EXIT change"])
         # and the good round after it, from the saved error too: "ok again" is a change
         self.lines = []
         run, runs = self.fake_runs([(0, None, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=never, run=run, until_change=True, max_minutes=25)
         self.assertEqual(code, 0)
         self.assertEqual(self.said()[1:], ["ok again", "EXIT change"])
@@ -994,7 +1000,7 @@ class UntilChangeTest(WatchCase):
         # no error saved: a good round says nothing
         self.lines = []
         run, runs = self.fake_runs([(0, None, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=never, run=run, until_change=True, max_minutes=25,
                                rounds=1)
         self.assertEqual(code, 0)
@@ -1104,7 +1110,7 @@ class UntilChangeTest(WatchCase):
         self.saved_error(lost)
         run, runs = self.fake_runs([(1, lost, {}), (1, lost, {}),
                                     (4, "ERROR connect: x", {}), (0, None, {})])
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(*[lambda: None] * 3), run=run, rounds=4)
         self.assertEqual(code, 0)
         self.assertEqual(self.said(), [watching(self.tree, 0, ", since then"), lost,
@@ -1146,7 +1152,7 @@ class UntilChangeTest(WatchCase):
                 ("ERROR connect: couldn't reach devbox", "transport"),
                 ("ERROR lost: the connection closed", "transport"),
                 ("ERROR timeout: no answer in 60 s", "transport"),
-                ("ERROR vcharon run mailbox didn't finish within 900 s", "transport"),
+                ("ERROR vcharon sync of mailbox didn't finish within 900 s", "transport"),
                 ("ERROR couldn't start vcharon: No such file", "transport"),
                 ("ERROR too_many_deletes: the plan deletes 612 files and directories, more "
                  "than max_deletes (500)", "too_many_deletes"),
@@ -1154,8 +1160,8 @@ class UntilChangeTest(WatchCase):
                  "ERROR unsafe_path: debian/a: a symlink"),
                 ("ERROR collision: debian/N.md and debian/n.md are the same path on macOS",
                  "ERROR collision: debian/N.md and debian/n.md are the same path on macOS"),
-                ("ERROR vcharon run mailbox exited with 9",
-                 "ERROR vcharon run mailbox exited with 9"),
+                ("ERROR vcharon sync of mailbox exited with 9",
+                 "ERROR vcharon sync of mailbox exited with 9"),
                 ("ERROR lostness: x", "ERROR lostness: x"),
                 ("ERROR vanished: debian/a.md changed while it was being listed", "vanished"),
                 ("ERROR aborted: couldn't read file 12: x", "aborted")):
@@ -1163,7 +1169,7 @@ class UntilChangeTest(WatchCase):
                 self.assertEqual(watch.error_key(line), key)
 
     def test_the_keys_with_the_job(self):
-        # M9c: vcharon run S names the failing job; the connection's errors and the retry and
+        # M9c: a sync names the failing job; the connection's errors and the retry and
         # too_many_deletes codes are keyed as without it, a content error keeps it
         for line, key in (
                 ("ERROR mailbox.up: connect: couldn't reach devbox", "transport"),
@@ -1315,11 +1321,11 @@ class UntilChangeTest(WatchCase):
 
         error = "ERROR can't read %s: Permission denied" % self.tree
         with mock.patch.object(watch, "scan", real):
-            watch.watch_job("mb.windows", self.config, 30, out=[].append, sleep=never,
-                            run=lambda job, config: (0, None, None), rounds=1)
+            watch.watch_job("mb.windows", self.sync_args, 30, out=[].append, sleep=never,
+                            run=lambda job, sync_args: (0, None, None), rounds=1)
         with mock.patch.object(watch, "scan", scan):
-            code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
-                                   sleep=never, run=lambda job, config: (0, None, None),
+            code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
+                                   sleep=never, run=lambda job, sync_args: (0, None, None),
                                    until_change=True, max_minutes=25)
         self.assertEqual(code, 0)
         self.assertEqual(self.said()[1:], [error, "EXIT change"])
@@ -1338,8 +1344,8 @@ class UntilChangeTest(WatchCase):
             return {}
 
         with mock.patch.object(watch, "scan", scan):
-            code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append,
-                                   sleep=never, run=lambda job, config: (2, busy, None),
+            code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
+                                   sleep=never, run=lambda job, sync_args: (2, busy, None),
                                    until_change=True, max_minutes=25)
         self.assertEqual(code, 0)
         self.assertEqual(self.said()[1:], ["ERROR can't read %s: Permission denied"
@@ -1412,13 +1418,13 @@ class UntilChangeTest(WatchCase):
         clock = Clock()
         runs = []
 
-        def run(job, config_path):
+        def run(job, sync_args):
             runs.append(job)
             clock.t += 70
             self.post("debian", 2, "steps", to="@all", file="STEPS.md")
             return 0, None, None
 
-        code = watch.watch_job("mb.windows", self.config, 30, out=self.lines.append, sleep=never,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append, sleep=never,
                                run=run, clock=clock, timer=clock, max_minutes=1)
         self.assertEqual(code, 10)
         self.assertEqual(runs, ["mb.windows"])
@@ -1445,25 +1451,31 @@ mailbox.remote = ~/.local/state/vcharon/channels/mb
 class ClientModeTest(WatchCase):
     @staticmethod
     def write_config(case):
-        """vcharon.ini and channels.d/mb.windows.ini; the client's tree starts empty (server
-        mode's debian/MEMBER.md goes: a test of both modes writes it again)."""
+        """vcharon.ini, channels.d/mb.windows.ini and windows's join record, a remote member
+        of the project p; the client's tree starts empty (server mode's debian/MEMBER.md goes:
+        a test of both modes writes it again). Returns what follows `vcharon sync` for it."""
         os.remove(os.path.join(case.tree, "debian", "MEMBER.md"))
         os.rmdir(os.path.join(case.tree, "debian"))
-        path = os.path.join(case.tmp, "vcharon.ini")
-        with open(path, "w", encoding="utf-8") as f:
+        os.makedirs(case.vcharon_home, exist_ok=True)
+        with open(os.path.join(case.vcharon_home, "vcharon.ini"), "w", encoding="utf-8") as f:
             f.write("[vcharon]\n")
-        folder = os.path.join(case.tmp, "channels.d")
+        folder = os.path.join(case.vcharon_home, "channels.d")
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "mb.windows.ini"), "w", encoding="utf-8") as f:
             f.write(MAILBOX.format(local=case.tree))
-        return path
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows",
+                                  "leader": "debian", "ssh": "devbox",
+                                  "remote": "~/.local/state/vcharon/channels/mb",
+                                  "machine": util.TEST_MACHINE_ID, "project": "p",
+                                  "role": None})
+        return list(SYNC)
 
     def setUp(self):
         WatchCase.setUp(self)
-        self.config = self.write_config(self)
+        self.sync_args = self.write_config(self)
 
     def test_rounds(self):
-        # a fake vcharon run: each round's result, and what it brings
+        # a fake sync: each round's result, and what it brings
         def steps():
             self.post("debian", 2, "steps", to="@all", file="STEPS.md")
             # the own folder: never told
@@ -1480,91 +1492,118 @@ class ClientModeTest(WatchCase):
         ]
         runs = []
 
-        def run(job, config_path):
-            runs.append((job, config_path))
+        def run(job, sync_args):
+            runs.append((job, sync_args))
             code, line, spec = results.pop(0)
             spec() if callable(spec) else write_tree(self.tree, spec)
             return code, line, None
 
         sleep = Rounds(*[lambda: None] * 5)
-        watch.watch_job("mb.windows", self.config, 30, out=self.lines.append, sleep=sleep, run=run,
-                        rounds=6)
+        watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append, sleep=sleep,
+                        run=run, rounds=6)
         self.assertEqual(self.said(), [watching(self.tree, 0),
                                        "to all: debian#2 — steps  (debian/STEPS.md)",
                                        "ERROR lost: the connection closed",
                                        "to you: debian#3 — answers  (debian/ANSWERS.md)",
                                        "ERROR connect: couldn't reach devbox",
                                        "ok again"])
-        self.assertEqual(runs, [("mb.windows", self.config)] * 6)
+        self.assertEqual(runs, [("mb.windows", self.sync_args)] * 6)
         # no sleep before the first run
         self.assertEqual(sleep.seconds, [30] * 5)
 
     def test_not_a_mailbox(self):
-        with self.assertRaises(SystemExit) as cm:
-            watch.watch_job("nope", self.config, 30, out=self.lines.append, rounds=0)
-        self.assertEqual(str(cm.exception), "mailbox_watch: %s has no channel section [nope]"
-                         % self.config)
+        with self.assertRaises(VCharonError) as cm:
+            watch.watch_job("nope", self.sync_args, 30, out=self.lines.append, rounds=0)
+        self.assertEqual((cm.exception.code, cm.exception.message),
+                         ("config", "%s has no channel section [nope]"
+                          % os.path.join(self.vcharon_home, "channels.d")))
 
     def test_a_fake_vcharon_command(self):
-        # run_vcharon runs SELF_ARGV run <job> --config <path>, as a child; here SELF_ARGV runs a
-        # folder with a __main__.py
+        # run_sync runs self_argv() sync <args>, as a child; here self_argv runs a folder with
+        # a __main__.py
         fake = os.path.join(self.tmp, "fake-vcharon")
         os.mkdir(fake)
         with open(os.path.join(fake, "__main__.py"), "w", encoding="utf-8") as f:
             f.write(textwrap.dedent("""
                 import sys
                 print("some output")
-                if sys.argv[1:3] == ["run", "bad"]:
+                assert sys.argv[1] == "sync", sys.argv
+                if sys.argv[2] == "bad":
                     sys.stderr.write("\\nERROR lost: gone\\n  fix: run again\\n")
                     sys.exit(1)
-                if sys.argv[1:3] == ["run", "gone"]:
-                    # vcharon run's block for a closed channel (the M13 measurement), after a
+                if sys.argv[2] == "gone":
+                    # the sync's block for a closed channel (the M13 measurement), after a
                     # line that isn't an ERROR
                     sys.stderr.write("note: x\\nERROR mb.w.up: not_found: no root\\n"
                                      "  fix: the channel is closed: leave it\\n  log: l\\n")
                     sys.exit(1)
-                if sys.argv[1:3] == ["run", "nofix"]:
+                if sys.argv[2] == "nofix":
                     sys.stderr.write("ERROR lost: gone\\n  log: l\\nERROR other: x\\n"
                                      "  fix: other's\\n")
                     sys.exit(1)
-                if sys.argv[1:3] == ["run", "tail"]:
+                if sys.argv[2] == "tail":
                     sys.stderr.write("ERROR connect: no\\n  | ssh: refused\\n  fix: check\\n")
                     sys.exit(4)
-                if sys.argv[1:3] == ["run", "quiet"]:
+                if sys.argv[2] == "quiet":
                     sys.exit(4)
-                if sys.argv[1:3] == ["run", "busy"]:
+                if sys.argv[2] == "busy":
                     sys.stderr.write("ERROR busy: another run of busy.up is in progress\\n")
                     sys.exit(2)
-                assert sys.argv[1:] == ["run", "mailbox", "--config", "c.ini"], sys.argv
+                assert sys.argv[2:] == ["mb", "--project", "p"], sys.argv
                 """))
-        with mock.patch.object(watch, "SELF_ARGV", (sys.executable, fake)):
-            self.assertEqual(watch.vcharon_argv("mailbox", None),
-                             [sys.executable, fake, "run", "mailbox"])
-            self.assertEqual(watch.run_vcharon("mailbox", "c.ini"), (0, None, None))
-            self.assertEqual(watch.run_vcharon("bad", None), (1, "ERROR lost: gone", "run again"))
-            self.assertEqual(watch.run_vcharon("gone", None),
+        with mock.patch.object(platform, "self_argv", lambda: [sys.executable, fake]):
+            self.assertEqual(watch.sync_argv(SYNC), [sys.executable, fake, "sync"] + SYNC)
+            self.assertEqual(watch.sync_argv(SYNC, repeat=3),
+                             [sys.executable, fake, "sync"] + SYNC + ["--repeat", "3"])
+            self.assertEqual(watch.run_sync("mb.windows", SYNC), (0, None, None))
+            self.assertEqual(watch.run_sync("bad", ["bad"]), (1, "ERROR lost: gone",
+                                                              "run again"))
+            self.assertEqual(watch.run_sync("gone", ["gone"]),
                              (1, "ERROR mb.w.up: not_found: no root",
                               "the channel is closed: leave it\nl"))
             # the first ERROR's block holds no fix: its log, never a later line's fix
-            self.assertEqual(watch.run_vcharon("nofix", None),
+            self.assertEqual(watch.run_sync("nofix", ["nofix"]),
                              (1, "ERROR lost: gone", "the job's log has the rest: l"))
             # the connection's last words come between the ERROR line and its fix
-            self.assertEqual(watch.run_vcharon("tail", None), (4, "ERROR connect: no", "check"))
-            self.assertEqual(watch.run_vcharon("quiet", None),
-                             (4, "ERROR vcharon run quiet exited with 4", None))
-            self.assertEqual(watch.run_vcharon("busy", None),
+            self.assertEqual(watch.run_sync("tail", ["tail"]), (4, "ERROR connect: no", "check"))
+            self.assertEqual(watch.run_sync("quiet", ["quiet"]),
+                             (4, "ERROR vcharon sync of quiet exited with 4", None))
+            self.assertEqual(watch.run_sync("busy", ["busy"]),
                              (2, "ERROR busy: another run of busy.up is in progress", None))
+
+    def test_the_child_is_this_vcharon(self):
+        # --no-stream's child each round: self_argv, -P and all; a binary's unpacks its own copy
+        ran = []
+
+        def run(argv, **kw):
+            ran.append((argv, kw["env"]))
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        with mock.patch.object(watch.subprocess, "run", run):
+            self.assertEqual(watch.run_sync("mb.windows", SYNC), (0, None, None))
+            binary = os.path.join(self.tmp, "vcharon")
+            with mock.patch.object(sys, "frozen", True, create=True), \
+                    mock.patch.object(sys, "_MEIPASS", self.tmp, create=True), \
+                    mock.patch.object(sys, "executable", binary):
+                self.assertEqual(watch.run_sync("mb.windows", SYNC), (0, None, None))
+        (argv, env), (frozen_argv, frozen_env) = ran
+        self.assertEqual(argv, [sys.executable, "-P", "-m", "vcharon", "sync"] + SYNC)
+        self.assertNotIn("PYINSTALLER_RESET_ENVIRONMENT", env)
+        self.assertEqual(env["VCHARON_HOME"], self.vcharon_home)
+        self.assertEqual(frozen_argv, [binary, "sync"] + SYNC)
+        self.assertEqual(frozen_env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
 
     def test_a_stuck_vcharon_run(self):
         stuck = subprocess.TimeoutExpired(["vcharon"], watch.RUN_TIMEOUT)
         with mock.patch.object(watch.subprocess, "run", side_effect=stuck):
-            self.assertEqual(watch.run_vcharon("mailbox", None),
-                             (1, "ERROR vcharon run mailbox didn't finish within 900 s", None))
+            self.assertEqual(watch.run_sync("mailbox", ["mb"]),
+                             (1, "ERROR vcharon sync of mailbox didn't finish within 900 s",
+                              None))
 
 
-# A stand-in for the streaming child, `vcharon run <job> --repeat <every>` (M15): it does the
+# A stand-in for the streaming child, `vcharon sync C --repeat <every>` (M15): it does the
 # actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
-# run --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
+# sync --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
 # at the end of a file; exit: exit with that code now; deaf: ignore the end of stdin for 60 s;
 # pause: sleep that many seconds (stdout and stderr are two pipes: a pause orders them).
 FAKE_CHILD = """
@@ -1594,13 +1633,13 @@ sys.stdin.buffer.read()
 
 
 class StreamTest(WatchCase):
-    """A streaming --job (DESIGN §14 M15): one long-lived vcharon run --repeat child, its rounds
+    """A streaming watch (DESIGN §14 M15): one long-lived vcharon sync --repeat child, its rounds
     as steps, its restarts with the backoff, the wake rules in time, and the child stopped on
     every way out. The child is FAKE_CHILD."""
 
     def setUp(self):
         WatchCase.setUp(self)
-        self.config = ClientModeTest.write_config(self)
+        self.sync_args = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
         self.spawned = []
         self.children = []
@@ -1654,7 +1693,7 @@ class StreamTest(WatchCase):
 
         kw.setdefault("max_minutes", 25)
         with mock.patch.object(watch.Stream, "next_round", next_round):
-            code = watch.watch_job("mb.windows", self.config, 2, out=lines.append, sleep=sleep,
+            code = watch.watch_job("mb.windows", self.sync_args, 2, out=lines.append, sleep=sleep,
                                    clock=clock, timer=clock, stream=True, spawn=self.spawn,
                                    **kw)
         return code, self.said(lines)
@@ -1674,15 +1713,29 @@ class StreamTest(WatchCase):
         self.assertEqual(lines, [watching(self.tree, 0, ", streaming every 2 s"),
                                  "to all: debian#2 — steps  (debian/RESULTS.md)",
                                  up, "  fix: remove or rename it", "  log: l", "ok again"])
-        # one child, as vcharon run <job> --repeat <every> --config <path>, its prints in UTF-8
+        # one child, as vcharon sync C --project P --repeat <every>, its prints in UTF-8
         self.assertEqual(len(self.spawned), 1)
         argv, env = self.spawned[0]
-        self.assertEqual(argv, [sys.executable, "-m", "vcharon", "run", "mb.windows",
-                                "--repeat", "2", "--config", self.config])
+        self.assertEqual(argv, [sys.executable, "-P", "-m", "vcharon", "sync", "mb",
+                                "--project", "p", "--repeat", "2"])
         self.assertEqual((env["PYTHONIOENCODING"], env["PYTHONUTF8"]), ("utf-8", "1"))
         self.assertEqual(env["VCHARON_HOME"], self.vcharon_home)
+        self.assertNotIn("PYINSTALLER_RESET_ENVIRONMENT", env)
         self.assertEqual(self.slept, [])
         self.assert_all_stopped()
+
+    def test_a_binarys_child(self):
+        # a PyInstaller binary starts itself, and its child unpacks its own copy (it outlives
+        # the parent's unpacked folder)
+        binary = os.path.join(self.tmp, "vcharon")
+        with mock.patch.object(sys, "frozen", True, create=True), \
+                mock.patch.object(sys, "_MEIPASS", self.tmp, create=True), \
+                mock.patch.object(sys, "executable", binary):
+            code, lines = self.watch([["out", "ROUND 0"]], rounds=1)
+        self.assertEqual(code, 0)
+        argv, env = self.spawned[0]
+        self.assertEqual(argv, [binary, "sync", "mb", "--project", "p", "--repeat", "2"])
+        self.assertEqual(env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
 
     def test_utf8_lines(self):
         line = "ERROR mb.windows.down: unsafe_path: mac/中文: x"
@@ -1707,7 +1760,7 @@ class StreamTest(WatchCase):
         # after a round whose error broke the connection isn't: the round said why; an exit
         # after a good round is (a crash)
         self.assertEqual(lines[1:], ["ERROR config: no such file", connect, "ok again",
-                                     "ERROR vcharon run mb.windows exited with 1", "ok again"])
+                                     "ERROR vcharon sync of mb.windows exited with 1", "ok again"])
         self.assertEqual(self.slept, [2, 4, 8, 16, 30, 30, 2])
         self.assertEqual(len(self.spawned), 8)
         self.assert_all_stopped()
@@ -1764,7 +1817,7 @@ class StreamTest(WatchCase):
 
     def test_exit_closed_from_a_streamed_round(self):
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
-        gone = channel_cmd.CHANNEL_GONE_PREFIX + "vcharon channel leave mb --role w"
+        gone = channel_cmd.CHANNEL_GONE_PREFIX + "vcharon leave mb --role w"
         code, lines = self.watch([["out", "ROUND 0"], ["out", error], ["out", "  fix: " + gone],
                                   ["out", "  log: l"], ["out", "ROUND 1"], ["out", "ROUND 0"]])
         self.assertEqual((code, lines[1:]), (watch.EXIT_CLOSED, [
@@ -1788,7 +1841,7 @@ class StreamTest(WatchCase):
                                   ["out", "ROUND 0"]]]
                 self.procs = []
                 with self.assertRaises(error):
-                    watch.watch_job("mb.windows", self.config, 2, out=out, sleep=never,
+                    watch.watch_job("mb.windows", self.sync_args, 2, out=out, sleep=never,
                                     stream=True, spawn=self.spawn)
                 self.assert_all_stopped()
         started = time.monotonic()
@@ -1801,7 +1854,7 @@ class StreamTest(WatchCase):
         self.assertLess(time.monotonic() - started, 30)
 
     def test_stderr_after_a_broken_round_is_its_way_out(self):
-        # vcharon run --repeat exits after a round whose error broke the connection; what it
+        # vcharon sync --repeat exits after a round whose error broke the connection; what it
         # says on stderr then (seen in the M15a review: an abort at shutdown) is no new error
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
         code, lines = self.watch(
@@ -1834,7 +1887,7 @@ class StreamTest(WatchCase):
             [["err", "note: skipped channels.d/x.ini"], ["pause", 0.5], ["out", "ROUND 0"],
              ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
-        self.assertEqual(lines[1:], ["ERROR vcharon run mb.windows exited with 1", "ok again"])
+        self.assertEqual(lines[1:], ["ERROR vcharon sync of mb.windows exited with 1", "ok again"])
 
     def test_a_crash_after_a_good_round_is_a_round(self):
         code, lines = self.watch(
@@ -1867,7 +1920,7 @@ class StreamTest(WatchCase):
         lines = []
         self.children = [[]]
         self.procs = []
-        code = watch.watch_job("mb.windows", self.config, 2, out=lines.append, sleep=never,
+        code = watch.watch_job("mb.windows", self.sync_args, 2, out=lines.append, sleep=never,
                                clock=Clock(), timer=Ticking(), stream=True, spawn=self.spawn,
                                max_minutes=1)
         self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_QUIET, ["EXIT quiet 1 min"]))
@@ -1880,7 +1933,7 @@ class StreamTest(WatchCase):
                          (4, "ERROR mb.windows.up: connect: no", "check\nl"))
         self.assertEqual(watch.parse_failure(0, lines, "mb.windows"), (0, None, None))
         self.assertEqual(watch.parse_failure(2, [], "mb.windows"),
-                         (2, "ERROR vcharon run mb.windows exited with 2", None))
+                         (2, "ERROR vcharon sync of mb.windows exited with 2", None))
 
 
 class EntriesTest(WatchCase):
@@ -1964,7 +2017,7 @@ class EntriesTest(WatchCase):
             "EXIT change"])
 
     def test_the_leader_is_the_records(self):
-        # a server member's leader is its record's (vcharon channel join --local wrote it), not
+        # a server member's leader is its record's (vcharon join --local wrote it), not
         # MEMBER.md's, nor the holder of CHANNEL.md
         from vcharon import channel_cmd
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
@@ -1981,15 +2034,15 @@ class EntriesTest(WatchCase):
                                      "note: @all from debian, not the leader: ignored"])
 
     def test_the_client_leader_is_the_sections(self):
-        config = ClientModeTest.write_config(self)
+        sync_args = ClientModeTest.write_config(self)
         os.remove(os.path.join(self.tree, "mac", "MEMBER.md"))
 
-        def run(job, config_path):
+        def run(job, sync_args):
             self.post("debian", 2, "from debian", to="@all")
             self.post("mac", 2, "from mac", to="@all")
             return 0, None, None
 
-        watch.watch_job("mb.windows", config, 30, out=self.lines.append, sleep=never, run=run,
+        watch.watch_job("mb.windows", sync_args, 30, out=self.lines.append, sleep=never, run=run,
                         rounds=1)
         self.assertEqual(self.said()[1:], ["to all: debian#2 — from debian  (debian/RESULTS.md)",
                                            "note: @all from mac, not the leader: ignored"])
@@ -2112,28 +2165,30 @@ class EntriesTest(WatchCase):
         for me in ("mac", "solo", "nobody"):
             with self.subTest(me=me):
                 member = os.path.join(self.tree, me, "MEMBER.md")
-                with self.assertRaises(SystemExit) as cm:
+                with self.assertRaises(VCharonError) as cm:
                     watch.watch_dir(self.tree, me, 10, out=self.lines.append, sleep=never,
                                     rounds=0)
-                self.assertEqual(str(cm.exception), platform.runnable(
-                    "mailbox_watch: %s isn't there: --dir is a channel's folder and --me a "
-                    "member whose folder in it holds MEMBER.md (vcharon channel join --local)"
-                    % member))
+                self.assertEqual((cm.exception.code, cm.exception.message, cm.exception.hint), (
+                    "channel", "%s isn't there: your folder in the channel holds it, once "
+                    "vcharon join --local has written it" % member,
+                    "ask the user: your folder in mb lost its MEMBER.md"))
         # refused before any line, lock or snapshot
         self.assertEqual(self.lines, [])
         self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "state")))
-        # main: exit 1, the line on stderr
-        err = io.StringIO()
-        with mock.patch("sys.stderr", err), mock.patch("sys.stdout", io.StringIO()), \
-                self.assertRaises(SystemExit) as cm:
-            watch.main(["--dir", self.tree, "--me", "mac"])
-        self.assertTrue(str(cm.exception.code).startswith("mailbox_watch: "), cm.exception.code)
+        # the command: exit 1, the ERROR and fix lines on stderr
+        self.local_record("mac")
+        code, out, err = self.cli()
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith("ERROR channel: %s isn't there: "
+                                       % os.path.join(self.tree, "mac", "MEMBER.md")), err)
+        self.assertIn("\n  fix: ask the user: ", err)
+        os.remove(channel_cmd.record_path("mb", "mac"))
         # a MEMBER.md without a leader, and no record: refused too
         write_tree(self.tree, {"mac/MEMBER.md": b"# MEMBER\n"})
-        with self.assertRaises(SystemExit) as cm:
+        with self.assertRaises(VCharonError) as cm:
             watch.watch_dir(self.tree, "mac", 10, out=self.lines.append, sleep=never, rounds=0)
-        self.assertEqual(str(cm.exception), "mailbox_watch: %s names no leader, and there's "
-                         "no record of mac in mb" % os.path.join(self.tree, "mac", "MEMBER.md"))
+        self.assertEqual(cm.exception.message, "%s names no leader, and there's no record of "
+                         "mac in mb" % os.path.join(self.tree, "mac", "MEMBER.md"))
 
 
 class ClosedTest(WatchCase):
@@ -2141,8 +2196,8 @@ class ClosedTest(WatchCase):
     line."""
 
     # the fix as the watcher prints it: the leave command as this box runs vcharon (M14a)
-    GONE = platform.runnable("the channel is closed, or your folder in it is gone: vcharon channel "
-                             "leave mb --project web --role b")
+    GONE = platform.runnable("the channel is closed, or your folder in it is gone: vcharon leave "
+                             "mb --project web --role b")
 
     def record(self):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "debian",
@@ -2202,37 +2257,37 @@ class ClosedTest(WatchCase):
             error, "  fix: " + self.GONE, "EXIT closed"]))
         self.assertFalse(os.path.exists(self.state()))
 
-    def test_dir_missing_at_the_start_through_main(self):
+    def test_dir_missing_at_the_start_through_the_command(self):
         self.record()
         shutil.rmtree(self.tree)
         for argv in ([], ["--until-change"]):
-            with self.subTest(argv=argv), mock.patch("sys.stdout", io.StringIO()) as out:
-                code = watch.main(["--dir", self.tree, "--me", "debian"] + argv)
-                lines = self.said(out.getvalue().splitlines())
-                self.assertEqual(code, 13)
+            with self.subTest(argv=argv):
+                code, out, err = self.cli("--role", "b", *argv, project="web")
+                lines = self.said(out.splitlines())
+                self.assertEqual((code, err), (13, ""))
                 self.assertEqual(lines[1:], ["  fix: " + self.GONE, "EXIT closed"])
                 self.assertTrue(lines[0].startswith("ERROR can't read %s: " % self.tree), lines)
-        # a <dir> that's there without <me>/MEMBER.md: still refused, exit 1 (SystemExit)
+        # a channel folder that's there without <me>/MEMBER.md: still refused, exit 1
         write_tree(self.tree, {"mac/x": b"x"})
-        with mock.patch("sys.stdout", io.StringIO()), self.assertRaises(SystemExit) as cm:
-            watch.main(["--dir", self.tree, "--me", "debian"])
-        self.assertIn("isn't there", str(cm.exception.code))
+        code, out, err = self.cli("--role", "b", project="web")
+        self.assertEqual(code, 1)
+        self.assertIn("isn't there", err)
 
     def job_watch(self, results, rounds, until_change, fresh=False):
-        """watch_job on a fake vcharon run: (exit code, the lines without their time but the
+        """watch_job on a fake sync: (exit code, the lines without their time but the
         watching line)."""
-        def run(job, config_path):
+        def run(job, sync_args):
             return results.pop(0)
 
         lines = []
-        code = watch.watch_job("mb.windows", self.config, 30, out=lines.append,
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=lines.append,
                                sleep=Rounds(*[lambda: None] * (rounds - 1)), run=run,
                                until_change=until_change, max_minutes=25, rounds=rounds,
                                fresh=fresh)
         return code, self.said(lines)[1:]
 
     def test_job_the_gone_fix_ends_it(self):
-        self.config = ClientModeTest.write_config(self)
+        self.sync_args = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
         fix = self.GONE + "\nl"
@@ -2249,7 +2304,7 @@ class ClosedTest(WatchCase):
                     watch.EXIT_CLOSED, [error, "  fix: " + self.GONE, "  log: l", "EXIT closed"]))
 
     def test_job_another_fix_goes_on(self):
-        self.config = ClientModeTest.write_config(self)
+        self.sync_args = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
         for fix in ("restore the folder", None):
@@ -2274,19 +2329,19 @@ class ClosedTest(WatchCase):
             "ERROR can't read %s: Permission denied" % self.tree]))
 
     def test_job_the_fix_shown_with_its_error(self):
-        config = ClientModeTest.write_config(self)
+        sync_args = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
         error = "ERROR mb.windows.up: not_found: the root x doesn't exist"
-        fix = "the channel is closed: vcharon channel leave mb --project web"
+        fix = "the channel is closed: vcharon leave mb --project web"
         results = [(1, error, {}, fix), (1, error, {}, fix), (1, error, {}, "another text")]
 
-        def run(job, config_path):
+        def run(job, sync_args):
             code, line, spec, why = results.pop(0)
             return code, line, why
 
         def watch_it(rounds, until_change=True):
             lines = []
-            code = watch.watch_job("mb.windows", config, 30, out=lines.append,
+            code = watch.watch_job("mb.windows", sync_args, 30, out=lines.append,
                                    sleep=Rounds(*[lambda: None] * (rounds - 1)), run=run,
                                    until_change=until_change, max_minutes=25, rounds=rounds)
             return code, self.said(lines)[1:]
@@ -2324,30 +2379,39 @@ class ClosedTest(WatchCase):
                          "it has another shape")
 
 
-class MainTest(WatchCase):
+class CommandTest(WatchCase):
+    """vcharon watch C: its options, the membership it watches, its exit codes."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        # debian, a local member of the project q; windows, a remote one of p
+        self.local_record()
+        self.client = ClientModeTest.write_config(self)
+        self.member()
+
     def test_usage_errors(self):
-        for argv in ([], ["--dir", "x"], ["--dir", "x", "--job", "y"],
-                     ["--dir", "x", "--me", "d", "--config", "c"], ["--job", "m", "--me", "d"],
-                     ["--dir", "x", "--me", "d", "--every", "0"],
-                     ["--dir", "x", "--me", "d", "--every", "²"],
-                     ["--dir", "x", "--me", "Debian"], ["--dir", "x", "--me", "../x"],
-                     ["--dir", "x", "--me", "con"], ["--dir", "x", "--me", "wIndows"],
-                     ["--job", "m", "--max-minutes", "0"], ["--job", "m", "--max-minutes", "1441"],
-                     ["--job", "m", "--until-change", "--max-errors", "0"],
-                     ["--job", "m", "--until-change", "--max-errors", "1001"],
-                     ["--job", "m", "--max-errors", "3"],
-                     # M15: a streaming --job's --every is vcharon run --repeat's, 1 to 300
-                     ["--job", "m", "--every", "301"], ["--job", "m", "--every", "0"],
-                     ["--dir", "x", "--me", "d", "--no-stream"]):
-            with self.subTest(argv=argv):
+        for project, argv in (
+                ("q", ["--dir", "x"]), ("q", ["--job", "y"]), ("q", ["--me", "d"]),
+                ("q", ["--config", "c"]), ("q", ["--every", "0"]), ("q", ["--every", "²"]),
+                ("q", ["--max-minutes", "0"]), ("q", ["--max-minutes", "1441"]),
+                ("q", ["--until-change", "--max-errors", "0"]),
+                ("q", ["--until-change", "--max-errors", "1001"]),
+                ("q", ["--max-errors", "3"]),
+                # M15: a streaming watch's --every is vcharon sync --repeat's, 1 to 300
+                ("p", ["--every", "301"]), ("p", ["--every", "0"]),
+                # a local member has no sync to stream
+                ("q", ["--no-stream"])):
+            with self.subTest(project=project, argv=argv):
                 # never a watch loop: an argument that got through fails here, not by hanging
                 ran = AssertionError("the watch started")
-                with mock.patch("sys.stderr", io.StringIO()), \
-                        mock.patch.object(watch, "watch_dir", side_effect=ran), \
-                        mock.patch.object(watch, "watch_job", side_effect=ran), \
-                        self.assertRaises(SystemExit) as cm:
-                    watch.main(argv)
-                self.assertEqual(cm.exception.code, 2)
+                with mock.patch.object(watch, "watch_dir", side_effect=ran), \
+                        mock.patch.object(watch, "watch_job", side_effect=ran):
+                    code, out, err = self.cli(*argv, project=project)
+                self.assertEqual((code, out), (3, ""))
+                self.assertTrue(err.startswith("ERROR config: "), err)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            self.assertEqual(cli.main(["watch"]), 3)
 
     def test_modes_and_ctrl_c(self):
         calls = []
@@ -2357,57 +2421,74 @@ class MainTest(WatchCase):
             raise KeyboardInterrupt
 
         with mock.patch.object(watch, "watch_dir", interrupted):
-            self.assertEqual(watch.main(["--dir", "~/box", "--me", "debian"]), 130)
+            code, out, err = self.cli()
+            self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         with mock.patch.object(watch, "watch_job", interrupted):
-            self.assertEqual(watch.main(["--job", "mailbox", "--every", "5"]), 130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--until-change", "--fresh"]), 130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--until-change", "--max-minutes",
-                                         "5", "--max-errors", "3"]), 130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--max-minutes", "29"]), 130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--no-stream"]), 130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--no-stream", "--every", "3600"]),
-                             130)
-            self.assertEqual(watch.main(["--job", "mailbox", "--every", "300"]), 130)
-        # main() resolves the dir to an absolute, normalized path (abspath makes it "a\b" on
-        # Windows), so that's what watch_dir gets
+            for argv in (["--every", "5"], ["--until-change", "--fresh"],
+                         ["--until-change", "--max-minutes", "5", "--max-errors", "3"],
+                         ["--max-minutes", "29"], ["--no-stream"],
+                         ["--no-stream", "--every", "3600"], ["--every", "300"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual(self.cli(*argv, project="p")[0], 130)
+        # the local member's channel folder, from its record; the remote member's section,
+        # and the sync's arguments that find it again
         plain = {"fresh": False, "until_change": False, "max_minutes": None, "max_errors": 10}
-        # --job streams by default, every 2 s (M15); --no-stream runs vcharon every 30 s
+        # a remote member streams by default, every 2 s (M15); --no-stream syncs every 30 s
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
-            ((os.path.abspath(os.path.expanduser("~/box")), "debian", 10), plain),
-            (("mailbox", None, 5), streams),
-            (("mailbox", None, 2), dict(streams, fresh=True, until_change=True, max_minutes=25)),
-            (("mailbox", None, 2), dict(streams, until_change=True, max_minutes=5,
-                                        max_errors=3)),
-            (("mailbox", None, 2), dict(streams, max_minutes=29)),
-            (("mailbox", None, 30), dict(plain, stream=False)),
-            (("mailbox", None, 3600), dict(plain, stream=False)),
-            (("mailbox", None, 300), streams)])
+            ((self.tree, "debian", 10), plain),
+            (("mb.windows", SYNC, 5), streams),
+            (("mb.windows", SYNC, 2), dict(streams, fresh=True, until_change=True,
+                                           max_minutes=25)),
+            (("mb.windows", SYNC, 2), dict(streams, until_change=True, max_minutes=5,
+                                           max_errors=3)),
+            (("mb.windows", SYNC, 2), dict(streams, max_minutes=29)),
+            (("mb.windows", SYNC, 30), dict(plain, stream=False)),
+            (("mb.windows", SYNC, 3600), dict(plain, stream=False)),
+            (("mb.windows", SYNC, 300), streams)])
+
+    def test_a_role_is_part_of_the_sync_args(self):
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows-b",
+                                  "leader": "debian", "ssh": "devbox", "remote": "r",
+                                  "machine": util.TEST_MACHINE_ID, "project": "p",
+                                  "role": "b"})
+        write_tree(self.vcharon_home, {"channels.d/mb.windows-b.ini": MAILBOX.format(
+            local=os.path.join(self.tmp, "b")).replace("windows", "windows-b").encode()})
+        calls = []
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: calls.append(a) or 0):
+            self.assertEqual(self.cli("--role", "b", project="p")[0], 0)
+        self.assertEqual(calls, [("mb.windows-b", ["mb", "--project", "p", "--role", "b"], 2)])
 
     def test_exit_codes(self):
         for code in (0, 10, 11, 12, 13):
             with self.subTest(code=code), \
                     mock.patch.object(watch, "watch_dir", return_value=code):
-                self.assertEqual(watch.main(["--dir", "~/box", "--me", "debian"]), code)
+                self.assertEqual(self.cli()[0], code)
+
+    def test_not_a_member(self):
+        code, out, err = self.cli(project="nope")
+        self.assertEqual((code, out), (1, ""))
+        self.assertEqual(err.splitlines()[0], "ERROR channel: you aren't in mb as --project nope "
+                                              "(no join record on this box)")
 
     def test_utf8_whatever_the_console(self):
         # a console whose code page can't hold ñ (PYTHONIOENCODING stands in for Windows' 936)
-        code = ("import importlib.util, sys\n"
-                "spec = importlib.util.spec_from_file_location('w', sys.argv[1])\n"
-                "w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)\n"
+        code = ("import sys\n"
+                "from vcharon import cli\n"
+                "from vcharon.mailbox import watch as w\n"
                 "w.watch_dir = lambda *a, **k: w.say('new mañana.md')\n"
-                "sys.exit(w.main(['--dir', sys.argv[2], '--me', 'debian']))\n")
+                "sys.exit(cli.main(['watch', 'mb', '--project', 'q']))\n")
         env = dict(os.environ, PYTHONIOENCODING="gbk")
-        ran = subprocess.run([sys.executable, "-c", code, TOOL, self.tree], env=env,
+        ran = subprocess.run([sys.executable, "-c", code], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
         want = "new mañana.md\n".encode("utf-8").replace(b"\n", os.linesep.encode())
         self.assertEqual((ran.returncode, ran.stdout), (0, want), ran.stderr)
 
     def test_a_real_until_change_run(self):
-        # the tool as a background command runs it: a child, its lines, its exit code
+        # as a background command runs it: a child, its lines, its exit code
         write_tree(self.tree, {"windows/x": b"x"})
-        argv = [sys.executable, TOOL, "--dir", self.tree, "--me", "debian", "--every", "1",
-                "--until-change"]
+        argv = [sys.executable, "-P", "-m", "vcharon", "watch", "mb", "--project", "q",
+                "--every", "1", "--until-change"]
         child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env=dict(os.environ, VCHARON_HOME=self.vcharon_home))
         try:

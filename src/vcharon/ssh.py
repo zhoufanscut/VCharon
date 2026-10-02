@@ -389,7 +389,7 @@ class Session:
         self._marker_seen = False
         self._reader_done = False
         self._started = 0.0
-        # where run_timeout counts from: the start, or with vcharon run --repeat the round's
+        # where run_timeout counts from: the start, or with vcharon sync --repeat the round's
         # start; None between rounds, when it doesn't count (start_round, end_round)
         self._run_from = None
         self._activity = 0.0
@@ -624,12 +624,12 @@ class Session:
                 return
 
     def start_round(self):
-        """vcharon run --repeat: run_timeout counts from now, within this round (M15)."""
+        """vcharon sync --repeat: run_timeout counts from now, within this round (M15)."""
         with self._lock:
             self._run_from = time.monotonic()
 
     def end_round(self):
-        """vcharon run --repeat: the wait between rounds doesn't count for run_timeout."""
+        """vcharon sync --repeat: the wait between rounds doesn't count for run_timeout."""
         with self._lock:
             self._run_from = None
 

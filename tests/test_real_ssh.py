@@ -54,11 +54,13 @@ class RealSshTest(unittest.TestCase):
     def test_ping(self):
         self.assertEqual(cli.main(["ping", DEST]), 0)
 
-    def run_job(self, *argv):
-        """vcharon run <argv>, which must succeed; its lines."""
+    def run_job(self, name, full=False):
+        """The sync's runner on the test job name (cli.run_jobs), which must succeed; its
+        lines."""
         out = io.StringIO()
+        run = cli._Run()
         with contextlib.redirect_stdout(out):
-            code = cli.main(["run"] + list(argv))
+            code = cli._guarded(lambda: cli.run_jobs([name], full=full, run=run), run)
         self.assertEqual(code, 0, out.getvalue())
         return out.getvalue().splitlines()
 
@@ -84,7 +86,7 @@ class RealSshTest(unittest.TestCase):
         # one byte more at the server: vcharon trusts the target until a --full run
         self.ssh("printf x >> %s" % shlex.quote(remote + "/run.sh"))
         self.assertEqual(self.run_job("push")[1], "  nothing to do")
-        self.assertEqual(self.run_job("push", "--full")[1],
+        self.assertEqual(self.run_job("push", full=True)[1],
                          "  put     4 files, 3 dirs (%s), 3 already there" % size())
         # a pull job with prune from the same server directory
         pulled = os.path.join(self.tmp, "pulled")
@@ -107,7 +109,7 @@ class RealSshTest(unittest.TestCase):
     def doctor(self, code):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            got = cli.main(["doctor", DEST])
+            got = cli.main(["doctor", "--server", DEST])
         self.assertEqual(got, code, out.getvalue() + err.getvalue())
         return [line for line in out.getvalue().splitlines()
                 if line.startswith(("  ok    %s " % DEST, "  FAIL  %s " % DEST))]

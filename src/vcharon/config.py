@@ -152,19 +152,15 @@ def job_name_problem(name):
     return None
 
 
-def load(path=None):
-    """Reads the config: `path` (--config), or else the default file, which may be missing."""
-    explicit = path is not None
-    if path is None:
-        path = platform.config_path()
+def load():
+    """Reads the config file (platform.config_path(), under VCHARON_HOME if set), which may be
+    missing."""
+    path = platform.config_path()
     hint = "fix %s" % path
     try:
         with open(path, "rb") as f:
             raw = f.read()
     except FileNotFoundError:
-        if explicit:
-            raise VCharonError("config", "the config file %s doesn't exist" % path,
-                               hint="check the --config path")
         raw = None
     except OSError as e:
         raise VCharonError("config", "couldn't read %s: %s" % (path, e.strerror or e), hint=hint)
@@ -317,7 +313,7 @@ def _read_jobs(parser, name, hint, settings, path):
                                % (name, section), hint=hint)
         if not any(key.startswith("mailbox.") for key in parser.options(section)):
             raise VCharonError("config", "%s [%s]: %s holds only [vcharon]; a channel's section "
-                               "goes in %s, which vcharon channel writes"
+                               "goes in %s, which vcharon join writes"
                                % (name, section, name, CHANNELS_DIR), hint=hint)
         problem = job_name_problem(section)
         if problem:
@@ -343,7 +339,7 @@ def _read_jobs(parser, name, hint, settings, path):
 
 
 def channels_dir(config_path):
-    """channels.d/ next to the config file, also under --config (DESIGN §14 M10)."""
+    """channels.d/ next to the config file (DESIGN §14 M10)."""
     return os.path.join(os.path.dirname(config_path), CHANNELS_DIR)
 
 
@@ -474,7 +470,7 @@ def _read_mailbox(parser, section, name, hint, base):
     problem = pathrules.writer_problem(leader)
     if problem:
         refuse("mailbox.leader", problem)
-    # [<channel>.<me>]: one section per channel and member, as vcharon channel names it
+    # [<channel>.<me>]: one section per channel and member, as vcharon join names it
     channel = section[:-len(me) - 1] if section.endswith("." + me) else ""
     if not channel:
         refuse(None, "a channel section is named <channel>.<mailbox.me>, here [<channel>.%s]"

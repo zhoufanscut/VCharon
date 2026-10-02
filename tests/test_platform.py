@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import site
 import struct
 import sys
+import sysconfig
 import tempfile
 import types
 import unittest
@@ -265,6 +267,10 @@ def no_which(name):
     return None
 
 
+# this host's own form, for this host's paths (a Linux form can't take C:\...)
+HOST = "windows" if os.name == "nt" else "linux"
+
+
 class VCharonCommandTest(unittest.TestCase):
     """How a fix line runs vcharon on this box (M14a): the pure core for every OS, on any OS."""
 
@@ -317,52 +323,220 @@ class VCharonCommandTest(unittest.TestCase):
         # by realpath: PATH's python3 is a link to this very file. The host's own OS form,
         # since real and link are this host's paths (a Linux form can't split C:\...).
         osn = "windows" if os.name == "nt" else "linux"
-        self.assertEqual(platform.command_for(real, "/f", osn,
-                                              lambda name: link if name == "python3.11" else None),
+        which = lambda name: link if name == "python3.11" else None
+        self.assertEqual(platform.command_for(real, "/f", osn, which, venv=False),
                          "python3.11 /f")
+        # a venv's python is a link to the base one, and only the link finds the venv's
+        # packages: by the path itself
+        self.assertEqual(platform.command_for(real, "/f", osn, which, venv=True),
+                         platform.command_for(real, "/f", osn, no_which))
 
     def test_runnable(self):
-        cmd = "py /f"
+        cmd = "py -P -m vcharon"
         for text, want in (
-                ("vcharon channel leave mb --project p", "py /f channel leave mb --project p"),
-                ("run: vcharon key dest", "run: py /f key dest"),
-                ("(vcharon channel close mb x)", "(py /f channel close mb x)"),
-                ("use `vcharon run a.up`", "use `py /f run a.up`"),
-                ("vcharon --help", "py /f --help"),
-                ("vcharon state reset a, and vcharon run a --full",
-                 "py /f state reset a, and py /f run a --full")):
+                ("vcharon leave mb --project p", "py -P -m vcharon leave mb --project p"),
+                ("run: vcharon key dest", "run: py -P -m vcharon key dest"),
+                ("(vcharon close mb --project x)", "(py -P -m vcharon close mb --project x)"),
+                ("use `vcharon sync mb --full`", "use `py -P -m vcharon sync mb --full`"),
+                ("vcharon --help", "py -P -m vcharon --help"),
+                ("vcharon sync a --reset up, and vcharon sync a --full",
+                 "py -P -m vcharon sync a --reset up, and py -P -m vcharon sync a --full")):
             with self.subTest(text=text):
                 self.assertEqual(platform.runnable(text, cmd), want)
-        for text in ("vcharon's rules", "vcharon/README.md", "see /x/vcharon run",
-                     "vcharon run's fix", "MEMBER.md is vcharon's", "vcharon channel's to write",
-                     "vcharon runner", "(vcharon cp: --skip-symlinks)", "a vcharon",
-                     "xvcharon run a", "vcharon  run", ""):
+        for verb in platform.COMMANDS:
+            with self.subTest(verb=verb):
+                self.assertEqual(platform.runnable("vcharon %s" % verb, cmd), "%s %s"
+                                 % (cmd, verb))
+        for text in ("vcharon's rules", "vcharon/README.md", "see /x/vcharon sync",
+                     "vcharon sync's fix", "MEMBER.md is vcharon's", "vcharon join's to write",
+                     "vcharon syncer", "(vcharon cp: --skip-symlinks)", "a vcharon",
+                     "xvcharon sync a", "vcharon  sync", "vcharon run a", "vcharon state reset a",
+                     "vcharon channel list", ""):
             with self.subTest(text=text):
                 self.assertEqual(platform.runnable(text, cmd), text)
 
     def test_runnable_twice_is_once(self):
-        # the command is `<python> -m vcharon`: its own `vcharon <command>` is never taken again
-        text = "run vcharon channel leave mb x, then vcharon run mb.x --full"
-        for cmd in ("python3 -m vcharon", '"C:/my py/python.exe" -m vcharon', None):
+        # the command ends in `-m vcharon`: its own `vcharon <command>` is never taken again;
+        # nor is a binary's path, and `vcharon` itself is the same text again
+        text = "run vcharon leave mb --project x, then vcharon sync mb --full"
+        for cmd in ("python3 -P -m vcharon", '"C:/my py/python.exe" -P -m vcharon',
+                    "/opt/bin/vcharon", "'/my bin/vcharon'", '"C:/my bin/vcharon.exe"',
+                    "vcharon", None):
             with self.subTest(cmd=cmd):
                 once = platform.runnable(text, cmd)
                 self.assertEqual(platform.runnable(once, cmd), once)
-        self.assertEqual(platform.runnable(text, "python3 -m vcharon"),
-                         "run python3 -m vcharon channel leave mb x, then python3 -m vcharon run "
-                         "mb.x --full")
+        self.assertEqual(platform.runnable(text, "python3 -P -m vcharon"),
+                         "run python3 -P -m vcharon leave mb --project x, then python3 -P -m "
+                         "vcharon sync mb --full")
+
+
+class SelfTest(unittest.TestCase):
+    """self_argv (how vcharon starts itself), child_env, and self_command (how a fix line spells
+    the command), each with sys.frozen, sys._MEIPASS, sys.executable and which faked."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def frozen(self, executable, meipass=True):
+        """Patches this process to look like a PyInstaller binary at executable."""
+        patchers = [mock.patch.object(sys, "frozen", True, create=True),
+                    mock.patch.object(sys, "executable", executable)]
+        if meipass:
+            patchers.append(mock.patch.object(sys, "_MEIPASS", os.path.join(self.tmp, "_MEI1"),
+                                              create=True))
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_self_argv(self):
+        self.assertFalse(platform.is_frozen())
+        self.assertEqual(platform.self_argv(), [sys.executable, "-P", "-m", "vcharon"])
+        binary = os.path.join(self.tmp, "vcharon")
+        self.frozen(binary)
+        self.assertTrue(platform.is_frozen())
+        self.assertEqual(platform.self_argv(), [binary])
+
+    def test_frozen_needs_meipass_too(self):
+        # sys.frozen alone (another freezer) isn't PyInstaller's binary
+        self.frozen(os.path.join(self.tmp, "vcharon"), meipass=False)
+        self.assertFalse(platform.is_frozen())
+        self.assertEqual(platform.self_argv(), [sys.executable, "-P", "-m", "vcharon"])
+
+    def test_child_env(self):
+        base = {"A": "1", "PYINSTALLER_RESET_ENVIRONMENT": "x"}
+        self.assertEqual(platform.child_env(base), base)
+        self.assertIsNot(platform.child_env(base), base)
+        self.frozen(os.path.join(self.tmp, "vcharon"))
+        self.assertEqual(platform.child_env({"A": "1"}),
+                         {"A": "1", "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+
+    def test_a_binary(self):
+        binary = os.path.join(self.tmp, "my bin", "vcharon")
+        os.makedirs(os.path.dirname(binary))
+        open(binary, "w").close()
+        self.frozen(binary)
+        # PATH's vcharon is this binary: its name
+        self.assertEqual(platform.self_command(lambda name: binary, HOST), "vcharon")
+        # none on PATH, or another one: the whole path, quoted for this host's shell
+        quoted = platform._quoted([binary], HOST)
+        self.assertNotEqual(quoted, binary)
+        self.assertEqual(platform.self_command(no_which, HOST), quoted)
+        other = os.path.join(self.tmp, "vcharon")
+        open(other, "w").close()
+        self.assertEqual(platform.self_command(lambda name: other, HOST), quoted)
+
+    def test_a_posix_binary_path(self):
+        # the declared OS's form, on a path of that OS
+        self.frozen("/opt/my tools/vcharon")
+        self.assertEqual(platform.self_command(no_which, "linux"), "'/opt/my tools/vcharon'")
+
+    def test_a_binary_through_a_link(self):
+        binary = os.path.join(self.tmp, "vcharon-0.1.0")
+        open(binary, "w").close()
+        link = os.path.join(self.tmp, "vcharon")
+        try:
+            os.symlink(binary, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+        self.frozen(binary)
+        self.assertEqual(platform.self_command(lambda name: link, HOST), "vcharon")
+
+    def test_a_windows_binary(self):
+        exe = "C:\\Users\\me\\My Tools\\vcharon.exe"
+        self.frozen(exe)
+        self.assertEqual(platform.self_command(no_which, "windows"),
+                         '"C:/Users/me/My Tools/vcharon.exe"')
+        self.frozen("C:\\tools\\vcharon.exe")
+        self.assertEqual(platform.self_command(no_which, "windows"), "C:/tools/vcharon.exe")
+
+    def entry_point(self, folder, python, text=None):
+        """A vcharon entry-point script in folder, its #! line naming python; its path."""
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "vcharon")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text if text is not None else "#!%s\nimport vcharon\n" % python)
+        return path
+
+    def test_an_entry_point_of_this_environment(self):
+        # pipx and uv: ~/.local/bin/vcharon links to the venv's bin/vcharon, next to its python
+        venv_bin = os.path.join(self.tmp, "venvs", "vcharon", "bin")
+        os.makedirs(venv_bin)
+        python = os.path.join(venv_bin, "python")
+        open(python, "w").close()
+        entry = self.entry_point(venv_bin, python)
+        local_bin = os.path.join(self.tmp, "local-bin")
+        os.makedirs(local_bin)
+        link = os.path.join(local_bin, "vcharon")
+        try:
+            os.symlink(entry, link)
+        except (OSError, NotImplementedError):
+            link = entry
+        with mock.patch.object(sys, "executable", python):
+            for found in (entry, link):
+                with self.subTest(found=found):
+                    self.assertTrue(platform.runs_this_package(found))
+                    self.assertEqual(platform.self_command(lambda name: found, HOST),
+                                     "vcharon")
+            # another install's vcharon on PATH: this one, by its python
+            other = self.entry_point(os.path.join(self.tmp, "other"), python)
+            self.assertFalse(platform.runs_this_package(other))
+            want = platform.command_for(python, None, HOST, no_which) + " -P -m vcharon"
+            self.assertEqual(platform.self_command(lambda name: other, HOST), want)
+            self.assertEqual(platform.self_command(no_which, HOST), want)
+
+    @unittest.skipIf(os.name == "nt", "an .exe launcher has no #! line")
+    def test_the_scripts_python(self):
+        folder = os.path.join(self.tmp, "bin")
+        python = os.path.join(folder, "python")
+        os.makedirs(folder)
+        open(python, "w").close()
+        with mock.patch.object(sys, "executable", python):
+            # another Python's script in this folder, or none named: not this install
+            for text in ("#!/usr/bin/python3.9\nimport vcharon\n", "", "import vcharon\n",
+                         "#!\n"):
+                with self.subTest(text=text):
+                    entry = self.entry_point(folder, python, text)
+                    self.assertFalse(platform.runs_this_package(entry, [folder]))
+            # pip's /bin/sh form for a long interpreter path, a quoted one, one with an option
+            sh = "#!/bin/sh\n'''exec' \"%s\" \"$0\" \"$@\"\n' '''\n" % python
+            for text in (sh, '#!"%s"\n' % python, "#!%s -E\n" % python):
+                with self.subTest(text=text):
+                    entry = self.entry_point(folder, python, text)
+                    self.assertTrue(platform.runs_this_package(entry, [folder]))
+
+    def test_scripts_folders(self):
+        # pip install --user: the user scheme's scripts folder
+        user = os.path.join(self.tmp, "user-bin")
+        entry = self.entry_point(user, sys.executable)
+        self.assertFalse(platform.runs_this_package(entry, []))
+        self.assertTrue(platform.runs_this_package(entry, [os.path.join(self.tmp, "x"), user]))
+        self.assertIn(os.path.dirname(sys.executable), platform._scripts_dirs())
+        # a found name that isn't a file (gone, or a folder) is no entry point
+        self.assertFalse(platform.runs_this_package(os.path.join(user, "gone"), [user]))
+        self.assertFalse(platform.runs_this_package(user, [self.tmp]))
+
+    def test_the_user_scheme_only_outside_a_venv(self):
+        def get_path(name, scheme=None):
+            return "/user-bin" if scheme else "/scripts"
+
+        with mock.patch.object(sysconfig, "get_path", get_path):
+            for prefix, base, enabled, user in (("/p", "/p", True, True),
+                                                ("/p", "/p", False, False),
+                                                ("/venv", "/p", True, False)):
+                with self.subTest(prefix=prefix, base=base, enabled=enabled), \
+                        mock.patch.object(sys, "prefix", prefix), \
+                        mock.patch.object(sys, "base_prefix", base), \
+                        mock.patch.object(site, "ENABLE_USER_SITE", enabled):
+                    self.assertEqual("/user-bin" in platform._scripts_dirs(), user)
+                    self.assertIn("/scripts", platform._scripts_dirs())
 
     def test_this_vcharon(self):
-        folder = platform.vcharon_dir()
-        self.assertTrue(os.path.isfile(os.path.join(folder, "vcharon", "__main__.py")), folder)
-        self.assertTrue(os.path.isabs(folder))
-        self.assertEqual(platform.vcharon_command(), platform.command_for(
-            sys.executable, None, platform.os_name(), shutil.which) + " -m vcharon")
-        self.assertEqual(platform.runnable("vcharon run a"),
-                         platform.vcharon_command() + " run a")
-        # no folder (the server's bundled copy): as written
-        with mock.patch.object(platform, "vcharon_dir", return_value=None):
-            self.assertIsNone(platform.vcharon_command())
-            self.assertEqual(platform.runnable("vcharon run a"), "vcharon run a")
+        # whatever this run's install is, the spelling parses back into this CLI
+        command = platform.self_command()
+        self.assertTrue(command == "vcharon" or command.endswith(" -P -m vcharon"), command)
+        self.assertEqual(platform.runnable("vcharon sync a"), command + " sync a")
+
 
 if __name__ == "__main__":
     unittest.main()

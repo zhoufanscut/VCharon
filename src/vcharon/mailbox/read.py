@@ -1,14 +1,8 @@
-"""Show a whole vcharon channel, every member's entries merged in one order (DESIGN §14 M12,
-MAILBOX.md in the vcharon folder). Read-only: it writes nothing and runs no vcharon.
+"""vcharon read C: a whole channel, every member's entries merged in one order (DESIGN §14 M12,
+the guide's read topic). Read-only: it writes nothing and starts no sync.
 
-For a local member, or any copy of a channel's tree:
-
-    python3 mailbox_view.py --dir ~/.local/state/vcharon/channels/<C> [--full] [--last N]
-
-For a client, its local tree of the channel section <C>.<name> (channels.d/), as of this box's
-last sync; it runs no vcharon run, so vcharon run <C>.<name> first for a fresh view:
-
-    python3 mailbox_view.py --job <C>.<name> [--config PATH] [--full] [--last N]
+A local member reads the channel's folder in the channel root on this machine; a remote member
+reads this box's copy of the channel, as of its last sync (a watch, or vcharon sync C).
 
 It reads every top-level folder whose name is a writer's (the member's own folder too; other
 names, symlinks and stage dirs are left out, as the watcher leaves them out), and below each the
@@ -16,7 +10,8 @@ entries of every .md file (vcharon/entries.py's format) but the folder's MEMBER.
 marks the folder. Lines, in this order:
 
     <C>: <n> entries from <m> members (<dir>)
-                                   the first line; with --job, `, as of this box's last sync`
+                                   the first line; for a remote member, `, as of this box's
+                                   last sync`
     <time>  <id>  <to>  [re <id>  ]<title>  (<folder>/<file>)
                                    one line an entry, oldest first; - for a part it lacks.
                                    --full adds the header's other lines and the body, indented
@@ -25,7 +20,7 @@ marks the folder. Lines, in this order:
 
 The order: an entry whose time is missing or doesn't parse (entries.TIME_FORMAT) comes first,
 in path order. The rest go by their minute. Within one minute the time can't order them, so
-there one member's entries go by number (#7 before #8: mailbox_post.py's lock makes that true),
+there one member's entries go by number (#7 before #8: post's lock makes that true),
 and the entry a re: names goes before the entry naming it; of the entries that are free to go,
 the smallest (name, number) goes first, the number compared as a number (#9 before #10).
 Across minutes the time wins, even against re:. Only a placed entry is ordered by number and
@@ -38,41 +33,29 @@ after this box's current minute; one stamped in an earlier minute than the entry
 (clocks differ?); a re: naming an ID not in the tree (not synced yet, or a typo); re: lines that
 make a cycle within a minute, which then goes by number only.
 
-Exit 0; 2 for a usage error (argparse's); 1 when the channel's folder can't be read (`ERROR
-can't read <dir>: ...`) or --job's section can't be resolved (`mailbox_view: ...`), on stderr.
-Standard library only, Python 3.9 or newer. It lives outside the vcharon package, as
-mailbox_watch.py does, and reads through vcharon's entries and pathrules modules.
+Exit 0; 1 when the channel's folder can't be read (`ERROR can't read <dir>: ...`, on stderr).
+
+--json prints one object instead (view_json): {"channel", "folder", "synced", "members",
+"count", "entries", "notes"}. "folder" is the tree read; "synced" is true for a remote member's
+copy; "members" the member folders read; "count" every entry in the tree, while "entries" holds
+the ones shown (--last), in the view's order, each {"time", "id", "name", "number", "to", "re",
+"title", "file", "header", "body"}: "file" is the entry's file relative to the tree, with "/";
+"time", "id", "name", "number" and "re" are null when the entry lacks them; "header" (a list of
+[key, value], key "" for a line without one) and "body" are null unless --full. "notes" are the
+note lines' texts, without "note: ".
 """
 
 from __future__ import annotations
 
-import argparse
 import datetime
 import heapq
 import os
 import sys
 import time
 
-# this tool's folder, which holds mailbox_watch.py, and the repo's src folder, which holds the
-# vcharon package
-TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-VCHARON_DIR = os.path.join(os.path.dirname(TOOLS_DIR), "src")
-PROG = "mailbox_view"
+from .. import entries, pathrules
+
 INDENT = "    "
-
-
-def _vcharon_import():
-    # the vcharon package next to this tool, never one on PATH (DESIGN §13)
-    if VCHARON_DIR not in sys.path:
-        sys.path.insert(0, VCHARON_DIR)
-
-
-def _watch():
-    """The watcher next to this tool, for its mailbox_of and its output helpers."""
-    if TOOLS_DIR not in sys.path:
-        sys.path.insert(0, TOOLS_DIR)
-    import mailbox_watch
-    return mailbox_watch
 
 
 def _why(e):
@@ -108,8 +91,6 @@ class Item:
 def read_tree(root):
     """(member folders, [Item] in path order, notes) of the channel tree root. An error on the
     root itself raises OSError; below it, what can't be read is a note."""
-    _vcharon_import()
-    from vcharon import entries, pathrules
     notes = []
 
     def rel(path):
@@ -174,8 +155,6 @@ def _kahn(nodes, edges):
 def order(items, now):
     """(items in the view's order, the notes of the minutes): the rules of the docstring. now
     is this box's current time, a datetime. Each item's own notes go on item.notes."""
-    _vcharon_import()
-    from vcharon import entries
     placed = {}
     in_tree = set()
     for item in items:
@@ -237,7 +216,7 @@ def order(items, now):
                    if n.e.re in here and n.e.re != n.e.id]
         done = _kahn(nodes, numbered + answers)
         if done is None:
-            # a wrong --re can make one: mailbox_post.py checks only its form
+            # a wrong --re can make one: post checks only its form
             notes.append("note: %s: re: lines make a cycle; that minute goes by number only"
                          % minute.strftime(entries.TIME_FORMAT))
             done = _kahn(nodes, numbered)
@@ -262,61 +241,52 @@ def lines(items, full):
     return out
 
 
+def _now():
+    """This box's current time (tests fake it)."""
+    return datetime.datetime.now()
+
+
+def _collect(root, now):
+    """(member folders, items in the view's order, notes) of the tree root; OSError when the
+    root can't be read."""
+    folders, items, read_notes = read_tree(root)
+    if now is None:
+        now = _now()
+    ordered, minute_notes = order(items, now)
+    notes = read_notes + [n for item in ordered for n in item.notes] + minute_notes
+    return folders, ordered, notes
+
+
 def view(root, channel, synced=False, full=False, last=None, now=None, out=print):
     """Prints the view of the channel tree root; returns the exit code."""
     try:
-        folders, items, read_notes = read_tree(root)
+        folders, ordered, notes = _collect(root, now)
     except OSError as e:
         print("ERROR can't read %s: %s" % (root, _why(e)), file=sys.stderr)
         return 1
-    if now is None:
-        now = datetime.datetime.now()
-    ordered, minute_notes = order(items, now)
-    out("%s: %s from %s (%s)%s" % (channel, _counted(len(items), "entry", "entries"),
+    out("%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
                                    _counted(len(folders), "member", "members"), root,
                                    ", as of this box's last sync" if synced else ""))
     shown = ordered[-last:] if last else ordered
     for line in lines(shown, full):
         out(line)
-    for note in read_notes + [n for item in ordered for n in item.notes] + minute_notes:
+    for note in notes:
         out(note)
     return 0
 
 
-def main(argv=None, now=None):
-    watch = _watch()
-    watch._utf8_output()
-    parser = argparse.ArgumentParser(prog="mailbox_view.py", description="Show a vcharon "
-                                     "channel's entries, every member's, in one order.")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--dir", help="a channel's folder: in the channel root on this machine, "
-                      "or any copy of its tree")
-    mode.add_argument("--job", help="a client's channel section (channels.d/), <C>.<name>: "
-                      "its local tree, as of this box's last sync")
-    parser.add_argument("--config", help="with --job: vcharon's config file")
-    parser.add_argument("--full", action="store_true", help="each entry's other header "
-                        "lines and its body too")
-    parser.add_argument("--last", type=watch._number(1, 1000000, "entries"), help="only the "
-                        "newest N entries")
-    args = parser.parse_args(argv)
-    if args.dir is not None:
-        if args.config:
-            parser.error("--dir takes no --config")
-        # a quoted "~/…" reaches us unexpanded, as the watcher's --dir does
-        root = os.path.abspath(os.path.expanduser(args.dir))
-        channel = os.path.basename(root)
-        synced = False
-    else:
-        try:
-            root = watch.mailbox_of(args.job, args.config, prog=PROG)[0]
-        except SystemExit as e:
-            print(e.code, file=sys.stderr)
-            return 1
-        # a section is [<channel>.<me>]
-        channel = args.job.split(".", 1)[0]
-        synced = True
-    return view(root, channel, synced=synced, full=args.full, last=args.last, now=now)
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+def view_json(root, channel, synced=False, full=False, last=None, now=None):
+    """The view as one JSON object (the module's docstring has its fields); OSError when the
+    root can't be read."""
+    folders, ordered, notes = _collect(root, now)
+    shown = ordered[-last:] if last else ordered
+    items = []
+    for item in shown:
+        e = item.e
+        items.append({"time": e.time or None, "id": e.id, "name": e.name, "number": e.number,
+                      "to": list(e.to), "re": e.re or None, "title": e.title, "file": item.path,
+                      "header": [[k or "", v] for k, v in e.header] if full else None,
+                      "body": e.body if full else None})
+    return {"channel": channel, "folder": root, "synced": synced, "members": folders,
+            "count": len(ordered), "entries": items,
+            "notes": [n[len("note: "):] if n.startswith("note: ") else n for n in notes]}

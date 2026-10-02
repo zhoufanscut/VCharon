@@ -1,5 +1,5 @@
 """The channel root (DESIGN §14 M10): list, claim, release and remove channel and member
-folders, directly below the root; on both ends (the helper's channel.* calls, and vcharon channel
+folders, directly below the root; on both ends (the helper's channel.* calls, and vcharon's
 --local in-process)."""
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ def _no_tick():
     pass
 
 
-def refused(text):
-    """A refused channel check: one line that names what to do (DESIGN §14 M10)."""
-    return VCharonError("channel", text)
+def refused(text, hint):
+    """A refused channel check: what's wrong, and its fix line (DESIGN §14 M10)."""
+    return VCharonError("channel", text, hint)
 
 
 def channel_problem(channel):
@@ -68,10 +68,10 @@ def _check_names(channel, name):
     # The client checked them; the server never trusts that (DESIGN §10.1).
     problem = channel_problem(channel)
     if problem:
-        raise refused("%s: %s" % (pathrules.show(channel), problem))
+        raise refused("%s: %s" % (pathrules.show(channel), problem), "pick another channel name")
     problem = pathrules.writer_problem(name) if isinstance(name, str) else "not text"
     if problem:
-        raise refused("%s: %s" % (pathrules.show(name), problem))
+        raise refused("%s: %s" % (pathrules.show(name), problem), "pick another member name")
 
 
 def _open_root(root):
@@ -94,9 +94,10 @@ def _real_dir(handle, name, what):
         return None
     kind = fsops.kind(st)
     if kind == fsops.LINK:
-        raise refused("%s is a symlink: remove it by hand; vcharon never follows one" % what)
+        raise refused("%s is a symlink, and vcharon never follows one" % what,
+                      "remove it by hand")
     if kind != fsops.DIR:
-        raise refused("%s isn't a folder: remove it by hand" % what)
+        raise refused("%s isn't a folder" % what, "remove it by hand")
     return st
 
 
@@ -107,7 +108,7 @@ def _is_file(handle, name):
 
 def _no_channel(channel):
     return VCharonError("not_found", "there is no channel %s" % channel,
-                        "check the name: vcharon channel list")
+                        "check the name against vcharon list's output")
 
 
 def _close_all(*handles):
@@ -201,8 +202,8 @@ def claim(root, channel, name, create, tick=_no_tick):
             try:
                 top.mkdir(channel)
             except FileExistsError:
-                raise refused("the channel %s already exists: join it, or pick another name"
-                              % channel)
+                raise refused("the channel %s already exists" % channel,
+                              "join it, or pick another name")
             except OSError as e:
                 raise fsops.error(e, os.path.join(root, channel))
         if _real_dir(top, channel, "the channel %s" % channel) is None:
@@ -304,14 +305,14 @@ def remove(root, channel, name, tick=_no_tick):
                 member.close()
         if name not in leaders:
             raise refused("%s/%s has no %s: only the channel's leader closes it"
-                          % (channel, name, CHANNEL_FILE))
+                          % (channel, name, CHANNEL_FILE), "ask the user")
         if len(leaders) > 1:
-            raise refused("%s has %d leaders (%s hold %s): ask the user"
+            raise refused("%s has %d leaders (%s hold %s)"
                           % (channel, len(leaders), ", ".join(l + "/" for l in leaders),
-                             CHANNEL_FILE))
+                             CHANNEL_FILE), "ask the user")
         if strays:
-            raise refused("%s holds %s at its top, not a member's folder: ask the user, and "
-                          "remove it first" % (channel, ", ".join(strays)))
+            raise refused("%s holds %s at its top, not a member's folder"
+                          % (channel, ", ".join(strays)), "ask the user, and remove it first")
         ch.close()
         ch = None
         closed = "%s%s-%s-%s" % (CLOSED_PREFIX, channel, time.strftime("%Y%m%d-%H%M%S"),
@@ -333,7 +334,7 @@ def remove(root, channel, name, tick=_no_tick):
             err = _not_gone(e, os.path.join(root, closed))
             raise VCharonError(err.code, "%s is closed, but deleting %s failed: %s"
                                % (channel, closed, err.message),
-                               "delete it by hand; vcharon channel list notes it")
+                               "delete it by hand; vcharon list's output notes it")
     except OSError as e:
         raise _not_gone(e, os.path.join(root, channel))
     finally:
@@ -360,5 +361,5 @@ def _not_gone(e, path):
     err = fsops.error(e, path) if isinstance(e, OSError) else e
     if err.code == "not_found":
         return VCharonError("vanished", "%s went away while the channel was checked or closed"
-                            % path, "check it with vcharon channel list, then close again")
+                            % path, "check it in vcharon list's output, then close again")
     return err

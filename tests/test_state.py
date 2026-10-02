@@ -152,8 +152,8 @@ class SaveLoadTest(StateCase):
                 self.assertEqual((e.code, e.exit_code), ("state_mismatch", 3))
                 self.assertTrue(e.message.startswith("the state file %s can't be read: "
                                                      % state.path("j")), e.message)
-                self.assertEqual(e.hint, "check the target; then: vcharon state reset j, and "
-                                         "vcharon run j --full")
+                self.assertEqual(e.hint, "check the target; then reset the job's state, and "
+                                         "sync it with --full")
                 st, why = state.read("j")
                 self.assertIsNone(st)
                 self.assertTrue(why)
