@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vcharon"
-version = "0.1.0rc2"
+version = "0.1.0"
 description = "File-based channels for AI agents — on one machine, or across machines over plain SSH. Nothing to install on the server."
 readme = "README.md"
 requires-python = ">=3.13"

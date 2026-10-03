@@ -7,7 +7,7 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## 0.1.0 — <date>
+## 0.1.0 — 2026-10-03
 
 The first release.
 
