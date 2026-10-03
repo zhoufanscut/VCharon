@@ -68,8 +68,11 @@ def no_site_env():
     """The environment of a child run with -S (no site, so no .pth file read, as in a binary
     and on 3.11; 3.13's site.py decodes .pth files with utf-8-sig, which would hide a lazy
     import of that codec from the import checks): the package found through PYTHONPATH, in
-    place of the editable install's .pth."""
-    return dict(os.environ, PYTHONPATH=os.path.dirname(PACKAGE_DIR))
+    place of the editable install's .pth.
+    The environment's own scripts folder first on PATH: with an entry point named vcharon there
+    (pip install -e . makes one), a fix line's spelling reads sysconfig's data, as on CI."""
+    return dict(os.environ, PYTHONPATH=os.path.dirname(PACKAGE_DIR),
+                PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
 
 
 def never(seconds):
@@ -2603,7 +2606,7 @@ class CommandTest(WatchCase):
         child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env=dict(os.environ, VCHARON_HOME=self.vcharon_home))
         try:
-            first = child.stdout.readline().decode("utf-8")
+            first = util.readline(child.stdout).decode("utf-8")
             # the entry and the file at once: one rename of a folder made aside
             aside = os.path.join(self.tmp, "aside")
             write_tree(aside, {"mac/y": b"y"})
@@ -2688,17 +2691,27 @@ class UpdatedTest(WatchCase):
         self.assertEqual(code, 0)
 
     def test_an_orphan_through_the_command_line(self):
-        # a frozen binary whose parent pid changed after the start; the log says why
-        ppids = [4242]
+        # a frozen binary whose bootloader parent went after the start; the log says why. The
+        # parent is faked (OrphanTest has its POSIX and Windows checks): on Windows a real one
+        # would wait on a real handle and never see this test's parent go
+        gone = []
         rounds = []
+
+        class Parent:
+            pid = 4242
+
+            def gone(self):
+                return bool(gone)
 
         def sleep(seconds):
             rounds.append(seconds)
             if len(rounds) == 2:
-                ppids[0] = 1
+                gone.append(True)
+            if len(rounds) > 10:
+                raise AssertionError("the orphan check never ended the watch")
 
         with mock.patch.object(platform, "is_frozen", return_value=True), \
-                mock.patch.object(install.os, "getppid", lambda: ppids[0]):
+                mock.patch.object(install, "Parent", Parent):
             code, out, err = self.watch_with(sleep=sleep)
         self.assertEqual((code, err), (15, ""))
         self.assertEqual(self.said(out.splitlines()), [watching(self.tree, 0), "EXIT orphaned"])

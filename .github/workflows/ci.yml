@@ -31,6 +31,8 @@ jobs:
             python-version: "3.13"
           - os: windows-latest
             python-version: "3.13"
+            # its log then names the last test that started, if one hangs
+            test-flags: "-v"
 
     steps:
       - uses: actions/checkout@v7
@@ -45,8 +47,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # a hang prints every thread's stack at 15 minutes (tests/__init__.py, when CI is set)
       - name: Run tests
-        run: python -m unittest discover -s tests -t .
+        run: python -m unittest discover -s tests -t . ${{ matrix.test-flags }}
 
       # one row is enough: the result doesn't depend on the OS or Python (target-version is
       # fixed in pyproject.toml), and the other rows' minutes count more while private. After

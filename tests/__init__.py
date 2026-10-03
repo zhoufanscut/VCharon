@@ -15,9 +15,17 @@ home)."""
 from __future__ import annotations
 
 import atexit
+import faulthandler
 import os
 import shutil
+import sys
 import tempfile
+
+# On CI, a hung suite prints every thread's stack and fails, inside the job's time limit, so
+# the log shows where it hung instead of only that the job was cancelled.
+CI_HANG_SECONDS = 15 * 60
+if os.environ.get("CI"):
+    faulthandler.dump_traceback_later(CI_HANG_SECONDS, exit=True, file=sys.stderr)
 
 REAL_HOME = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
 TEMP = os.path.normcase(os.path.realpath(tempfile.gettempdir()))

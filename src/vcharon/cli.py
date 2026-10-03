@@ -878,6 +878,12 @@ class _Run:
     def watch_code(self, say):
         """Starts the watchdog of a long-running command (watch, sync --repeat); say prints
         its EXIT updated and EXIT orphaned lines. Returns the watchdog."""
+        # Before the start the watchdog marks: how fix lines spell vcharon (platform.runnable)
+        # reads sysconfig's data when an entry point named vcharon is on PATH, and Python
+        # imports that data at its first use (_sysconfigdata_*; _osx_support on macOS). A
+        # long-running command imports nothing after its start (DESIGN, "Running watchers");
+        # sysconfig keeps what it read, so later fix lines import nothing.
+        platform.self_command()
         self.watchdog = install.Watchdog()
         self.updated_line = lambda: say("EXIT updated")
         self.orphaned_line = lambda: say("EXIT orphaned")

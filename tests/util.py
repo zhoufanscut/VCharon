@@ -47,6 +47,18 @@ def _can_symlink():
 CAN_SYMLINK = _can_symlink()
 
 
+def read_all(stream, timeout=60):
+    """stream.read() of a child's pipe, to its end, or an AssertionError after timeout seconds,
+    as readline."""
+    got = []
+    reader = threading.Thread(target=lambda: got.append(stream.read()), daemon=True)
+    reader.start()
+    reader.join(timeout)
+    if not got:
+        raise AssertionError("the child's output didn't end within %d s" % timeout)
+    return got[0]
+
+
 def readline(stream, timeout=60):
     """stream.readline() of a child's pipe, or an AssertionError after timeout seconds: a child
     that hangs fails the test instead of hanging the suite (the caller then kills it, which
@@ -335,7 +347,7 @@ def unblock_fifo(case, path, delay=3.0):
 
     def stop():
         done.set()
-        thread.join()
+        thread.join(60)
 
     case.addCleanup(stop)
     return stop

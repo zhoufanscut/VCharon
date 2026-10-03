@@ -11,6 +11,8 @@ import unittest
 
 from vcharon.lock import Lock
 
+from tests.util import readline
+
 # Holds an exclusive lock on argv[1], says so, then waits to be killed.
 if os.name == "nt":
     HOLDER = """
@@ -34,17 +36,20 @@ def hold_in_child(path):
     """A child process that holds the lock on path, once it has said so."""
     child = subprocess.Popen([sys.executable, "-c", HOLDER, path], stdout=subprocess.PIPE,
                              stdin=subprocess.DEVNULL)
-    line = child.stdout.readline()
+    try:
+        line = readline(child.stdout)
+    except AssertionError:
+        line = b"(nothing)"
     if line.strip() != b"held":
         child.kill()
-        child.communicate()
+        child.communicate(timeout=60)
         raise AssertionError("the child didn't take the lock: %r" % line)
     return child
 
 
 def stop_child(child):
     child.kill()
-    child.communicate()
+    child.communicate(timeout=60)
 
 
 class LockTest(unittest.TestCase):

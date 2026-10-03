@@ -224,7 +224,8 @@ class CliTest(FakeSshCase):
                   "sys.exit(cli.main(['ping', 'fake-dest']))\n" % (VCHARON_DIR, FAKE_SSH))
         proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, universal_newlines=True)
-        self.assertEqual(proc.stdout.readline(), "vcharon: ping fake-dest\n")
+        self.addCleanup(lambda: proc.poll() is None and (proc.kill(), proc.wait()))
+        self.assertEqual(util.readline(proc.stdout, 20), "vcharon: ping fake-dest\n")
         time.sleep(0.5)
         proc.send_signal(signal.SIGINT)
         _out, err = proc.communicate(timeout=20)
@@ -1442,14 +1443,22 @@ class RepeatTest(FakeSshCase):
         self.assert_locks_free("a", "b")
 
     def test_an_orphan_at_the_top_of_a_round(self):
-        # a binary whose bootloader parent was killed: exits on its own, locks freed
-        ppids = [4242]
+        # a binary whose bootloader parent was killed: exits on its own, locks freed. The
+        # parent is faked (OrphanTest has the real checks): on Windows a real one would wait on
+        # a real handle
+        gone = []
+
+        class Parent:
+            pid = 4242
+
+            def gone(self):
+                return bool(gone)
 
         def kill_parent():
-            ppids[0] = 1
+            gone.append(True)
 
         with mock.patch.object(platform, "is_frozen", return_value=True), \
-                mock.patch.object(install.os, "getppid", lambda: ppids[0]):
+                mock.patch.object(install, "Parent", Parent):
             code, lines, err, _ = self.repeat("a", "b", between=[kill_parent])
         self.assertEqual((code, err), (install.EXIT_ORPHANED, ""))
         self.assertEqual(lines, ["ROUND 0", "EXIT orphaned"])
@@ -1641,9 +1650,12 @@ class RepeatTest(FakeSshCase):
         # -S: no site, so no .pth file is read, as in a binary and on 3.11. 3.13's site.py
         # decodes .pth files with utf-8-sig, which would hide a lazy import of that codec from
         # the import checks; the path insert above stands in for the editable install's .pth.
+        # the environment's scripts folder first on PATH: an entry point named vcharon there
+        # makes a fix line's spelling read sysconfig's data, as on CI
+        path = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
         return subprocess.Popen([sys.executable, "-S", "-c", code] + list(argv),
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE, env=dict(os.environ, PATH=path))
 
     def test_a_broken_connection_with_stdin_open_in_a_child(self):
         # a stdin thread blocked in sys.stdin.buffer would abort the exit at interpreter
@@ -1654,8 +1666,8 @@ class RepeatTest(FakeSshCase):
             child = self.child(*argv)
             try:
                 # stdin stays open until the child has exited
-                out = child.stdout.read()
-                err = child.stderr.read()
+                out = util.read_all(child.stdout)
+                err = util.read_all(child.stderr)
                 child.wait(60)
             finally:
                 if child.poll() is None:
@@ -1692,8 +1704,8 @@ class RepeatTest(FakeSshCase):
             # stdin stays open: its end would stop the child too. Its output is a few lines,
             # so the pipes can't fill while it is waited for.
             child.wait(60)
-            out = child.stdout.read()
-            err = child.stderr.read()
+            out = util.read_all(child.stdout)
+            err = util.read_all(child.stderr)
         finally:
             if child.poll() is None:
                 child.kill()
@@ -1714,7 +1726,7 @@ class RepeatTest(FakeSshCase):
         # the real stdin thread: the child syncs rounds until its stdin ends, then says bye
         child = self.child(*self.channel() + ["--repeat", "1"])
         try:
-            lines = [child.stdout.readline() for _ in range(2)]
+            lines = [util.readline(child.stdout) for _ in range(2)]
             child.stdin.close()
             # communicate() would flush the closed pipe
             child.stdin = None

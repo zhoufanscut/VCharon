@@ -1405,14 +1405,18 @@ import failed with a `zlib` error ("incorrect header check") after a swap with a
 and worked after a swap with a byte-identical copy. The checks below turned each case, and the
 unchanged build's, into `EXIT updated` and exit 14 within a round, with no traceback.
 
-- So the long-running commands import every module they can need at start, in every install
-  mode: `cli.py` imports every module of the package at its top, the plugins too (which
-  `plugin.py` loads by name); the few imports inside functions, there to break an import cycle,
-  only look up a module already loaded. The standard library loads some modules at first use:
-  the UTF-16 codec `pathrules` counts with is looked up when it loads, and the Windows-only
-  `winreg` loads at start on Windows. `update.py` is the one module imported later, by
-  `--update` alone, which imports nothing after its swap. A test runs a watcher and `sync
-  --repeat` in a child through rounds and checks that no module was imported after the start.
+- So the long-running commands import every module they can need at start, in every install mode:
+  `cli.py` imports every module of the package at its top, the plugins too (which `plugin.py` loads
+  by name); the few imports inside functions, there to break an import cycle, only look up a module
+  already loaded. The standard library loads some modules at first use: the UTF-16 codec
+  `pathrules` counts with and the `utf-8-sig` one `config` reads with are looked up when those
+  load; the Windows-only `winreg` loads at start on Windows; and the start of `watch` and `sync
+  --repeat` spells `vcharon` once as fix lines do, which reads sysconfig's data
+  (`_sysconfigdata_*`, and `_osx_support` on macOS) when an entry point named `vcharon` is on PATH.
+  `update.py` is the one module imported later, by `--update` alone, which imports nothing after
+  its swap. Tests run a watcher and `sync --repeat` in a child through rounds and check that no
+  module was imported after the start, each child under `-S` (no `.pth` read, as in a binary) with
+  the environment's scripts folder first on PATH.
 - At the top of each round, before any other work, `watch` and `sync --repeat` compare the
   code's file with the one they started with: a binary's own file, else the package's
   `__init__.py` (pipx and pip rewrite it), by size, modification time and file id (`st_ino`,
