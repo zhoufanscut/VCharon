@@ -372,7 +372,9 @@ class DoctorTest(DoctorCase):
         self.assertEqual((doc["box"], doc["box_source"], doc["claimer_source"]),
                          ("laptop", "config", "client-id file (random)"))
         lines = self.doctor(code=0)
-        self.assertEqual(self.of(lines, "box"), [("ok", "laptop (set in %s)" % self.config)])
+        # the path as the declared OS joins it: on a Windows host, Linux's / before the name
+        self.assertEqual(self.of(lines, "box"),
+                         [("ok", "laptop (set in %s)" % platform.config_path())])
         path = platform.client_id_path()
         self.assertFalse(os.path.exists(path))
         cid, origin = platform.client_id()

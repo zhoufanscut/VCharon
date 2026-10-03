@@ -244,8 +244,9 @@ class SetupTest(ChannelCase):
         out = self.ok("setup", "--box", "laptop")
         self.assertEqual(out.splitlines()[2], "  box      laptop (set in %s)" % self.ini)
         self.assertEqual(self.text(), "[vcharon]\nbox = laptop\n")
-        # an existing file: one line changed, comments and other keys kept
-        with open(self.ini, "w", encoding="utf-8") as f:
+        # an existing file: one line changed, comments and other keys kept (newline="": \n on
+        # every host, since setup keeps an existing file's line ends)
+        with open(self.ini, "w", encoding="utf-8", newline="") as f:
             f.write("# my notes\n[vcharon]\n; old box\nbox = laptop\ncompress = yes\n")
         self.ok("setup", "--box", "desk")
         self.assertEqual(self.text(), "# my notes\n[vcharon]\n; old box\nbox = desk\n"
@@ -263,7 +264,7 @@ class SetupTest(ChannelCase):
                 self.assertEqual(self.text(), "# my notes\n[vcharon]\n; old box\nbox = desk\n"
                                  "compress = yes\n")
         # a broken file is the user's to fix: never rewritten
-        with open(self.ini, "w", encoding="utf-8") as f:
+        with open(self.ini, "w", encoding="utf-8", newline="") as f:
             f.write("[vcharon]\ncompress = maybe\n")
         self.assertTrue(self.refused("setup", "--box", "desk", code=3).startswith(
             "ERROR config: vcharon.ini [vcharon] compress"))
@@ -297,7 +298,7 @@ class SetupTest(ChannelCase):
 
     def test_a_read_only_config_on_windows(self):
         # Windows can't replace a read-only file: its flag is cleared first, then set again
-        with open(self.ini, "w", encoding="utf-8") as f:
+        with open(self.ini, "w", encoding="utf-8", newline="") as f:
             f.write("[vcharon]\n")
         os.chmod(self.ini, 0o444)
         self.addCleanup(lambda: os.path.exists(self.ini) and os.chmod(self.ini, 0o644))

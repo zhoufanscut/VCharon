@@ -298,9 +298,14 @@ class CtxTest(unittest.TestCase):
         self.assertEqual(win.resolve("~/", "to.path"), "C:\\Users\\me\\")
         self.assertEqual(win.resolve("inbox/a", "to.path"), "C:\\Users\\me\\inbox\\a")
         self.assertEqual(win.resolve("C:x", "to.path"), "C:\\Users\\me\\x")
-        self.assertEqual(win.resolve("~root", "to.path"),
-                         os.path.expanduser("~root") if platform.os_name() == "windows"
-                         else "C:\\Users\\me\\~root")
+        # ~user: on a Windows host, this machine's expanduser answers (a profile set here, since
+        # the suite's sandboxed one makes Python give up on another user's home); on any other
+        # host the text stays a name under the end's home
+        if os.name == "nt":
+            with mock.patch.dict(os.environ, {"USERPROFILE": "C:\\Users\\me", "USERNAME": "me"}):
+                self.assertEqual(win.resolve("~root", "to.path"), "C:\\Users\\root")
+        else:
+            self.assertEqual(win.resolve("~root", "to.path"), "C:\\Users\\me\\~root")
         local = plugin.Ctx("local", home="C:\\Users\\me", osn="windows")
         self.assertEqual(local.resolve("C:\\data\\x", "to.path"), "C:\\data\\x")
         # a Windows path needs a drive or a share: these depend on the current directory, which

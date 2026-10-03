@@ -1570,7 +1570,8 @@ class ClaimerTest(ChannelCase):
         path = os.path.join(own, "MEMBER.md")
         text = ("# MEMBER\n\n## t \u2014 a#1 \u2014 member\nto: @a\nbox: x\n"
                 "## t \u2014 a#2 \u2014 two\nto: @a\nagent: keep\n")
-        with open(path, "w", encoding="utf-8") as f:
+        # newline="": the file holds \n on every host (set_header keeps a file's line ends)
+        with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         entries.set_header(path, own, "a", 1, "agent", "codex")
         found = entries.parse_file(path)
@@ -1581,18 +1582,24 @@ class ClaimerTest(ChannelCase):
 
     def test_the_client_id_file(self):
         # a Linux box with no machine id: a random id, made once in the state folder, used for
-        # the claimer
-        with mock.patch.object(platform, "machine_id", return_value=None), \
-                mock.patch.object(platform, "os_name", return_value="linux"):
-            self.assertEqual(platform.client_id(make=False), (None, "random"))
-            self.assertIsNone(platform.claimer("game", make=False))
-            self.lead()
-            self.ok("join", "game", "--server", "fake-dest")
+        # the claimer. Linux is declared only around client_id: over a whole command it would
+        # also give this host's paths Linux's rules (a Windows host's C:\ isn't absolute there).
+        self.lead()
+        with mock.patch.object(platform, "machine_id", return_value=None):
+            with mock.patch.object(platform, "os_name", return_value="linux"):
+                self.assertEqual(platform.client_id(make=False), (None, "random"))
+                self.assertIsNone(platform.claimer("game", make=False))
+                made = platform.client_id()
             path = platform.client_id_path()
-            with open(path) as f:
-                cid, origin = f.read().split("\n")[:2]
+            with open(path, "rb") as f:
+                before = f.read()
+            cid, origin = before.decode("ascii").split("\n")[:2]
+            self.assertEqual(made, (cid, origin))
             self.assertEqual(origin, "random")
             self.assertRegex(cid, r"\A[0-9a-f]{32}\Z")
+            self.ok("join", "game", "--server", "fake-dest")
+            with open(path, "rb") as f:
+                self.assertEqual(f.read(), before)
             self.assertEqual(platform.client_id(), (cid, "random"))
             self.assertEqual(self.server_member()["claimer"], hashlib.sha256(
                 ("game:" + cid).encode()).hexdigest()[:16])
@@ -1646,7 +1653,12 @@ class ClaimerTest(ChannelCase):
         self.assertEqual(os.listdir(os.path.dirname(path)), ["client-id"])
 
     def test_no_hard_links_falls_back_to_an_exclusive_create(self):
-        # FAT, exFAT, some SMB and FUSE mounts: os.link fails with EPERM and the like
+        # FAT, exFAT, some SMB and FUSE mounts: os.link fails with EPERM and the like. The
+        # link path on every host: NTFS has os.link too, though a Windows host renames.
+        windows = mock.patch.object(platform.fsops, "WINDOWS", False)
+        windows.start()
+        self.addCleanup(windows.stop)
+
         def no_link(src, dst):
             raise OSError(errno.EPERM, "Operation not permitted")
         with mock.patch.object(platform.os, "link", no_link):
@@ -1668,6 +1680,45 @@ class ClaimerTest(ChannelCase):
             with self.assertRaises(VCharonError):
                 platform.client_id()
         self.assertFalse(os.path.exists(path))
+
+    def test_the_rename_path_keeps_another_run_s_file(self):
+        # Windows' way: a rename, which fails when another run's file is there. A fake rename
+        # on every host, since a POSIX one would replace that file.
+        path = platform.client_id_path()
+        folder = os.path.dirname(path)
+
+        def lost_race(src, dst):
+            with open(dst, "wb") as f:
+                f.write(b"c" * 32 + b"\nrandom\n")
+            raise FileExistsError(errno.EEXIST, "File exists", dst)
+        with mock.patch.object(platform.fsops, "WINDOWS", True):
+            with mock.patch.object(platform.os, "rename", lost_race):
+                self.assertEqual(platform.client_id(), ("c" * 32, "random"))
+            self.assertEqual(os.listdir(folder), ["client-id"])
+            # any other rename error is an error, and leaves no file behind
+            os.remove(path)
+            with mock.patch.object(platform.os, "rename",
+                                   side_effect=OSError(errno.EIO, "I/O error")):
+                with self.assertRaises(VCharonError):
+                    platform.client_id()
+        self.assertEqual(os.listdir(folder), [])
+
+    @unittest.skipUnless(os.name == "nt", "only Windows' rename refuses an existing file")
+    def test_windows_rename_never_replaces_a_file(self):
+        # the real rename: another run's file turns up after the first read; kept, and read
+        path = platform.client_id_path()
+        folder = os.path.dirname(path)
+        os.makedirs(folder, exist_ok=True)
+
+        def other_run_first():
+            with open(path, "wb") as f:
+                f.write(b"c" * 32 + b"\nrandom\n")
+            return "1" * 32
+        with mock.patch.object(platform, "machine_id", other_run_first):
+            self.assertEqual(platform.client_id(), ("c" * 32, "random"))
+        self.assertEqual(os.listdir(folder), ["client-id"])
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"c" * 32 + b"\nrandom\n")
 
     def test_the_host_os_picks_link_or_rename(self):
         # a test that declares Windows on a POSIX host still links: a POSIX rename would
