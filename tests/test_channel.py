@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import channel_cmd, channels, config, entries, platform
+from vcharon import channel_cmd, channels, config, entries, platform, state
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -756,6 +756,14 @@ class LeaveCloseTest(ChannelCase):
         self.assertIn("  note    game is gone on the server", out)
         self.assertNotIn("channels.d/game.mac-web.ini", self.box_files())
         self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
+        # what the guide's end topic tells an agent: nothing of the channel stays here
+        # this box's other membership of game is named, since it stays
+        self.assertEqual(out.splitlines()[-2:], [
+            "  note    nothing of game as mac-web is left on this machine; still here: mac-web-b "
+            "(leave each on its own)", "OK  left game"])
+        # (this box's other membership, mac-web-b, stays)
+        self.assertEqual([p for p in self.box_files() if "game.mac-web" in p
+                          and "game.mac-web-b" not in p], [])
 
     def test_local_leave_after_the_channel_is_gone(self):
         # a local member: its server is this machine, not "the server"
@@ -807,6 +815,9 @@ class LeaveCloseTest(ChannelCase):
         self.use_box("laptop")
         out = self.ok("close", "game", "--project", "ui")
         self.assertIn("OK  closed game", out)
+        # close says it too; the laptop box has no other membership of game
+        self.assertIn("  note    nothing of game as laptop-ui is left on this machine",
+                      out.splitlines())
         self.assertEqual(os.listdir(self.root), [])
         self.assertFalse(any("game.laptop-ui" in p for p in self.box_files("laptop")),
                          self.box_files("laptop"))
@@ -874,6 +885,83 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(self.record("game.laptop-ui")["leader"], "laptop-ui")
         self.ok("close", "game", "--project", "ui")
         self.assertEqual(os.listdir(self.root), [])
+
+
+class PostSendTest(ChannelCase):
+    """A remote member's post goes to the server at once (its up job), unless --no-sync; a
+    failed send never fails the post."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.srv = os.path.join(self.root, "game", "mac-web", "RESULTS.md")
+
+    def post(self, *extra):
+        return self.run_cli("post", "game", "--to", "@laptop-ui", "--title", "done", "--body",
+                            "b", *extra)
+
+    def titles(self):
+        return [e.title for e in entries.parse_file(self.srv)] if os.path.exists(self.srv) \
+            else []
+
+    def test_sent_at_once(self):
+        code, out, err = self.post()
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertRegex(lines[0], r"\Aposted mac-web#\d+ — done to mac-web/RESULTS.md at ")
+        self.assertEqual(lines[1:], ["sent to fake-dest"])
+        self.assertIn("done", self.titles())
+
+    def test_no_sync(self):
+        code, out, err = self.post("--no-sync")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(out.splitlines()), 1)
+        self.assertNotIn("done", self.titles())
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        self.assertIn("done", self.titles())
+
+    def test_a_failed_send_warns(self):
+        os.environ.update(FAKE_SSH_EXIT="255", FAKE_SSH_STDERR="kex_exchange_identification: "
+                          "read: Connection reset by peer\n")
+        code, out, err = self.post()
+        del os.environ["FAKE_SSH_EXIT"], os.environ["FAKE_SSH_STDERR"]
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(out.splitlines()), 1)
+        lines = err.splitlines()
+        self.assertTrue(lines[0].startswith("WARN not sent to fake-dest: "), lines)
+        self.assertIn("Connection reset by peer", lines[0])
+        self.assertEqual(lines[1], platform.runnable(
+            "  fix: the entry is saved in your folder; your watcher sends it, or once the "
+            "server answers, run: vcharon sync game --project web"))
+        # saved here, and the next sync sends it
+        self.assertNotIn("done", self.titles())
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        self.assertIn("done", self.titles())
+
+    def test_a_running_sync_sends_it(self):
+        # a watcher's round holds the up job's lock: no second sync, a note
+        held = state.lock("game.mac-web.up")
+        try:
+            code, out, err = self.post()
+        finally:
+            held.release()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(out.splitlines()), 1)
+        self.assertEqual(err, "note: a sync of game is running (your watcher's): it sends the "
+                              "entry\n")
+
+    def test_a_local_member_has_nothing_to_send(self):
+        self.lead("local", where=("--local",), box="pc")
+        self.ok("join", "local", "--local")
+        code, out, err = self.run_cli("post", "local", "--to", "@pc-ui", "--title", "t",
+                                      "--body", "b")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(out.splitlines()), 1)
+        code, out, err = self.run_cli("post", "local", "--to", "@pc-ui", "--title", "t",
+                                      "--body", "b", "--no-sync")
+        self.assertEqual(code, 3)
+        self.assertIn("--no-sync is for a remote member", err)
 
 
 class SkippedTest(ChannelCase):

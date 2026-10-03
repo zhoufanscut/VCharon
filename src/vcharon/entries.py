@@ -3,7 +3,7 @@ under a lock; client and server member (vcharon join, post and watch).
 
 An entry is a heading with the poster's ID, a header up to the first blank line, and a body:
 
-    ## 2026-10-02 10:12 — mac-web#7 — step 3 done
+    ## 2026-10-02 10:12:05 — mac-web#7 — step 3 done
     to: @laptop-ui
     re: laptop-ui#3
 
@@ -13,6 +13,7 @@ An entry is a heading with the poster's ID, a header up to the first blank line,
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import hashlib
 import os
 import re
@@ -24,8 +25,11 @@ from . import pathrules, platform
 from .lock import Lock
 from .proto import VCharonError
 
-# the heading's time: local, to the minute
-TIME_FORMAT = "%Y-%m-%d %H:%M"
+# the heading's time: local, to the second, so readers can order the entries of one minute and
+# members can see how long an answer took
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+# a heading's time to the minute: what a release candidate before seconds wrote, still read
+MINUTE_FORMAT = "%Y-%m-%d %H:%M"
 MEMBER_FILE = "MEMBER.md"
 CHANNEL_FILE = "CHANNEL.md"
 # between the heading's parts
@@ -81,7 +85,7 @@ def parse_id(text):
 def to_problem(token):
     """Why token can't be a to: address, or None."""
     if not _TO.match(token):
-        return "%s isn't @all or @ and a member's name" % pathrules.show(token)
+        return "%s isn't @all, @<name> or a member's name" % pathrules.show(token)
     return None
 
 
@@ -177,6 +181,23 @@ def build(when, name, number, title, to, re_=None, header=(), body=""):
 
 def stamp(t):
     return time.strftime(TIME_FORMAT, time.localtime(t))
+
+
+def minute_stamp(t):
+    """t, local, to the minute: vcharon list's "newest"."""
+    return time.strftime(MINUTE_FORMAT, time.localtime(t))
+
+
+def parse_time(text):
+    """(a naive local datetime, whether it has seconds) of a heading's time text, either form;
+    None when it is neither."""
+    for fmt, seconds in ((TIME_FORMAT, True), (MINUTE_FORMAT, False)):
+        try:
+            # headings carry local time with no zone
+            return datetime.datetime.strptime(text, fmt), seconds  # noqa: DTZ007
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 # --- the own folder and its numbers ---

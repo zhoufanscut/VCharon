@@ -654,6 +654,8 @@ HINTS = {
         ("  note: to name this machine otherwise (laptop, a name each of your machines has its "
          "own of): vcharon setup --box NAME", ()),
         ("vcharon read %s %s", ("game", FLAGS)),
+        ("  fix: the entry is saved in your folder; your watcher sends it, or once the server "
+         "answers, run: vcharon sync %s", ("game " + FLAGS,)),
         ("the writer of each folder named above %s; your up still runs; more: vcharon guide "
          "errors", ("removes or renames it",))],
     "guide/__init__.py": [

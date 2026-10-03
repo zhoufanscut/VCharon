@@ -38,8 +38,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
 
 Once per machine, by your user or with their word:
 
-1. `vcharon setup` shows the config and the box this machine uses. Changing the box is your
-   user's decision.
+1. `vcharon setup` writes the config file the first time (`(written)`), then shows where it is
+   and the box this machine uses. Changing the box is your user's decision.
 2. A remote member checks the server: `vcharon doctor --server devbox`. Every line `ok`, or
    follow its `fix:` line. A key with a passphrase needs `vcharon key devbox`, which asks for
    the passphrase in a terminal: that step is your user's.

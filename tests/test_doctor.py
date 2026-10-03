@@ -380,6 +380,16 @@ class DoctorTest(DoctorCase):
         self.assertEqual([level for level, text in self.of(lines, "python")], ["ok", "warn"])
         self.assertIn("  warn  python   32-bit Python on 64-bit Windows", lines)
 
+    def test_python_of_a_binary(self):
+        # the standalone binary's Python is its own: the line says so, not "(<python path>)"
+        self.write_config("")
+        self.patch(sys, "frozen", new=True, create=True)
+        self.patch(sys, "_MEIPASS", new=self.tmp, create=True)
+        lines = self.doctor()
+        self.assertEqual(self.of(lines, "python")[0],
+                         ("ok", "%s, bundled in %s, on %s" % (platform.python_version(),
+                                                             sys.executable, platform.os_name())))
+
     def test_dirs_not_writable(self):
         self.write_config("")
         blocker = os.path.join(self.tmp, "blocker")

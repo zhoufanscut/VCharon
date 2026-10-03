@@ -1048,7 +1048,7 @@ def parse_failure(code, lines, job):
     """(exit code, its error line, that line's fix) of a sync's output lines: the first
     line that starts with ERROR, else the first that isn't blank; the fix is the text of that
     ERROR line's "  fix: " line, with its "  log: " path after it, since a fix can point
-    at lines the watcher doesn't show ("see ssh's messages above"); a log with no fix gives one
+    at lines the watcher doesn't show (ssh's other messages); a log with no fix gives one
     that names the log; else None. Both are None for code 0. One parser for a sync's
     stderr and a streamed round's lines."""
     if code == 0:

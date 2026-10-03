@@ -18,12 +18,14 @@ marks the folder. Lines, in this order:
                                    by 4. --last N: only the newest N
     note: <text>                   after the list, one line each (below)
 
-The order: an entry whose time is missing or doesn't parse (entries.TIME_FORMAT) comes first,
-in path order. The rest go by their minute. Within one minute the time can't order them, so
-there one member's entries go by number (#7 before #8: post's lock makes that true),
-and the entry a re: names goes before the entry naming it; of the entries that are free to go,
-the smallest (name, number) goes first, the number compared as a number (#9 before #10).
-Across minutes the time wins, even against re:. Only a placed entry is ordered by number and
+The order: an entry whose time is missing or doesn't parse (entries.TIME_FORMAT, or the older
+MINUTE_FORMAT) comes first, in path order. The rest go by their minute. Within one minute one
+member's entries go by number (#7 before #8: post's lock makes that true), and the entry a re:
+names goes before the entry naming it; of the entries that are free to go, the earliest second
+goes first (a heading without seconds counts as the minute's start), then the smallest (name,
+number), the number compared as a number (#9 before #10). Across minutes the time wins, even
+against re:. So clocks a few seconds apart can't put an answer before its question, nor one
+member's #8 before its #7. Only a placed entry is ordered by number and
 re:: its ID's name is its folder's, and it's the first with that ID in path order (the
 watcher's rule). Every entry is listed.
 
@@ -78,6 +80,9 @@ class Item:
         self.path = path            # relative to the tree, with "/"
         self.placed = False
         self.minute = None          # a datetime, or None for a missing or bad time
+        self.second = 0             # its second; 0 for a heading without seconds
+        self.when = None            # the full time, a datetime
+        self.precise = False        # whether the heading has seconds
         self.notes = []
 
     @property
@@ -86,9 +91,10 @@ class Item:
         return self.e.id or "%s line %d" % (self.path, self.e.line)
 
     def key(self):
-        """Of the ready entries, the smallest goes first: (name, number), then where it is."""
+        """Of the ready entries, the smallest goes first: (second, name, number), then where it
+        is."""
         e = self.e
-        return (e.name or self.folder, e.number or 0, self.path, e.line)
+        return (self.second, e.name or self.folder, e.number or 0, self.path, e.line)
 
 
 def read_tree(root, skip=None):
@@ -185,14 +191,16 @@ def order(items, now):
     minutes = {}
     for item in items:
         when = item.e.time
-        try:
-            # headings carry local time with no zone; compared with _now(), also naive
-            item.minute = datetime.datetime.strptime(when, entries.TIME_FORMAT)  # noqa: DTZ007
-        except (TypeError, ValueError):
+        # headings carry local time with no zone; compared with _now(), also naive
+        parsed = entries.parse_time(when)
+        if parsed is None:
             item.notes.append("note: %s has %s: listed first"
                               % (item.label, "no time" if not when else "a bad time %r" % when))
             untimed.append(item)
             continue
+        item.when, item.precise = parsed
+        item.minute = item.when.replace(second=0)
+        item.second = item.when.second
         minutes.setdefault(item.minute, []).append(item)
         if item.minute > this_minute:
             item.notes.append("note: %s is stamped after now (%s)" % (item.label, when))
@@ -206,7 +214,7 @@ def order(items, now):
             continue
         target = placed.get(re_)
         if (target is not None and item.minute is not None and target.minute is not None
-                and item.minute < target.minute):
+                and _earlier(item, target)):
             item.notes.append("note: %s answers %s but is stamped earlier: clocks differ?"
                               % (item.e.id, re_))
     out = list(untimed)
@@ -228,10 +236,18 @@ def order(items, now):
         if done is None:
             # a wrong --re can make one: post checks only its form
             notes.append("note: %s: re: lines make a cycle; that minute goes by number only"
-                         % minute.strftime(entries.TIME_FORMAT))
+                         % minute.strftime(entries.MINUTE_FORMAT))
             done = _kahn(nodes, numbered)
         out.extend(done)
     return out, notes
+
+
+def _earlier(a, b):
+    """Whether a is stamped before b: to the second when both headings have seconds, else to
+    the minute."""
+    if a.precise and b.precise:
+        return a.when < b.when
+    return a.minute < b.minute
 
 
 def lines(items, full):

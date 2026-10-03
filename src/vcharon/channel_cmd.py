@@ -570,7 +570,7 @@ def _list(args, cfg, log, say):
         say("  %s  leader %s  members %s  newest %s  format %s"
             % (ch["name"], leaders[0] if len(leaders) == 1 else "?",
                ", ".join(ch["members"]) or "none",
-               entries.stamp(newest) if isinstance(newest, (int, float)) else "-",
+               entries.minute_stamp(newest) if isinstance(newest, (int, float)) else "-",
                "-" if fmt is None else fmt))
         if not leaders:
             say("    note: no member's folder holds %s: ask the user" % entries.CHANNEL_FILE)
@@ -634,7 +634,7 @@ def list_json(server, listing):
         out.append({"name": ch["name"], "leader": leaders[0] if len(leaders) == 1 else None,
                     "leaders": leaders, "members": list(ch["members"]),
                     "member_info": member_info(ch),
-                    "newest": entries.stamp(newest) if isinstance(newest, (int, float))
+                    "newest": entries.minute_stamp(newest) if isinstance(newest, (int, float))
                     else None,
                     "strays": list(ch.get("strays", [])), "format": _format_of(ch),
                     "limits": _limits_of(ch)})
@@ -1206,6 +1206,17 @@ def _leave(args, cfg, record, log, say, close):
                     "again once vcharon sync %s %s works" % (channel, flags_, channel, flags_)))
                 return code
     _remove_membership(cfg, record, section, say)
+    if gone:
+        # what an agent would otherwise ask its user about: there is nothing more to delete for
+        # this membership; another one of the channel on this box is that one's to leave
+        try:
+            others = sorted(r["name"] for r in records(channel) if r["name"] != name)
+        except VCharonError:
+            # a record that can't be read: the removal is done, and the note mustn't fail it
+            others = ["(a record that can't be read)"]
+        say("  note    nothing of %s as %s is left on this machine%s"
+            % (channel, name, "; still here: %s (leave each on its own)" % ", ".join(others)
+               if others else ""))
     say("OK  %s %s" % ("closed" if close else "left", channel))
     return 0
 

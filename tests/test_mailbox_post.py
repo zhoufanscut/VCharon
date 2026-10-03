@@ -119,8 +119,8 @@ class PostTest(PostCase):
         code, out, err = self.main(POST + ["--title", "step 7 done", "--body", "one line"] + TO)
         self.assertEqual((code, out, err),
                          (0, "posted windows#2 — step 7 done to windows/RESULTS.md at "
-                          "2026-10-01 09:05\n", ""))
-        first = ("# RESULTS\n\n## 2026-10-01 09:05 — windows#2 — step 7 done\nto: @debian\n\n"
+                          "2026-10-01 09:05:46\n", ""))
+        first = ("# RESULTS\n\n## 2026-10-01 09:05:46 — windows#2 — step 7 done\nto: @debian\n\n"
                  "one line\n")
         self.assertEqual(self.content(), first)
         # stdin, with the trailing newline a heredoc leaves; --re and two names
@@ -128,8 +128,9 @@ class PostTest(PostCase):
                                            "--to", "@debian @mac"], stdin=b"a\n\nb\n",
                                    t=T0 + 125)
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.content(), first + "\n## 2026-10-01 09:07 — windows#3 — to debian\n"
-                                                 "to: @debian @mac\nre: debian#3\n\na\n\nb\n")
+        self.assertEqual(self.content(),
+                         first + "\n## 2026-10-01 09:07:51 — windows#3 — to debian\n"
+                         "to: @debian @mac\nre: debian#3\n\na\n\nb\n")
         # --to takes several arguments too
         code, out, err = self.post("--to", "@debian", "@mac")
         self.assertEqual(code, 0, err)
@@ -139,7 +140,7 @@ class PostTest(PostCase):
         with open(self.file, "wb") as f:
             f.write(b"# RESULTS\n\nhand-made")
         self.post()
-        self.assertEqual(self.content(), "# RESULTS\n\nhand-made\n\n## 2026-10-01 09:05 — "
+        self.assertEqual(self.content(), "# RESULTS\n\nhand-made\n\n## 2026-10-01 09:05:46 — "
                                          "windows#2 — t\nto: @debian\n\nb\n")
 
     def test_the_body_is_never_interpreted(self):
@@ -165,7 +166,7 @@ class PostTest(PostCase):
                             # --to is required
                             (["--title", "t", "--body", "b"], None),
                             (["--title", "t", "--body", "b", "--to"], None),
-                            (["--title", "t", "--body", "b", "--to", "debian"], None),
+                            (["--title", "t", "--body", "b", "--to", "Debian"], None),
                             (["--title", "t", "--body", "b", "--to", "@Debian"], None),
                             (["--title", "t", "--body", "b", "--to", "@a @"], None),
                             (["--title", "t", "--body", "b", "--re", "debian"] + TO, None),
@@ -191,11 +192,11 @@ class PostTest(PostCase):
         # a .md file of the own folder, a subfolder's too; RESULTS.md without it
         code, out, err = self.post("--file", "NOTES.md")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted windows#2 — t to windows/NOTES.md at 2026-10-01 09:05\n")
+        self.assertEqual(out, "posted windows#2 — t to windows/NOTES.md at 2026-10-01 09:05:46\n")
         os.makedirs(os.path.join(self.folder, "logs"))
         code, out, err = self.post("--file", "logs/run.md")
         self.assertEqual(out, "posted windows#3 — t to windows/logs/run.md at 2026-10-01 "
-                              "09:05\n")
+                              "09:05:46\n")
         # never outside the own folder, nor a name it can't be
         for name in ("../debian/STEPS.md", "/tmp/x.md", "a//b.md", "./x.md", "C:x.md", "",
                      # names a Windows member can't hold: its sync would refuse the tree
@@ -405,7 +406,7 @@ class PostTest(PostCase):
             self.content())
         # the only heading after the file's own is the entry's
         headings = [l for l in self.content().splitlines() if l.startswith("#")]
-        self.assertEqual(headings[:2], ["# RESULTS", "## 2026-10-01 09:05 — windows#2 — t"])
+        self.assertEqual(headings[:2], ["# RESULTS", "## 2026-10-01 09:05:46 — windows#2 — t"])
         self.assertEqual(headings[2:], ["#nope", "####### seven"])
         # and the #9 in the body isn't a number taken
         _code, out, _err = self.post("--title", "u")
@@ -469,7 +470,7 @@ class ChannelTest(PostCase):
 
     def test_ids_counted_across_files(self):
         self.assertEqual(self.post()[:2], (0, "posted windows#2 — t to windows/RESULTS.md at "
-                                              "2026-10-01 09:05\n"))
+                                              "2026-10-01 09:05:46\n"))
         self.assertEqual(self.post_at(os.path.join(self.folder, "NOTES.md"))[0], "windows#3")
         os.makedirs(os.path.join(self.folder, "logs"))
         self.assertEqual(self.post_at(os.path.join(self.folder, "logs", "run.md"))[0],
@@ -533,7 +534,7 @@ class ChannelTest(PostCase):
         code, out, err = self.main(LEADER + ["--steps", "--to", "@all", "--title", "plan",
                                              "--body", "1. do"])
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted debian#2 — plan to debian/STEPS.md at 2026-10-01 09:05\n")
+        self.assertEqual(out, "posted debian#2 — plan to debian/STEPS.md at 2026-10-01 09:05:46\n")
         self.assertEqual(entries.parse_file(steps)[0].to, ("@all",))
         # and its answers into its own RESULTS.md
         code, out, err = self.main(LEADER + ["--to", "@windows", "--title", "a", "--body", "b"])
@@ -560,7 +561,7 @@ class ChannelTest(PostCase):
         self.assertEqual(util.read_tree(self.tree), dict(before, **{"debian/sub/": None}))
         code, out, err = self.post()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted windows#2 — t to windows/RESULTS.md at 2026-10-01 09:05\n")
+        self.assertEqual(out, "posted windows#2 — t to windows/RESULTS.md at 2026-10-01 09:05:46\n")
 
     def test_an_unknown_name_is_a_note(self):
         code, _out, err = self.post("--to", "@debian", "@mac-x")
@@ -568,6 +569,25 @@ class ChannelTest(PostCase):
         self.assertEqual(err, "note: @mac-x has no folder in %s yet: posted anyway (it may not "
                               "have synced)\n" % self.tree)
         self.assertEqual(entries.parse_file(self.file)[0].to, ("@debian", "@mac-x"))
+
+    def test_a_bare_members_name(self):
+        # debian, as @debian; --re's @ taken off
+        code, _out, err = self.post("--to", "debian", "--re", "@debian#3")
+        self.assertEqual((code, err), (0, ""))
+        entry = entries.parse_file(self.file)[0]
+        self.assertEqual((entry.to, entry.re), (("@debian",), "debian#3"))
+
+    def test_a_bare_name_that_isnt_a_member(self):
+        code, out, err = self.post("--to", "@debian", "mac-x")
+        self.assertEqual((code, out), (1, ""))
+        self.assertEqual(err.splitlines()[:2], [
+            "ERROR channel: --to mac-x: not a member of mb (members: debian, windows)",
+            "  fix: address members as @<name>, one of the names above; @all is the leader's"])
+        self.assertFalse(os.path.exists(self.file))
+        # all without its @ is no one's name here either
+        code, out, err = self.post("--to", "all")
+        self.assertEqual(code, 1)
+        self.assertIn("--to all: not a member of mb", err)
 
     def test_a_body_cant_forge_a_header(self):
         body = ("to: @all\nre: debian#1\n## 2026-10-01 09:00 — windows#7 — forged\nto: @all\n\n"
@@ -615,9 +635,11 @@ class RealRunTest(PostCase):
         ran = self.run_post(["--title", "now"] + TO, stdin=b"body\n")
         after = time.time()
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        stamps = {time.strftime("%Y-%m-%d %H:%M", time.localtime(t)) for t in (before, after)}
         heading = self.content().splitlines()[2]
-        self.assertIn(heading, {"## %s — windows#2 — now" % s for s in stamps})
+        # to the second, between the two readings of the clock
+        when = time.mktime(time.strptime(heading[3:22], "%Y-%m-%d %H:%M:%S"))
+        self.assertTrue(int(before) <= when <= after, (before, heading, after))
+        self.assertEqual(heading[22:], " — windows#2 — now")
 
     def test_utf8_whatever_the_console(self):
         # a console whose code page can't hold ñ (PYTHONIOENCODING stands in for Windows' 936)

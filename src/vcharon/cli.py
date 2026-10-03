@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import io
 import json
 import os
 import posixpath
@@ -220,6 +221,8 @@ def _parser():
                      "subfolder's with a / (default: RESULTS.md)")
     one.add_argument("--steps", action="store_true", help="the leader's plan: --file STEPS.md, "
                      "the leader only")
+    one.add_argument("--no-sync", action="store_true", help="a remote member: don't send the "
+                     "entry to the server now; your watcher or the next sync sends it")
     ident(one)
     one = verb("read", "every member's entries, in one order", "vcharon read myapp --last 20")
     channel(one)
@@ -531,7 +534,7 @@ def _post(args, run):
     """vcharon post C: an entry into a .md file of your own folder: RESULTS.md, --file's, or
     the leader's STEPS.md (--steps). post() checks the file (mailbox/post.py)."""
     watch_mod.utf8_output()
-    to, title = post_mod.check_args(args.to, args.title, args.re, args.body)
+    to, title, re_ = post_mod.check_args(args.to, args.title, args.re, args.body)
     if args.steps and args.file is not None:
         raise _usage("--steps is --file %s: give one of them" % post_mod.STEPS_FILE,
                      "leave out --file, or --steps")
@@ -543,7 +546,10 @@ def _post(args, run):
         raise _usage("no --body, and stdin is a terminal", "give --body TEXT, or the body on "
                      "stdin: a file, or a quoted heredoc (<<'EOF')")
     cfg = load_config()
-    record, _flags = _membership(args, cfg)
+    record, flags = _membership(args, cfg)
+    if args.no_sync and record["ssh"] is None:
+        raise _usage("--no-sync is for a remote member; you are a local member of %s"
+                     % args.channel, "leave out --no-sync")
     limits = channel_cmd.channel_limits(record)
     name = record["name"]
     steps = len(parts) == 1 and parts[0].casefold() == post_mod.STEPS_FILE.casefold()
@@ -560,9 +566,39 @@ def _post(args, run):
     path = (post_mod.file_below(own, parts) if os.path.isdir(own)
             else os.path.join(own, *parts))
     body = args.body if args.body is not None else post_mod.body_from(_stdin_bytes())
-    id_, when = post_mod.post(path, name, to, title, args.re, body, limits=limits)
+    id_, when = post_mod.post(path, name, to, title, re_, body, limits=limits,
+                              channel=args.channel)
     print("posted %s — %s to %s at %s" % (id_, title, "/".join([name] + parts), when))
+    sys.stdout.flush()
+    if record["ssh"] is not None and not args.no_sync:
+        _send_post(args.channel, record, flags)
     return 0
+
+
+def _send_post(channel, record, flags):
+    """A remote member's post goes to the server at once: its section's up job, in this
+    process, its sync lines kept back. The entry is written already, so nothing here fails the
+    post: a running watcher's round holds the job's lock and sends it itself (a note), and any
+    other failure is a WARN with its error, saying the entry waits for the next sync."""
+    job = _section(record) + ".up"
+    run = _Run()
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = _guarded(lambda: run_jobs([job], run=run), run)
+    if code == 0:
+        _say("sent to %s" % record["ssh"])
+        return
+    if code == proto.EXIT["busy"]:
+        print("note: a sync of %s is running (your watcher's): it sends the entry"
+              % channel, file=sys.stderr)
+        return
+    lines = (err.getvalue() + out.getvalue()).splitlines()
+    _code, line, _fix = watch_mod.parse_failure(code, lines, job)
+    print("WARN not sent to %s: %s" % (record["ssh"], line.removeprefix("ERROR ")),
+          file=sys.stderr)
+    print(platform.runnable("  fix: the entry is saved in your folder; your watcher sends it, "
+                            "or once the server answers, run: vcharon sync %s"
+                            % " ".join([channel] + flags)), file=sys.stderr)
 
 
 def _read(args, run):

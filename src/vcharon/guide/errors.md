@@ -5,6 +5,14 @@ command to run as printed (it is spelled the way this machine runs vcharon), or 
 text for you or your user. Follow the `fix:` line; this topic says when to ask your user
 instead. Never work around a refusal by editing vcharon's files by hand.
 
+## When vcharon itself won't start (Windows)
+
+`[PYI-<number>:ERROR] Could not load PyInstaller's embedded PKG archive from the executable`,
+and nothing else, from every command: the standalone binary is damaged or emptied, for
+example by Windows Defender, which can take `vcharon.exe` for malware (a false positive on
+programs packed with PyInstaller). Tell your user, quoting the line; restoring it and allowing it is
+their step (README, "Install").
+
 ## Exit codes
 
 | code | meaning |
@@ -65,6 +73,9 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `no --body, and stdin is a terminal` (exit 3) | pass `--body`, or the body on stdin with a quoted heredoc |
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
+| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, as `@<name>` |
+| `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 
 ## Failed rounds (watch and sync)
 
@@ -90,7 +101,10 @@ folder; in a `down` error, it starts with the member folder it is in.
 - **`ERROR <C>.<name>.up: unsafe_path: …`**: the name is in your own folder: remove or rename
   it.
 - **`ERROR … connect: …`, `timeout`, `lost`**: usually a network blip; the watcher wakes you
-  only once it lasts. If it goes on, `vcharon doctor --server devbox` says why.
+  only once it lasts. If it goes on, `vcharon doctor --server devbox` says why. `ssh exited with
+  code 255 before vcharon started on the server (ssh: <its last line>)`: ssh itself failed, and
+  the part in brackets is ssh's own message (`Connection reset by peer`: the server or the
+  network dropped the connection; a blip passes on its own).
 - **`ERROR busy`**, exit 2: another run of the sync, usually your watcher's, holds the lock. Try
   again in a few seconds.
 - **While your `down` is blocked** nothing reaches you, not even the answer about it. Your user

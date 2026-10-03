@@ -135,6 +135,37 @@ class OrderTest(ViewCase):
         self.assertEqual(self.notes(lines), ["note: %s: re: lines make a cycle; that minute "
                                              "goes by number only" % MINUTE])
 
+    def test_seconds_order_one_minute(self):
+        # arrival order within the minute, whatever the names; an older heading without
+        # seconds counts as the minute's start
+        write_tree(self.tree, {
+            "aa/R.md": md(entry("aa#2", when=MINUTE + ":50")),
+            "bb/R.md": md(entry("bb#1", when=MINUTE + ":05")),
+            "cc/R.md": md(entry("cc#1", when=MINUTE + ":05"), entry("cc#2", when=MINUTE)),
+        })
+        lines = self.view()
+        # cc#2 comes after cc#1: one member's numbers keep their order, seconds or none
+        self.assertEqual(self.ids(lines), ["bb#1", "cc#1", "cc#2", "aa#2"])
+        self.assertEqual(lines[1], "%s:05  bb#1  @all  t  (bb/R.md)" % MINUTE)
+        self.assertEqual(self.notes(lines), [])
+
+    def test_seconds_keep_numbers_and_re(self):
+        # clocks a few seconds apart: the answer is stamped before its question, and one
+        # member's #8 before its #7 (a hand edit); the edges still win within the minute
+        write_tree(self.tree, {
+            "aa/R.md": md(entry("aa#7", when=MINUTE + ":40"), entry("aa#8", when=MINUTE + ":10")),
+            "bb/R.md": md(entry("bb#1", when=MINUTE + ":20", re_="aa#7")),
+        })
+        lines = self.view()
+        self.assertEqual(self.ids(lines), ["aa#7", "aa#8", "bb#1"])
+        self.assertEqual(self.notes(lines),
+                         ["note: bb#1 answers aa#7 but is stamped earlier: clocks differ?"])
+
+    def test_seconds_across_minutes(self):
+        write_tree(self.tree, {"aa/R.md": md(entry("aa#1", when="2026-10-02 10:13:01")),
+                               "bb/R.md": md(entry("bb#1", when="2026-10-02 10:12:59"))})
+        self.assertEqual(self.ids(self.view()), ["bb#1", "aa#1"])
+
     def test_a_re_not_in_the_tree(self):
         write_tree(self.tree, {"aa/R.md": md(entry("aa#1", re_="zz#4"))})
         self.assertEqual(self.notes(self.view()), ["note: aa#1 answers zz#4, which isn't in "

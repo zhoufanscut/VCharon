@@ -60,19 +60,41 @@ From a source checkout, for development: `python3 -m venv .venv && .venv/bin/pip
 Check it: `vcharon --version` prints the version, and `vcharon doctor` checks this machine, one
 line per check, each problem with a `fix:` line.
 
+By hand, from a release's assets (a release candidate, say, fetched with `gh release download`):
+unpack `vcharon` from the `.tar.gz` (or `vcharon.exe` from the `.zip`), check the archive
+against its `.sha256`, and put the binary on your PATH. On macOS, a file downloaded by a browser
+carries a quarantine flag that stops it from running; remove it if present (a file fetched with
+`gh` or `curl` has none, and the command then fails harmlessly):
+
+```sh
+xattr -d com.apple.quarantine vcharon 2>/dev/null || true
+```
+
+**Windows Defender** may quarantine `vcharon.exe` as malware (it named it
+`Trojan:Win32/Bearfoos.A!ml` on a default Windows 11): a false positive that programs packed with
+PyInstaller often get. The install then seems to work, but every command prints only
+`[PYI-<number>:ERROR] Could not load PyInstaller's embedded PKG archive from the executable
+(…)`: the file is there, but Defender has emptied or locked it, so the program inside can't be
+read. To fix it, as the user of that machine: in Windows Security, open Virus & threat
+protection, Protection history, find the vcharon.exe entry, and choose Restore (or Allow on
+device); then add an exclusion for the file or for its folder
+(`%LOCALAPPDATA%\Programs\vcharon`) under Virus & threat protection settings, Exclusions, so
+the next update isn't caught too. Check the file against the release's `.sha256` first if in
+doubt.
+
 ## Platforms and floors
 
 | where | what | checked |
 |---|---|---|
 | your machines (where agents run) | Linux, macOS, Windows 10 or 11 | the unit tests run in CI on all three |
-| a server for remote members | Linux with `python3` 3.11 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | not yet over real ssh: the unit tests run the server side through a stand-in for ssh |
+| a server for remote members | Linux with `python3` 3.11 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (0.1.0rc1); the unit tests run the server side through a stand-in for ssh |
 | a channel only for agents on one machine | any of the three | Linux, by hand |
 | Python | the binaries carry their own (3.13); pipx, uv and the server need 3.11 or later | 3.11 and 3.13 on Linux, 3.13 on macOS and Windows |
 | the ssh client | the system's OpenSSH: `/usr/bin/ssh` on Linux and macOS, Windows' own `ssh.exe` (not Git for Windows' ssh, which can't use the Windows ssh-agent service) | |
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).
 Codex and OpenCode as channel members are **untested** on every OS; Claude Code has been checked
-on Linux only, as a local member.
+as a local member on Linux and as a remote member on macOS and Windows.
 
 ## A first channel on one machine
 
@@ -135,8 +157,9 @@ Linux server (or on any Linux machine your others can ssh into); its own agents 
    ```
 
 A remote member keeps a copy of the channel on its own machine. Its watcher keeps one ssh
-connection open and syncs every 2 seconds: your folder up, the others' down. While no watcher
-runs, nothing you post is sent; `vcharon sync myapp` sends it by hand. `devbox` is anything ssh
+connection open and syncs every 2 seconds: your folder up, the others' down. `vcharon post`
+sends your folder at once (`--no-sync` leaves it to the watcher); while no watcher runs, nothing
+from the others arrives, and `vcharon sync myapp` syncs by hand. `devbox` is anything ssh
 accepts: an alias from `~/.ssh/config` (best), `user@host`, or `ssh://user@host:port`.
 
 A Mac or a Windows machine can hold channels for its own local members only; a remote member

@@ -124,15 +124,27 @@ def classify_exit(rc, tail, dest, settings, killed=None):
             what = "ssh was killed by signal %d" % -rc
         else:
             what = "ssh exited with code %s" % rc
+        last = _last_words(tail) if rc == 255 else ""
         if rc == 255:
-            # ssh's own failure; the stderr tail says what it was.
-            hint = "see ssh's messages above"
+            # ssh's own failure: its last stderr line says what it was, in the error itself, since
+            # a watcher shows only the error and its fix
+            hint = ("try again; if it keeps failing, run ssh %s in a terminal to see why" % dest)
         else:
             # A startup file that eats stdin garbles the bootstrap, which then exits 1.
             hint = "a shell startup file on the server may have read stdin; see the log"
-        err = VCharonError("connect", "%s before vcharon started on the server" % what, hint=hint)
+        err = VCharonError("connect", "%s before vcharon started on the server%s"
+                           % (what, " (ssh: %s)" % last if last else ""), hint=hint)
     err.tail = list(tail)
     return err
+
+
+def _last_words(tail, limit=200):
+    """ssh's last non-blank stderr line, cut to limit characters; "" when there is none."""
+    for line in reversed(tail):
+        line = line.strip()
+        if line:
+            return line if len(line) <= limit else line[:limit - 3] + "..."
+    return ""
 
 
 START_HINT = "install the OpenSSH client, or set ssh_path in vcharon.ini"

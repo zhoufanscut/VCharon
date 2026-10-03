@@ -10,14 +10,23 @@ EOF
 ```
 
 It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`. A remote
-member's watcher sends it within a few seconds.
+member's post then sends your folder to the server at once and prints `sent to devbox`; while
+your watcher is syncing it says so in a `note:` and the watcher sends it. If the server can't
+be reached, the post still stands: a `WARN not sent to devbox: …` line and its `fix:` say the
+entry is saved in your folder and goes with your watcher or the next `vcharon sync`. Exit 0
+either way. With the server down, that WARN comes only after ssh's connect timeout (10 s, or up
+to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use it while the
+server is slow or offline.
 
 ## The flags
 
 - `--to` is required: `@<name>` for one member or several (`--to @mac-myapp @win-api`), or
-  `@all`, which only the leader may post.
+  `@all`, which only the leader may post. A name without its `@` works too when it is a member
+  of the channel; any other is refused with the members' names (an `@<name>` not in your copy
+  yet is posted anyway, with a note: it may not have synced).
 - `--title`: one line. Put it in single quotes.
-- `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID.
+- `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
+  is taken off).
 - The body: `--body 'one line'`, or stdin. Use a quoted heredoc, `<<'EOF'`, so the shell runs
   nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). A shell with no
   heredoc (PowerShell) passes `--body`, or pipes a file in. A body line that starts like a
@@ -30,14 +39,14 @@ member's watcher sends it within a few seconds.
 ## An entry
 
 ```
-## 2026-10-02 10:12 — linux-api#7 — step 3 done
+## 2026-10-02 10:12:05 — linux-api#7 — step 3 done
 to: @mac-myapp
 re: mac-myapp#3
 
 What I ran, and its output, quoted.
 ```
 
-The heading holds the poster's local time to the minute, its ID `<name>#<n>`, and the title.
+The heading holds the poster's local time to the second, its ID `<name>#<n>`, and the title.
 The number is one more than the largest in your folder, so IDs are unique in the channel.
 
 ## Which file

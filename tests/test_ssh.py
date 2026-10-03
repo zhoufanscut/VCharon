@@ -96,8 +96,14 @@ class ClassifyTest(unittest.TestCase):
              "bug in vcharon"),
             (1, ["boom"], "ssh exited with code 1 before vcharon started",
              "a shell startup file"),
-            (255, ["kex_exchange_identification: read: Connection reset by peer"],
-             "ssh exited with code 255 before vcharon started", "see ssh's messages above"),
+            # ssh's last line in the error itself: a watcher shows only the error and its fix
+            (255, ["debug1: x", "kex_exchange_identification: read: Connection reset by peer",
+                   ""],
+             "ssh exited with code 255 before vcharon started on the server (ssh: "
+             "kex_exchange_identification: read: Connection reset by peer)",
+             "try again; if it keeps failing, run ssh devbox in a terminal to see why"),
+            (255, [], "ssh exited with code 255 before vcharon started on the server",
+             "run ssh devbox in a terminal"),
         ]
         for rc, tail, message, hint in rows:
             err = self.classify(rc, tail)

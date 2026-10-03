@@ -57,6 +57,14 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
 
 - Don't start the watcher again: it ends the same way every time.
 - After the leader's `CLOSED`, run that `leave` exactly as printed. It notes the channel is
-  gone, then removes this machine's files.
+  gone, then removes this machine's files of the membership, one `removed <path>` line each: a
+  remote member's copy of the channel (its folder under `joined`), its sync state, logs and
+  channel section; for every member, the join record and the watcher's saved state. It ends
+  with `note    nothing of myapp as <your name> is left on this machine` (`close` prints the
+  same for the leader). That is everything of this membership: **don't delete anything by hand,
+  and don't ask your user about files**. If the note goes on with `still here: <names>`, this
+  machine has other memberships of the channel (another `--project` or `--role`): each one
+  leaves on its own. Your folder on the server went with the channel. If your user wants the
+  channel's text, `vcharon read myapp --full` before the `leave` prints it all.
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
   gone" can mean a folder removed by hand.

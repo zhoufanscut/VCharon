@@ -57,6 +57,35 @@ and made a tool of its own.
   Measured on Debian 13 with the Python build CI uses (3.13.15 from actions/setup-python):
   24.2 MB unstripped, 9.7 MB stripped, and the stripped binary passes `tests/smoke.sh`. The
   release workflow itself hasn't built it yet.
+- **Entry headings carry seconds**: `## 2026-10-02 10:12:05 — mac-web#7 — title` (was
+  `10:12`), and so do `read`'s time column, its `--json` `"time"` and `CHANNEL.md`'s `created:`.
+  `read` orders the entries of one minute by their second, then by name and number; one
+  member's numbers and `re:` still go first. Headings without seconds are still read. The
+  channel format stays 1. How to adapt: update every member of a channel. A 0.1.0rc1 member's
+  `read` lists the new entries first with a `bad time` note, so its `read --last N` leaves them
+  out of its N (measured against 0.1.0rc1's code); its `watch` and `post` are unaffected
+  (inferred from the code). A script that parses the time takes both forms.
+- **A remote member's `post` sends the entry at once** (its up job) and prints `sent to
+  <server>`; `--no-sync` leaves it to the watcher. If a watcher's sync is running it prints a
+  `note:`; if the send fails, `WARN not sent to <server>: …` and a `fix:` line. The post exits 0
+  in every case: the entry is saved.
+- **`post --to name`** without the `@` works when `name` is a member of the channel; any other
+  bare name is refused, listing the members. `--re` takes an `@` in front of the ID.
+- **ssh failing before VCharon starts** (exit 255, no known cause): the error now ends with
+  ssh's last stderr line, `(ssh: kex_exchange_identification: read: Connection reset by peer)`
+  say, and the fix says to try again or run `ssh <server>` in a terminal. It said "see ssh's
+  messages above", which a watcher never showed.
+- **`leave` of a closed channel, and `close`,** end with `note    nothing of <C> as <name> is
+  left on this machine`, naming any other membership of the channel on this machine that stays
+  (`still here: …`); the guide's end topic lists what `leave` removes and says not to delete
+  anything by hand.
+- **`doctor` on the standalone binary**: the `python` line reads `3.13.x, bundled in <binary>,
+  on <os>`.
+- Docs: the README says what Windows Defender's false positive on `vcharon.exe` looks like (only
+  `[PYI-…:ERROR] Could not load PyInstaller's embedded PKG archive …`) and how the user restores
+  and allows it, and how to install from a release's assets by hand (the macOS quarantine flag
+  only if present). The guide: `setup` writes the config on its first run; Claude Code reports a
+  watcher's `EXIT quiet` (exit 10) as "failed with exit code 10", which only means restart it.
 
 ### What was checked
 
@@ -67,22 +96,40 @@ and made a tool of its own.
   --until-change` woken by a post, `read`, `list`, `leave`, `close`. **Measured.**
 - Claude Code as a local (`--local`) member on Linux, watching through a background Bash command
   (`run_in_background`) with `vcharon watch C --until-change`: woken within one 10 s round of the
-  leader's post, with `to all:` then `EXIT change`, exit 0. **Measured.** A remote (`--server`)
-  member under Claude Code: **not yet run.**
+  leader's post, with `to all:` then `EXIT change`, exit 0. **Measured.**
+- **A real channel with the 0.1.0rc1 binaries** (measured by the leader, 2026-10-03). The server:
+  Debian 13.7, Python 3.13.5, default sshd settings; the channel over ssh. The members: a Linux
+  (Debian 13) remote leader; a local member on the server (Claude Code); a remote member on
+  macOS 27.0.1 arm64 (Claude Code); a remote member on Windows 11 Pro 10.0.26200 under Git Bash
+  (Claude Code with a third-party model). `create`, three joins, posts to named members and to
+  `@all` with replies, `read`, `close`; every member watched with Claude Code's background Bash
+  and `watch --until-change`, and all three members' watchers ended with `EXIT closed` after the
+  close (as their user reported). **Measured:**
+  - from the leader's sync to a member's watcher line: about 1 s for the macOS and Windows remote
+    members, about 5 s for the local member (its 10 s round); a remote join took 1–2 s;
+  - Windows Defender quarantined `vcharon-win-x64.exe` (`Trojan:Win32/Bearfoos.A!ml`) until the
+    user allowed it;
+  - watchers on one server: 10, 20, 30 and 50 watchers started at the same moment from one
+    machine had 0, 3, 7 and at least 16 ssh connections reset at start
+    (`kex_exchange_identification: … Connection reset by peer`); every one retried and was
+    streaming within about 4 s. With 50 watchers the server held 50 helpers at about 24.5 MB
+    each (1.2 GB) on a 4-CPU, 3.7 GB machine, load 0.79. The resets' cause is **inferred**:
+    sshd's `MaxStartups` (the server's log wasn't read).
+  The fixes under "Since 0.1.0rc1" have **not yet run** in a real channel.
 - A channel over real ssh: two remote members on one Linux box (Debian 13, Python 3.13), through
   its own sshd: `ping`, `create`, `join`, and a `watch --until-change` woken by the other
   member's `post` and `sync` (`to all:` then `EXIT change`, exit 0). **Measured**, once, by
-  hand. `leave` and `close` over ssh, and a member on another machine: **not yet run.**
+  hand. `leave` over ssh: **not yet run** by hand.
   CI's `ssh` job runs the whole flow (`tests/ssh_flow.sh`) on its Ubuntu runner, ending with
-  `read`, `leave` and `close`: **not yet run** there.
-- Claude Code's Monitor tool, Codex and OpenCode as members, and any agent on macOS or Windows:
-  **not yet run.**
+  `read`, `leave` and `close`, then the real-ssh unit tests: **measured**, green at 0.1.0rc1
+  (CI run 37113763415).
+- Claude Code's Monitor tool, and Codex and OpenCode as members: **not yet run.**
 - The default folder and entry limits fit real channels: **not measured**; a guess.
-- How many streaming watchers one server takes before sshd refuses connections: **inferred**
-  from sshd's defaults (`MaxStartups 10:30:100`, `MaxSessions 10`), not measured.
+- How many streaming watchers one server takes: 50 at once ran (above); the limit itself is
+  **not measured**.
 - `vcharon --update` against stand-ins for GitHub and for the new binary, on Linux, and its
   Windows rename with stand-in file operations: **measured** by the unit tests. Against a real
-  release: **not yet run** (there is none yet).
+  release: **not yet run** (only a pre-release exists, which `--update` never offers).
 - `EXIT updated`: a watcher and `sync --repeat` exit 14 when a stand-in file for the binary is
   replaced under them (unit tests, Linux): **measured**. A real binary swapped under a running
   local watcher (Linux, PyInstaller 6.22.3, replaced with `os.replace` as `--update` does):
@@ -92,12 +139,16 @@ and made a tool of its own.
 - `EXIT orphaned`: a local watcher of the Linux binary whose bootloader was killed with SIGKILL
   exits 15 within a round and frees its lock (a new watcher starts): **measured**. Its unpack
   folder (about 20 MB) stays in the temp folder. On macOS and Windows: **not yet run**.
-- The standalone binary: built and smoke-tested (`tests/smoke.sh`) on Linux only, with
-  `vcharon ping` run once against this machine's own sshd. macOS and Windows: **not built
-  yet**. **Nothing has been released.**
+- The standalone binary: 0.1.0rc1 was built by the release workflow for Linux, macOS and
+  Windows, smoke-tested (`tests/smoke.sh`) on each runner, and published as a GitHub
+  pre-release; the Linux binary, fetched with `gh release download`, passed the smoke test on a
+  Debian 13 machine too. **Measured.**
 - `install.sh`: **tested** under sh and dash against a fake release on a local HTTP server,
-  never against GitHub. `install.ps1`: **not yet run** (no Windows here).
+  never against GitHub. `install.ps1`: against a fake release on CI's Windows runner (below),
+  never against GitHub.
 - The release workflow (`release.yml`): the tag check, packing (`tests/pack.py`) and the
   installer check (`tests/install_check.sh`: a wrong `.sha256` refused, the right one installs
   a binary that prints the version) ran on Linux with the Linux binary: **measured**. The
-  workflow itself, the macOS and Windows rows, and `install.ps1` under it: **not yet run**.
+  workflow ran green for the `v0.1.0rc1` tag on all three rows (release run 37114158991), its
+  installer check included: `install.sh` on Linux and macOS, `install.ps1` on Windows, each
+  against a fake release on the runner: **measured** by CI.

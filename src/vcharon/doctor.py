@@ -59,8 +59,8 @@ SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("vcharon", "install", "bundle", "python", "config", "box", "ssh", "agent",
                    "dirs", "machine")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
-# A chosen line, not a derived one: headings carry the minute, so any gap can reorder
-# entries posted near a minute's end; from 30 s it will do so often.
+# A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
+# reorder entries posted near a minute's end; from 30 s it will do so often.
 CLOCK_WARN = 30
 CLOCK_HINT = "sync both clocks (NTP); channel entries are ordered by each box's own clock"
 # a Linux box without /etc/machine-id
@@ -190,7 +190,13 @@ def _bundle(rep):
 
 def _python(rep):
     osn = platform.os_name()
-    rep.check("ok", "python", "%s (%s) on %s" % (platform.python_version(), sys.executable, osn))
+    if platform.is_frozen():
+        # the binary's own Python: nothing is installed, and the line must not read as if it were
+        rep.check("ok", "python", "%s, bundled in %s, on %s"
+                  % (platform.python_version(), sys.executable, osn))
+    else:
+        rep.check("ok", "python", "%s (%s) on %s"
+                  % (platform.python_version(), sys.executable, osn))
     if osn != "windows":
         return
     if platform.is_wow64():

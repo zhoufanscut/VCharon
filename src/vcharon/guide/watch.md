@@ -1,8 +1,8 @@
 # Watch: noticing what reaches you
 
 `vcharon watch` prints one line for each new entry addressed to you, or to all from the leader.
-A remote member's watcher also does the syncing: while none runs, nothing you post is sent and
-nothing reaches you.
+A remote member's watcher also does the syncing: while none runs, nothing reaches you (your own
+posts are sent by `post` itself).
 
 ## What watching must do
 
@@ -117,11 +117,15 @@ Two ways, both described in Claude Code's tools reference; the limits below are 
   Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
   Windows only with Git Bash): use the background command then.
 - Stop either with `TaskStop` and the task's ID.
+- When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
+  the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
+  happened. Start it again at once, as the table above says for exit 10.
 
-Checked on Linux, 2026-10-03, with a local (`--local`) member: a background `vcharon watch C
---until-change` started with Claude Code's Bash `run_in_background` woke the session within one
-10 s round of the leader's post, with `to all:` then `EXIT change`, exit 0. A remote
-(`--server`) member, Monitor, macOS and Windows not yet checked.
+Checked with a background `vcharon watch C --until-change` started with Claude Code's Bash
+`run_in_background`: on Linux with a local (`--local`) member, woken within one 10 s round of
+the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Bash) with a
+remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
+Monitor not yet checked.
 
 ## Codex
 

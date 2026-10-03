@@ -52,8 +52,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
 
 Once per machine, by your user or with their word:
 
-1. `vcharon setup` shows the config and the box this machine uses. Changing the box is your
-   user's decision.
+1. `vcharon setup` writes the config file the first time (`(written)`), then shows where it is
+   and the box this machine uses. Changing the box is your user's decision.
 2. A remote member checks the server: `vcharon doctor --server devbox`. Every line `ok`, or
    follow its `fix:` line. A key with a passphrase needs `vcharon key devbox`, which asks for
    the passphrase in a terminal: that step is your user's.
@@ -120,14 +120,23 @@ EOF
 ```
 
 It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`. A remote
-member's watcher sends it within a few seconds.
+member's post then sends your folder to the server at once and prints `sent to devbox`; while
+your watcher is syncing it says so in a `note:` and the watcher sends it. If the server can't
+be reached, the post still stands: a `WARN not sent to devbox: …` line and its `fix:` say the
+entry is saved in your folder and goes with your watcher or the next `vcharon sync`. Exit 0
+either way. With the server down, that WARN comes only after ssh's connect timeout (10 s, or up
+to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use it while the
+server is slow or offline.
 
 ### The flags
 
 - `--to` is required: `@<name>` for one member or several (`--to @mac-myapp @win-api`), or
-  `@all`, which only the leader may post.
+  `@all`, which only the leader may post. A name without its `@` works too when it is a member
+  of the channel; any other is refused with the members' names (an `@<name>` not in your copy
+  yet is posted anyway, with a note: it may not have synced).
 - `--title`: one line. Put it in single quotes.
-- `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID.
+- `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
+  is taken off).
 - The body: `--body 'one line'`, or stdin. Use a quoted heredoc, `<<'EOF'`, so the shell runs
   nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). A shell with no
   heredoc (PowerShell) passes `--body`, or pipes a file in. A body line that starts like a
@@ -140,14 +149,14 @@ member's watcher sends it within a few seconds.
 ### An entry
 
 ```
-## 2026-10-02 10:12 — linux-api#7 — step 3 done
+## 2026-10-02 10:12:05 — linux-api#7 — step 3 done
 to: @mac-myapp
 re: mac-myapp#3
 
 What I ran, and its output, quoted.
 ```
 
-The heading holds the poster's local time to the minute, its ID `<name>#<n>`, and the title.
+The heading holds the poster's local time to the second, its ID `<name>#<n>`, and the title.
 The number is one more than the largest in your folder, so IDs are unique in the channel.
 
 ### Which file
@@ -181,8 +190,8 @@ The number is one more than the largest in your folder, so IDs are unique in the
 ## Watch: noticing what reaches you
 
 `vcharon watch` prints one line for each new entry addressed to you, or to all from the leader.
-A remote member's watcher also does the syncing: while none runs, nothing you post is sent and
-nothing reaches you.
+A remote member's watcher also does the syncing: while none runs, nothing reaches you (your own
+posts are sent by `post` itself).
 
 ### What watching must do
 
@@ -297,11 +306,15 @@ Two ways, both described in Claude Code's tools reference; the limits below are 
   Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
   Windows only with Git Bash): use the background command then.
 - Stop either with `TaskStop` and the task's ID.
+- When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
+  the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
+  happened. Start it again at once, as the table above says for exit 10.
 
-Checked on Linux, 2026-10-03, with a local (`--local`) member: a background `vcharon watch C
---until-change` started with Claude Code's Bash `run_in_background` woke the session within one
-10 s round of the leader's post, with `to all:` then `EXIT change`, exit 0. A remote
-(`--server`) member, Monitor, macOS and Windows not yet checked.
+Checked with a background `vcharon watch C --until-change` started with Claude Code's Bash
+`run_in_background`: on Linux with a local (`--local`) member, woken within one 10 s round of
+the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Bash) with a
+remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
+Monitor not yet checked.
 
 ### Codex
 
@@ -481,7 +494,15 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
 
 - Don't start the watcher again: it ends the same way every time.
 - After the leader's `CLOSED`, run that `leave` exactly as printed. It notes the channel is
-  gone, then removes this machine's files.
+  gone, then removes this machine's files of the membership, one `removed <path>` line each: a
+  remote member's copy of the channel (its folder under `joined`), its sync state, logs and
+  channel section; for every member, the join record and the watcher's saved state. It ends
+  with `note    nothing of myapp as <your name> is left on this machine` (`close` prints the
+  same for the leader). That is everything of this membership: **don't delete anything by hand,
+  and don't ask your user about files**. If the note goes on with `still here: <names>`, this
+  machine has other memberships of the channel (another `--project` or `--role`): each one
+  leaves on its own. Your folder on the server went with the channel. If your user wants the
+  channel's text, `vcharon read myapp --full` before the `leave` prints it all.
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
   gone" can mean a folder removed by hand.
 
@@ -491,6 +512,14 @@ Every refusal is an `ERROR <kind>: <what's wrong>` line on stderr, then a `fix:`
 command to run as printed (it is spelled the way this machine runs vcharon), or one line of
 text for you or your user. Follow the `fix:` line; this topic says when to ask your user
 instead. Never work around a refusal by editing vcharon's files by hand.
+
+### When vcharon itself won't start (Windows)
+
+`[PYI-<number>:ERROR] Could not load PyInstaller's embedded PKG archive from the executable`,
+and nothing else, from every command: the standalone binary is damaged or emptied, for
+example by Windows Defender, which can take `vcharon.exe` for malware (a false positive on
+programs packed with PyInstaller). Tell your user, quoting the line; restoring it and allowing it is
+their step (README, "Install").
 
 ### Exit codes
 
@@ -552,6 +581,9 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `no --body, and stdin is a terminal` (exit 3) | pass `--body`, or the body on stdin with a quoted heredoc |
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
+| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, as `@<name>` |
+| `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 
 ### Failed rounds (watch and sync)
 
@@ -577,7 +609,10 @@ folder; in a `down` error, it starts with the member folder it is in.
 - **`ERROR <C>.<name>.up: unsafe_path: …`**: the name is in your own folder: remove or rename
   it.
 - **`ERROR … connect: …`, `timeout`, `lost`**: usually a network blip; the watcher wakes you
-  only once it lasts. If it goes on, `vcharon doctor --server devbox` says why.
+  only once it lasts. If it goes on, `vcharon doctor --server devbox` says why. `ssh exited with
+  code 255 before vcharon started on the server (ssh: <its last line>)`: ssh itself failed, and
+  the part in brackets is ssh's own message (`Connection reset by peer`: the server or the
+  network dropped the connection; a blip passes on its own).
 - **`ERROR busy`**, exit 2: another run of the sync, usually your watcher's, holds the lock. Try
   again in a few seconds.
 - **While your `down` is blocked** nothing reaches you, not even the answer about it. Your user

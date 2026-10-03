@@ -289,7 +289,8 @@ The last line is one argument, and the only text that ever goes through the serv
 | `remote_python` isn't runnable | exit 126 | check `remote_python` |
 | Python too old | exit 90 | install 3.11 or later |
 | VCharon's code didn't load | exit 91 | a bug; see the log |
-| ssh exited before the marker in any other way | any other code | the stderr tail; a shell startup file may have read stdin |
+| ssh exited before the marker in any other way | exit 255 otherwise | try again, else run `ssh <dest>` in a terminal; ssh's last stderr line goes into the error itself, `(ssh: <line>)`, since a watcher shows only the error and its fix |
+| the bootstrap exited before the marker | any other code | a shell startup file may have read stdin; see the log |
 | no marker within `handshake_timeout` | the watchdog | authentication or a jump host may be stuck |
 | the ssh client can't be started | starting `ssh_path` fails | install the OpenSSH client, or set `ssh_path` |
 
@@ -1019,7 +1020,12 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs' state, logs, locks
   not held, the watcher's snapshot, the post lock, the record, and the section file last, one
   `removed <path>` line each. The member's folder in the channel stays: it is its history, and
-  its name stays taken.
+  its name stays taken. When the channel was gone, it ends with `note    nothing of <C> as
+  <name> is left on this machine` (and `still here: <names>` for other memberships of C on this
+  machine, which stay): an agent told nothing would ask its user what to delete. `close` prints
+  the same. Nothing is removed on its own when a watcher sees the channel closed: `EXIT
+  closed` also means a folder removed by hand, and after a close this machine's copy is the
+  last of the channel's text.
 - **`close C`**: the leader only. The same lock checks first (a held lock can't leave a
   half-closed channel), the machine id check, then `channel.remove`, which refuses unless the
   leader's folder holds the only `CHANNEL.md` and every top-level entry is a folder with a valid
@@ -1033,16 +1039,19 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
 ### Entries
 
 ```
-## 2026-10-02 10:12 — mac-web#7 — step 3 done
+## 2026-10-02 10:12:05 — mac-web#7 — step 3 done
 to: @linux-api
 re: linux-api#3
 
 <body>
 ```
 
-- The heading holds the poster's local time to the minute (`YYYY-mm-dd HH:MM`, no zone), its ID
-  `<name>#<n>`, and the title. The lines after it, up to the first blank line, are the header:
-  `to:` (one or more `@<name>`, or `@all`), then `re:` (optional), then any other `key: value`.
+- The heading holds the poster's local time to the second (`YYYY-mm-dd HH:MM:SS`, no zone), its ID
+  `<name>#<n>`, and the title. Why seconds: the entries of one minute can then be ordered as they
+  came, and members can see how long an answer took. Readers also take a time to the minute
+  (`YYYY-mm-dd HH:MM`), what 0.1.0rc1 wrote; it counts as the minute's start. The lines after it, up
+  to the first blank line, are the header: `to:` (one or more `@<name>`, or `@all`), then `re:`
+  (optional), then any other `key: value`.
 - `<n>` is one more than the largest `<name>#<n>` in any heading of any `.md` file of the own
   folder (headings only, never bodies). IDs are unique per channel because names are.
 - `MEMBER.md` holds #1 and `CHANNEL.md` the leader's #2; VCharon writes both, and `post` refuses
@@ -1057,7 +1066,8 @@ re: linux-api#3
 
 ### Posting
 
-`vcharon post C --to … --title … [--re ID] [--body TEXT | stdin] [--file NAME.md | --steps]`:
+`vcharon post C --to … --title … [--re ID] [--body TEXT | stdin] [--file NAME.md | --steps]
+[--no-sync]`:
 
 - It finds the own folder from the membership; the file is `RESULTS.md`, `STEPS.md` with
   `--steps` (the leader only), or another `.md` file of the own folder, a subfolder's too.
@@ -1065,7 +1075,16 @@ re: linux-api#3
   covers the numbering, the append and the swap: two posts at once can't take one number or lose
   an entry. It waits up to 30 s, then `busy`.
 - `@all` only from the leader its record names; a `@name` with no folder in the tree yet is a
-  note on stderr, and the post goes on (it may not have synced yet).
+  note on stderr, and the post goes on (it may not have synced yet). A bare `name` is taken as
+  `@name` when it is a member's folder in the tree, and refused otherwise, with the members'
+  names: without the `@` it is more likely a typo than a member not synced yet. `--re` drops an
+  `@` in front of the ID.
+- A remote member's post then runs the section's up job in the same process (`--no-sync`
+  skips it), so the entry reaches the server without waiting for a watcher. It prints `sent to
+  <server>`; when the job's lock is held (the watcher's round) a `note:`, since that round or
+  the next sends it; any other failure a `WARN not sent to <server>: <error>` and a `fix:` line
+  on stderr. The post's exit is 0 in all three: the entry is written, and the next sync sends
+  it. The up job's lock never waits, so a post can't deadlock with a watcher.
 - The whole new file goes to a `.vcharon-stage-` temp file in the same folder, then replaces it
   in one step (retried on Windows while another program holds it): a reader or a sync sees the
   old file or the new one, never half.
@@ -1084,7 +1103,7 @@ VCharon, and an older one must not misread a newer channel.
 
 ```
 leader: linux-api
-created: 2026-10-02 10:12
+created: 2026-10-02 10:12:05
 rules: vcharon guide rules
 format: 1
 created by: vcharon 0.1.0
@@ -1095,6 +1114,12 @@ max entry kb: 1000
 
 with `MEMBER.md`'s entry #1 fields ([Member names](#member-names)), entries as
 [Entries](#entries) has them, and the member-folder layout of [Layout](#layout).
+
+- Format 1 is fixed by 0.1.0. Seconds in the heading came after 0.1.0rc1 and stayed format 1:
+  0.1.0rc1 was a pre-release, and nothing of a channel is lost or written wrong by it. Its `read`
+  lists such an entry first, with a `bad time` note, so its `read --last N` leaves it out of its
+  N (measured against its code); its `watch` tells the entry and its numbering counts it (from
+  the code). Members of one channel update together from a release candidate.
 
 - Where it's read: a remote member can't read `CHANNEL.md` before its first pull, so the helper's
   `channel.list` and `channel.claim` replies carry `format` and `limits`, read at the server; a
@@ -1205,23 +1230,25 @@ reads: for a remote member it shows the local tree as of the last sync, and says
 
 - It reads each top-level folder with a valid member name, the own folder too, and every `.md`
   file below it but `MEMBER.md`, whose #1 only marks the folder.
-- Order: an entry with no or a bad time first, in path order; the rest by minute. Within one
-  minute the time can't order them, so there one member's entries go by number and the entry a
-  `re:` names goes before the one naming it; of the entries free to go, the smallest (name,
-  number) goes first. Across minutes the time wins, even against `re:`. Only a placed entry
-  (its ID's name is its folder's, the first with that ID) takes part.
+- Order: an entry with no or a bad time first, in path order; the rest by minute. Within one minute
+  one member's entries go by number and the entry a `re:` names goes before the one naming it; of
+  the entries free to go, the earliest second goes first, then the smallest (name, number). Across
+  minutes the time wins, even against `re:`. Why the minute and not only the second: clocks a few
+  seconds apart must not put an answer before its question. Only a placed entry (its ID's name is
+  its folder's, the first with that ID) takes part.
 - `note:` lines after the list: an unreadable folder or file, a left-out folder, an entry with no
   or a wrong-folder ID or a duplicate, a bad or future time, an answer stamped before its
   question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle.
 
 ### Clocks
 
-Each heading carries its poster's local clock, to the minute, with no zone: entries are ordered
+Each heading carries its poster's local clock, to the second, with no zone: entries are ordered
 by each machine's own clock, and nothing else in a channel's files can show a gap.
 
 - `doctor` shows each server's clock against this machine's from the hello (`clock +n.n s`), a
-  warning from 30 s (a chosen line: any gap reorders entries posted near a minute's end, and
-  30 s does it often), and a warning when the server's time zone differs from this machine's.
+  warning from 30 s (a chosen line: across minutes the time wins, so a gap reorders entries posted
+  near a minute's end, and 30 s does it often), and a warning when the server's time zone differs
+  from this machine's.
 - The guide tells agents to leave `TZ` alone and never to type a time.
 
 ### Mixed versions
@@ -1534,6 +1561,9 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   the `__main__` ones), since `plugin.py` loads plugins by name and `update.py` is imported only
   by `--update`; the analysis follows neither. The codecs looked up by name at start
   (`utf-16-le`, `utf-8-sig`) come with all of `encodings`, in `base_library.zip`.
+- **The bundled Python, said so**: in a binary, `doctor`'s `python` line reads `<version>,
+  bundled in <binary>, on <os>`, not `<version> (<executable>)`: the executable is the binary
+  itself, and the line must not read as if a Python were installed.
 - **Proof in every build**: `doctor` builds the bundle the way a session does and reads it back
   (its `bundle` line; `--json`'s `helper_bundle`: module count, whether `vcharon.helper` is in
   it, size). `tests/smoke.sh DIST WORK` runs a built binary through `--version`, `doctor
@@ -1558,8 +1588,9 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   KILL after 5 s), and cleans up on INT, TERM and HUP. `install.ps1` stops a binary that overruns
   the 60 s, and its child, best effort; its two moves are retried 5 times 0.5 s apart, a stop
   between them puts the old binary back, and its work folder is kept while no binary is in place.
-  `install.sh` is tested under sh and dash against a local fake release; **`install.ps1` has not
-  been run yet** (no Windows here).
+  `install.sh` is tested under sh and dash against a local fake release, and both installers run
+  against a fake release in each release build ([Releases](#releases)); neither has run against
+  GitHub yet.
 
 ### Releases
 
@@ -1649,8 +1680,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 
   A field may be added in a minor version; none is removed or changes meaning without a
   CHANGELOG line.
-- **The entry header**: `## <time> — <name>#<n> — <title>`, then `to:`, `re:`, and other
-  `key: value` lines up to the first blank line ([Entries](#entries)).
+- **The entry header**: `## <time> — <name>#<n> — <title>`, `<time>` as `YYYY-mm-dd HH:MM:SS`
+  (readers also take `YYYY-mm-dd HH:MM`), then `to:`, `re:`, and other `key: value` lines up to
+  the first blank line ([Entries](#entries)).
 - **The channel files**: the layout ([Layout](#layout)); `MEMBER.md`'s #1 fields, `CHANNEL.md`'s
   #2 fields ([Formats](#formats)); `STEPS.md` (the leader's) and `RESULTS.md`; any `.md` file of
   a member's folder holds entries.

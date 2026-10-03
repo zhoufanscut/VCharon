@@ -11,7 +11,7 @@ file of the own folder, a subfolder's too, with --file (NOTES.md, logs/run.md). 
 MEMBER.md and CHANNEL.md itself. The command line finds the own folder from your membership
 (DESIGN, "Which membership"); post() below takes the file's path, and checks it. It appends
 
-    ## <local time YYYY-mm-dd HH:MM> — <name>#<n> — <title>
+    ## <local time YYYY-mm-dd HH:MM:SS> — <name>#<n> — <title>
     to: @<name> ...
     re: <id>
 
@@ -24,12 +24,15 @@ read, the append and the swap, so two posts at once can't take one number or los
 The time is the clock's when it writes: an agent never types a time.
 
 --to is required: @<name> separated by spaces, or @all, which only the leader posts (the
-leader MEMBER.md names). A name that isn't a folder in the local tree is posted anyway, with a
-note on stderr: it may not have synced yet. --re is optional, an ID (<name>#<n>), checked for its
-form only. The body comes from --body or from stdin, in UTF-8, and is never interpreted: give
-it a file or a quoted heredoc (<<'EOF'), and the shell can't run any of it either. It goes
-after the header's blank line, and a body line that starts like a Markdown heading (`# `, `## `
-… `###### `) gets `> ` in front, so a body can't forge a header or a heading.
+leader MEMBER.md names). An @<name> that isn't a folder in the local tree is posted anyway, with
+a note on stderr: it may not have synced yet. A bare <name> (no @) is taken as @<name> when it
+is a member's folder in the tree; any other is refused with the members' names, since a typo
+there would go to nobody. --re is optional, an ID (<name>#<n>, an @ in front taken off),
+checked for its form only. The body comes from --body or from stdin, in UTF-8, and is never
+interpreted: give it a file or a quoted heredoc (<<'EOF'), and the shell can't run any of it
+either. It goes after the header's blank line, and a body line that starts like a Markdown
+heading (`# `, `## ` … `###### `) gets `> ` in front, so a body can't forge a header or a
+heading.
 
 It refuses, writing nothing: a body bigger than the channel's entry limit (1 MB unless its
 leader set another); an entry file that would grow past it, and an own folder that would hold
@@ -161,11 +164,15 @@ def _refuse(text, hint):
 
 def check_args(to, title, re_, body):
     """The usage errors of a post's options, before anything is read: (the --to tokens, the
-    stripped title). A config error (exit 3) each."""
+    stripped title, the --re ID). A config error (exit 3) each. A bare member's name stays
+    bare in the tokens: post() takes it as @<name> once it has seen the tree."""
     title = title.strip()
     if not title or entries.one_line_problem(title):
         raise VCharonError("config", "--title: one line, not empty, with no line break of any "
                            "kind", hint="give a one-line --title")
+    if re_ is not None and re_.startswith("@"):
+        # @mac-web#3 for mac-web#3: the address's form, given by habit
+        re_ = re_[1:]
     if re_ is not None and entries.parse_id(re_) is None:
         raise VCharonError("config", "--re: %s isn't an ID (<name>#<n>)" % re_,
                            hint="give --re as <name>#<n>, the ID of the entry you answer")
@@ -174,13 +181,48 @@ def check_args(to, title, re_, body):
         raise VCharonError("config", "--to is required: @<name> ..., or @all",
                            hint="give --to @<name>, or @all as the leader")
     for token in tokens:
+        if is_bare(token):
+            continue
         problem = entries.to_problem(token)
         if problem:
             raise VCharonError("config", "--to: %s" % problem, hint="give --to @<name> ...")
     if body is not None and not body.strip():
         raise VCharonError("config", "the body is empty", hint="give --body TEXT, or the body "
                            "on stdin")
-    return tokens, title
+    return tokens, title, re_
+
+
+def is_bare(token):
+    """Whether a --to token is a member's name without its @."""
+    return not token.startswith("@") and entries.to_problem("@" + token) is None
+
+
+def members_in(tree):
+    """The member folders' names in a channel tree, sorted."""
+    try:
+        names = os.listdir(tree)
+    except OSError:
+        return []
+    return sorted(n for n in names if pathrules.writer_problem(n) is None
+                  and os.path.isdir(os.path.join(tree, n)))
+
+
+def resolve_to(to, tree, channel=None):
+    """The --to tokens with each bare member's name as @<name>; a bare name that isn't a
+    member's folder in the tree is refused, naming the members."""
+    out = []
+    for token in to:
+        if not is_bare(token):
+            out.append(token)
+            continue
+        if not os.path.isdir(os.path.join(tree, token)):
+            members = members_in(tree)
+            raise _refuse("--to %s: not a member of %s (members: %s)"
+                          % (token, channel or "this channel", ", ".join(members) or "none"),
+                          "address members as @<name>, one of the names above; @all is the "
+                          "leader's")
+        out.append("@" + token)
+    return out
 
 
 def file_parts(file):
@@ -302,7 +344,7 @@ def limit_check(own, limits):
     return check
 
 
-def post(path, me, to, title, re_=None, body="", clock=None, limits=None):
+def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channel=None):
     """Posts one entry as me into the .md file path, in me's own folder; to and title as
     check_args returns them. Returns (the entry's ID, its time). Refuses (VCharonError)
     as the module's docstring says, writing nothing. clock: time.time, looked up when it
@@ -350,12 +392,13 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None):
     if me != name:
         raise _refuse("%s is %s's folder, not %s's" % (shown, name, me),
                       "post only in your own folder")
+    tree = os.path.dirname(own)
+    to = resolve_to(to, tree, channel)
     if entries.ALL in to:
         leader = leader_of(own)
         if leader != name:
             raise _refuse("@all is the leader's (%s)" % (leader or "MEMBER.md names none"),
                           "address members by name: --to @<name> ...")
-    tree = os.path.dirname(own)
     for token in to:
         if token != entries.ALL and not os.path.isdir(os.path.join(tree, token[1:])):
             print("note: %s has no folder in %s yet: posted anyway (it may not have synced)"
