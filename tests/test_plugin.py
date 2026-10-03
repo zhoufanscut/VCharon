@@ -198,7 +198,8 @@ class RegistryTest(PluginCase):
         self.assertIs(source.ctx, ctx)
         self.assertEqual(source.options, {"path": "x", "keep_name": False, "exclude": [],
                                           "symlinks": "error", "prune": False,
-                                          "allow_empty": False, "mailbox_me": None})
+                                          "allow_empty": False, "mailbox_me": None,
+                                      "max_bytes": None, "max_files": None})
         sink = plugin.make("remote", "dir", "sink", {"path": "x", "create": "yes"}, ctx)
         self.assertEqual(sink.options, {"path": "x", "create": True, "max_deletes": 500})
         # make runs every check_side check

@@ -48,10 +48,13 @@ Lines; * marks the ones that count for --until-change:
     note: @all from <folders>, not the leader: ignored
                                    one line a round
     new | changed | gone <path>    a file that isn't a .md file in a member's folder
-  * WARN <text>                    server mode: a name clients leave out; in a member's
+  * WARN <text>                    server mode: another member's folder over the
+                                   channel's limits, held as it was until it is back under;
+                                   a name clients leave out; in a member's
                                    folder, two names that are one on macOS or Windows, a name
                                    such a client can't hold, a symlink or a special file;
-                                   once, while it lasts
+                                   a remote member: another member's folder its last sync
+                                   left out for the same reason; once, while it lasts
     WARN cleared: <text>           that problem is gone
   * ERROR ...                      a failed round's first error line, once, and again only
                                    when it changes (status() says when it counts)
@@ -99,7 +102,7 @@ import time
 
 # Imported here, not in the functions: a long-running watch has every module it needs loaded
 # before anything can change the files under it (DESIGN, running watchers).
-from .. import channel_cmd, config, entries, fsops, pathrules, platform, plugin
+from .. import channel_cmd, charter, config, entries, fsops, pathrules, platform, plugin
 from ..lock import Lock
 from ..proto import VCharonError
 
@@ -290,6 +293,34 @@ def warnings(root, me):
                            % (path, problem))
         out.extend(_twins(rel, names, pathrules.fold))
     return sorted(out)
+
+
+def over_limit(files, max_bytes, max_files):
+    """{member: the WARN line's text} for each member folder among files (scan's) that holds
+    more than the channel's limits. The text names the limit, not the folder's size, so it
+    stays one warning while the folder grows."""
+    totals = {}
+    for path, (size, _) in files.items():
+        top, sep, _ = path.partition("/")
+        if sep:
+            total = totals.setdefault(top, [0, 0])
+            total[0] += size
+            total[1] += 1
+    out = {}
+    for member, (size, n) in sorted(totals.items()):
+        if size > max_bytes or n > max_files:
+            out[member] = charter.skipped_note(
+                member, "over the channel's limit of %s"
+                % charter.limit_text(max_bytes, max_files), pulled=False)
+    return out
+
+
+def hold_over(new, old, over):
+    """new (scan's), with each member folder in over as it was in old: nothing new or gone
+    from it is told while it is over the limit."""
+    out = {p: v for p, v in new.items() if p.partition("/")[0] not in over}
+    out.update((p, v) for p, v in old.items() if p.partition("/")[0] in over)
+    return out
 
 
 def is_entry_file(path):
@@ -612,9 +643,12 @@ class _Watch:
     snapshot."""
 
     def __init__(self, root, me, out, clock, fold=False, state=None, check=None, leader=None,
-                 gone=None, timer=time.monotonic, hold=None, suffix=""):
+                 gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None):
         self.root = root
         self.me = me
+        # a local member's: (max bytes, max files) of each other member's folder; one over
+        # them is held as it was (hold_over), with a WARN line while it lasts
+        self.folder_limits = folder_limits
         # streaming (M15): an error of RETRY_KEYS counts once it has held hold seconds in a
         # row by timer, not in its second round; and the watching line's end
         self.timer = timer
@@ -687,10 +721,14 @@ class _Watch:
                     self.say("WARN %s" % text)
                 return True
         try:
-            self.snap = scan(self.root, self.me, self.fold)
+            # a folder over the limits already is a baseline too: held as it is now, its
+            # entries seen, so once it's back under only what came since is told
+            first = scan(self.root, self.me, self.fold)
+            self.snap, over = self._limited(first, first)
             # the entries there already are a baseline: told to nobody
             self.entries(self.snap, list(self.snap), baseline=True)
             warns = self.check(self.root, self.me) if self.check is not None else []
+            warns = list(warns) + list(over)
         except FileNotFoundError:
             # not there yet: the first sync makes it
             self.snap = {}
@@ -722,8 +760,9 @@ class _Watch:
         a scan that failed, which keeps the last snapshot, or None; its fix line's text, or
         None; the number of lines that count)."""
         try:
-            new = scan(self.root, self.me, self.fold)
+            new, over = self._limited(scan(self.root, self.me, self.fold), self.snap or {})
             warns = set(self.check(self.root, self.me)) if self.check is not None else set()
+            warns |= over
         except OSError as e:
             return self._error(e) + (0,)
         baseline = self.snap is None
@@ -747,6 +786,15 @@ class _Watch:
         self.snap = new
         self.warns = warns
         return None, None, counted
+
+    def _limited(self, new, old):
+        """(new with the folders over the limits held as in old, the WARN texts of those)."""
+        if self.folder_limits is None:
+            return new, set()
+        over = over_limit(new, *self.folder_limits)
+        if not over:
+            return new, set()
+        return hold_over(new, old, over), set(over.values())
 
     def status(self, error, fix=None, baseline=False):
         """A failed round's error line once, until its text changes, with its fix line (fix,
@@ -911,11 +959,13 @@ def _locked(w, state):
 
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
-              max_errors=10):
+              max_errors=10, folder_limits=None):
     """Server mode: a server member's channel as it is on disk; root is the channel's
-    folder, as main passes it. rounds: stop after that many (tests). Returns the exit code.
-    Refused (VCharonError) unless root/me/ holds MEMBER.md; root gone (a closed channel) is
-    the ERROR and fix lines and EXIT closed, before any lock or snapshot (M14b)."""
+    folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
+    bytes, max files) of each other member's folder; one over them is held as it was, with a
+    WARN line. Returns the exit code. Refused (VCharonError) unless root/me/ holds
+    MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT closed,
+    before any lock or snapshot (M14b)."""
     gone = gone_fix(root, me)
     try:
         os.scandir(root).close()
@@ -930,7 +980,8 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         pass
     leader = server_leader(root, me)
     state = snapshot_path(root, me)
-    w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone)
+    w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone,
+               folder_limits=folder_limits)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
@@ -1304,9 +1355,12 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer."""
     local, me, leader = mailbox_of(job)
     state = snapshot_path(local, me, job)
+    # the members the pull left out for their size, as the sync saved them after its down:
+    # a WARN each while it lasts, in both modes (a streaming sync prints no notes)
     w = _Watch(local, me, out, clock, fold=FOLDS, state=state, leader=leader, timer=timer,
                hold=STREAM_HOLD if stream else None,
-               suffix=", streaming every %d s" % every if stream else "")
+               suffix=", streaming every %d s" % every if stream else "",
+               check=lambda root, me: charter.left_out_notes(job))
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED

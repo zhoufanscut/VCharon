@@ -394,11 +394,31 @@ def set_header(path, own, name, number, key, value):
 
 
 def post(path, own, name, title, to, re_=None, body="", header=(), clock=time.time,
-         number=None):
+         number=None, check=None):
     """Appends one entry of name to path, in the own folder own, under its lock; the number is
-    the next one (or number, for MEMBER.md's #1 and CHANNEL.md's #2). Returns (id, time)."""
+    the next one (or number, for MEMBER.md's #1 and CHANNEL.md's #2). Returns (id, time).
+    check(path, the file's size after the append): called under the lock before anything is
+    written; it refuses by raising."""
     with lock(own):
         n = number if number is not None else next_number(own, name)
         when = stamp(clock())
-        append(path, build(when, name, n, title, to, re_, header, body))
+        text = build(when, name, n, title, to, re_, header, body)
+        if check is not None:
+            check(path, size_after(path, text))
+        append(path, text)
     return "%s#%d" % (name, n), when
+
+
+def size_after(path, text):
+    """path's size in bytes once append(path, text) has run."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            old = f.tell()
+            if old:
+                f.seek(-1, os.SEEK_END)
+                old += f.read(1) != b"\n"
+    except FileNotFoundError:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        old = len(("# %s\n" % stem).encode("utf-8"))
+    return old + len(text.encode("utf-8"))

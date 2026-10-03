@@ -14,6 +14,7 @@ from unittest import mock
 from vcharon import channel_cmd, cli
 from vcharon.mailbox import read as view
 
+from tests import util
 from tests.util import CAN_SYMLINK, TEST_MACHINE_ID, write_tree
 
 # a member of the channel, for the record that finds it (DESIGN §7.2)
@@ -62,7 +63,7 @@ class ViewCase(unittest.TestCase):
     def record(self, name, ssh, remote):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": name, "leader": "aa",
                                   "ssh": ssh, "remote": remote, "machine": TEST_MACHINE_ID,
-                                  "project": "p", "role": None})
+                                  "project": "p", "role": None, **util.record_format()})
 
     def main(self, *argv):
         """vcharon read mb ARGV at NOW: (exit code, stdout lines, stderr)."""

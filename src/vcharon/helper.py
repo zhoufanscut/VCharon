@@ -161,12 +161,17 @@ def hello():
     """DESIGN §7.3. VCHARON_TEST_OS stands in for the OS's name in it, as VCHARON_TEST_MACHINE_ID
     does for the id: tests on a Mac or Windows run their helper there, and the client takes
     only a Linux one (M11a). VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
-    VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests (M12b)."""
+    VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests (M12b).
+    VCHARON_TEST_OS_RELEASE names the file read in place of /etc/os-release (tests)."""
     offset = os.environ.get("VCHARON_TEST_UTC_OFFSET")
+    test_release = os.environ.get("VCHARON_TEST_OS_RELEASE")
+    release = platform.os_release((test_release,) if test_release else platform.OS_RELEASE)
+    release = release or {}
     msg = {"t": "hello", "protocol": PROTOCOL, "version": VERSION,
            "python": platform.python_version(),
            "os": os.environ.get("VCHARON_TEST_OS") or platform.os_name(),
-           "distro": platform.distro(), "machine": platform.machine_id(),
+           "distro": release.get("PRETTY_NAME"), "distro_id": release.get("ID"),
+           "distro_version": release.get("VERSION_ID"), "machine": platform.machine_id(),
            "user": platform.user(), "home": platform.home(),
            "utc_offset": int(offset) if offset else time.localtime().tm_gmtoff}
     # last, so the gap leaves out the time the other fields took

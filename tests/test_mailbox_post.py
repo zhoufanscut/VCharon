@@ -58,7 +58,7 @@ class PostCase(unittest.TestCase):
             channel_cmd.write_record({"version": 1, "channel": "mb", "name": name,
                                       "leader": "debian", "ssh": None, "remote": self.tree,
                                       "machine": TEST_MACHINE_ID, "project": project,
-                                      "role": None})
+                                      "role": None, **util.record_format()})
         self.file = os.path.join(self.folder, "RESULTS.md")
 
     def main(self, argv, stdin=None, t=T0):

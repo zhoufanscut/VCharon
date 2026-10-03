@@ -16,6 +16,7 @@ import textwrap
 import unittest
 from unittest import mock
 
+import vcharon
 from vcharon import channel_cmd, channels, config, entries, platform
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
@@ -194,7 +195,8 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.record("game.laptop-ui"), {
             "version": 1, "channel": "game", "name": "laptop-ui", "leader": "laptop-ui",
             "ssh": "fake-dest", "remote": "~/.local/state/vcharon/channels/game",
-            "machine": TEST_MACHINE_ID, "project": "ui", "role": None})
+            "machine": TEST_MACHINE_ID, "project": "ui", "role": None, "format": 1,
+            "limits": {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}})
         with open(os.path.join(self.homes["laptop"], "channels.d", "game.laptop-ui.ini"),
                   encoding="utf-8") as f:
             self.assertEqual(f.read(), textwrap.dedent("""\
@@ -204,6 +206,8 @@ class CreateJoinTest(ChannelCase):
                 mailbox.leader = laptop-ui
                 mailbox.local  = %s
                 mailbox.remote = ~/.local/state/vcharon/channels/game
+                mailbox.max_mb = 50
+                mailbox.max_files = 1000
                 """) % self.joined("game.laptop-ui"))
         self.assertEqual(sorted(os.listdir(own)), ["CHANNEL.md", "MEMBER.md"])
         self.assertEqual(sorted(read_tree(self.root)), [
@@ -219,7 +223,12 @@ class CreateJoinTest(ChannelCase):
         ch = entries.parse_file(os.path.join(own, "CHANNEL.md"))
         self.assertEqual([(e.id, e.title, e.to) for e in ch],
                          [("laptop-ui#2", "channel game created", ("@all",))])
-        self.assertEqual([k for k, v in ch[0].header], ["leader", "created", "rules"])
+        self.assertEqual([k for k, v in ch[0].header],
+                         ["leader", "created", "rules", "format", "created by", "max mb",
+                          "max files", "max entry kb"])
+        self.assertEqual(ch[0].header[3:], [
+            ("format", "1"), ("created by", "vcharon " + vcharon.VERSION), ("max mb", "50"),
+            ("max files", "1000"), ("max entry kb", "1000")])
         self.assertEqual(dict(ch[0].header)["rules"], channel_cmd.RULES)
         # vcharon is self-contained: the rules are found by the vcharon folder, not a checkout
         self.assertEqual(channel_cmd.RULES,
@@ -272,7 +281,8 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.record("game.linux-x"), {
             "version": 1, "channel": "game", "name": "linux-x", "leader": "laptop-ui",
             "ssh": None, "remote": os.path.join(self.root, "game"),
-            "machine": TEST_MACHINE_ID, "project": "x", "role": None})
+            "machine": TEST_MACHINE_ID, "project": "x", "role": None,
+            **util.record_format()})
 
     def test_the_same_name_in_two_channels(self):
         self.lead("game")
@@ -381,7 +391,8 @@ class CreateJoinTest(ChannelCase):
 
     def test_no_machine_id_here_has_its_os_hint(self):
         # a Mac: this check's refusal and hint come before the client id's (made after it)
-        hint = "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
+        hint = ("check that /usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice prints an "
+                "IOPlatformUUID line, then try again; if it prints none, ask your user")
         self.lead()
         before = self.server_tree()
         for verb in ("create", "join"):
@@ -542,8 +553,11 @@ class ServerCallsTest(ChannelCase):
         self.assertEqual(s.call("channel.list", {}), {"channels": [], "others": []})
         got = s.call("channel.claim", {"channel": "game", "name": "a", "create": True})
         # no host name in the reply: its values go into the channel's files
+        # a new channel has no CHANNEL.md yet: no format
+        none = {"max_mb": None, "max_files": None, "max_entry_kb": None}
         self.assertEqual(got, {"existed": False, "machine": TEST_MACHINE_ID,
-                               "root": self.root, "claimer": None})
+                               "root": self.root, "claimer": None, "format": None,
+                               "limits": none})
         # an existing folder: its MEMBER.md's claimer:, read at the server
         entries.post(os.path.join(self.root, "game", "a", "MEMBER.md"),
                      os.path.join(self.root, "game", "a"), "a", "member", ["@a"],

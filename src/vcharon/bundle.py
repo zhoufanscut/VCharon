@@ -74,12 +74,14 @@ def _sources(root=None):
 
 
 # The loader runs on the server's Python, which may be older than the floor. It must parse on
-# Python 3.7 and 3.8 so that an old server reaches the version check: no f-strings, no
-# annotations, no walrus, and no % templating here (loader_source prepends FLOOR).
+# any Python 3 an old server may still have (3.6 and later) so that it reaches the version
+# check, which runs before any of vcharon's own modules, written for the floor, is compiled:
+# no f-strings, no annotations, no walrus, and no % templating here (loader_source prepends
+# FLOOR).
 _LOADER = r'''import sys
 
 if sys.version_info[:2] < FLOOR:
-    sys.stderr.write("vcharon: the server's Python is %d.%d; vcharon needs %d.%d or newer\n"
+    sys.stderr.write("vcharon: the server's Python is %d.%d; vcharon needs %d.%d or later\n"
                      % (sys.version_info[0], sys.version_info[1], FLOOR[0], FLOOR[1]))
     sys.stderr.flush()
     sys.exit(90)

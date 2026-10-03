@@ -145,8 +145,8 @@ class DoctorTest(DoctorCase):
                                                 "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
-        self.assertEqual(lines.pop(1), "  ok    vcharon    0.1.0, protocol 3; runs as %s"
-                         % platform.self_command())
+        self.assertEqual(lines.pop(1), "  ok    vcharon    0.1.0, protocol 3, reads channel "
+                         "formats up to 1; runs as %s" % platform.self_command())
         # the subjects are padded to the longest one, fake-dest
         self.assertEqual(lines[1], "  ok    python     %s (%s) on %s"
                          % (platform.python_version(), sys.executable, platform.os_name()))
@@ -192,8 +192,14 @@ class DoctorTest(DoctorCase):
         [line] = out.splitlines()
         doc = json.loads(line)
         self.assertEqual(sorted(doc), ["box", "box_source", "checks", "claimer_source",
-                                       "command", "executable", "failed", "ok", "os",
-                                       "protocol", "python", "version", "warnings"])
+                                       "command", "executable", "failed", "format", "ok", "os",
+                                       "protocol", "python", "servers", "version",
+                                       "warnings"])
+        self.assertEqual(doc["format"], 1)
+        self.assertEqual(doc["servers"], [{
+            "server": "fake-dest", "python": platform.python_version(), "os": "linux",
+            "distro": "Debian GNU/Linux 13 (trixie)", "distro_id": "debian",
+            "distro_version": "13", "tested": True}])
         self.assertEqual((doc["box"], doc["box_source"], doc["claimer_source"]),
                          (platform.os_word(), "os", "client-id file (from the machine id)"))
         self.assertEqual((doc["version"], doc["protocol"], doc["ok"], doc["failed"],
@@ -294,13 +300,10 @@ class DoctorTest(DoctorCase):
         self.write_config("")
         self.os_name("windows")
         self.patch(platform, "is_wow64", return_value=True)
-        self.patch(doctor, "python_tuple", return_value=(3, 10))
         lines = self.doctor(code=0)
-        self.assertEqual([level for level, text in self.of(lines, "python")],
-                         ["ok", "warn", "warn"])
+        # the floor (3.11) covers every OS: no warning of its own on Windows
+        self.assertEqual([level for level, text in self.of(lines, "python")], ["ok", "warn"])
         self.assertIn("  warn  python   32-bit Python on 64-bit Windows", lines)
-        self.assertIn("  warn  python   vcharon is tested with Python 3.11 or later on Windows",
-                      lines)
 
     def test_dirs_not_writable(self):
         self.write_config("")
@@ -335,11 +338,14 @@ class DoctorTest(DoctorCase):
         self.patch(platform, "machine_id", return_value=None)
         text = ("no machine id: this machine can't hold a channel (--local), nor keep jobs' "
                 "state as a server")
-        for osn, fix in (("linux", "give it one: systemd-machine-id-setup, as root"),
-                         ("darwin", "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): "
-                                    "ask the user"),
-                         ("windows", "vcharon couldn't read this box's MachineGuid (the "
-                                     "registry): ask the user")):
+        for osn, fix in (("linux", "as root, run systemd-machine-id-setup: it writes "
+                                   "/etc/machine-id"),
+                         ("darwin", "check that /usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice "
+                                    "prints an IOPlatformUUID line, then try again; if it "
+                                    "prints none, ask your user"),
+                         ("windows", "check that reg query HKLM\\SOFTWARE\\Microsoft\\"
+                                     "Cryptography /v MachineGuid /reg:64 prints a MachineGuid, "
+                                     "then try again; if it prints none, ask your user")):
             for argv in ((), ("--server", "fake-dest")):
                 with self.subTest(osn=osn, argv=argv):
                     self.os_name(osn)
@@ -629,6 +635,57 @@ class ClockTest(DoctorCase):
         self.assertEqual(doctor.clock_checks({"time": True, "utc_offset": "8"}, 0.0, 0), [])
 
 
+class DistroTest(DoctorCase):
+    """The server's distro from its hello: Debian 13 or later is ok, anything else a warning,
+    never a failure; the fake server's /etc/os-release is VCHARON_TEST_OS_RELEASE's file."""
+
+    def release(self, data):
+        if data is None:
+            os.environ["VCHARON_TEST_OS_RELEASE"] = os.path.join(self.tmp, "missing")
+            return
+        with open(self.os_release, "wb") as f:
+            f.write(data)
+
+    def test_each_case(self):
+        cases = [
+            (util.DEBIAN_13, None, ("debian", "13")),
+            (b'ID=debian\nVERSION_ID="14"\nPRETTY_NAME="Debian GNU/Linux 14 (forky)"\n', None,
+             ("debian", "14")),
+            (b'ID=debian\nVERSION_ID="12"\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n',
+             "VCharon is tested on Debian 13 or later; it is ID=debian VERSION_ID=12 (Debian "
+             "GNU/Linux 12 (bookworm))", ("debian", "12")),
+            (b'NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="24.04"\n'
+             b'PRETTY_NAME="Ubuntu 24.04.1 LTS"\n',
+             "VCharon is tested on Debian 13 or later; it is ID=ubuntu VERSION_ID=24.04 "
+             "(Ubuntu 24.04.1 LTS)", ("ubuntu", "24.04")),
+            (None, "VCharon is tested on Debian 13 or later; its os-release names no distro "
+                   "(no ID=)", (None, None)),
+            (b"\x00\xff garbage\nno equals here\n=\n", "VCharon is tested on Debian 13 or "
+             "later; its os-release names no distro (no ID=)", (None, None)),
+            (b"ID=debian\nVERSION_ID=thirteen\n", "VCharon is tested on Debian 13 or later; it "
+             "is ID=debian VERSION_ID=thirteen", ("debian", "thirteen"))]
+        for data, warning, fields in cases:
+            with self.subTest(data=data):
+                self.release(data)
+                lines = self.doctor("--server", "fake-dest", code=0)
+                dest = self.of(lines, "fake-dest")
+                warns = [text for level, text in dest if level == "warn"]
+                self.assertEqual(warns, [warning] if warning else [], lines)
+                self.assertRegex(lines[-1], r"\AOK  nothing failed" + (", 1 warning  "
+                                                                       if warning else "  "))
+                doc = json.loads(self.run_cli("doctor", "--server", "fake-dest", "--json")[1])
+                [server] = doc["servers"]
+                self.assertEqual((server["distro_id"], server["distro_version"],
+                                  server["tested"]), fields + (warning is None,))
+                # ping says it too, as a warning line
+                code, out, err = self.run_cli("ping", "fake-dest")
+                self.assertEqual(code, 0, err)
+                self.assertEqual([l for l in out.splitlines() if l.startswith("  warn ")],
+                                 ["  warn     " + warning] if warning else [])
+                if data is None:
+                    os.environ["VCHARON_TEST_OS_RELEASE"] = self.os_release
+
+
 class RowTest(DoctorCase):
     """Item 1: one case per row of DESIGN §6.4, each a FAIL on the fake-dest line with its
     message and fix, exit 1, and the destination's later checks skipped."""
@@ -701,8 +758,10 @@ class RowTest(DoctorCase):
     def test_python_too_old(self):
         real = bundle.loader_line
         self.patch(bundle, "loader_line", side_effect=lambda floor=vcharon.FLOOR: real((99, 0)))
-        self.failed("the Python on fake-dest is too old for vcharon",
-                    "install Python 3.9 or newer on fake-dest, or set remote_python")
+        major, minor = sys.version_info[:2]
+        self.failed("the server's python3 is %d.%d; vcharon needs 3.11 or later" % (major, minor),
+                    "install python3 3.11 or later on fake-dest (Debian 13's is 3.13), or point "
+                    "remote_python in vcharon.ini at one")
 
     def test_code_didnt_load(self):
         self.patch(bundle, "build", return_value=struct.pack(">Q", 3) + b"abc")

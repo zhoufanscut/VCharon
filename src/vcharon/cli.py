@@ -15,7 +15,7 @@ import threading
 import time
 import traceback
 
-from . import (VERSION, channel_cmd, config, doctor, entries, fsops, keys, pathrules,
+from . import (VERSION, channel_cmd, charter, config, doctor, entries, fsops, keys, pathrules,
                platform, plugin, proto, remote, ssh, stage, state)
 # `run` is the name of _Run objects here.
 from . import run as engine
@@ -137,6 +137,16 @@ def _parser():
     where(one)
     ident(one)
     agent(one)
+    for flag, key, what, default in (
+            ("--max-mb", "max_mb", "MB", "the most each member's folder may hold, in MB "
+             "(default %d)" % charter.DEFAULT_MAX_MB),
+            ("--max-files", "max_files", "files", "the most files each member's folder may "
+             "hold (default %d)" % charter.DEFAULT_MAX_FILES),
+            ("--max-entry-kb", "max_entry_kb", "kB", "the most an entry file may hold, in kB "
+             "(default %d)" % charter.DEFAULT_MAX_ENTRY_KB)):
+        low, high = charter.BOUNDS[key]
+        one.add_argument(flag, dest=key, metavar="N", type=_number(low, high, what),
+                         help="%s; %d to %d" % (default, low, high))
     one = verb("join", "join a channel as a member", "vcharon join game --server dev")
     channel(one)
     where(one)
@@ -223,8 +233,8 @@ def _parser():
 
 def _utf8_console():
     """Launch rules (DESIGN §13): on Windows, stdout and stderr write UTF-8. A stream that a
-    test or another tool swapped in may not have reconfigure(). Elsewhere Python 3.9+ writes
-    UTF-8 already."""
+    test or another tool swapped in may not have reconfigure(). Elsewhere Python writes UTF-8
+    already."""
     if platform.os_name() != "windows":
         return
     for stream in (sys.stdout, sys.stderr):
@@ -260,6 +270,13 @@ def _guarded(fn, run):
     except VCharonError as e:
         run.show_error(e)
         return e.exit_code
+    except BrokenPipeError as e:
+        # stdout's reader went away (vcharon doctor | head -3): no ERROR line, and nothing
+        # more to say; stdout goes to devnull so Python's own flush at exit can't fail too.
+        # Logged, in case the pipe was another one.
+        run.log_line("error", "stdout closed: %s" % e, create=True)
+        _stdout_to_devnull()
+        return 1
     except KeyboardInterrupt:
         # The session has killed ssh on its way out.
         run.log_line("error", "interrupted")
@@ -270,6 +287,20 @@ def _guarded(fn, run):
         run.show_error(VCharonError("internal", "%s: %s" % (type(e).__name__, e)),
                        logged=True)
         return 1
+
+
+def _stdout_to_devnull():
+    """Points stdout's file descriptor at devnull (the Python docs' recipe for a closed
+    pipe). A stdout without one (a test's) is left as it is."""
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, ValueError, OSError):
+        return
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, fd)
+    finally:
+        os.close(devnull)
 
 
 def _usage(message, hint):
@@ -403,6 +434,7 @@ def _post(args, run):
                      "stdin: a file, or a quoted heredoc (<<'EOF')")
     cfg = load_config()
     record, flags = _membership(args, cfg)
+    limits = channel_cmd.channel_limits(record)
     name = record["name"]
     steps = len(parts) == 1 and parts[0].casefold() == post_mod.STEPS_FILE.casefold()
     if steps and record["leader"] != name:
@@ -418,7 +450,7 @@ def _post(args, run):
     path = (post_mod.file_below(own, parts) if os.path.isdir(own)
             else os.path.join(own, *parts))
     body = args.body if args.body is not None else post_mod.body_from(_stdin_bytes())
-    id_, when = post_mod.post(path, name, to, title, args.re, body)
+    id_, when = post_mod.post(path, name, to, title, args.re, body, limits=limits)
     print("posted %s — %s to %s at %s" % (id_, title, "/".join([name] + parts), when))
     return 0
 
@@ -428,15 +460,36 @@ def _read(args, run):
     watch_mod.utf8_output()
     cfg = load_config()
     record, _ = _membership(args, cfg)
+    limits = channel_cmd.channel_limits(record)
     tree, synced = _tree(cfg, record)
+    # a local member reads the other folders where they are: one over the limit is left out,
+    # as a remote member's pull leaves it out
+    skip = None if synced else _over_limit(limits, record["name"])
+    # a remote member: the members its last pull left out, whose copy here is as it was
+    notes = charter.left_out_notes(_section(record)) if synced else []
     if args.json:
         try:
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
-                                     last=args.last)
+                                     last=args.last, skip=skip, notes=notes)
         except OSError as e:
             raise fsops.error(e, tree)
         return _print_json(doc)
-    return read_mod.view(tree, args.channel, synced=synced, full=args.full, last=args.last)
+    return read_mod.view(tree, args.channel, synced=synced, full=args.full, last=args.last,
+                         skip=skip, notes=notes)
+
+
+def _over_limit(limits, me):
+    """skip(folder path, member name): a local member's read's note for another member's
+    folder over the channel's limits, or None to read it."""
+    max_bytes, max_files = limits["max_mb"] * charter.MB, limits["max_files"]
+
+    def skip(path, member):
+        if member == me:
+            return None
+        text = charter.over(*charter.folder_total(path), max_bytes, max_files)
+        return None if text is None else charter.skipped_note(member, text, pulled=False)
+
+    return skip
 
 
 def _watch(args, run):
@@ -448,6 +501,7 @@ def _watch(args, run):
                      "--max-errors")
     cfg = load_config()
     record, flags = _membership(args, cfg)
+    channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
               "max_errors": args.max_errors or 10}
@@ -456,7 +510,9 @@ def _watch(args, run):
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
                          % args.channel, "leave out --no-stream")
         return watch_mod.watch_dir(os.path.abspath(os.path.expanduser(record["remote"])),
-                                   record["name"], args.every or watch_mod.DIR_EVERY, **limits)
+                                   record["name"], args.every or watch_mod.DIR_EVERY,
+                                   folder_limits=(channel_limits["max_mb"] * charter.MB,
+                                                  channel_limits["max_files"]), **limits)
     stream = not args.no_stream
     if stream and args.every is not None and args.every > watch_mod.STREAM_EVERY_MAX:
         raise _usage("--every: 1 to %d seconds when streaming" % watch_mod.STREAM_EVERY_MAX,
@@ -477,6 +533,7 @@ def _sync(args, run):
                              "then sync")
     cfg = load_config()
     record, flags = _membership(args, cfg)
+    channel_cmd.channel_limits(record)
     if record["ssh"] is None:
         raise channel_cmd.channels.refused(
             "you are a local member of %s: your folder is in the channel itself, so there is "
@@ -640,6 +697,10 @@ def _ping(args, run):
              % (hello.get("version"), hello.get("protocol"), hello.get("python")))
         _say("  server   %s, user %s, home %s"
              % (hello.get("distro") or hello.get("os"), hello.get("user"), hello.get("home")))
+        warning = platform.distro_warning(hello)
+        if warning is not None:
+            # a warning, never a failure: other servers may work
+            _say("  warn     %s" % warning)
         if hello.get("machine"):
             _say("  machine  %s" % hello["machine"])
         else:
@@ -752,15 +813,8 @@ def pull_guard(path):
     return guard
 
 
-def size_text(n):
-    """Decimal units with one decimal: 0 B, 999 B, 1.0 kB, 3.4 MB, 1.2 GB."""
-    if n < 1000:
-        return "%d B" % n
-    for unit, scale in (("kB", 1e3), ("MB", 1e6), ("GB", 1e9)):
-        # decided after rounding, so 999,999 bytes is 1.0 MB, not 1000.0 kB
-        if round(n / scale, 1) < 1000:
-            return "%.1f %s" % (n / scale, unit)
-    return "%.1f TB" % (n / 1e12)
+# the sync's sizes, and the limits' (charter)
+size_text = charter.size_text
 
 
 def _counted(n, word):
@@ -1198,6 +1252,9 @@ def _repeat_one(args, jr, conn, stack):
     jr.started = time.monotonic()
     try:
         eng, done = _run_one(args, jr, conn, stack)
+    except BrokenPipeError:
+        # stdout's reader is gone: no job's error, the whole command's (_guarded)
+        raise
     except Exception as e:
         if conn.session is not None and not _still_usable(conn.session, e):
             conn.broke = e
@@ -1235,6 +1292,9 @@ def _one_of_group(args, jr, conn, stack, last):
     error = trace = None
     try:
         eng, done = _run_one(args, jr, conn, stack)
+    except BrokenPipeError:
+        # stdout's reader is gone: no job's error, the whole command's (_guarded)
+        raise
     except Exception as e:
         error, trace = e, traceback.format_exc()
         if conn.session is not None and not _still_usable(conn.session, e):
@@ -1490,6 +1550,16 @@ def _run_one(args, jr, conn, stack):
                                % (name, err.message), SAVE_HINT)
         log.info("saved the state of %s" % name)
         jr.saved_state = True
+    if done is not None and job.mailbox is not None and name == job.mailbox.section + ".down":
+        # the members this pull left out for their size: the watcher's WARN and read's note
+        # come from there (with --repeat the notes reach only the log); after the state,
+        # which holds those members' entries as they were
+        try:
+            charter.save_left_out(job.mailbox.section, eng.plan.notes,
+                                  int(job.source.options["max_bytes"]),
+                                  int(job.source.options["max_files"]))
+        except OSError as e:
+            log.warn("couldn't save the members left out: %s" % e)
     return eng, done
 
 

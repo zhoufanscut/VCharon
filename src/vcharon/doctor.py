@@ -2,8 +2,12 @@
 line each (DESIGN §13); client. It only reads, apart from a temp file in the state and log
 dirs, and its log. It never prompts.
 
---json prints one object instead: {"version", "protocol", "python", "executable", "os",
-"command", "box", "box_source", "claimer_source", "ok", "failed", "warnings", "checks"}.
+--json prints one object instead: {"version", "protocol", "format", "python", "executable",
+"os", "command", "box", "box_source", "claimer_source", "servers", "ok", "failed", "warnings",
+"checks"}. "format" is the newest channel format this vcharon reads; "servers" one object
+for each server whose session opened and echoed: {"server", "python", "os", "distro", "distro_id",
+"distro_version", "tested"}, the distro fields from its /etc/os-release (PRETTY_NAME, ID,
+VERSION_ID; null each when missing) and "tested" true for Debian 13 or later.
 "command" is how this box runs vcharon (the fix lines' spelling); "box" this machine's part of
 member names and "box_source" "config" ([vcharon] box) or "os" (the default), both null when
 the config can't be read; "claimer_source" what the id this machine claims member folders with
@@ -24,7 +28,7 @@ import sys
 import tempfile
 import time
 
-from . import PROTOCOL, VERSION, config, fsops, keys, platform, plugin, ssh, state
+from . import PROTOCOL, VERSION, charter, config, fsops, keys, platform, plugin, ssh, state
 from .log import Log
 from .proto import VCharonError
 
@@ -38,12 +42,9 @@ NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor -
 # entries posted near a minute's end; from 30 s it will do so often.
 CLOCK_WARN = 30
 CLOCK_HINT = "sync both clocks (NTP); channel entries are ordered by each box's own clock"
+# a Linux box without /etc/machine-id
+LINUX_ID_HINT = "as root, run systemd-machine-id-setup: it writes /etc/machine-id"
 ZONE_HINT = "give both the same time zone; entry headings carry local time with no zone"
-
-
-def python_tuple():
-    """(major, minor) of this Python; tests patch it."""
-    return tuple(sys.version_info[:2])
 
 
 def _counted(n, word):
@@ -123,8 +124,8 @@ def _scope(target, cfg):
 
 def _vcharon(rep):
     """This vcharon's version, and how it's run here: the spelling of every fix line."""
-    rep.check("ok", "vcharon", "%s, protocol %d; runs as %s"
-              % (VERSION, PROTOCOL, platform.self_command()))
+    rep.check("ok", "vcharon", "%s, protocol %d, reads channel formats up to %d; runs as %s"
+              % (VERSION, PROTOCOL, charter.FORMAT, platform.self_command()))
 
 
 def _python(rep):
@@ -135,9 +136,6 @@ def _python(rep):
     if platform.is_wow64():
         rep.check("warn", "python", "32-bit Python on 64-bit Windows",
                   "install a 64-bit Python; until then vcharon runs Sysnative\\OpenSSH\\ssh.exe")
-    if python_tuple() < (3, 11):
-        rep.check("warn", "python", "vcharon is tested with Python 3.11 or later on Windows",
-                  "install a newer Python")
 
 
 def _config(rep, cfg, err, no_scope):
@@ -234,7 +232,7 @@ def _machine(rep):
     if mid:
         rep.check("ok", "machine", mid)
     else:
-        hint = platform.no_machine_hint() or "give it one: systemd-machine-id-setup, as root"
+        hint = platform.no_machine_hint() or LINUX_ID_HINT
         rep.check("warn", "machine", "no machine id: this machine can't hold a channel "
                   "(--local), nor keep jobs' state as a server", hint)
     path = platform.client_id_path()
@@ -326,6 +324,10 @@ def _server(rep, d, session):
     rep.check("ok", dest, "Python %s on %s, user %s; handshake %.2f s"
               % (hello.get("python"), hello.get("distro") or hello.get("os"), hello.get("user"),
                  session.handshake_seconds))
+    # tested on Debian 13 or later: anything else is a warning, never a failure
+    warning = platform.distro_warning(hello)
+    if warning is not None:
+        rep.check("warn", dest, warning)
     for level, text, hint in clock_checks(hello, session.hello_received,
                                           time.localtime().tm_gmtoff):
         rep.check(level, dest, text, hint)
@@ -352,6 +354,14 @@ def _server(rep, d, session):
         return None
     rep.check("ok", dest, "echo 4 MiB byte-identical in %.2f s" % (time.monotonic() - started))
     return hello
+
+
+def server_json(dest, hello):
+    """--json's object of a server whose hello came: what it runs."""
+    return {"server": dest, "python": hello.get("python"), "os": hello.get("os"),
+            "distro": hello.get("distro"), "distro_id": hello.get("distro_id"),
+            "distro_version": hello.get("distro_version"),
+            "tested": platform.distro_warning(hello) is None}
 
 
 # --- a job (decisions 20, 21) ---
@@ -483,22 +493,25 @@ def main(args, run):
     _agent(rep, agent, dests)
     _dirs(rep)
     claimer_source = _machine(rep)
+    servers = []
     for d in dests:
         # a locked key's FAIL line says to run vcharon key: the doctor never prompts
         logged_in, _ = _login(rep, d, agent, log)
         # ControlMaster off, as in the probe (DESIGN §6.1)
         with ssh.Session(d.settings, d.dest, log, probe=True) as session:
             hello = _server(rep, d, session) if logged_in else None
+            if hello is not None:
+                servers.append(server_json(d.dest, hello))
             for job in d.jobs:
                 _job(rep, job, session if hello is not None else None, hello, log)
     say(rep.last_line(time.monotonic() - started))
     if args.json:
-        print(json.dumps({"version": VERSION, "protocol": PROTOCOL,
+        print(json.dumps({"version": VERSION, "protocol": PROTOCOL, "format": charter.FORMAT,
                           "python": platform.python_version(), "executable": sys.executable,
                           "os": platform.os_name(), "command": platform.self_command(),
                           "box": cfg.box_name if cfg is not None else None,
                           "box_source": cfg.box_source if cfg is not None else None,
-                          "claimer_source": claimer_source,
+                          "claimer_source": claimer_source, "servers": servers,
                           "ok": not rep.failed, "failed": rep.failed,
                           "warnings": rep.warnings, "checks": rep.checks},
                          ensure_ascii=False))

@@ -15,7 +15,8 @@ import sys
 import tempfile
 import time
 
-from . import channels, config, entries, fsops, pathrules, platform, plugin, ssh, state
+from . import (VERSION, channels, charter, config, entries, fsops, pathrules, platform, plugin,
+               ssh, state)
 from . import run as engine
 from .lock import Lock
 from .log import Log
@@ -24,8 +25,10 @@ from .proto import VCharonError
 RECORD_VERSION = 1
 RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine")
 # the parts that rebuild the name, and find the membership again (DESIGN §7.2); a record
-# written before the M10 re-review has neither, and is read as before
-RECORD_OPTIONAL = ("project", "role")
+# written before the M10 re-review has neither, and is read as before. format and limits: the
+# channel's (charter), from the list reply at join or create's own; a record without them is
+# read, but the commands that use the channel refuse it until a rejoin writes them
+RECORD_OPTIONAL = ("project", "role", "format", "limits")
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
@@ -240,12 +243,28 @@ def read_record(channel, name):
             or sorted(k for k in doc if k not in RECORD_OPTIONAL) != sorted(RECORD_KEYS)
             or not isinstance(doc.get("project", ""), str)
             or not isinstance(doc.get("role"), (str, type(None)))
+            or not isinstance(doc.get("format", 1), int) or isinstance(doc.get("format"), bool)
+            or not isinstance(doc.get("limits", {}), dict)
             or doc["version"] != RECORD_VERSION or doc["channel"] != channel
             or doc["name"] != name
             or not all(isinstance(doc[k], str) for k in ("leader", "remote", "machine"))
             or not isinstance(doc["ssh"], (str, type(None)))):
         raise VCharonError("config", "the record %s has another shape" % path, hint=hint)
     return doc
+
+
+def channel_limits(record):
+    """The channel's limits from its join record, after the format check (charter.check):
+    post, read, watch and sync run it first. A record from before formats were kept is
+    refused: a rejoin writes them."""
+    channel = record["channel"]
+    where = "--local" if record["ssh"] is None else "--server %s" % record["ssh"]
+    rejoin = ("vcharon join %s %s %s (a rejoin) writes it"
+              % (channel, where, name_flags(channel, record["name"], record)))
+    if "format" not in record:
+        raise channels.refused("your join record of %s has no channel format: an older "
+                               "vcharon wrote it" % channel, rejoin)
+    return charter.check(channel, record, limits_hint=rejoin)
 
 
 def _write_atomic(path, data, temp):
@@ -302,10 +321,14 @@ def local_text(section):
     return os.path.join(platform.joined_dir(), section)
 
 
-def write_section(cfg, section, alias, name, leader, remote_text):
+def write_section(cfg, section, alias, name, leader, remote_text, limits):
+    """The section file of a remote member: its two jobs (config), with the channel's folder
+    limits for up's check and down's skip."""
     text = ("[%s]\nssh            = %s\nmailbox.me     = %s\nmailbox.leader = %s\n"
-            "mailbox.local  = %s\nmailbox.remote = %s\n"
-            % (section, alias, name, leader, local_text(section), remote_text))
+            "mailbox.local  = %s\nmailbox.remote = %s\nmailbox.max_mb = %d\n"
+            "mailbox.max_files = %d\n"
+            % (section, alias, name, leader, local_text(section), remote_text,
+               limits["max_mb"], limits["max_files"]))
     path = section_path(cfg, section)
     # .<name>.ini.tmp: no reader takes it for a section (DESIGN §14 M10, Config)
     _write_atomic(path, text.encode("utf-8"),
@@ -526,10 +549,12 @@ def _list(args, cfg, log, say):
     for ch in listing["channels"]:
         leaders = ch["leaders"]
         newest = ch.get("newest")
-        say("  %s  leader %s  members %s  newest %s"
+        fmt = _format_of(ch)
+        say("  %s  leader %s  members %s  newest %s  format %s"
             % (ch["name"], leaders[0] if len(leaders) == 1 else "?",
                ", ".join(ch["members"]) or "none",
-               entries.stamp(newest) if isinstance(newest, (int, float)) else "-"))
+               entries.stamp(newest) if isinstance(newest, (int, float)) else "-",
+               "-" if fmt is None else fmt))
         if not leaders:
             say("    note: no member's folder holds %s: ask the user" % entries.CHANNEL_FILE)
         elif len(leaders) > 1:
@@ -540,9 +565,26 @@ def _list(args, cfg, log, say):
                 % tuple([one["name"]] + [one[k] or "-" for k in channels.LIST_FIELDS]))
         for stray in ch.get("strays", []):
             say("    note: %s at its top isn't a member's folder" % pathrules.show(stray))
+        if len(leaders) == 1:
+            # the join's own check, as a note: the other channels are still listed
+            note = charter.format_note(ch["name"], ch)
+            if note is not None:
+                say("    note: %s" % platform.runnable(note))
     for other in listing["others"]:
         say("  note: %s: %s" % (pathrules.show(other["name"]), other["why"]))
     return 0
+
+
+def _format_of(ch):
+    fmt = ch.get("format")
+    return fmt if isinstance(fmt, int) and not isinstance(fmt, bool) else None
+
+
+def _limits_of(ch):
+    """A listed channel's limits as list --json gives them: each an int or null."""
+    limits = ch.get("limits") if isinstance(ch.get("limits"), dict) else {}
+    return {k: limits.get(k) if isinstance(limits.get(k), int)
+            and not isinstance(limits.get(k), bool) else None for k in charter.LIMIT_KEYS}
 
 
 def member_info(ch):
@@ -561,11 +603,13 @@ def member_info(ch):
 def list_json(server, listing):
     """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
     for --local; each channel is {"name", "leader", "leaders", "members", "member_info",
-    "newest", "strays"}: "leader" is the one leader, or null when there are none or several
-    ("leaders" lists them), "member_info" each member's {"name", "box", "os", "agent",
-    "project"} from its MEMBER.md (null for a field it lacks), "newest" the newest entry's
-    local time (YYYY-mm-dd HH:MM) or null; each of "others" is {"name", "why"}, a name at the
-    root that isn't a usable channel."""
+    "newest", "strays", "format", "limits"}: "leader" is the one leader, or null when there
+    are none or several ("leaders" lists them), "member_info" each member's {"name", "box",
+    "os", "agent", "project"} from its MEMBER.md (null for a field it lacks), "newest" the
+    newest entry's local time (YYYY-mm-dd HH:MM) or null, "format" the channel's format from
+    its leader's CHANNEL.md (null when it has none) and "limits" its {"max_mb", "max_files",
+    "max_entry_kb"} (null each when missing); each of "others" is {"name", "why"}, a name at
+    the root that isn't a usable channel."""
     out = []
     for ch in listing["channels"]:
         leaders = list(ch["leaders"])
@@ -575,7 +619,8 @@ def list_json(server, listing):
                     "member_info": member_info(ch),
                     "newest": entries.stamp(newest) if isinstance(newest, (int, float))
                     else None,
-                    "strays": list(ch.get("strays", []))})
+                    "strays": list(ch.get("strays", [])), "format": _format_of(ch),
+                    "limits": _limits_of(ch)})
     return {"server": server.ssh, "channels": out,
             "others": [{"name": o["name"], "why": o["why"]} for o in listing["others"]]}
 
@@ -586,9 +631,26 @@ def _another_server(record, server, channel):
                                "pass --role R to join from here as another member")
 
 
+def create_limits(args):
+    """The limits create writes into CHANNEL.md: --max-mb, --max-files and --max-entry-kb
+    (each checked against charter.BOUNDS by the parser), else the defaults. An entry file
+    can't be bigger than the folder that holds it."""
+    limits = charter.default_limits()
+    for key in charter.LIMIT_KEYS:
+        value = getattr(args, key, None)
+        if value is not None:
+            limits[key] = value
+    if charter.limits_problem(limits):
+        raise VCharonError("config", "--max-entry-kb %d is more than the folder limit of %d MB"
+                           % (limits["max_entry_kb"], limits["max_mb"]),
+                           hint="give a smaller --max-entry-kb, or a larger --max-mb")
+    return limits
+
+
 def _create(args, cfg, name, log, say):
     channel = args.channel
     section = "%s.%s" % (channel, name)
+    info = {"format": charter.FORMAT, "limits": create_limits(args)}
     record = read_record(channel, name)
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
@@ -601,7 +663,7 @@ def _create(args, cfg, name, log, say):
         made = []
         try:
             own, remote_text, _ = _write_member(cfg, server, channel, name, name, section,
-                                                made, got, args.ident, args.fields,
+                                                made, got, args.ident, args.fields, info,
                                                 create=True)
         except BaseException:
             # while the folder holds only those files: release removes nothing else
@@ -612,6 +674,10 @@ def _create(args, cfg, name, log, say):
                 log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
             raise
     say("  claimed %s/%s; you lead it" % (channel, name))
+    say("  format %d; limits per member folder %s, per entry file %s"
+        % (info["format"], charter.limit_text(info["limits"]["max_mb"] * charter.MB,
+                                              info["limits"]["max_files"]),
+           charter.size_text(info["limits"]["max_entry_kb"] * charter.KB)))
     if server.ssh is None:
         say("OK  created %s; your folder is %s" % (channel, own))
         return 0
@@ -625,10 +691,12 @@ def _create(args, cfg, name, log, say):
 
 
 def _write_member(cfg, server, channel, name, leader, section, made, got, ident, fields,
-                  create=False, rejoin=False):
+                  info, create=False, rejoin=False):
     """The record, MEMBER.md (and CHANNEL.md for create), a remote member's section file:
     returns (the own folder, mailbox.remote's text or the channel folder, MEMBER.md's fields
-    after leader:). made collects what it wrote, for _undo."""
+    after leader:). made collects what it wrote, for _undo. info: the channel's {"format",
+    "limits"}, checked; the record keeps them."""
+    limits = info["limits"]
     remote = server.ssh is not None
     if remote:
         # the root as the helper spelled it: ~/… for the fixed one
@@ -636,7 +704,8 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
     else:
         remote_text = os.path.join(server.root, channel)
     doc = {"version": RECORD_VERSION, "channel": channel, "name": name, "leader": leader,
-           "ssh": server.ssh, "remote": remote_text, "machine": server.machine}
+           "ssh": server.ssh, "remote": remote_text, "machine": server.machine,
+           "format": info["format"], "limits": dict(limits)}
     doc.update(ident)
     fields = member_header(name, ident, fields, cfg)
     if not rejoin or read_record(channel, name) is None:
@@ -661,12 +730,12 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
         entries.post(os.path.join(own, entries.CHANNEL_FILE), own, name,
                      "channel %s created" % channel, [entries.ALL],
                      header=[("leader", name), ("created", entries.stamp(time.time())),
-                             ("rules", RULES)],
+                             ("rules", RULES)] + charter.header(VERSION, limits),
                      number=2)
     if remote:
         if not os.path.exists(section_path(cfg, section)):
             made.append(section_path(cfg, section))
-        write_section(cfg, section, server.ssh, name, leader, remote_text)
+        write_section(cfg, section, server.ssh, name, leader, remote_text, limits)
     return own, remote_text, fields
 
 
@@ -728,6 +797,9 @@ def _join(args, cfg, name, log, say):
                                    % (channel, len(leaders), ", ".join(l + "/" for l in leaders),
                                       entries.CHANNEL_FILE), "ask the user")
         leader = leaders[0]
+        # the channel's format and limits, read at the server: a newer format, or none, is
+        # refused before any claim
+        info = {"format": found.get("format"), "limits": charter.check(channel, found)}
         # 2. a live session already is <name>
         if server.ssh is None:
             lock = watcher_snapshot(None, section, name,
@@ -742,6 +814,19 @@ def _join(args, cfg, name, log, say):
         # 3. one mkdir
         got = server.claim(channel, name, False)
         rejoin = got["existed"]
+        # the claim's own reading of CHANNEL.md is the one that counts: checked as the list's
+        # was, and the same as the list's, or the join stops before writing anything
+        try:
+            claimed = {"format": got.get("format"), "limits": charter.check(channel, got)}
+            if claimed != info:
+                raise channels.refused("%s's format or limits changed during the join (format "
+                                       "%s, then %s)" % (channel, info["format"],
+                                                         claimed["format"]),
+                                       "run the join again")
+        except VCharonError:
+            if not rejoin:
+                _release_quietly(server, channel, name, log)
+            raise
         # 4. a folder that was there: whose (its MEMBER.md's claimer:)
         takeover = rejoin and _claimed_elsewhere(args, server, got, name, record)
         if rejoin and record is None and not args.rejoin:
@@ -756,7 +841,7 @@ def _join(args, cfg, name, log, say):
             # 5. the record first; before it is written, a failure releases the claim
             own, remote_text, fields = _write_member(cfg, server, channel, name, leader,
                                                      section, made, got, args.ident,
-                                                     args.fields, rejoin=rejoin)
+                                                     args.fields, info, rejoin=rejoin)
         except BaseException:
             if not rejoin:
                 _undo(made)
@@ -802,6 +887,14 @@ def _join(args, cfg, name, log, say):
     if code == 0:
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
+
+
+def _release_quietly(server, channel, name, log):
+    """Releases a claim a failed join made; a failure to is only logged."""
+    try:
+        server.release(channel, name)
+    except Exception as e:
+        log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
 
 
 def _own_path(server, got, channel, name, section):
@@ -1156,6 +1249,7 @@ def _remove_membership(cfg, record, section, say):
                          os.path.join(platform.log_dir(), job + ".log.1")):
                 drop(path)
             drop(os.path.join(platform.state_dir(), job + ".lock"), lock=True)
+        drop(charter.left_out_path(section))
         snapshot = watcher_snapshot(record, section, name)
     else:
         snapshot = watcher_snapshot(record, section, name, record["remote"])

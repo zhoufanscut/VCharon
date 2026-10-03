@@ -27,7 +27,10 @@ Across minutes the time wins, even against re:. Only a placed entry is ordered b
 re:: its ID's name is its folder's, and it's the first with that ID in path order (the
 watcher's rule). Every entry is listed.
 
-Notes: a folder or file it can't read (the rest is still shown); an entry with no ID, in a
+Notes: a folder or file it can't read (the rest is still shown); for a local member, another
+member's folder over the channel's limits (MB or files), left out until it is back under; for
+a remote member, each folder its last sync left out for that reason, whose copy here stays as
+it was; an entry with no ID, in a
 folder not its ID's, or a second copy of an ID; an entry with no time, or a bad one; one stamped
 after this box's current minute; one stamped in an earlier minute than the entry its re: names
 (clocks differ?); a re: naming an ID not in the tree (not synced yet, or a typo); re: lines that
@@ -88,9 +91,11 @@ class Item:
         return (e.name or self.folder, e.number or 0, self.path, e.line)
 
 
-def read_tree(root):
+def read_tree(root, skip=None):
     """(member folders, [Item] in path order, notes) of the channel tree root. An error on the
-    root itself raises OSError; below it, what can't be read is a note."""
+    root itself raises OSError; below it, what can't be read is a note. skip(folder's path,
+    its name): a note for a member folder to leave out (over the channel's limits), or None
+    to read it."""
     notes = []
 
     def rel(path):
@@ -111,6 +116,10 @@ def read_tree(root):
             continue
         # a stage dir, a symlink or a stray name: clients leave it out, and so does the view
         if not is_dir or pathrules.writer_problem(d.name) is not None:
+            continue
+        left_out = skip(d.path, d.name) if skip is not None else None
+        if left_out is not None:
+            notes.append("note: %s" % left_out)
             continue
         folders.append(d.name)
         for path in entries.md_files(d.path, onerror=unread):
@@ -246,10 +255,11 @@ def _now():
     return datetime.datetime.now()
 
 
-def _collect(root, now):
+def _collect(root, now, skip=None, notes=()):
     """(member folders, items in the view's order, notes) of the tree root; OSError when the
-    root can't be read."""
-    folders, items, read_notes = read_tree(root)
+    root can't be read. notes: more notes' texts, first."""
+    folders, items, read_notes = read_tree(root, skip)
+    read_notes = ["note: %s" % n for n in notes] + read_notes
     if now is None:
         now = _now()
     ordered, minute_notes = order(items, now)
@@ -257,10 +267,12 @@ def _collect(root, now):
     return folders, ordered, notes
 
 
-def view(root, channel, synced=False, full=False, last=None, now=None, out=print):
-    """Prints the view of the channel tree root; returns the exit code."""
+def view(root, channel, synced=False, full=False, last=None, now=None, out=print, skip=None,
+         notes=()):
+    """Prints the view of the channel tree root; returns the exit code. skip: read_tree's;
+    notes: more notes (a remote member's: the members its last pull left out)."""
     try:
-        folders, ordered, notes = _collect(root, now)
+        folders, ordered, notes = _collect(root, now, skip, notes)
     except OSError as e:
         print("ERROR can't read %s: %s" % (root, _why(e)), file=sys.stderr)
         return 1
@@ -275,10 +287,11 @@ def view(root, channel, synced=False, full=False, last=None, now=None, out=print
     return 0
 
 
-def view_json(root, channel, synced=False, full=False, last=None, now=None):
+def view_json(root, channel, synced=False, full=False, last=None, now=None, skip=None,
+              notes=()):
     """The view as one JSON object (the module's docstring has its fields); OSError when the
-    root can't be read."""
-    folders, ordered, notes = _collect(root, now)
+    root can't be read. skip and notes: view's."""
+    folders, ordered, notes = _collect(root, now, skip, notes)
     shown = ordered[-last:] if last else ordered
     items = []
     for item in shown:

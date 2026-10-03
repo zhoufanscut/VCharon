@@ -10,7 +10,7 @@ import re
 import stat
 import tempfile
 
-from . import channels, fsops, pathrules, platform, ssh
+from . import channels, charter, fsops, pathrules, platform, ssh
 from .helper import TICK_EVERY
 from .proto import VCharonError
 from .run import Side
@@ -41,6 +41,8 @@ class Mailbox:
     remote: str           # as written, on the server
     leader: str = None    # the channel's leader, mailbox.leader
     channel: str = None   # the section name's first part
+    max_mb: int = charter.DEFAULT_MAX_MB          # mailbox.max_mb
+    max_files: int = charter.DEFAULT_MAX_FILES    # mailbox.max_files
 
     @property
     def own_folder(self):
@@ -150,6 +152,9 @@ JOB_SETTINGS = ("idle_timeout", "run_timeout", "compress", "remote_python")
 # A mailbox section [S] becomes the jobs S.up and S.down (DESIGN §12).
 MAILBOX_KEYS = ("mailbox.me", "mailbox.leader", "mailbox.local", "mailbox.remote")
 MAILBOX_JOBS = (".up", ".down")
+# the channel's folder limits (charter), as join writes them from the record; a section
+# without them takes the defaults
+MAILBOX_LIMITS = {"mailbox.max_mb": "max_mb", "mailbox.max_files": "max_files"}
 # so S.down stays a job name
 MAILBOX_NAME_MAX = 64 - len(".down")
 # [vcharon] box: at most this long, so a member's name <box>-<project>-<role> fits 32 (M10)
@@ -605,7 +610,7 @@ def _read_mailbox(parser, section, name, hint, base):
     settings = dataclasses.replace(base)
     values = {}
     for key, value in parser.items(section):
-        if key == "ssh" or key in MAILBOX_KEYS:
+        if key == "ssh" or key in MAILBOX_KEYS or key in MAILBOX_LIMITS:
             values[key] = value
         elif key in JOB_SETTINGS:
             _setting(settings, key, value, "%s [%s] %s" % (name, section, key), hint)
@@ -647,10 +652,25 @@ def _read_mailbox(parser, section, name, hint, base):
     if posixpath.normpath(remote) in ("/", "//", ".", "~"):
         refuse("mailbox.remote", "can't be the server's home or its root; give the tree a "
                                  "folder of its own, such as ~/.local/state/vcharon/mailbox")
-    box = Mailbox(section, me, local, remote, leader, channel)
+    limits = {}
+    for key, name_ in MAILBOX_LIMITS.items():
+        text = values.get(key)
+        if text is None:
+            limits[name_] = getattr(charter, "DEFAULT_" + name_.upper())
+            continue
+        low, high = charter.BOUNDS[name_]
+        if not (text.isascii() and text.isdigit() and len(text) < 10
+                and low <= int(text) <= high):
+            refuse(key, "a whole number, %d to %d" % (low, high))
+        limits[name_] = int(text)
+    box = Mailbox(section, me, local, remote, leader, channel, limits["max_mb"],
+                  limits["max_files"])
+    # up refuses to push an own folder over them; down leaves out each other member's folder
+    # over them (the path source's max_bytes and max_files)
+    sizes = {"max_bytes": str(box.max_mb * charter.MB), "max_files": str(box.max_files)}
     up = Job(section + ".up", values["ssh"],
-             Side("local", "path", {"path": box.own_folder, "prune": "yes",
-                                    "allow_empty": "yes"}),
+             Side("local", "path", dict({"path": box.own_folder, "prune": "yes",
+                                         "allow_empty": "yes"}, **sizes)),
              # never create (M10): the claim made <remote>/<me>; with create, a member's up
              # would make a closed channel again
              Side("remote", "dir", {"path": posixpath.join(remote, me), "create": "no"}),
@@ -658,8 +678,8 @@ def _read_mailbox(parser, section, name, hint, base):
     # mailbox_me: down plans only the other writers' folders at the top of the tree, and
     # leaves out everything else there, <me>/ in any case included (DESIGN §9.2, §12)
     down = Job(section + ".down", values["ssh"],
-               Side("remote", "path", {"path": remote, "mailbox_me": me, "prune": "yes",
-                                       "allow_empty": "yes"}),
+               Side("remote", "path", dict({"path": remote, "mailbox_me": me, "prune": "yes",
+                                            "allow_empty": "yes"}, **sizes)),
                Side("local", "dir", {"path": local, "create": "yes"}),
                settings, "remote:path", "local:dir", box)
     return [up, down]

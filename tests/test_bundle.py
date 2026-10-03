@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+import io
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import tokenize
 import unittest
 import zlib
 from unittest import mock
@@ -30,6 +33,79 @@ def run_loader(stdin, timeout=30):
     """Runs the bootstrap the way the server does, fed `stdin`."""
     return subprocess.run([sys.executable, "-I", "-c", bundle.BOOTSTRAP], input=stdin,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+
+
+def newer_syntax(source):
+    """[(what, (line, col))] for the syntax in source that Python 3.6 can't parse, of the kinds
+    the loader could slip into: f-strings, :=, a match statement's keyword at a statement's
+    start (a name match = 1 counts too: the loader has no use for it), a positional-only /
+    in a def's or a lambda's parameters, except*, a def's type parameters (def f[T]) and a
+    parenthesized with of several context managers (with (a as x, b as y))."""
+    found = []
+    fstring_start = getattr(tokenize, "FSTRING_START", None)
+    start = True
+    in_def = depth = 0
+    lambdas = []
+    tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    level = 0
+
+    def nxt(i):
+        return tokens[i + 1].string if i + 1 < len(tokens) else ""
+
+    for i, tok in enumerate(tokens):
+        name = tok.type == tokenize.NAME
+        op = tok.type == tokenize.OP
+        if tok.type == fstring_start or (
+                tok.type == tokenize.STRING
+                and "f" in re.match(r"[A-Za-z]*", tok.string).group().lower()):
+            found.append(("f-string", tok.start))
+        if op and tok.string == ":=":
+            found.append((":=", tok.start))
+        if start and name and tok.string == "match":
+            found.append(("match", tok.start))
+        if name and tok.string == "except" and nxt(i) == "*":
+            found.append(("except*", tok.start))
+        if name and tok.string == "def" and i + 2 < len(tokens) and tokens[i + 2].string == "[":
+            found.append(("def f[T]", tok.start))
+        if name and tok.string == "with" and nxt(i) == "(":
+            inner = 0
+            for later in tokens[i + 1:]:
+                if later.string in "([{" and later.type == tokenize.OP:
+                    inner += 1
+                elif later.string in ")]}" and later.type == tokenize.OP:
+                    inner -= 1
+                    if not inner:
+                        break
+                elif inner == 1 and later.type == tokenize.NAME and later.string == "as":
+                    found.append(("with (... as ...)", tok.start))
+                    break
+        # a lambda's parameters run to its ":" at the bracket level it started at
+        if op and tok.string in "([{":
+            level += 1
+        elif op and tok.string in ")]}":
+            level -= 1
+        if name and tok.string == "lambda":
+            lambdas.append(level)
+        elif op and tok.string == ":" and lambdas and lambdas[-1] == level:
+            lambdas.pop()
+        positional = (op and tok.string == "/" and tokens[i - 1].string == ","
+                      and nxt(i) in (",", ")", ":"))
+        if positional and lambdas and lambdas[-1] == level:
+            found.append(("/ in a lambda", tok.start))
+        if name and tok.string == "def":
+            in_def, depth = True, 0
+        elif in_def and op:
+            if tok.string == "(":
+                depth += 1
+            elif tok.string == ")":
+                depth -= 1
+                in_def = depth > 0
+            elif positional and depth == 1:
+                # a parameter of its own, not a division in a default value
+                found.append(("/ in a def", tok.start))
+        start = tok.type in (tokenize.NEWLINE, tokenize.NL, tokenize.INDENT, tokenize.DEDENT,
+                             tokenize.COMMENT)
+    return found
 
 
 class BundleTest(unittest.TestCase):
@@ -89,18 +165,46 @@ class BundleTest(unittest.TestCase):
                          "python3 -I -c 'import sys,base64;exec(base64.b64decode("
                          "sys.stdin.buffer.readline()))'")
 
-    def test_loader_parses_on_python_3_7(self):
-        try:
-            ast.parse("x = 1", feature_version=(3, 7))
-        except (ValueError, TypeError):
-            self.skipTest("this Python can't parse as 3.7")
-        ast.parse(bundle.loader_source(), feature_version=(3, 7))
+    def test_loader_parses_on_an_old_python(self):
+        # an old server's Python must reach the floor check, which the loader runs first
+        for version in ((3, 6), (3, 7)):
+            try:
+                ast.parse("x = 1", feature_version=version)
+            except (ValueError, TypeError):
+                continue
+            ast.parse(bundle.loader_source(), feature_version=version)
+        self.assertTrue(bundle.loader_source().startswith("FLOOR = (3, 11)\nimport sys\n\n"
+                                                          "if sys.version_info[:2] < FLOOR:"))
+
+    def test_loader_has_no_newer_syntax(self):
+        # ast's feature_version doesn't refuse an f-string on 3.13: tokens do. No f-string,
+        # no :=, no match statement, no positional-only / in a def (all newer than 3.6).
+        self.assertEqual(newer_syntax(bundle.loader_source()), [])
+        # the check itself sees each of them
+        for bad, what in (('x = f"{1}"\n', "f-string"), ("x = rF'a'\n", "f-string"),
+                          ("if (y := 1):\n    pass\n", ":="),
+                          ("match x:\n    case 1:\n        pass\n", "match"),
+                          ("def g(a, /, b):\n    pass\n", "/ in a def"),
+                          ("def g(a, /):\n    pass\n", "/ in a def"),
+                          ("h = lambda a, /: a\n", "/ in a lambda"),
+                          ("try:\n    pass\nexcept* ValueError:\n    pass\n", "except*"),
+                          ("def g[T](a):\n    pass\n", "def f[T]"),
+                          ("with (open(a) as x, open(b) as y):\n    pass\n",
+                           "with (... as ...)")):
+            with self.subTest(bad=bad):
+                self.assertEqual([w for w, _ in newer_syntax(bad)], [what])
+        self.assertEqual(newer_syntax("match = 1 / 2\ndef h(a=1 / 2):\n    pass\n"),
+                         [("match", (1, 0))])
+        # what 3.6 parses: a division in a lambda, one with in parentheses, except, x[0]
+        self.assertEqual(newer_syntax("f = lambda a, b=1 / 2: a / b\nwith (open(a)) as x:\n"
+                                      "    pass\ntry:\n    pass\nexcept (A, B):\n    pass\n"
+                                      "y = [1][0]\n"), [])
 
     def test_loader_line(self):
-        line = bundle.loader_line((3, 9))
+        line = bundle.loader_line((3, 11))
         self.assertTrue(line.endswith(b"\n"))
         self.assertNotIn(b"\n", line[:-1])
-        self.assertTrue(bundle.loader_source((3, 9)).startswith("FLOOR = (3, 9)\n"))
+        self.assertTrue(bundle.loader_source((3, 11)).startswith("FLOOR = (3, 11)\n"))
 
 
 class LoaderTest(unittest.TestCase):
@@ -114,7 +218,7 @@ class LoaderTest(unittest.TestCase):
     def test_too_old(self):
         result = run_loader(bundle.loader_line((99, 0)) + bundle.build(NONCE))
         self.assertEqual(result.returncode, 90, result.stderr)
-        self.assertIn(b"vcharon needs 99.0 or newer", result.stderr)
+        self.assertIn(b"vcharon needs 99.0 or later", result.stderr)
         self.assertEqual(result.stdout, b"")
 
     def test_bad_bundles(self):

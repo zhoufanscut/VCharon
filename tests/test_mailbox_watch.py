@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, entries, platform
+from vcharon import channel_cmd, charter, cli, entries, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
@@ -128,7 +128,7 @@ class WatchCase(unittest.TestCase):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": me, "leader": leader,
                                   "ssh": None, "remote": self.tree,
                                   "machine": util.TEST_MACHINE_ID, "project": project,
-                                  "role": role})
+                                  "role": role, **util.record_format()})
 
     def cli(self, *argv, project="q"):
         """vcharon watch mb --project <project> ARGV in this process: (exit code, stdout,
@@ -1449,6 +1449,33 @@ mailbox.remote = ~/.local/state/vcharon/channels/mb
 
 
 class ClientModeTest(WatchCase):
+    def test_a_member_left_out_by_the_pull(self):
+        # --no-stream: the same WARN, from the file the sync's down saved
+        note = charter.skipped_note("debian", "2.0 kB in 3 files, 1.0 kB over the limit of "
+                                    "1.0 kB and 10 files")
+        steps = [[note], [note.replace("2.0 kB in 3", "3.0 kB in 4")], []]
+        path = charter.left_out_path("mb.windows")
+        seen = []
+
+        def run(job, sync_args):
+            charter.save_left_out("mb.windows", steps.pop(0), 1000, 10)
+            if os.path.exists(path):
+                st = os.stat(path)
+                seen.append((st.st_ino, st.st_mtime_ns))
+            return 0, None, None
+
+        watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
+                        sleep=Rounds(*[lambda: None] * 2), run=run, rounds=3)
+        warn = ("left out debian/: over the channel's limit of 1.0 kB and 10 files; this box's "
+                "copy of it stays as it was until it is back under")
+        # one warning while the folder grows, cleared once the pull takes it again
+        self.assertEqual(self.said(), [watching(self.tree, 0), "WARN " + warn,
+                                       "WARN cleared: " + warn])
+        self.assertFalse(os.path.exists(charter.left_out_path("mb.windows")))
+        # the file holds names only: not written again while the folder grows
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0], seen[1])
+
     @staticmethod
     def write_config(case):
         """vcharon.ini, channels.d/mb.windows.ini and windows's join record, a remote member
@@ -1467,7 +1494,7 @@ class ClientModeTest(WatchCase):
                                   "leader": "debian", "ssh": "devbox",
                                   "remote": "~/.local/state/vcharon/channels/mb",
                                   "machine": util.TEST_MACHINE_ID, "project": "p",
-                                  "role": None})
+                                  "role": None, **util.record_format()})
         return list(SYNC)
 
     def setUp(self):
@@ -1701,6 +1728,29 @@ class StreamTest(WatchCase):
     def assert_all_stopped(self):
         for proc in self.procs:
             self.assertIsNotNone(proc.poll(), "a child still runs")
+
+    def test_a_member_left_out_by_the_pull(self):
+        # the streaming sync prints no notes: the members its down left out reach the
+        # watcher through the file the sync saves, a WARN each while it lasts
+        path = charter.left_out_path("mb.windows")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        doc = json.dumps({"limit": "1.0 kB and 10 files", "members": ["debian"]})
+        warn = ("left out debian/: over the channel's limit of 1.0 kB and 10 files; this box's "
+                "copy of it stays as it was until it is back under")
+        # the child doesn't wait for the watcher's rounds: the WARN comes in round 1 or 2, and
+        # once (its clearing is ClientModeTest's)
+        code, lines = self.watch(
+            [["out", "ROUND 0"], ["append", path, doc], ["out", "ROUND 0"], ["out", "ROUND 0"]],
+            rounds=3)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, [watching(self.tree, 0, ", streaming every 2 s"),
+                                 "WARN " + warn])
+        os.remove(path)
+        # it counts as a change once
+        self.children = []
+        code, lines = self.watch([["append", path, doc], ["out", "ROUND 0"]],
+                                 until_change=True, fresh=True)
+        self.assertEqual((code, lines[-2:]), (0, ["WARN " + warn, "EXIT change"]))
 
     def test_rounds_from_one_child(self):
         up = "ERROR mb.windows.up: unsafe_path: lnk: a symlink"
@@ -2022,7 +2072,7 @@ class EntriesTest(WatchCase):
         from vcharon import channel_cmd
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
                                   "leader": "windows", "ssh": None, "remote": self.tree,
-                                  "machine": util.TEST_MACHINE_ID})
+                                  "machine": util.TEST_MACHINE_ID, **util.record_format()})
         write_tree(self.tree, {"debian/CHANNEL.md": b"# CHANNEL\n"})
 
         def posted():
@@ -2203,7 +2253,7 @@ class ClosedTest(WatchCase):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "debian",
                                   "leader": "debian", "ssh": None, "remote": self.tree,
                                   "machine": util.TEST_MACHINE_ID, "project": "web",
-                                  "role": "b"})
+                                  "role": "b", **util.record_format()})
 
     def test_the_hint_is_channel_cmds(self):
         from vcharon import cli
@@ -2436,7 +2486,8 @@ class CommandTest(WatchCase):
         # a remote member streams by default, every 2 s (M15); --no-stream syncs every 30 s
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
-            ((self.tree, "debian", 10), plain),
+            # a local member's watch holds another folder over the channel's limits
+            ((self.tree, "debian", 10), dict(plain, folder_limits=(50 * 1000 * 1000, 1000))),
             (("mb.windows", SYNC, 5), streams),
             (("mb.windows", SYNC, 2), dict(streams, fresh=True, until_change=True,
                                            max_minutes=25)),
@@ -2451,7 +2502,7 @@ class CommandTest(WatchCase):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows-b",
                                   "leader": "debian", "ssh": "devbox", "remote": "r",
                                   "machine": util.TEST_MACHINE_ID, "project": "p",
-                                  "role": "b"})
+                                  "role": "b", **util.record_format()})
         write_tree(self.vcharon_home, {"channels.d/mb.windows-b.ini": MAILBOX.format(
             local=os.path.join(self.tmp, "b")).replace("windows", "windows-b").encode()})
         calls = []

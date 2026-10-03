@@ -11,7 +11,7 @@ from .proto import VCharonError, quote
 
 STAGE_PREFIX = ".vcharon-stage-"
 
-# Python 3.13's ntpath._reserved_names; ported, since the floor is 3.9.
+# Python 3.13's ntpath._reserved_names; ported, since 3.11 and 3.12 don't have it.
 RESERVED = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
     + ["COM%d" % i for i in range(1, 10)] + ["LPT%d" % i for i in range(1, 10)]

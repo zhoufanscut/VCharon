@@ -8,7 +8,7 @@ import hashlib
 import os
 import stat
 
-from .. import fsops, pathrules, platform, plugin, proto
+from .. import charter, fsops, pathrules, platform, plugin, proto
 from ..fsops import DIR, FILE, LINK, OTHER
 from ..plan import Plan, delete, good_mtime, put_dir, put_file
 from ..plugin import Option, choice
@@ -24,10 +24,14 @@ OPTIONS = {"path": Option(str, required=True), "keep_name": Option(bool, default
            "symlinks": Option(choice("error", "skip"), default="error"),
            "prune": Option(bool, default=False), "allow_empty": Option(bool, default=False),
            # set by a mailbox section's down job only (DESIGN §12)
-           "mailbox_me": Option(str, default=None)}
+           "mailbox_me": Option(str, default=None),
+           # a channel section's folder limits: with mailbox_me, of each other member's
+           # folder, which is left out while it's over them; without, of the whole source,
+           # which is refused then
+           "max_bytes": Option(int, default=None), "max_files": Option(int, default=None)}
 
 # options only a channel section sets: left out of the list of options
-HIDDEN = ("mailbox_me",)
+HIDDEN = ("mailbox_me", "max_bytes", "max_files")
 
 NAME_HINT = "rename it at the source"
 LINKS_HINT = "remove them, or skip them with symlinks = skip"
@@ -225,6 +229,13 @@ class Source(plugin.Source):
         self._me = options.get("mailbox_me")
         self._strays = []
         self._top_names = set()
+        # the folder limits (max_bytes, max_files), or None; with mailbox_me, each member
+        # folder's totals [bytes, files] as the walk met them, and those left out for being
+        # over the limits: {name: the note's clause}
+        limits = (options.get("max_bytes"), options.get("max_files"))
+        self._limits = None if None in limits else limits
+        self._totals = {}
+        self._over = {}
         # the patterns under each folding receiver's rule, for stale spellings in sent
         self._folded = [(osn, [pathrules.fold(x, osn) for x in singles],
                          [pathrules.fold(x, osn) for x in wholes])
@@ -469,9 +480,11 @@ class Source(plugin.Source):
                         raise
                     continue
                 digest = None
-                # Once the plan is bound to fail on a name or a link, reading more bytes for
-                # it would only waste time.
-                if full and not bad_names and not links:
+                over = self._count(parts[0] if self._me is not None else None, st.st_size)
+                # Once the plan is bound to fail on a name or a link, or to leave out the
+                # file's folder (or refuse the source) for its size, reading more bytes for it
+                # would only waste time.
+                if full and not bad_names and not links and not over:
                     try:
                         st, digest = self._hash(d, name, path)
                     except FileNotFoundError:
@@ -499,7 +512,49 @@ class Source(plugin.Source):
             notes.append("skipped 1 symlink or special file")
         elif skipped:
             notes.append("skipped %d symlinks or special files" % skipped)
+        if self._limits is not None:
+            entries, files = self._over_limits(entries, files, abs_path, notes)
         return entries, files, notes
+
+    def _count(self, top, size):
+        """Adds a file of size bytes to its member folder's totals (top), or to the whole
+        source's (None). True once those are over the limits."""
+        if self._limits is None:
+            return False
+        total = self._totals.setdefault(top, [0, 0])
+        total[0] += size
+        total[1] += 1
+        return total[0] > self._limits[0] or total[1] > self._limits[1]
+
+    def _over_limits(self, entries, files, abs_path, notes):
+        """The walk's (entries, files) less each member folder over the limits, with a note
+        each (mailbox_me); without mailbox_me, a source over them is refused: nothing is
+        sent."""
+        max_bytes, max_files = self._limits
+        if self._me is None:
+            size, n = self._totals.get(None, (0, 0))
+            text = charter.over(size, n, max_bytes, max_files)
+            if text is not None:
+                raise VCharonError("too_big", "%s holds %s, so nothing was sent"
+                                   % (abs_path, text),
+                                   charter.folder_hint(abs_path, max_bytes, max_files))
+            return entries, files
+        for name in sorted(self._totals):
+            size, n = self._totals[name]
+            text = charter.over(size, n, max_bytes, max_files)
+            if text is not None:
+                self._over[name] = text
+                notes.append(charter.skipped_note(name, text))
+        if not self._over:
+            return entries, files
+        kept, kept_files = [], {}
+        for i, e in enumerate(entries):
+            if e.path.partition("/")[0] in self._over:
+                continue
+            if i in files:
+                kept_files[len(kept)] = files[i]
+            kept.append(e)
+        return kept, kept_files
 
     # --- what changed since the saved state ---
 
@@ -577,6 +632,14 @@ class Source(plugin.Source):
         {index: parts} for open(), and the new state."""
         prune = self.options["prune"]
         found = {e.path: e for e in walked}
+        # A member folder left out for its size keeps its sent entries as they are: none of
+        # its paths is put, and none deleted (dropping them would make a file its writer
+        # deletes while cleaning up never a delete here). Once it's back under the limits,
+        # the next run plans it as usual.
+        held = {}
+        if self._over:
+            held = {p: v for p, v in sent.items() if p.partition("/")[0] in self._over}
+            sent = {p: v for p, v in sent.items() if p not in held}
         # exclude doesn't apply to a single file, so neither does its drop
         base = sent if single else self._drop_excluded(sent, top, found)
         if prune and not single and all(e.path == top for e in walked):
@@ -606,7 +669,9 @@ class Source(plugin.Source):
         for e in deletes:
             del new[e.path]
         new.update(values)
-        self._base = base
+        new.update(held)
+        self._base = dict(base)
+        self._base.update(held)
         self._values = values
         self._deletes = {e.path for e in deletes}
         return entries, new_files, {"sent": new}

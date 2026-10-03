@@ -282,9 +282,13 @@ class SessionTest(FakeSshCase):
         s = self.session(floor=(99, 0))
         err = self.failure(s.open)
         self.assertEqual((err.code, err.exit_code), ("connect", 4))
-        self.assertIn("too old", err.message)
-        self.assertIn("install Python 3.9 or newer", err.hint)
-        self.assertTrue(any("vcharon needs 99.0 or newer" in line for line in err.tail), err.tail)
+        # the floor is checked before any of vcharon's modules is compiled
+        major, minor = sys.version_info[:2]
+        self.assertEqual(err.message, "the server's python3 is %d.%d; vcharon needs 3.11 or "
+                         "later" % (major, minor))
+        self.assertEqual(err.hint, "install python3 3.11 or later on fake-dest (Debian 13's is "
+                         "3.13), or point remote_python in vcharon.ini at one")
+        self.assertTrue(any("vcharon needs 99.0 or later" in line for line in err.tail), err.tail)
 
     # 5
     def test_exits_before_the_marker(self):

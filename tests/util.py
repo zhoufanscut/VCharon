@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import cli, config, platform, run, ssh, stage
+from vcharon import charter, cli, config, platform, run, ssh, stage
 from vcharon.log import Log
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +29,8 @@ FAKE_SSH = os.path.join(TESTS_DIR, "fake_ssh.py")
 FAKE_SSH_ADD = os.path.join(TESTS_DIR, "fake_ssh_add.py")
 PACKAGE_DIR = os.path.dirname(os.path.abspath(vcharon.__file__))
 TEST_MACHINE_ID = "0123456789abcdef0123456789abcdef"
+DEBIAN_13 = (b'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nNAME="Debian GNU/Linux"\n'
+             b'VERSION_ID="13"\nVERSION="13 (trixie)"\nID=debian\n')
 
 
 def _can_symlink():
@@ -75,8 +77,12 @@ class FakeSshCase(unittest.TestCase):
         agent_vars = {var for _, var in platform.AGENT_ENV}
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("FAKE_SSH_") and k not in agent_vars}
+        # the fake server is Debian 13, whatever this box runs: no distro warning
+        self.os_release = os.path.join(self.tmp, "os-release")
+        with open(self.os_release, "wb") as f:
+            f.write(DEBIAN_13)
         env.update(FAKE_SSH_HOME=self.home, VCHARON_TEST_MACHINE_ID=TEST_MACHINE_ID,
-                   VCHARON_HOME=self.vcharon_home)
+                   VCHARON_HOME=self.vcharon_home, VCHARON_TEST_OS_RELEASE=self.os_release)
         patcher = mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -172,6 +178,7 @@ class FakeSshCase(unittest.TestCase):
                "leader": leader, "ssh": ssh, "remote": remote,
                "machine": os.environ.get("VCHARON_TEST_MACHINE_ID", TEST_MACHINE_ID),
                "project": project, "role": role}
+        doc.update(record_format())
         channel_cmd.write_record(doc)
         return doc
 
@@ -181,6 +188,12 @@ class FakeSshCase(unittest.TestCase):
                 return f.read()
         except FileNotFoundError:
             return ""
+
+
+def record_format(limits=None):
+    """A join record's format and limits, as join writes them: this vcharon's format, and
+    the default limits unless limits ({max_mb, max_files, max_entry_kb}) are given."""
+    return {"format": charter.FORMAT, "limits": dict(limits or charter.default_limits())}
 
 
 _REAL_READ_JOBS = config._read_jobs

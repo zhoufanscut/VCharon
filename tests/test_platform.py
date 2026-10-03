@@ -185,6 +185,45 @@ class FilesTest(unittest.TestCase):
             self.assertIsNone(platform.machine_id(missing, ioreg=must_not_run,
                                                   machine_guid=must_not_run))
 
+    def test_the_default_readers(self):
+        # machine_id() with its own readers: ioreg's output on a Mac, the registry on Windows
+        missing = (os.path.join(self.tmp, "missing"),)
+        uuid = "4C4C4544-0042-3510-8051-B4C04F4D4D32"
+        hashed = hashlib.sha256(("vcharon:" + uuid.lower()).encode()).hexdigest()[:32]
+        out = ('    "IOPlatformUUID" = "%s"\n' % uuid).encode()
+        with mock.patch.object(platform, "os_name", return_value="darwin"), \
+                mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(platform.fsops, "run",
+                                   return_value=platform.fsops.Ran(0, out, b"")):
+                self.assertEqual(platform.machine_id(missing), hashed)
+            # no ioreg at all
+            with mock.patch.object(platform.fsops, "run", side_effect=FileNotFoundError(2, "x")):
+                self.assertIsNone(platform.machine_id(missing))
+        module = types.ModuleType("winreg")
+        module.HKEY_LOCAL_MACHINE, module.KEY_READ, module.KEY_WOW64_64KEY = 7, 1, 256
+        module.REG_SZ = 1
+
+        class Key:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        module.OpenKey = lambda *args: Key()
+        module.QueryValueEx = lambda key, name: (uuid, 1)
+        with mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.dict(sys.modules, {"winreg": module}):
+                self.assertEqual(platform.machine_id(missing), hashed)
+
+            def no_key(*args):
+                raise FileNotFoundError(2, "no such key")
+
+            module.OpenKey = no_key
+            with mock.patch.dict(sys.modules, {"winreg": module}):
+                self.assertIsNone(platform.machine_id(missing))
+
     def test_ioreg_output(self):
         out = (b'+-o J314sAP  <class IOPlatformExpertDevice, id 0x100000202>\n  {\n'
                b'    "IOPlatformSerialNumber" = "XYZ"\n'
@@ -237,7 +276,7 @@ class FilesTest(unittest.TestCase):
                 self.assertIsNone(hint)
             else:
                 self.assertIn(want, hint)
-                self.assertTrue(hint.endswith("ask the user"), hint)
+                self.assertTrue(hint.endswith("ask your user"), hint)
 
     def test_distro(self):
         a = self.file("a", 'NAME="Debian GNU/Linux"\nPRETTY_NAME="Debian GNU/Linux 13 (trixie)"\n'
@@ -251,6 +290,38 @@ class FilesTest(unittest.TestCase):
         self.assertEqual(platform.distro((c,)), "Plain")
         self.assertIsNone(platform.distro((none, a)))
         self.assertIsNone(platform.distro((missing,)))
+
+    def test_os_release(self):
+        a = self.file("a", 'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nVERSION_ID="13"\n'
+                           "ID=debian\nID=other\n")
+        none = self.file("none", "NAME=x\n")
+        missing = os.path.join(self.tmp, "missing")
+        self.assertEqual(platform.os_release((missing, a)),
+                         {"PRETTY_NAME": "Debian GNU/Linux 13 (trixie)", "ID": "debian",
+                          "VERSION_ID": "13"})
+        # the first file that exists counts, even with none of the keys
+        self.assertEqual(platform.os_release((none, a)),
+                         {"PRETTY_NAME": None, "ID": None, "VERSION_ID": None})
+        self.assertIsNone(platform.os_release((missing,)))
+
+    def test_distro_warning(self):
+        text = "VCharon is tested on Debian 13 or later; "
+        for hello, want in (
+                ({"distro_id": "debian", "distro_version": "13"}, None),
+                ({"distro_id": "debian", "distro_version": "13.1"}, None),
+                ({"distro_id": "debian", "distro_version": "20"}, None),
+                ({"distro_id": "debian", "distro_version": "12", "distro": "Debian 12"},
+                 text + "it is ID=debian VERSION_ID=12 (Debian 12)"),
+                ({"distro_id": "debian"}, text + "it is ID=debian VERSION_ID=?"),
+                ({"distro_id": "ubuntu", "distro_version": "24.04"},
+                 text + "it is ID=ubuntu VERSION_ID=24.04"),
+                ({"distro_id": "debian", "distro_version": "\u0661\u0663"},
+                 text + "it is ID=debian VERSION_ID=\u0661\u0663"),
+                ({}, text + "its os-release names no distro (no ID=)"),
+                ({"distro_id": 13, "distro_version": 13},
+                 text + "its os-release names no distro (no ID=)")):
+            with self.subTest(hello=hello):
+                self.assertEqual(platform.distro_warning(hello), want)
 
     def test_small_facts(self):
         self.assertIn(platform.os_name(), ("linux", "darwin", "windows"))

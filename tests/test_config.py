@@ -234,15 +234,17 @@ class MailboxTest(MailboxCase):
         up, down = cfg.jobs["ch.windows.up"], cfg.jobs["ch.windows.down"]
         own = os.path.join("~/vcharon_mailbox", "windows")
         self.assertEqual((up.ssh, up.from_text, up.to_text), ("devbox", "local:path", "remote:dir"))
-        self.assertEqual(up.source, Side("local", "path", {"path": own, "prune": "yes",
-                                                           "allow_empty": "yes"}))
+        # the channel's folder limits: the defaults, as the section sets none
+        sizes = {"max_bytes": "50000000", "max_files": "1000"}
+        self.assertEqual(up.source, Side("local", "path", dict({"path": own, "prune": "yes",
+                                                                "allow_empty": "yes"}, **sizes)))
         # M10: up never creates; the claim made the member's folder
         self.assertEqual(up.sink, Side("remote", "dir", {"path": "~/vcharon_mailbox/windows",
                                                          "create": "no"}))
         self.assertEqual((down.from_text, down.to_text), ("remote:path", "local:dir"))
         self.assertEqual(down.source, Side("remote", "path", {
             "path": "~/vcharon_mailbox", "mailbox_me": "windows", "prune": "yes",
-            "allow_empty": "yes"}))
+            "allow_empty": "yes", **sizes}))
         self.assertEqual(down.sink, Side("local", "dir", {"path": "~/vcharon_mailbox",
                                                           "create": "yes"}))
         for job in (up, down):

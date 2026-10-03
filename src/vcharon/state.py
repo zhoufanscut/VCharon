@@ -101,7 +101,7 @@ def path(name):
 
 
 def now():
-    """The "saved" stamp. Never parsed: datetime.fromisoformat can't read its Z before 3.11."""
+    """The "saved" stamp. Never parsed."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 

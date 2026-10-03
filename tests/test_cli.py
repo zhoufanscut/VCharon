@@ -2380,5 +2380,31 @@ class EntryPointTest(unittest.TestCase):
                                                  "choice: "), result.stderr)
 
 
+class BrokenPipeTest(FakeSshCase):
+    """stdout's reader gone (vcharon doctor | head -3): exit 1, no ERROR line, and nothing
+    from Python's own flush at exit."""
+
+    def test_a_stdout_that_raises(self):
+        class Gone(io.StringIO):
+            def write(self, text):
+                raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+        err = io.StringIO()
+        with mock.patch("sys.stdout", Gone()), mock.patch("sys.stderr", err):
+            code = cli.main(["setup"])
+        self.assertEqual((code, err.getvalue()), (1, ""))
+
+    @unittest.skipIf(sys.platform == "win32", "a closed pipe's write isn't EPIPE on Windows")
+    def test_a_closed_pipe(self):
+        # the reader is gone before the first line: its write fails at once
+        r, w = os.pipe()
+        os.close(r)
+        try:
+            ran = subprocess.run([sys.executable, "-m", "vcharon", "doctor"], stdout=w,
+                                 stderr=subprocess.PIPE, timeout=60)
+        finally:
+            os.close(w)
+        self.assertEqual((ran.returncode, ran.stderr), (1, b""))
+
 if __name__ == "__main__":
     unittest.main()

@@ -390,8 +390,10 @@ class ListJsonTest(ChannelCase):
         self.assertEqual(sorted(doc), ["channels", "others", "server"])
         self.assertEqual(doc["server"], "fake-dest")
         [ch] = doc["channels"]
-        self.assertEqual(sorted(ch), ["leader", "leaders", "member_info", "members", "name",
-                                      "newest", "strays"])
+        self.assertEqual(sorted(ch), ["format", "leader", "leaders", "limits", "member_info",
+                                      "members", "name", "newest", "strays"])
+        self.assertEqual((ch["format"], ch["limits"]),
+                         (1, {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}))
         self.assertEqual((ch["name"], ch["leader"], ch["leaders"], ch["members"], ch["strays"]),
                          ("game", "laptop-ui", ["laptop-ui"], ["laptop-ui", "mac-web", "old"],
                           ["Stray"]))
@@ -639,6 +641,8 @@ HINTS = {
          ("game", "dev", FLAGS)),
         # another machine's claimer
         ("vcharon join %s %s --rejoin --takeover %s", ("game", "--server dev", FLAGS)),
+        # a join record from before channel formats
+        ("vcharon join %s %s %s (a rejoin) writes it", ("game", "--server dev", FLAGS)),
         ("on this machine, run: vcharon setup --box NAME (ask your user for one), then join "
          "again; only if your user confirms that this machine made that folder (its state "
          "was wiped), run: %s", ("vcharon join game --local --rejoin --takeover " + FLAGS,))],

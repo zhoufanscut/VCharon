@@ -9,7 +9,7 @@ import re
 import stat
 import time
 
-from . import fsops, pathrules, platform
+from . import charter, fsops, pathrules, platform
 from .entries import CHANNEL_FILE, MEMBER_FILE, header_of
 from .proto import VCharonError
 
@@ -176,11 +176,12 @@ def _close_all(*handles):
 # --- channel.list ---
 
 def list_channels(root, tick=_no_tick):
-    """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest"}], "others":
-    [{"name", "why"}]}, in name order. fields: for each member, {"box", "os", "agent",
-    "project"} from its MEMBER.md (None each when it's missing); leaders: the members whose
-    folder holds CHANNEL.md; newest: the newest file's mtime, or None. A missing root holds
-    no channel."""
+    """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "format",
+    "limits"}], "others": [{"name", "why"}]}, in name order. fields: for each member, {"box",
+    "os", "agent", "project"} from its MEMBER.md (None each when it's missing); leaders: the
+    members whose folder holds CHANNEL.md; newest: the newest file's mtime, or None; format
+    and limits: from the one leader's CHANNEL.md (charter.parse), unchecked. A missing root
+    holds no channel."""
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
@@ -238,8 +239,32 @@ def _channel_info(path, name, tick):
                 continue
             if stat.S_ISREG(st.st_mode) and (newest is None or st.st_mtime > newest):
                 newest = st.st_mtime
-    return {"name": name, "members": members, "fields": fields, "leaders": leaders,
+    info = {"name": name, "members": members, "fields": fields, "leaders": leaders,
             "strays": strays, "newest": newest}
+    info.update(_charter(path, leaders))
+    return info
+
+
+def _charter(path, leaders):
+    """{"format", "limits"} from the one leader's CHANNEL.md (charter.parse); no format when
+    the channel has no leader or several."""
+    if len(leaders) != 1:
+        return charter.parse("", "")
+    return charter.read(os.path.join(path, leaders[0]), leaders[0])
+
+
+def _leaders(path):
+    """The members whose folder holds CHANNEL.md as a regular file, in name order."""
+    found = []
+    for entry in sorted(os.scandir(path), key=lambda e: e.name):
+        if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
+            try:
+                st = os.lstat(os.path.join(entry.path, CHANNEL_FILE))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                found.append(entry.name)
+    return found
 
 
 # --- channel.claim, channel.release ---
@@ -249,8 +274,9 @@ def claim(root, channel, name, create, tick=_no_tick):
     missing parents): one mkdir each, so of two creators or two joiners with one name only one
     wins. Returns {"existed": the member folder was there already, "machine", "root": the
     root as a section's mailbox.remote spells it, "claimer": the claimer: of the existing
-    folder's MEMBER.md, or None (a new folder, no MEMBER.md, none in it)}. Never a host
-    name: the reply's values go into the channel's files."""
+    folder's MEMBER.md, or None (a new folder, no MEMBER.md, none in it), "format" and
+    "limits": the channel's, as list_channels gives them}. Never a host name: the reply's
+    values go into the channel's files."""
     _check_names(channel, name)
     if create:
         try:
@@ -295,8 +321,15 @@ def claim(root, channel, name, create, tick=_no_tick):
         claimer = _claimer_of(ch, name) if existed else None
     finally:
         _close_all(ch, top)
-    return {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
-            "claimer": claimer}
+    reply = {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
+             "claimer": claimer}
+    # a new channel's CHANNEL.md isn't written yet: create writes it after the claim
+    path = os.path.join(root, channel)
+    try:
+        reply.update(_charter(path, _leaders(path)))
+    except OSError:
+        reply.update(charter.parse("", ""))
+    return reply
 
 
 def _claimer_of(ch, name):

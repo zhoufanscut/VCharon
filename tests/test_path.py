@@ -1024,6 +1024,64 @@ class PathCases:
         self.assertNotEqual(p.entries[0].mtime, MTIME)
 
 
+    # --- a channel's folder limits ---
+
+    def test_a_member_folder_over_the_limits(self):
+        # the pull's source: each member folder over max_bytes or max_files is left out of
+        # the plan, with a note, and keeps its sent entries as they were
+        limits = dict(mailbox_me="me", prune="yes", max_bytes="100", max_files="3")
+        write_tree(self.src, {"me/x": b"x", "a/MEMBER.md": b"m", "a/old.txt": b"o",
+                              "b/b.txt": b"b"})
+        first = self.state_of(**limits)
+        self.assertIn("a/old.txt", first["sent"])
+        # over: three new files, and old.txt deleted, at once; b changes
+        write_tree(self.src, {"a/n1": b"1", "a/n2": b"2", "a/n3": b"3", "b/b.txt": b"bb"})
+        os.remove(self.at("a/old.txt"))
+        src, p = self.planned(first, **limits)
+        self.assertEqual(paths(p), ["b/b.txt"])
+        self.assertEqual(p.notes, ["left out a/: 4 B in 4 files, 1 file over the limit of "
+                                   "100 B and 3 files; this box's copy of it stays as it was "
+                                   "until it is back under"])
+        held = {k: v for k, v in first["sent"].items() if k.startswith("a")}
+        self.assertEqual({k: v for k, v in p.state["sent"].items() if k.startswith("a")}, held)
+        # a commit that wrote nothing keeps them too
+        after = src.state_after([], [])
+        self.assertEqual({k: v for k, v in after["sent"].items() if k.startswith("a")}, held)
+        # full: the same, and the folder's files aren't read
+        src, p = self.planned(first, full=True, **limits)
+        self.assertEqual(paths(p), ["b", "b/b.txt"])
+        # by size alone
+        src, p = self.planned(first, **dict(limits, max_files="10", max_bytes="3"))
+        self.assertEqual(paths(p), ["b/b.txt"])
+        self.assertEqual(len(p.notes), 1)
+        self.assertTrue(p.notes[0].startswith("left out a/: 4 B in 4 files, 1 B over the "
+                                              "limit of 3 B and 10 files"), p.notes)
+        # back under: old.txt's delete is planned, and the new files come
+        for name in ("n2", "n3"):
+            os.remove(self.at("a/" + name))
+        src, p = self.planned(first, **limits)
+        self.assertEqual(paths(p), ["a/n1", "b/b.txt", "a/old.txt"])
+        self.assertEqual([e.op for e in p.entries], ["put", "put", "delete"])
+        self.assertNotIn("a/old.txt", p.state["sent"])
+        self.assertEqual(p.notes, [])
+
+    def test_a_whole_source_over_the_limits(self):
+        # the writer's own folder (up): refused, nothing planned
+        write_tree(self.src, {"MEMBER.md": b"m", "a.txt": b"aaaa", "d/b.txt": b"b"})
+        err = self.refused("too_big", max_bytes="5", max_files="10")
+        self.assertEqual(err.message, "%s holds 6 B in 3 files, 1 B over the limit of 5 B and 10 "
+                                      "files, so nothing was sent" % self.src)
+        self.assertEqual(err.hint, "move what isn't an entry (logs, builds, data) out of %s, or "
+                                   "delete it, until it holds at most 5 B and 10 files; keep "
+                                   "MEMBER.md and your .md files with entries" % self.src)
+        self.refused("too_big", max_bytes="100", max_files="2")
+        self.assertEqual(paths(self.plan(max_bytes="6", max_files="3")),
+                         ["MEMBER.md", "a.txt", "d", "d/b.txt"])
+        # with a state too
+        with self.assertRaises(VCharonError) as cm:
+            self.planned({}, max_bytes="5", max_files="10")
+        self.assertEqual(cm.exception.code, "too_big")
+
 @unittest.skipIf(WINDOWS, "directory fds are POSIX only")
 class FdPathSourceTest(PathCases, unittest.TestCase):
     impl = "fd"

@@ -8,6 +8,7 @@ import io
 import ntpath
 import os
 import posixpath
+import re
 import subprocess
 import threading
 import time
@@ -74,6 +75,10 @@ def ssh_command(settings, dest, probe=False):
     return argv
 
 
+# the loader's refusal of an old Python (bundle._LOADER)
+_OLD_PYTHON = re.compile(r"the server's Python is ([0-9]+\.[0-9]+);")
+
+
 def classify_exit(rc, tail, dest, settings, killed=None):
     """Why ssh ended before the ready marker (DESIGN §6.4). Always `connect`."""
     text = "\n".join(tail)
@@ -84,8 +89,13 @@ def classify_exit(rc, tail, dest, settings, killed=None):
                            hint="authentication or a jump host may be stuck; run ssh %s in a "
                            "terminal to see" % dest)
     elif rc == 90:
-        err = VCharonError("connect", "the Python on %s is too old for vcharon" % dest,
-                           hint="install Python %d.%d or newer on %s, or set remote_python"
+        # the loader's line says which version it found
+        found = _OLD_PYTHON.search(text)
+        err = VCharonError("connect", "the server's %s is %s; vcharon needs %d.%d or later"
+                           % (settings.remote_python, found.group(1) if found else "too old",
+                              FLOOR[0], FLOOR[1]),
+                           hint="install python3 %d.%d or later on %s (Debian 13's is 3.13), "
+                           "or point remote_python in vcharon.ini at one"
                            % (FLOOR[0], FLOOR[1], dest))
     elif rc == 91:
         err = VCharonError("connect", "the server couldn't load vcharon's code",

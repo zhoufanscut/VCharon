@@ -23,7 +23,8 @@
 # | VCHARON_TEST_OS         | passed on; default linux, the os the helper's hello names      |
 #
 # The rest of the environment reaches the helper as it is, VCHARON_TEST_CLOCK_SHIFT and
-# VCHARON_TEST_UTC_OFFSET among it (the hello's clock and zone, M12b).
+# VCHARON_TEST_UTC_OFFSET among it (the hello's clock and zone, M12b), and
+# VCHARON_TEST_OS_RELEASE (the file the hello reads in place of /etc/os-release).
 #
 # It then runs [sys.executable, "-I", "-c", code] with its own stdin and stdout pipes and relays
 # bytes both ways, the way ssh does: a thread copies fd 0 to the child and closes the child's

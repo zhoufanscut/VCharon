@@ -31,7 +31,10 @@ it a file or a quoted heredoc (<<'EOF'), and the shell can't run any of it eithe
 after the header's blank line, and a body line that starts like a Markdown heading (`# `, `## `
 … `###### `) gets `> ` in front, so a body can't forge a header or a heading.
 
-It refuses, writing nothing: a file outside a member's folder, or in another member's folder;
+It refuses, writing nothing: a body bigger than the channel's entry limit (1 MB unless its
+leader set another); an entry file that would grow past it, and an own folder that would hold
+more than the channel's folder limits (50 MB and 1,000 files unless set), with this entry; a
+file outside a member's folder, or in another member's folder;
 MEMBER.md and CHANNEL.md; a file that isn't a .md file (the watcher and the numbering read only
 those); a file whose name is the same on macOS or Windows as another name next to it
 (ANSWERS.md next to answers.md: a client there would refuse the whole tree), or one in a folder
@@ -53,7 +56,7 @@ import os
 import sys
 import time
 
-from .. import entries, fsops, pathrules, platform
+from .. import charter, entries, fsops, pathrules, platform
 from ..proto import VCharonError
 
 # the files post writes: a member's, and the leader's plan (--steps)
@@ -264,11 +267,54 @@ def body_from(data):
     return body
 
 
-def post(path, me, to, title, re_=None, body="", clock=None):
+def _too_big(text, hint):
+    return VCharonError("too_big", text, hint)
+
+
+BODY_HINT = ("shorten it: put long output in a file outside the channel, and say in the body "
+             "where it is")
+FILE_HINT = "post into a new file of your own folder: add --file NAME.md (RESULTS-2.md, say)"
+
+
+def limit_check(own, limits):
+    """entries.post's check for the channel's limits (charter): the entry file and the own
+    folder, as they would be after the post. Refused (too_big) over either."""
+    max_entry = limits["max_entry_kb"] * charter.KB
+    max_bytes, max_files = limits["max_mb"] * charter.MB, limits["max_files"]
+
+    def check(path, after):
+        if after > max_entry:
+            raise _too_big("%s would hold %s with this entry; an entry file holds at most %s "
+                           "in this channel" % (path, charter.size_text(after),
+                                                charter.size_text(max_entry)), FILE_HINT)
+        size, files = charter.folder_total(own)
+        try:
+            st = os.lstat(path)
+            size -= st.st_size
+        except FileNotFoundError:
+            files += 1
+        text = charter.over(size + after, files, max_bytes, max_files)
+        if text is not None:
+            raise _too_big("with this entry your folder %s would hold %s" % (own, text),
+                           charter.folder_hint(own, max_bytes, max_files))
+
+    return check
+
+
+def post(path, me, to, title, re_=None, body="", clock=None, limits=None):
     """Posts one entry as me into the .md file path, in me's own folder; to and title as
     check_args returns them. Returns (the entry's ID, its time). Refuses (VCharonError)
     as the module's docstring says, writing nothing. clock: time.time, looked up when it
-    posts (tests fake it)."""
+    posts (tests fake it). limits: the channel's (charter); a body bigger than its entry
+    limit is refused first, the entry file and the own folder as they would be after the post
+    under the folder's lock."""
+    if limits is not None:
+        max_entry = limits["max_entry_kb"] * charter.KB
+        size = len(body.encode("utf-8"))
+        if size > max_entry:
+            raise _too_big("the body is %s; an entry file holds at most %s in this channel"
+                           % (charter.size_text(size), charter.size_text(max_entry)),
+                           BODY_HINT)
     path = os.path.abspath(path)
     shown = path
     if not os.path.isdir(os.path.dirname(path)):
@@ -315,7 +361,9 @@ def post(path, me, to, title, re_=None, body="", clock=None):
                   % (token, tree), file=sys.stderr)
     if found is not None:
         print("note: %s" % found[1], file=sys.stderr)
+    check = limit_check(own, limits) if limits is not None else None
     try:
-        return entries.post(path, own, name, title, to, re_, body, clock=clock or time.time)
+        return entries.post(path, own, name, title, to, re_, body, clock=clock or time.time,
+                            check=check)
     except OSError as e:
         raise fsops.error(e, path)

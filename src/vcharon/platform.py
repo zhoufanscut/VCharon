@@ -522,33 +522,71 @@ def detect_agent(env=None):
 
 
 def no_machine_hint():
-    """What to do when machine_id() is None on this box."""
+    """What to do when machine_id() is None on this box: on a Mac or Windows, the command
+    that shows the id vcharon reads; None elsewhere."""
     osn = os_name()
     if osn == "darwin":
-        return "vcharon couldn't read this Mac's IOPlatformUUID (ioreg): ask the user"
+        return ("check that /usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice prints an "
+                "IOPlatformUUID line, then try again; if it prints none, ask your user")
     if osn == "windows":
-        return "vcharon couldn't read this box's MachineGuid (the registry): ask the user"
+        return ("check that reg query HKLM\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid "
+                "/reg:64 prints a MachineGuid, then try again; if it prints none, ask your user")
     return None
 
 
-def distro(paths=("/etc/os-release", "/usr/lib/os-release")):
-    """PRETTY_NAME from os-release, or None."""
+OS_RELEASE = ("/etc/os-release", "/usr/lib/os-release")
+# the server distro vcharon is tested on: Debian, from this VERSION_ID on (only a warning
+# elsewhere)
+TESTED_DISTRO = ("debian", 13)
+
+
+def os_release(paths=OS_RELEASE):
+    """{"PRETTY_NAME", "ID", "VERSION_ID"} from os-release, each None when missing or empty;
+    None when no file can be read. The first file that exists is the one that counts
+    (os-release(5))."""
     for path in paths:
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 lines = f.read(65536).splitlines()
         except OSError:
             continue
+        out = dict.fromkeys(("PRETTY_NAME", "ID", "VERSION_ID"))
         for line in lines:
             key, sep, value = line.partition("=")
-            if sep and key.strip() == "PRETTY_NAME":
+            key = key.strip()
+            if sep and key in out and out[key] is None:
                 value = value.strip()
                 if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                     value = value[1:-1]
-                return value or None
-        # The first file that exists is the one that counts (os-release(5)).
-        return None
+                out[key] = value or None
+        return out
     return None
+
+
+def distro(paths=OS_RELEASE):
+    """PRETTY_NAME from os-release, or None."""
+    found = os_release(paths)
+    return found["PRETTY_NAME"] if found else None
+
+
+def distro_warning(hello):
+    """None for a server whose hello says Debian 13 or later (distro_id, distro_version);
+    else the warning's text, with what was found. Never a refusal."""
+    distro_id, version = hello.get("distro_id"), hello.get("distro_version")
+    major = None
+    if isinstance(version, str):
+        head = version.split(".")[0]
+        major = int(head) if head.isascii() and head.isdigit() and len(head) < 6 else None
+    if distro_id == TESTED_DISTRO[0] and major is not None and major >= TESTED_DISTRO[1]:
+        return None
+    if not isinstance(distro_id, str) and not isinstance(version, str):
+        found = "its os-release names no distro (no ID=)"
+    else:
+        found = "it is ID=%s VERSION_ID=%s" % (distro_id or "?", version or "?")
+    pretty = hello.get("distro")
+    if isinstance(pretty, str) and pretty:
+        found += " (%s)" % pretty
+    return "VCharon is tested on Debian 13 or later; %s" % found
 
 
 def user():
