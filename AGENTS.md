@@ -100,15 +100,10 @@ Guards that fail the suite, and what to do:
 | the old tool's name | `tests/test_old_name.py` | VCharon came from another tool, whose name appears only in the CHANGELOG line that says so; `ALLOWED` counts hits per file exactly |
 | a reference to a doc section | `tests/test_guide.py` (`DocReferenceTest`) | references go by heading name, as `(DESIGN, "Which membership")`; rename both together; never a section number |
 
-## Private words
+## Example names
 
-The repo must never hold the maintainer's own machine names, host names, paths or accounts: not
-in code, tests, docs, file names or commit messages. There is a local word list in `.git/info/`,
-and two hooks in `.git/hooks/` (`pre-commit`, `commit-msg`) refuse a commit that matches it; see
-the maintainer for both. They are not in the repo, on purpose: a committed list would publish
-the words it hides. Never commit with `--no-verify`. Examples use neutral names only: boxes
-`mac`, `win`, `linux`, `laptop`; servers `devbox`, `server.example.com`; projects `myapp`,
-`api`, `web`.
+Examples in code, tests and docs use neutral names: boxes `mac`, `win`, `linux`, `laptop`;
+servers `devbox`, `server.example.com`; projects `myapp`, `api`, `web`.
 
 ## Where each kind of text goes
 
