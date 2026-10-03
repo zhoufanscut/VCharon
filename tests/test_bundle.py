@@ -205,7 +205,7 @@ class BundleTest(unittest.TestCase):
             except (ValueError, TypeError):
                 continue
             ast.parse(bundle.loader_source(), feature_version=version)
-        self.assertTrue(bundle.loader_source().startswith("FLOOR = (3, 11)\nimport sys\n\n"
+        self.assertTrue(bundle.loader_source().startswith("FLOOR = (3, 13)\nimport sys\n\n"
                                                           "if sys.version_info[:2] < FLOOR:"))
 
     def test_loader_has_no_newer_syntax(self):
@@ -233,10 +233,10 @@ class BundleTest(unittest.TestCase):
                                       "y = [1][0]\n"), [])
 
     def test_loader_line(self):
-        line = bundle.loader_line((3, 11))
+        line = bundle.loader_line((3, 13))
         self.assertTrue(line.endswith(b"\n"))
         self.assertNotIn(b"\n", line[:-1])
-        self.assertTrue(bundle.loader_source((3, 11)).startswith("FLOOR = (3, 11)\n"))
+        self.assertTrue(bundle.loader_source((3, 13)).startswith("FLOOR = (3, 13)\n"))
 
 
 class LoaderTest(unittest.TestCase):
@@ -252,6 +252,19 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(result.returncode, 90, result.stderr)
         self.assertIn(b"vcharon needs 99.0 or later", result.stderr)
         self.assertEqual(result.stdout, b"")
+
+    def test_refuses_3_11_and_3_12(self):
+        # the real floor, with the server's Python faked older: what a Debian 12 (3.11) or an
+        # Ubuntu 24.04 (3.12) server gets
+        for minor in (11, 12):
+            with self.subTest(minor=minor):
+                code = ("import sys\nsys.version_info = (3, %d, 0)\nexec(compile(%r, 'loader', "
+                        "'exec'))\n" % (minor, bundle.loader_source()))
+                result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
+                                        timeout=60, check=False)
+                self.assertEqual(result.returncode, 90, result.stderr)
+                self.assertIn(b"the server's Python is 3.%d; vcharon needs 3.13 or later" % minor,
+                              result.stderr)
 
     def test_bad_bundles(self):
         good = bundle.build(NONCE)

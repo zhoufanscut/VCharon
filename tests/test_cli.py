@@ -1648,7 +1648,7 @@ class RepeatTest(FakeSshCase):
                 "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
                 "%s"
                 "sys.exit(cli.main(sys.argv[1:]))\n" % (VCHARON_DIR, FAKE_SSH, before))
-        # -S: no site, so no .pth file is read, as in a binary and on 3.11. 3.13's site.py
+        # -S: no site, so no .pth file is read, as in a binary. site.py
         # decodes .pth files with utf-8-sig, which would hide a lazy import of that codec from
         # the import checks; the path insert above stands in for the editable install's .pth.
         # the environment's scripts folder first on PATH: an entry point named vcharon there

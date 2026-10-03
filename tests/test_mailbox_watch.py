@@ -65,8 +65,8 @@ class Rounds:
 
 
 def no_site_env():
-    """The environment of a child run with -S (no site, so no .pth file read, as in a binary
-    and on 3.11; 3.13's site.py decodes .pth files with utf-8-sig, which would hide a lazy
+    """The environment of a child run with -S (no site, so no .pth file read, as in a binary;
+    site.py decodes .pth files with utf-8-sig, which would hide a lazy
     import of that codec from the import checks): the package found through PYTHONPATH, in
     place of the editable install's .pth.
     The environment's own scripts folder first on PATH: with an entry point named vcharon there

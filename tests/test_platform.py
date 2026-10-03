@@ -384,7 +384,7 @@ class VCharonCommandTest(unittest.TestCase):
     def test_which_through_a_link(self):
         tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        real = os.path.join(tmp, "python3.11")
+        real = os.path.join(tmp, "python3.13")
         open(real, "w").close()
         link = os.path.join(tmp, "python3")
         try:
@@ -394,9 +394,9 @@ class VCharonCommandTest(unittest.TestCase):
         # by realpath: PATH's python3 is a link to this very file. The host's own OS form,
         # since real and link are this host's paths (a Linux form can't split C:\...).
         osn = "windows" if os.name == "nt" else "linux"
-        which = lambda name: link if name == "python3.11" else None
+        which = lambda name: link if name == "python3.13" else None
         self.assertEqual(platform.command_for(real, "/f", osn, which, venv=False),
-                         "python3.11 /f")
+                         "python3.13 /f")
         # a venv's python is a link to the base one, and only the link finds the venv's
         # packages: by the path itself
         self.assertEqual(platform.command_for(real, "/f", osn, which, venv=True),

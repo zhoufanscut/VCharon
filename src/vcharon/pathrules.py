@@ -17,7 +17,7 @@ STAGE_PREFIX = ".vcharon-stage-"
 # use, and a long-running command imports nothing after its start (DESIGN, "Running watchers").
 codecs.lookup("utf-16-le")
 
-# Python 3.13's ntpath._reserved_names; ported, since 3.11 and 3.12 don't have it.
+# Python 3.13's ntpath._reserved_names, copied: a private name, so not imported.
 RESERVED = frozenset(
     ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
     + ["COM%d" % i for i in range(1, 10)] + ["LPT%d" % i for i in range(1, 10)]

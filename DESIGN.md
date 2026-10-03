@@ -30,8 +30,8 @@ every such name is a heading here.
 
 | role | OS | Python |
 |---|---|---|
-| client (where an agent runs) | Linux, macOS, Windows 10 or 11 | the binary's own; 3.11 or later for pipx, uvx or a source checkout |
-| server for remote members | Linux. Debian 13 or later is the supported one; `doctor` and `ping` warn on any other distro and go on | its `python3`, 3.11 or later |
+| client (where an agent runs) | Linux, macOS, Windows 10 or 11 | the binary's own; 3.13 or later for pipx, uvx or a source checkout |
+| server for remote members | Linux. Debian 13 or later is the supported one; `doctor` and `ping` warn on any other distro and go on | its `python3`, 3.13 or later |
 | channel root for local members only | any of the three | – |
 
 - The client always opens the connection. The server can't reach the client (NAT, firewalls, no
@@ -51,7 +51,7 @@ for remote members, a GUI.
 | decision | why |
 |---|---|
 | Python, standard library only, on both ends | Every server has `python3`. Nothing to install there, and the helper can be sent as source code |
-| Python 3.11 or later everywhere | One language level for both ends. The binaries carry their own Python, so no floor has to fit an old system Python on a client |
+| Python 3.13 or later everywhere | One language level for both ends. The binaries bundle 3.13, the server VCharon targets (Debian 13) ships 3.13, and a client running the binary never uses its own Python; one floor means one CI row fewer and no code for older versions |
 | The system OpenSSH client, never an ssh library | It reuses your keys, agent, `~/.ssh/config`, `known_hosts` and jump hosts |
 | One ssh connection per sync; up and down share it | Windows' OpenSSH can't share a connection between runs (no ControlMaster), so fewer connections is the only way to save handshakes there |
 | Nothing installed on the server | The helper's code is sent over stdin on every connection, so both ends always run the same version |
@@ -160,7 +160,7 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
 
 ```
 src/vcharon/
-  __init__.py      VERSION, PROTOCOL, FLOOR = (3, 11)
+  __init__.py      VERSION, PROTOCOL, FLOOR = (3, 13)
   __main__.py      python -m vcharon
   cli.py           the command line: verbs, output, exit codes; the sync runner       client
   channel_cmd.py   list, create, join, leave, close: names, records, sections         client
@@ -287,7 +287,7 @@ The last line is one argument, and the only text that ever goes through the serv
 | network | exit 255 with `Connection refused`, `timed out`, `Could not resolve`, … | check the host, port, VPN |
 | no Python on the server | exit 127 | install `python3`, or set `remote_python` |
 | `remote_python` isn't runnable | exit 126 | check `remote_python` |
-| Python too old | exit 90 | install 3.11 or later |
+| Python too old | exit 90 | install 3.13 or later |
 | VCharon's code didn't load | exit 91 | a bug; see the log |
 | ssh exited before the marker in any other way | exit 255 otherwise | try again, else run `ssh <dest>` in a terminal; ssh's last stderr line goes into the error itself, `(ssh: <line>)`, since a watcher shows only the error and its fix |
 | the bootstrap exited before the marker | any other code | a shell startup file may have read stdin; see the log |
@@ -1725,17 +1725,19 @@ which and how to adapt. A channel format change is always a minor version at lea
   where VCharon came from; every reference by name to a section of DESIGN.md or README.md names
   a heading that exists, and none goes by a section number; every `vcharon <verb>` string
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
-- CI runs the suite on Linux (Python 3.11 and 3.13), macOS and Windows (3.13), and `ruff check
-  src tests` on one row.
+- CI runs the suite on Linux, macOS and Windows (Python 3.13), and `ruff check src tests` on one
+  row.
 - CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`: sshd started, a
-  key without a passphrase authorized, `localhost` in `known_hosts`) and runs a real channel over
+  key without a passphrase authorized, `localhost` in `known_hosts`, and setup-python's 3.13 linked
+  as `/usr/local/bin/python3`, since the runner's own `python3` is below the floor and the server
+  side runs what an ssh login finds; a login is checked to get 3.13) and runs a real channel over
   it: `tests/ssh_flow.sh localhost WORK` pings, then two remote members from two `VCHARON_HOME`s
   (boxes `ci1` and `ci2`, one project) create and join a channel, the second one's `watch
   --until-change` wakes on the first one's post and sync, and it ends with `read`, `leave` and
-  `close`; then the real-ssh unit tests (`VCHARON_TEST_SSH=localhost`). The channel is made in
-  the ssh user's real channel root, since the server side reads no test variable over ssh, so
-  `ssh_flow.sh` runs only where `CI` is set (or `SSH_FLOW_REAL_HOME=1`), refuses a root that
-  already holds its channel, and `ci_sshd.sh` only on GitHub Actions.
+  `close`; then the real-ssh unit tests (`VCHARON_TEST_SSH=localhost`). The channel is made in the
+  ssh user's real channel root, since the server side reads no test variable over ssh, so
+  `ssh_flow.sh` runs only where `CI` is set (or `SSH_FLOW_REAL_HOME=1`), refuses a root that already
+  holds its channel, and `ci_sshd.sh` only on GitHub Actions.
 - `install.sh` runs under `sh` against a fake release on a local HTTP server, with `uname`
   faked for each platform (POSIX only). A built binary is checked by `tests/smoke.sh`
   ([Packaging](#packaging)), and its packed assets by `tests/pack.py` and
@@ -1743,7 +1745,7 @@ which and how to adapt. A channel format change is always a minor version at lea
 
 ## Rules for the code
 
-- Standard library only, Python 3.11 or later. `ruff check src tests` clean, with the ignores in
+- Standard library only, Python 3.13 or later. `ruff check src tests` clean, with the ignores in
   `pyproject.toml`, each with its reason there.
 - Never build a shell command string on the client: argument lists only; the bootstrap line is
   the only shell text.

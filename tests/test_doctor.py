@@ -376,7 +376,7 @@ class DoctorTest(DoctorCase):
         self.os_name("windows")
         self.patch(platform, "is_wow64", return_value=True)
         lines = self.doctor(code=0)
-        # the floor (3.11) covers every OS: no warning of its own on Windows
+        # the floor (3.13) covers every OS: no warning of its own on Windows
         self.assertEqual([level for level, text in self.of(lines, "python")], ["ok", "warn"])
         self.assertIn("  warn  python   32-bit Python on 64-bit Windows", lines)
 
@@ -845,8 +845,8 @@ class RowTest(DoctorCase):
         real = bundle.loader_line
         self.patch(bundle, "loader_line", side_effect=lambda floor=vcharon.FLOOR: real((99, 0)))
         major, minor = sys.version_info[:2]
-        self.failed("the server's python3 is %d.%d; vcharon needs 3.11 or later" % (major, minor),
-                    "install python3 3.11 or later on fake-dest (Debian 13's is 3.13), or point "
+        self.failed("the server's python3 is %d.%d; vcharon needs 3.13 or later" % (major, minor),
+                    "install python3 3.13 or later on fake-dest (Debian 13's is 3.13), or point "
                     "remote_python in vcharon.ini at one")
 
     def test_code_didnt_load(self):

@@ -86,12 +86,19 @@ and made a tool of its own.
   and allows it, and how to install from a release's assets by hand (the macOS quarantine flag
   only if present). The guide: `setup` writes the config on its first run; Claude Code reports a
   watcher's `EXIT quiet` (exit 10) as "failed with exit code 10", which only means restart it.
+- **Python 3.13 or later**, on both ends (was 3.11): a server whose `python3` is 3.11 or 3.12
+  is now refused at connect (`the server's python3 is 3.12; vcharon needs 3.13 or later`, exit
+  4), and pipx, uv and a source checkout need 3.13. The standalone binaries carry their own 3.13
+  and are unaffected. How to adapt: install Python 3.13 on the server (Debian 13's is 3.13), or
+  point `remote_python` in `vcharon.ini` at a 3.13 there; install VCharon from source with a 3.13.
+  Why: the binaries bundle 3.13 and the server VCharon targets ships it, so only a source
+  install meets the floor on a client. The floor isn't in DESIGN's "Stable" list.
 
 ### What was checked
 
 - Unit tests (about 1,100), with the server side run through a stand-in for ssh: the suite runs
-  in CI on Linux (Python 3.11 and 3.13), macOS (3.13) and Windows (3.13), and a release is tagged
-  only on a green run. About 240 of them are POSIX-only and skipped on Windows.
+  in CI on Linux, macOS and Windows (Python 3.13; Linux also ran 3.11 until the floor rose), and
+  a release is tagged only on a green run. About 240 of them are POSIX-only and skipped on Windows.
 - A local channel by hand on Linux (Debian 13, Python 3.13): `create`, `join`, `post`, `watch
   --until-change` woken by a post, `read`, `list`, `leave`, `close`. **Measured.**
 - Claude Code as a local (`--local`) member on Linux, watching through a background Bash command

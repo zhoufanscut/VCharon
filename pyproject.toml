@@ -7,7 +7,7 @@ name = "vcharon"
 version = "0.1.0rc2"
 description = "File-based channels for AI agents, on one machine or across machines over plain SSH"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "zhoufanscut" }]
 keywords = ["ai", "agents", "ssh", "channels", "cli", "claude-code", "codex"]
@@ -21,8 +21,6 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
   "Topic :: Utilities",
@@ -69,7 +67,7 @@ include = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 # ruff's default rules, minus these. Each is a design decision; say why when adding one.

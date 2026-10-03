@@ -4,9 +4,16 @@
 # known_hosts, then one BatchMode login to prove it. Then `vcharon ping localhost` and
 # tests/ssh_flow.sh localhost work there.
 #
+# The server side runs the python3 an ssh login finds, and the runner's own is older than
+# VCharon's floor (Ubuntu 24.04 ships 3.12): so the python3 on this script's PATH, setup-python's,
+# is linked as /usr/local/bin/python3, which comes before /usr/bin in sshd's PATH, and a login is
+# checked to get 3.13 or later. Run it after setup-python. Its binary finds its libpython through
+# its RUNPATH (the tool cache's absolute lib folder), so no LD_LIBRARY_PATH is needed over ssh.
+#
 #   sh tests/ci_sshd.sh
 #
-# It changes ~/.ssh and starts a system service, so it runs only on a GitHub Actions runner.
+# It changes ~/.ssh, /usr/local/bin and starts a system service, so it runs only on a GitHub
+# Actions runner.
 set -eu
 
 if [ "${GITHUB_ACTIONS:-}" != true ]; then
@@ -51,4 +58,20 @@ cat "${RUNNER_TEMP:-/tmp}/localhost.keys" >> "${HOME}/.ssh/known_hosts"
 chmod 600 "${HOME}/.ssh/known_hosts"
 
 ssh -o BatchMode=yes localhost true
-echo "ci_sshd: OK (ssh localhost works under BatchMode)"
+
+# setup-python's 3.13 as the python3 of an ssh login (see the header)
+PY="$(python3 -c 'import os, sys; print(os.path.realpath(sys.executable))')"
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)' || {
+  echo "ci_sshd: python3 on PATH is $(python3 --version 2>&1) (${PY}); run setup-python with" \
+    "3.13 or later first" >&2
+  exit 1
+}
+sudo ln -sf "${PY}" /usr/local/bin/python3
+if ! ssh -o BatchMode=yes localhost \
+    "python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)'"; then
+  echo "ci_sshd: an ssh login's python3 isn't 3.13 or later:" \
+    "$(ssh -o BatchMode=yes localhost 'command -v python3; python3 --version' 2>&1)" >&2
+  exit 1
+fi
+echo "ci_sshd: OK (ssh localhost works under BatchMode; its python3 is" \
+  "$(ssh -o BatchMode=yes localhost 'python3 --version' 2>&1))"

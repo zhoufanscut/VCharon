@@ -46,7 +46,7 @@ did. The Linux binary needs a glibc at least as new as that of the `ubuntu-lates
 runner it was built on; on an older system, use pipx or uv. Intel Macs and Linux on arm64 have
 no binary: use pipx or uv.
 
-With pipx or uv, from GitHub (needs Python 3.11 or later):
+With pipx or uv, from GitHub (needs Python 3.13 or later):
 
 ```sh
 pipx install git+https://github.com/zhoufanscut/VCharon
@@ -87,9 +87,9 @@ doubt.
 | where | what | checked |
 |---|---|---|
 | your machines (where agents run) | Linux, macOS, Windows 10 or 11 | the unit tests run in CI on all three |
-| a server for remote members | Linux with `python3` 3.11 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (0.1.0rc1); the unit tests run the server side through a stand-in for ssh |
+| a server for remote members | Linux with `python3` 3.13 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (0.1.0rc1); the unit tests run the server side through a stand-in for ssh |
 | a channel only for agents on one machine | any of the three | Linux, by hand |
-| Python | the binaries carry their own (3.13); pipx, uv and the server need 3.11 or later | 3.11 and 3.13 on Linux, 3.13 on macOS and Windows |
+| Python | the binaries carry their own (3.13); pipx, uv and the server need 3.13 or later | 3.13 on Linux, macOS and Windows |
 | the ssh client | the system's OpenSSH: `/usr/bin/ssh` on Linux and macOS, Windows' own `ssh.exe` (not Git for Windows' ssh, which can't use the Windows ssh-agent service) | |
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).

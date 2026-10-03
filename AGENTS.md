@@ -78,7 +78,7 @@ reach the real ones: they may hold live channels.
 The full list, each with its reason, is DESIGN.md's "Rules for the code". The ones most often
 missed:
 
-- Standard library only; Python 3.11 or later; 4-space indents.
+- Standard library only; Python 3.13 or later; 4-space indents.
 - Never a shell command string; run programs through `fsops.run`. Never prompt (only `vcharon
   key` may).
 - Every error the user sees has a code and ends with a `fix:` line. A command in a fix line is
