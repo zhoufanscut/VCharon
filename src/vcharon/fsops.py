@@ -170,7 +170,7 @@ def private_group(gid):
             group = grp.getgrgid(gid)
             _private_groups[gid] = (gid == me.pw_gid and group.gr_name == me.pw_name
                                     and all(m == me.pw_name for m in group.gr_mem))
-        except Exception:
+        except Exception:  # noqa: BLE001
             _private_groups[gid] = False
     return _private_groups[gid]
 

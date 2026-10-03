@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import errno
 import hashlib
@@ -531,10 +532,8 @@ class Stager:
                 except OSError:
                     pass
             for i in created:
-                try:
+                with contextlib.suppress(Exception):
                     self._stage.unlink(str(i))
-                except Exception:
-                    pass
             if isinstance(err, OSError):
                 raise fsops.error(err, pathrules.show(self._entries[current].path))
             raise
@@ -727,7 +726,6 @@ class Stager:
     def _close(self, d):
         if d is not self._root:
             d.close()
-        return None
 
     def commit(self):
         self._need_checked("commit")

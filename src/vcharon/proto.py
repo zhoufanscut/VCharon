@@ -62,10 +62,10 @@ def quote(obj, limit=200):
     """A short, printable form of something that arrived over the wire."""
     try:
         text = json.dumps(obj, ensure_ascii=False)
-    except Exception:
+    except Exception:  # noqa: BLE001
         try:
             text = repr(obj)
-        except Exception:
+        except Exception:  # noqa: BLE001
             text = "<%s>" % type(obj).__name__
     if len(text) > limit:
         text = text[:limit] + "..."
@@ -205,7 +205,7 @@ def send_stream(conn, files):
             item = next(it)
         except StopIteration:
             break
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # We can't go on at all: end the whole stream with the error.
             conn.send_json({"t": "end", "error": _stream_error(e).to_json()})
             return
@@ -351,7 +351,7 @@ def receive_stream(conn, indexes, stage):
             if first is None:
                 try:
                     stage(index, fin)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     if fin.broken is not None:
                         raise fin.broken
                     first = e

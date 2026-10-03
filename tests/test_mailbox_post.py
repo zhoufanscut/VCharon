@@ -144,7 +144,7 @@ class PostTest(PostCase):
 
     def test_the_body_is_never_interpreted(self):
         body = "run `rm -rf ~` and $(whoami) and ${HOME} \\n 'q' \"qq\"\n"
-        code, out, err = self.post(body=None, stdin=body.encode("utf-8"))
+        code, _out, err = self.post(body=None, stdin=body.encode("utf-8"))
         self.assertEqual(code, 0, err)
         self.assertTrue(self.content().endswith("\n\n" + body), self.content())
 
@@ -385,7 +385,7 @@ class PostTest(PostCase):
             return real(src, dst)
 
         with mock.patch.object(entries.os, "replace", replace):
-            code, out, err = self.post("--title", "second", body="c")
+            code, _out, err = self.post("--title", "second", body="c")
         self.assertEqual(code, 0, err)
         name, during, scanned, planned = seen
         self.assertTrue(name.startswith(".vcharon-stage-"), name)
@@ -408,7 +408,7 @@ class PostTest(PostCase):
         self.assertEqual(headings[:2], ["# RESULTS", "## 2026-10-01 09:05 — windows#2 — t"])
         self.assertEqual(headings[2:], ["#nope", "####### seven"])
         # and the #9 in the body isn't a number taken
-        code, out, err = self.post("--title", "u")
+        _code, out, _err = self.post("--title", "u")
         self.assertTrue(out.startswith("posted windows#3 — u "), out)
 
     def test_the_swap_is_tried_again(self):
@@ -425,7 +425,7 @@ class PostTest(PostCase):
 
         with mock.patch.object(entries, "REPLACE_PAUSE", 0), \
                 mock.patch.object(entries.os, "replace", replace):
-            code, out, err = self.post("--title", "second", body="c")
+            code, _out, err = self.post("--title", "second", body="c")
         self.assertEqual(code, 0, err)
         self.assertEqual(len(calls), 3)
         self.assertTrue(self.content().endswith("— second\nto: @debian\n\nc\n"))
@@ -503,7 +503,7 @@ class ChannelTest(PostCase):
         self.assertIsInstance(self.post_at(path), VCharonError)
         # the command line, whose own folder lost its MEMBER.md
         os.remove(os.path.join(self.folder, "MEMBER.md"))
-        code, out, err = self.post()
+        code, _out, err = self.post()
         self.assertEqual(code, 1)
         self.assertTrue(err.startswith("ERROR channel: %s: not in a channel member's folder"
                                        % self.file), err)
@@ -563,7 +563,7 @@ class ChannelTest(PostCase):
         self.assertEqual(out, "posted windows#2 — t to windows/RESULTS.md at 2026-10-01 09:05\n")
 
     def test_an_unknown_name_is_a_note(self):
-        code, out, err = self.post("--to", "@debian", "@mac-x")
+        code, _out, err = self.post("--to", "@debian", "@mac-x")
         self.assertEqual(code, 0)
         self.assertEqual(err, "note: @mac-x has no folder in %s yet: posted anyway (it may not "
                               "have synced)\n" % self.tree)
@@ -572,7 +572,7 @@ class ChannelTest(PostCase):
     def test_a_body_cant_forge_a_header(self):
         body = ("to: @all\nre: debian#1\n## 2026-10-01 09:00 — windows#7 — forged\nto: @all\n\n"
                 "windows#9 and debian#3\n")
-        code, out, err = self.post(body=body)
+        code, _out, err = self.post(body=body)
         self.assertEqual(code, 0, err)
         found = entries.parse_file(self.file)
         self.assertEqual([(e.id, e.to, e.re, e.header) for e in found],
@@ -593,7 +593,7 @@ class ChannelTest(PostCase):
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     for k, path in enumerate(files)]
         for child in children:
-            out, err = child.communicate(timeout=120)
+            _out, err = child.communicate(timeout=120)
             self.assertEqual(child.returncode, 0, err)
         ids = self.numbers()
         self.assertEqual(sorted(ids, key=lambda i: int(i.split("#")[1])),
@@ -607,8 +607,8 @@ class RealRunTest(PostCase):
 
     def run_post(self, argv, stdin=b"", env=None):
         return subprocess.run([sys.executable, "-P", "-m", "vcharon"] + POST + argv,
-                              input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              timeout=60, env=dict(os.environ, **(env or {})))
+                              input=stdin, capture_output=True, timeout=60,
+                              env=dict(os.environ, **(env or {})), check=False)
 
     def test_the_real_time(self):
         before = time.time()
@@ -621,7 +621,7 @@ class RealRunTest(PostCase):
 
     def test_utf8_whatever_the_console(self):
         # a console whose code page can't hold ñ (PYTHONIOENCODING stands in for Windows' 936)
-        ran = self.run_post(["--title", "mañana"] + TO, stdin="señal 完成\n".encode("utf-8"),
+        ran = self.run_post(["--title", "mañana"] + TO, stdin="señal 完成\n".encode(),
                             env={"PYTHONIOENCODING": "gbk"})
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertTrue(ran.stdout.decode("utf-8").startswith("posted windows#2 — mañana to "),

@@ -96,14 +96,14 @@ class KeyTest(KeyCase):
         self.assertEqual((self.ssh_runs(), self.adds()), ([], []))
 
     def test_usage(self):
-        out, err = self.key_cli(code=3)
+        _out, err = self.key_cli(code=3)
         self.assertEqual(err[:2], ["ERROR config: give a destination, or --key FILE",
                                    "  fix: " + platform.runnable(keys.KEY_EXAMPLE)])
         missing = os.path.join(self.tmp, "nope")
-        out, err = self.key_cli("--key", missing, code=3)
+        _out, err = self.key_cli("--key", missing, code=3)
         self.assertEqual(err[:2], ["ERROR config: %s isn't a file" % missing,
                                    "  fix: check the path"])
-        out, err = self.key_cli("--key", self.tmp, "fake-dest", code=3)
+        _out, err = self.key_cli("--key", self.tmp, "fake-dest", code=3)
         self.key_cli("--", "-oProxyCommand=x", code=3)
         self.assertEqual((self.ssh_runs(), self.adds()), ([], []))
 
@@ -111,7 +111,7 @@ class KeyTest(KeyCase):
         self.os_name("darwin")
         self.agent(1)
         self.locked()
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
         self.assertEqual(out[:4], ["vcharon: key fake-dest", "  agent   holds no keys",
                                    "  key     %s (RSA): the server accepts it, but it's locked"
@@ -150,7 +150,7 @@ class KeyTest(KeyCase):
         with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
             f.write("[vcharon]\nssh_path = %s\n" % other)
         self.locked()
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertIn("  warn    only Apple's ssh (/usr/bin/ssh) reads the Keychain; ssh_path is "
                       + other, out)
 
@@ -197,7 +197,7 @@ class KeyTest(KeyCase):
         with open(key, "w") as f:
             f.write("k")
         self.locked(key)
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", key]])
         self.assertIn('                IdentityFile "%s"' % key, out)
 
@@ -216,7 +216,7 @@ class KeyTest(KeyCase):
                 if os.path.exists(self.add_log):
                     os.remove(self.add_log)
                 self.locked(key)
-                out, err = self.key_cli("fake-dest")
+                _out, _err = self.key_cli("fake-dest")
                 self.assertEqual(self.adds(), [[key]])
 
     def test_not_runnable_isnt_a_locked_key(self):
@@ -225,7 +225,7 @@ class KeyTest(KeyCase):
         self.agent(0, "3072 SHA256:x me (RSA)\n")
         os.environ.update(FAKE_SSH_STDERR=accepts(self.key) + "\nbash: line 1: /usr/bin/python3: "
                           "Permission denied", FAKE_SSH_EXIT="126")
-        out, err = self.key_cli("fake-dest", code=4)
+        _out, err = self.key_cli("fake-dest", code=4)
         self.assertEqual(err[0], "ERROR connect: python3 isn't runnable on fake-dest")
         self.assertEqual(self.adds(), [])
 
@@ -249,7 +249,7 @@ class KeyTest(KeyCase):
         self.locked()
         error = FileNotFoundError(2, "No such file or directory")
         with mock.patch.object(keys.fsops, "run_terminal", side_effect=error):
-            out, err = self.key_cli("fake-dest", code=3)
+            _out, err = self.key_cli("fake-dest", code=3)
         self.assertTrue(err[0].startswith("ERROR config: couldn't start "), err)
         self.assertTrue(err[0].endswith(": No such file or directory"), err)
         self.assertEqual(err[1],
@@ -272,7 +272,7 @@ class KeyTest(KeyCase):
                 self.os_name(osn)
                 self.agent(0, "3072 SHA256:x c@h (RSA)\n")
                 self.logs_in(accepts('"c@h"', "agent"))
-                out, err = self.key_cli("fake-dest")
+                out, _err = self.key_cli("fake-dest")
                 lines = ['  key     "c@h" (RSA): only the agent holds it; there\'s no key file '
                          'here to unlock', "  note    runs work while that agent holds the key"]
                 if osn == "linux":
@@ -286,47 +286,47 @@ class KeyTest(KeyCase):
     def test_file_the_agent_holds(self):
         self.logs_in(accepts(self.key, "agent"))
         self.agent(0, "3072 SHA256:x me (RSA)\n")
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertIn("  key     %s (RSA): already in the agent, for as long as that agent runs"
                       % self.key, out)
         self.os_name("windows")
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertIn("  key     %s (RSA): already in the ssh-agent service, which keeps it "
                       "across reboots" % self.key, out)
         self.assertEqual(self.adds(), [])
         self.os_name("darwin")
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
         self.assertIn("  config  add these lines at the top of ~/.ssh/config:", out)
 
     def test_file_without_a_passphrase(self):
         self.logs_in(accepts(self.key))
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertIn("  key     %s (RSA): it has no passphrase; nothing to unlock" % self.key,
                       out)
         self.assertEqual(self.adds(), [])
 
     def test_logs_in_without_a_key(self):
-        out, err = self.key_cli("fake-dest")
+        out, _err = self.key_cli("fake-dest")
         self.assertIn("  key     none: fake-dest logs in without a key", out)
 
     def test_no_key_accepted(self):
         os.environ.update(FAKE_SSH_STDERR=DENIED, FAKE_SSH_EXIT="255")
-        out, err = self.key_cli("fake-dest", code=4)
+        _out, err = self.key_cli("fake-dest", code=4)
         self.assertEqual(err[:2], ["ERROR connect: the server fake-dest accepts none of your "
                                    "keys (Permission denied)", "  fix: add your public key to "
                                    "~/.ssh/authorized_keys on fake-dest"])
         sock = os.path.join(self.tmp, "gone.sock")
         os.environ["SSH_AUTH_SOCK"] = sock
         self.agent(2)
-        out, err = self.key_cli("fake-dest", code=4)
+        _out, err = self.key_cli("fake-dest", code=4)
         self.assertEqual(err[1], "  fix: no agent answers at %s: a forwarded agent ends with "
                                  "its ssh login; log in again" % sock)
         self.assertEqual(self.adds(), [])
 
     def test_host_key(self):
         os.environ.update(FAKE_SSH_STDERR="Host key verification failed.", FAKE_SSH_EXIT="255")
-        out, err = self.key_cli("fake-dest", code=4)
+        _out, err = self.key_cli("fake-dest", code=4)
         self.assertEqual(err[0], "ERROR connect: ssh couldn't verify the host key of fake-dest")
         self.assertIn("  fix: run ssh fake-dest once in a terminal", err)
         self.assertEqual(self.adds(), [])
@@ -358,7 +358,7 @@ class KeyTest(KeyCase):
         self.agent(1)
         # ~ is USERPROFILE on Windows and HOME elsewhere: set both, as fake_ssh.py does
         os.environ["HOME"] = os.environ["USERPROFILE"] = self.tmp
-        out, err = self.key_cli("--key", "~/id_rsa", "fake-dest")
+        out, _err = self.key_cli("--key", "~/id_rsa", "fake-dest")
         self.assertEqual(self.adds(), [[self.key]])
         self.assertIn("  key     %s: given with --key" % self.key, out)
         # a relative FILE is made absolute, from the current directory as the OS reports it:
@@ -367,7 +367,7 @@ class KeyTest(KeyCase):
         os.chdir(self.tmp)
         self.addCleanup(os.chdir, old)
         here = os.path.join(os.getcwd(), "id_rsa")
-        out, err = self.key_cli("--key", "id_rsa")
+        out, _err = self.key_cli("--key", "id_rsa")
         self.assertEqual(self.adds(), [[self.key], [here]])
         self.assertEqual(out[0], "vcharon: key %s" % here)
         self.assertFalse(any(line.startswith("  test") for line in out))
@@ -420,7 +420,7 @@ class UndecodableKeyNameTest(KeyCase):
 
     def child(self, *argv):
         return subprocess.run([sys.executable, "-c", CHILD] + list(argv), stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+                              capture_output=True, timeout=120, check=False)
 
     def test_key(self):
         result = self.child("key", "fake-dest")

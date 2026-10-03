@@ -32,7 +32,7 @@ def unpack(blob):
 def run_loader(stdin, timeout=30):
     """Runs the bootstrap the way the server does, fed `stdin`."""
     return subprocess.run([sys.executable, "-I", "-c", bundle.BOOTSTRAP], input=stdin,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+                          capture_output=True, timeout=timeout, check=False)
 
 
 def newer_syntax(source):
@@ -125,8 +125,7 @@ class BundleTest(unittest.TestCase):
                 if filename.endswith(".py") and filename[:-3].isidentifier():
                     rel = os.path.relpath(os.path.join(dirpath, filename), PACKAGE_DIR)
                     name = "vcharon." + rel[:-3].replace(os.sep, ".")
-                    if name.endswith(".__init__"):
-                        name = name[:-len(".__init__")]
+                    name = name.removesuffix(".__init__")
                     with open(os.path.join(dirpath, filename), "rb") as f:
                         expected[name] = f.read().decode("utf-8")
         self.assertEqual(doc["modules"], expected)
@@ -155,7 +154,7 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(packages, ["vcharon"])
 
     def test_extra_modules(self):
-        size, doc = unpack(bundle.build(NONCE, {"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"}))
+        _size, doc = unpack(bundle.build(NONCE, {"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"}))
         self.assertEqual(doc["modules"]["vcharon.extra"], "X = 1\n")
         self.assertEqual(doc["modules"]["vcharon"], "Y = 2\n")
 
@@ -223,7 +222,7 @@ class LoaderTest(unittest.TestCase):
 
     def test_bad_bundles(self):
         good = bundle.build(NONCE)
-        size, doc = unpack(good)
+        _size, doc = unpack(good)
         doc["nonce"] = "not hex"
         wrong = zlib.compress(json.dumps(doc).encode())
         for blob in (b"", good[:5], good[:-10], good[:8] + b"x" * (len(good) - 8),

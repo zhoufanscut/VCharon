@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import ntpath
 import os
@@ -61,10 +62,8 @@ class Ctx:
         """Never raises: logging never fails a run."""
         if self._log is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self._log(msg)
-        except Exception:
-            pass
 
     def tick(self):
         self._tick()
@@ -87,12 +86,11 @@ class Ctx:
             # "~/" keeps a trailing separator: to the file sink, it doesn't name a file.
             rest = path[2:].lstrip(seps)
             path = mod.join(self.home, self._resep(rest)) if rest else mod.join(self.home, "")
-        elif path.startswith("~"):
+        elif path.startswith("~") and self.os == platform.os_name():
             # "~user": only this machine's user database can answer for another user, and only
             # with this machine's own paths. For another OS's end the text stays a name relative
             # to that end's home, as it does here for a user that doesn't exist.
-            if self.os == platform.os_name():
-                path = os.path.expanduser(self._resep(path))
+            path = os.path.expanduser(self._resep(path))
         if pathrules.is_absolute(path, self.os):
             return path
         if self.end == "remote":
@@ -135,7 +133,7 @@ class Source(Plugin):
         """The state to save after a commit that failed having written these puts' paths and
         got through these deletes' paths; None saves nothing. Sources that keep state override
         it."""
-        return None
+        return
 
 
 class Sink(Plugin):

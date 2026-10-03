@@ -52,9 +52,9 @@ from __future__ import annotations
 
 import datetime
 import heapq
+import itertools
 import os
 import sys
-import time
 
 from .. import entries, pathrules
 
@@ -186,7 +186,8 @@ def order(items, now):
     for item in items:
         when = item.e.time
         try:
-            item.minute = datetime.datetime.strptime(when, entries.TIME_FORMAT)
+            # headings carry local time with no zone; compared with _now(), also naive
+            item.minute = datetime.datetime.strptime(when, entries.TIME_FORMAT)  # noqa: DTZ007
         except (TypeError, ValueError):
             item.notes.append("note: %s has %s: listed first"
                               % (item.label, "no time" if not when else "a bad time %r" % when))
@@ -219,7 +220,7 @@ def order(items, now):
             by_name.setdefault(n.e.name, []).append(n)
         for group in by_name.values():
             group.sort(key=lambda n: n.e.number)
-            numbered.extend(zip(group, group[1:]))
+            numbered.extend(itertools.pairwise(group))
         here = {n.e.id: n for n in mine}
         answers = [(here[n.e.re], n) for n in mine
                    if n.e.re in here and n.e.re != n.e.id]
@@ -252,7 +253,8 @@ def lines(items, full):
 
 def _now():
     """This box's current time (tests fake it)."""
-    return datetime.datetime.now()
+    # naive local time on purpose: headings are written in local time, with no zone
+    return datetime.datetime.now()  # noqa: DTZ005
 
 
 def _collect(root, now, skip=None, notes=()):
@@ -302,4 +304,4 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
                       "body": e.body if full else None})
     return {"channel": channel, "folder": root, "synced": synced, "members": folders,
             "count": len(ordered), "entries": items,
-            "notes": [n[len("note: "):] if n.startswith("note: ") else n for n in notes]}
+            "notes": [n.removeprefix("note: ") for n in notes]}

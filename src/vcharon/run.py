@@ -154,7 +154,7 @@ class Engine:
         Never raises: it must not replace the commit's error."""
         try:
             result = source.state_after(list(done.written), list(done.deletes_done))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.log.warn("state_after failed: %s" % e)
             return
         if isinstance(result, dict):
@@ -170,14 +170,14 @@ class Engine:
     def _abort(self, sink):
         try:
             sink.abort()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # never in place of the error that made the run abort
             self.log.warn("aborting the sink failed: %s" % e)
 
     def _close(self, obj, role):
         try:
             obj.close()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.log.warn("closing the local %s failed: %s" % (role, e))
 
 

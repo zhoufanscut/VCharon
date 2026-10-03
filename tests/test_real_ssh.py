@@ -39,9 +39,8 @@ class RealSshTest(unittest.TestCase):
                 "-o", "ControlPath=none", DEST, command]
         # the server's names are UTF-8 bytes, and under LC_ALL=C find prints them raw: decoding
         # with this machine's locale (GBK here) would fail
-        return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              universal_newlines=True, encoding="utf-8", errors="replace",
-                              timeout=60, check=True).stdout
+        return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=60, check=True).stdout
 
     def remote_tmp(self):
         """A new directory under the server's home, removed after the test; its path."""
@@ -68,7 +67,7 @@ class RealSshTest(unittest.TestCase):
         use_test_jobs(self)
         remote = self.remote_tmp()
         src = os.path.join(self.tmp, "源 src")
-        spec = {"文档/报告.txt": "报告\n".encode("utf-8") * 100, "with space/a b.txt": b"sp",
+        spec = {"文档/报告.txt": "报告\n".encode() * 100, "with space/a b.txt": b"sp",
                 "run.sh": b"#!/bin/sh\necho hi\n", "empty dir/": None,
                 "big.bin": os.urandom(1 << 20)}
         write_tree(src, spec)

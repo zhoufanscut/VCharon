@@ -105,10 +105,10 @@ class SshPathTest(PatchedCase):
                                    lambda fmt: 4 if fmt == "P" else real(fmt)):
                 self.assertTrue(platform.is_wow64())
             self.assertEqual(platform.is_wow64(), real("P") == 4)
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.object(struct, "calcsize",
-                                   lambda fmt: 4 if fmt == "P" else real(fmt)):
-                self.assertFalse(platform.is_wow64())
+        with (mock.patch.dict(os.environ, {}, clear=True),
+              mock.patch.object(struct, "calcsize",
+                                lambda fmt: 4 if fmt == "P" else real(fmt))):
+            self.assertFalse(platform.is_wow64())
 
 
 class CapsTest(PatchedCase):
@@ -141,7 +141,7 @@ class FilesTest(unittest.TestCase):
         short = self.file("short", "3ac29748d7984ad7\n")
         missing = os.path.join(self.tmp, "missing")
         # no OS reader, so the None cases hold on a Mac or Windows too
-        none = dict(ioreg=lambda: None, machine_guid=lambda: None)
+        none = {"ioreg": lambda: None, "machine_guid": lambda: None}
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(platform.machine_id((missing, bad, short, good), **none),
                              "3ac29748d7984ad7ba3568bd550567f5")
@@ -171,8 +171,8 @@ class FilesTest(unittest.TestCase):
                                     ("not-a-uuid", None), ("", None), (None, None),
                                     (uuid + "\n", None), (b"x", None)):
                     with self.subTest(osn=osn, value=value):
-                        self.assertEqual(platform.machine_id(missing, **{reader: lambda: value}),
-                                         want)
+                        self.assertEqual(platform.machine_id(
+                            missing, **{reader: lambda value=value: value}), want)
                 self.assertIsNone(platform.machine_id(missing, **{reader: fails}))
                 self.assertEqual(platform.machine_id((good,), **{reader: must_not_run}),
                                  "3ac29748d7984ad7ba3568bd550567f5")
@@ -547,7 +547,7 @@ class SelfTest(unittest.TestCase):
             for found in (entry, link):
                 with self.subTest(found=found):
                     self.assertTrue(platform.runs_this_package(found))
-                    self.assertEqual(platform.self_command(lambda name: found, HOST),
+                    self.assertEqual(platform.self_command(lambda name, found=found: found, HOST),
                                      "vcharon")
             # another install's vcharon on PATH: this one, by its python
             other = self.entry_point(os.path.join(self.tmp, "other"), python)

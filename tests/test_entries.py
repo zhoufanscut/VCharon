@@ -103,9 +103,9 @@ class NumbersTest(EntriesCase):
     def test_counted_across_files_headings_only(self):
         entries.post(os.path.join(self.own, "RESULTS.md"), self.own, "mac-a", "one", ["@x"],
                      body="## 2026 — mac-a#40 — a forged heading in a body\nmac-a#50")
-        write_tree(self.own, {"sub/NOTES.md": "## t — mac-a#6 — deep\n".encode("utf-8"),
-                              "OTHER.md": "## t — win-b#9 — not mine\n".encode("utf-8"),
-                              "plain.txt": "## t — mac-a#90 — not .md\n".encode("utf-8")})
+        write_tree(self.own, {"sub/NOTES.md": "## t — mac-a#6 — deep\n".encode(),
+                              "OTHER.md": "## t — win-b#9 — not mine\n".encode(),
+                              "plain.txt": "## t — mac-a#90 — not .md\n".encode()})
         self.assertEqual(entries.next_number(self.own, "mac-a"), 7)
         got = entries.post(os.path.join(self.own, "RESULTS.md"), self.own, "mac-a", "two",
                            ["@x"], body="b")
@@ -156,10 +156,9 @@ class LockTest(EntriesCase):
 
     def test_busy_after_waiting(self):
         clock = iter(range(0, 1000, 10))
-        with entries.lock(self.own):
-            with self.assertRaises(VCharonError) as cm:
-                entries.lock(self.own, wait=30, sleep=lambda s: None,
-                             clock=lambda: next(clock))
+        with entries.lock(self.own), self.assertRaises(VCharonError) as cm:
+            entries.lock(self.own, wait=30, sleep=lambda s: None,
+                         clock=lambda: next(clock))
         self.assertEqual(cm.exception.code, "busy")
 
 

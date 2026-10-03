@@ -152,7 +152,7 @@ class FrameTest(unittest.TestCase):
             self.assertEqual(cm.exception.code, "protocol", payload)
 
     def test_encode_json(self):
-        self.assertEqual(proto.encode_json({"t": "é"}), '{"t":"é"}'.encode("utf-8"))
+        self.assertEqual(proto.encode_json({"t": "é"}), '{"t":"é"}'.encode())
         with self.assertRaises(ValueError):
             proto.encode_json({"t": float("nan")})
         with self.assertRaises(UnicodeEncodeError):

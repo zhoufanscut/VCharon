@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-import vcharon
 from vcharon import channel_cmd, channels, charter, cli, entries, platform, state
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -180,7 +179,7 @@ class FormatTest(ChannelCase):
                  ("ERROR channel: game's format or limits changed during the join (format 1, "
                   "then 1)", "run the join again"))):
             with self.subTest(reply=reply):
-                def claim(*args, **kw):
+                def claim(*args, reply=reply, **kw):
                     return dict(real(*args, **kw), **reply)
 
                 before = self.server_tree()
@@ -290,7 +289,7 @@ class LimitsTest(ChannelCase):
                           ("--max-files", "100001"), ("--max-entry-kb", "0"),
                           ("--max-entry-kb", "10001"), ("--max-mb", "x")):
             with self.subTest(flag=flag, bad=bad):
-                code, out, err = self.channel("create", "game", "--local", flag, bad)
+                code, _out, err = self.channel("create", "game", "--local", flag, bad)
                 self.assertEqual(code, 3, err)
                 self.assertIn("must be a whole number", err)
         # the highest values are taken
@@ -337,7 +336,7 @@ class LimitsTest(ChannelCase):
             text = f.read()
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(text.replace("mailbox.max_mb = 50\nmailbox.max_files = 1000\n", ""))
-        up, down = cli.load_config().named("game.mac-web")
+        _up, down = cli.load_config().named("game.mac-web")
         self.assertEqual((down.source.options["max_bytes"], down.source.options["max_files"]),
                          (str(50 * 1000 * 1000), "1000"))
         self.ok("sync", "game")

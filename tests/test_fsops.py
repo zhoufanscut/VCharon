@@ -428,9 +428,8 @@ class HandleCases:
         self.assertEqual(fsops.kind(root.lstat("f")), fsops.FILE)
         with root.open_read("f") as f:
             self.assertEqual(f.read(), b"data")
-        with root.enter("d", owner_rule=False) as d:
-            with d.open_read("g") as f:
-                self.assertEqual(f.read(), b"deeper")
+        with root.enter("d", owner_rule=False) as d, d.open_read("g") as f:
+            self.assertEqual(f.read(), b"deeper")
         # searched, never listed
         with self.assertRaises(OSError):
             root.scan()
@@ -674,9 +673,9 @@ class RunTest(unittest.TestCase):
                     proc.wait()
 
         self.addCleanup(cleanup)
-        with mock.patch.object(subprocess, "Popen", Popen):
-            with self.assertRaises(KeyboardInterrupt):
-                fsops.run(self.py("import time; time.sleep(60)"), timeout=30)
+        with (mock.patch.object(subprocess, "Popen", Popen),
+              self.assertRaises(KeyboardInterrupt)):
+            fsops.run(self.py("import time; time.sleep(60)"), timeout=30)
         [proc] = procs
         # killed, not left running
         self.assertIsNotNone(proc.wait(5))

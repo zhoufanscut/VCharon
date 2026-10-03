@@ -526,7 +526,7 @@ class Session:
             rest = self._find_marker()
             if rest is not None:
                 self._read_frames(rest)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # A bug here must not leave the main thread waiting forever.
             self.log.error("the stdout reader failed:\n%s" % traceback.format_exc())
             self._queue.put(VCharonError("internal", "the stdout reader failed: %r" % e))
@@ -851,7 +851,7 @@ class Session:
         if self._healthy and self.hello is not None:
             try:
                 self.call("bye", timeout=5)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 self.log.debug("bye failed: %s" % e)
         self._closed = True
         try:

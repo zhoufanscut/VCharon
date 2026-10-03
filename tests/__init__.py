@@ -33,7 +33,7 @@ if not os.environ.get("VCHARON_TEST_SSH"):
                       APPDATA=os.path.join(_home, "AppData", "Roaming"),
                       LOCALAPPDATA=os.path.join(_home, "AppData", "Local"))
 
-from vcharon import channels, platform  # noqa: E402
+from vcharon import channels, platform
 
 
 def _under(path, top):

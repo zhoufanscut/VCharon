@@ -142,7 +142,7 @@ class SinkDoctorTest(SinkCase):
 
     def test_dir_missing(self):
         missing = os.path.join(self.root, "a", "b")
-        [(level, message, hint)] = self.doctor("dir", path=missing)
+        [(level, message, _hint)] = self.doctor("dir", path=missing)
         self.assertEqual((level, message), ("FAIL", "the root %s doesn't exist" % missing))
         self.assertEqual(self.doctor("dir", path=missing, create="yes"),
                          [("ok", "to.path %s doesn't exist yet; the first run creates it"
@@ -152,7 +152,7 @@ class SinkDoctorTest(SinkCase):
     @unittest.skipUnless(POSIX, "the owner rule is POSIX only")
     def test_dir_owned_by_another_user(self):
         patch_stats(self, self.root, st_uid=os.geteuid() + 1)
-        [(level, message, hint)] = self.doctor("dir", path=self.root)
+        [(level, message, _hint)] = self.doctor("dir", path=self.root)
         self.assertEqual(level, "FAIL")
         self.assertEqual(message, "the root %s is owned by another user" % self.root)
         self.assert_untouched()

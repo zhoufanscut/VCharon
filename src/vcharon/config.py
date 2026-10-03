@@ -274,7 +274,7 @@ def box_problem(box):
 
 # configparser's own section line (SECTCRE), after leading blanks
 _SECTION = re.compile(r"\A\s*\[(.+)\]")
-_BOX_LINE = re.compile(r"\A\s*box\s*[=:]", re.I)
+_BOX_LINE = re.compile(r"\A\s*box\s*[=:]", re.IGNORECASE)
 # the commented line a bare vcharon setup writes; setup --box replaces it
 BOX_COMMENT = "# box = %s   (the default: this OS); to set another: vcharon setup --box NAME"
 _BOX_COMMENT = re.compile(r"\A# box = ")

@@ -19,8 +19,16 @@ from vcharon import pathrules, proto, remote, stage
 from vcharon.proto import VCharonError
 from vcharon.run import Engine, Side
 
-from tests.util import (FakeSshCase, big_file, fd_count, helper_override, read_tree, sha256,
-                        unblock_fifo, write_tree)
+from tests.util import (
+    FakeSshCase,
+    big_file,
+    fd_count,
+    helper_override,
+    read_tree,
+    sha256,
+    unblock_fifo,
+    write_tree,
+)
 
 POSIX = os.name != "nt"
 REPORT = bool(os.environ.get("VCHARON_TEST_REPORT"))
@@ -32,7 +40,7 @@ FIFO_DELAY = 5.0
 CALLS = {"push": ["sink.check", "sink.receive", "sink.commit"],
          "pull": ["source.plan", "source.send"]}
 
-TREE = {"文档/报告 2026.txt": "季度报告\n".encode("utf-8") * 100,
+TREE = {"文档/报告 2026.txt": "季度报告\n".encode() * 100,
         "with space/a b.txt": b"spaces\n",
         "empty dir/": None,
         "empty.txt": b"",
@@ -726,7 +734,7 @@ class RunTest(FakeSshCase):
                 os.stat(root).st_mtime_ns)
 
     def set_mtimes(self, root, mtime):
-        for rel, data in read_tree(root).items():
+        for rel in read_tree(root):
             if not rel.endswith("/"):
                 os.utime(os.path.join(root, *rel.split("/")), (mtime, mtime))
 

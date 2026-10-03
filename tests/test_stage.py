@@ -20,8 +20,7 @@ from vcharon.proto import VCharonError
 
 from tests.test_lock import hold_in_child, stop_child
 from tests.test_path import unix_socket
-from tests.util import (fd_count, patch_stats, read_tree, run_stager, umask, unblock_fifo,
-                        write_tree)
+from tests.util import fd_count, patch_stats, read_tree, run_stager, umask, unblock_fifo, write_tree
 
 POSIX = os.name != "nt"
 WINDOWS = os.name == "nt"
@@ -298,7 +297,7 @@ class StagerCases:
     # 9
     @unittest.skipUnless(POSIX, "the owner and mode rule is POSIX only")
     def test_owner_and_mode(self):
-        entries, data = fputs({"a/x": b"x"})
+        entries, _data = fputs({"a/x": b"x"})
         self.patch(fsops, "private_group", lambda gid: False)
         os.chmod(self.root, 0o775)
         e = self.refused_at_check(entries, "unsafe_dir")
@@ -331,7 +330,7 @@ class StagerCases:
             self.assertEqual(stat.S_IMODE(os.stat(self.path("a/b")).st_mode), 0o775)
             self.run_plan(*fputs({"a/b/y": b"y"}))
         with mock.patch.object(fsops, "private_group", return_value=False):
-            entries, data = fputs({"a/b/z": b"z"})
+            entries, _data = fputs({"a/b/z": b"z"})
             e = self.refused_at_check(entries, "unsafe_dir")
         self.assertEqual(e.message, "a is writable by its group")
 
@@ -366,7 +365,7 @@ class StagerCases:
     def test_symlinked_root(self):
         link = os.path.join(self.tmp, "rootlink")
         os.symlink(self.root, link)
-        checked, done = self.run_plan(*fputs({"x": b"x"}), root=link)
+        checked, _done = self.run_plan(*fputs({"x": b"x"}), root=link)
         self.assertEqual(checked.root, self.root)
         self.assertEqual(read_tree(self.root), {"x": b"x"})
 
@@ -376,9 +375,9 @@ class StagerCases:
         os.symlink(self.root, link)
         patch_stats(self, link, st_uid=os.geteuid() + 1)
         before = read_tree(self.tmp)
-        with self.stager(root=os.path.join(link, "sub"), create=True) as s:
-            with self.assertRaises(VCharonError) as cm:
-                s.check(Plan(fputs({"x": b"x"})[0]))
+        with (self.stager(root=os.path.join(link, "sub"), create=True) as s,
+              self.assertRaises(VCharonError) as cm):
+            s.check(Plan(fputs({"x": b"x"})[0]))
         self.assertEqual(cm.exception.code, "unsafe_dir")
         self.assertEqual(cm.exception.message, "the root %s/sub goes through %s, a symlink "
                          "owned by another user" % (link, link))
@@ -387,7 +386,7 @@ class StagerCases:
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_missing_root_planted_as_foreign_link(self):
         new = os.path.join(self.tmp, "new")
-        entries, data = fputs({"x": b"x"})
+        entries, _data = fputs({"x": b"x"})
         s = self.stager(root=os.path.join(new, "root"), create=True)
         s.check(Plan(entries))
         os.symlink(self.outside, new)
@@ -401,7 +400,7 @@ class StagerCases:
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_missing_root_planted_as_own_link(self):
         new = os.path.join(self.tmp, "new")
-        entries, data = fputs({"x": b"x"})
+        entries, _data = fputs({"x": b"x"})
         s = self.stager(root=os.path.join(new, "root"), create=True)
         s.check(Plan(entries))
         os.symlink(self.outside, new)
@@ -416,7 +415,7 @@ class StagerCases:
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_dir_swapped_after_check(self):
         write_tree(self.root, {"a/": None})
-        entries, data = fputs({"a/z.txt": b"new", "a/b/y": b"y"})
+        entries, _data = fputs({"a/z.txt": b"new", "a/b/y": b"y"})
         s = self.stager()
         s.check(Plan(entries))
         s.stage(0, io.BytesIO(b"new"))
@@ -461,7 +460,7 @@ class StagerCases:
     def test_other_file_system(self):
         write_tree(self.root, {"a/": None, "t/sub/x": b"x"})
         self.fake_device("a")
-        entries, data = fputs({"a/x": b"x"})
+        entries, _data = fputs({"a/x": b"x"})
         e = self.refused_at_check(entries, "unsafe_dir")
         self.assertEqual(e.message, "a is on another file system")
         self.assertEqual(e.hint, "pick a root with no mount points under it")
@@ -474,7 +473,7 @@ class StagerCases:
 
     # 12
     def test_stage_dir(self):
-        entries, data = fputs({"x": b"x", "y": b"y"})
+        entries, _data = fputs({"x": b"x", "y": b"y"})
         s = self.stager()
         s.check(Plan(entries))
         self.assertEqual(stage_dirs(self.root), [])
@@ -505,7 +504,7 @@ class StagerCases:
         self.assertEqual(read_tree(self.root), {})
 
     def test_abort_and_close(self):
-        entries, data = fputs({"x": b"x"})
+        entries, _data = fputs({"x": b"x"})
         for how in ("abort", "close"):
             with self.subTest(how=how):
                 s = self.stager()
@@ -547,7 +546,7 @@ class StagerCases:
             self.backdate(PREFIX + name)
         child = hold_in_child(self.path(PREFIX + "live/lock"))
         try:
-            checked, done = self.run_plan(*fputs({"n": b"n"}))
+            _checked, done = self.run_plan(*fputs({"n": b"n"}))
             self.assertEqual(done.notes, [])
             left = {PREFIX + "f", PREFIX + "live"} | ({PREFIX + "x"} if POSIX else set())
             self.assertEqual(set(stage_dirs(self.root)), left)
@@ -565,7 +564,7 @@ class StagerCases:
         self.addCleanup(os.chmod, os.path.join(stuck, "sub"), 0o700)
         self.backdate(PREFIX + "stuck")
         logged = []
-        checked, done = self.run_plan(*fputs({"n": b"n"}), log=logged.append)
+        _checked, done = self.run_plan(*fputs({"n": b"n"}), log=logged.append)
         self.assertEqual(len(done.notes), 1)
         self.assertTrue(done.notes[0].startswith(
             "couldn't remove the old stage dir %s: " % (PREFIX + "stuck")), done.notes)
@@ -595,7 +594,7 @@ class StagerCases:
 
         self.patch(lock.Lock, "try_acquire", try_acquire)
         fds = len(os.listdir("/dev/fd")) if os.path.isdir("/dev/fd") else None
-        checked, done = self.run_plan(*fputs({"n": b"n"}))
+        _checked, done = self.run_plan(*fputs({"n": b"n"}))
         self.assertEqual(done.notes, ["couldn't remove the old stage dir %sold: Input/output "
                                       "error" % PREFIX])
         self.assertEqual([lk.fd for lk in calls], [None, None])
@@ -611,7 +610,7 @@ class StagerCases:
             return real(d)
 
         self.patch(self.cls, "listdir", listdir)
-        checked, done = self.run_plan(*fputs({"n": b"n"}))
+        _checked, done = self.run_plan(*fputs({"n": b"n"}))
         self.assertEqual(done.notes, ["couldn't look for old stage dirs: Input/output error"])
         self.assertEqual(done.written, ["n"])
 
@@ -622,7 +621,7 @@ class StagerCases:
         e = self.refused_at_check(entries, "not_found", root=missing)
         self.assertEqual(e.message, "the root %s doesn't exist" % missing)
         self.assertEqual(e.hint, "create it first (in a job: to.create = yes)")
-        checked, done = self.run_plan(entries, data, root=missing, create=True)
+        checked, _done = self.run_plan(entries, data, root=missing, create=True)
         self.assertEqual(checked, stage.Checked(root=missing, notes=[], deletes=0))
         self.assertEqual(read_tree(missing), {"a/": None, "a/x": b"x"})
         write_tree(self.tmp, {"file": b"f"})
@@ -692,7 +691,7 @@ class StagerCases:
         os.chmod(gdir, 0o2755)
         if not os.stat(gdir).st_mode & stat.S_ISGID:
             self.skipTest("this file system doesn't keep setgid")
-        checked, done = self.run_plan(*fputs({"g/f.txt": b"f", "top.txt": b"t"}))
+        _checked, done = self.run_plan(*fputs({"g/f.txt": b"f", "top.txt": b"t"}))
         self.assertEqual(os.stat(self.path("g/f.txt")).st_gid, gid)
         self.assertEqual(os.stat(self.path("top.txt")).st_gid, root_gid)
         self.assertEqual(done.notes, [])
@@ -761,7 +760,7 @@ class StagerCases:
         inode = os.stat(self.path("same-size")).st_ino
         opened = self.count_reads()
         entries = [hashed("same-size", b"bbbb"), hashed("other-size", b"bbbb")]
-        checked, done = self.run_plan(entries, {"same-size": b"bbbb", "other-size": b"bbbb"})
+        checked, _done = self.run_plan(entries, {"same-size": b"bbbb", "other-size": b"bbbb"})
         self.assertEqual(checked.have, [])
         # another size is never read
         self.assertEqual(opened, ["same-size"])
@@ -775,7 +774,7 @@ class StagerCases:
         # a put under a deleted parent, and a delete-and-put of the same path: new files
         entries = [delete("d", tree=True), hashed("d/x", b"same"), delete("y"),
                    hashed("y", b"same")]
-        checked, done = self.run_plan(entries, {"d/x": b"same", "y": b"same"})
+        checked, _done = self.run_plan(entries, {"d/x": b"same", "y": b"same"})
         self.assertEqual((checked.have, opened), ([], []))
         self.assertEqual(read_tree(self.root), {"d/": None, "d/x": b"same", "y": b"same"})
 
@@ -787,7 +786,7 @@ class StagerCases:
         unblock_fifo(self, self.path("fifo"))
         opened = self.count_reads()
         entries = [hashed("link", b"same"), hashed("fifo", b"same")]
-        checked, done = self.run_plan(entries, {"link": b"same", "fifo": b"same"})
+        checked, _done = self.run_plan(entries, {"link": b"same", "fifo": b"same"})
         self.assertEqual((checked.have, opened), ([], []))
         # replaced, never followed
         self.assertEqual(read_tree(self.root), {"link": b"same", "fifo": b"same"})
@@ -817,7 +816,7 @@ class StagerCases:
         os.chmod(self.path("locked"), 0)
         inode = os.stat(self.path("locked")).st_ino
         logged = []
-        checked, done = self.run_plan([hashed("locked", b"same")], {"locked": b"same"},
+        checked, _done = self.run_plan([hashed("locked", b"same")], {"locked": b"same"},
                                       log=logged.append)
         self.assertEqual(checked.have, [])
         self.assertTrue(logged[0].startswith("check: couldn't hash locked, so it's sent: "),
@@ -988,7 +987,7 @@ class StagerCases:
                                "d/d2/g": b"g"})
         entries = [delete("t", tree=True), delete("missing"), delete("full"), delete("f.txt"),
                    delete("e"), delete("d/d2/g"), delete("d/d2"), put_dir("n")]
-        checked, done = self.run_plan(entries)
+        _checked, done = self.run_plan(entries)
         # in the order done, deepest first: removed, already gone, kept, and a tree once
         self.assertEqual(done.deletes_done, ["d/d2/g", "d/d2", "e", "f.txt", "full", "missing",
                                              "t"])
@@ -1039,7 +1038,7 @@ class StagerCases:
         if not os.path.exists(os.path.join(self.tmp, "pROBE")):
             self.skipTest("this file system tells case apart")
         write_tree(self.root, {"README.md": b"same"})
-        checked, done = self.run_plan([hashed("readme.md", b"same")])
+        checked, _done = self.run_plan([hashed("readme.md", b"same")])
         self.assertEqual(checked.have, [0])
         self.assertEqual(os.listdir(self.root), ["readme.md"])
         self.assert_mtime("readme.md")
@@ -1173,10 +1172,10 @@ class WindowsStagerTest(unittest.TestCase):
 
     def test_in_use(self):
         write_tree(self.root, {"held.txt": b"h"})
-        with open(os.path.join(self.root, "held.txt"), "rb"):
-            with mock.patch.object(fsops.time, "sleep") as sleep:
-                with self.assertRaises(VCharonError) as cm:
-                    self.run_plan([delete("held.txt")])
+        with (open(os.path.join(self.root, "held.txt"), "rb"),
+              mock.patch.object(fsops.time, "sleep") as sleep,
+              self.assertRaises(VCharonError) as cm):
+            self.run_plan([delete("held.txt")])
         self.assertEqual(cm.exception.code, "in_use")
         self.assertEqual(sleep.call_count, 3)
 

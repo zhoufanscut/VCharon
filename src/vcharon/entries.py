@@ -32,7 +32,7 @@ CHANNEL_FILE = "CHANNEL.md"
 DASH = " — "
 # a body line that would read as a Markdown heading, an entry's own included (Markdown allows
 # up to 3 spaces before the #): it gets "> " in front
-HEADING = re.compile(r"^(?= {0,3}#{1,6}(?:[ \t\r]|$))", re.M)
+HEADING = re.compile(r"^(?= {0,3}#{1,6}(?:[ \t\r]|$))", re.MULTILINE)
 # <name>#<n>: a writer's name, then a number from 1
 _ID = re.compile(r"\A([a-z0-9][a-z0-9_-]{0,31})#([1-9][0-9]{0,8})\Z")
 # a to: token: @all, or @ and a writer's name
@@ -101,7 +101,7 @@ def parse_heading(text):
 def split_lines(text):
     """text's lines, split on "\n" only, each without a trailing "\r": never splitlines(),
     which also splits on \x85, \u2028 and the like (quote_body's ^ doesn't)."""
-    return [line[:-1] if line.endswith("\r") else line for line in text.split("\n")]
+    return [line.removesuffix("\r") for line in text.split("\n")]
 
 
 def one_line_problem(value):
@@ -230,7 +230,7 @@ def next_number(own, name):
             continue
         for line in split_lines(text):
             if line.startswith("## "):
-                when, who, number, title = parse_heading(line[3:])
+                _when, who, number, _title = parse_heading(line[3:])
                 if who == name and number > high:
                     high = number
     return high + 1
@@ -370,7 +370,7 @@ def set_header(path, own, name, number, key, value):
         for i, line in enumerate(lines):
             text = line.decode("utf-8", "replace").rstrip("\r\n")
             if text.startswith("## "):
-                when, who, n, title = parse_heading(text[3:])
+                _when, who, n, _title = parse_heading(text[3:])
                 if who == name and n == number:
                     start = i
                     break

@@ -340,7 +340,7 @@ def write_tree(root, spec):
             f.write(data)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def folds_case():
     """True if the temp dir takes a and A as one name (APFS and NTFS by default): a tree with
     case twins can't be made there."""
@@ -388,7 +388,7 @@ def start_failure_text(path):
     machine."""
     try:
         subprocess.run([path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=30)
+                       stderr=subprocess.DEVNULL, timeout=30, check=False)
     except OSError as e:
         return e.strerror or str(e)
     raise AssertionError("%s could be started, so it can't test a start failure" % path)

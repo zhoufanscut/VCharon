@@ -105,7 +105,7 @@ class IdentityTest(ChannelCase):
                          ["game.mac-web.json"])
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
         # whoami without a channel: the name a new join would take, and the one kept
-        code, out, err = self.run_cli("whoami", "--json")
+        _code, out, _err = self.run_cli("whoami", "--json")
         doc = json.loads(out)
         self.assertEqual((doc["box"], doc["name"], [c["name"] for c in doc["channels"]]),
                          ("macbook", "macbook-web", ["mac-web"]))
@@ -458,7 +458,7 @@ class SyncTest(ChannelCase):
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
         before = read_tree(own)
         shutil.rmtree(own)
-        code, out, err = self.run_cli("sync", "game")
+        code, _out, err = self.run_cli("sync", "game")
         self.assertEqual(code, 1)
         fixes = {l[len("  fix: "):] for l in err.splitlines() if l.startswith("  fix: ")}
         rejoin = platform.runnable("vcharon join game --server fake-dest --project web takes "
@@ -609,7 +609,7 @@ class FixRoundTripTest(ChannelCase):
             if verb.startswith("--"):
                 continue
             with self.subTest(verb=verb):
-                code, out, err = self.run_cli(verb, "--help")
+                _code, out, _err = self.run_cli(verb, "--help")
                 [example] = [l for l in out.splitlines() if l.startswith("example: ")]
                 [argv] = commands(example[len("example: "):])
                 self.assertEqual(argv[0], verb)

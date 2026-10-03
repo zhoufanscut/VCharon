@@ -169,13 +169,13 @@ class NamesTest(unittest.TestCase):
 
     def test_the_box_defaults_to_the_os(self):
         for osn, word in (("linux", "linux"), ("darwin", "mac"), ("windows", "win")):
-            with self.subTest(osn=osn):
-                with mock.patch.object(platform, "os_name", return_value=osn):
-                    self.assertEqual(platform.os_word(), word)
-                    cfg = self.cfg(None)
-                    self.assertEqual((cfg.box_name, cfg.box_source), (word, "os"))
-                    self.assertEqual(cfg.box_text(), "%s (default, from the OS)" % word)
-                    self.assertEqual(channel_cmd.member_name(cfg, project="UI"), word + "-ui")
+            with (self.subTest(osn=osn),
+                  mock.patch.object(platform, "os_name", return_value=osn)):
+                self.assertEqual(platform.os_word(), word)
+                cfg = self.cfg(None)
+                self.assertEqual((cfg.box_name, cfg.box_source), (word, "os"))
+                self.assertEqual(cfg.box_text(), "%s (default, from the OS)" % word)
+                self.assertEqual(channel_cmd.member_name(cfg, project="UI"), word + "-ui")
         cfg = self.cfg("laptop")
         self.assertEqual((cfg.box_name, cfg.box_source), ("laptop", "config"))
         self.assertEqual(cfg.box_text(), "laptop (set in /x/vcharon.ini)")
@@ -370,7 +370,7 @@ class CreateJoinTest(ChannelCase):
         fix = "  fix: only a Linux server takes remote members: check the alias"
         self.use_box("laptop")
         os.environ["VCHARON_TEST_OS"] = "darwin"
-        code, out, err = self.channel("create", "game", "--server", "fake-dest", "--project", "ui")
+        code, _out, err = self.channel("create", "game", "--server", "fake-dest", "--project", "ui")
         self.assertEqual((code, err.splitlines()[:2]), (3, [refused % "darwin", fix]))
         self.assertEqual(self.server_tree(), {})
         self.assertFalse(os.path.exists(channel_cmd.record_path("game", "laptop-ui")))
@@ -384,7 +384,7 @@ class CreateJoinTest(ChannelCase):
         self.ok("join", "game", "--server", "fake-dest")
         os.environ["VCHARON_TEST_OS"] = "darwin"
         before = self.server_tree()
-        code, out, err = self.channel("leave", "game")
+        code, _out, err = self.channel("leave", "game")
         self.assertEqual((code, err.splitlines()[:2]), (3, [refused % "darwin", fix]))
         self.assertEqual(self.server_tree(), before)
         self.assertTrue(os.path.exists(channel_cmd.record_path("game", "mac-web")))
@@ -402,7 +402,7 @@ class CreateJoinTest(ChannelCase):
                                           return_value="darwin"), \
                         mock.patch.object(channel_cmd.platform, "no_machine_hint",
                                           return_value=hint):
-                    code, out, err = self.channel(verb, "game", "--local", "--project", "x")
+                    code, _out, err = self.channel(verb, "game", "--local", "--project", "x")
                 self.assertEqual((code, err.splitlines()[:2]),
                                  (3, ["ERROR state_mismatch: this machine has no machine id, so "
                                       "vcharon can't tie a channel's record to it",
@@ -462,7 +462,7 @@ class CreateJoinTest(ChannelCase):
         self.lead()
         # the record can't be written: the claim is released
         write_tree(self.vcharon_home, {"state/channels": b"a file in the way"})
-        code, out, err = self.channel("join", "game", "--server", "fake-dest")
+        code, _out, _err = self.channel("join", "game", "--server", "fake-dest")
         self.assertNotEqual(code, 0)
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["laptop-ui"])
         self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "joined")))
@@ -470,7 +470,7 @@ class CreateJoinTest(ChannelCase):
     def test_a_failed_run_keeps_the_join(self):
         self.lead()
         with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
-            code, out, err = self.channel("join", "game", "--server", "fake-dest")
+            code, out, _err = self.channel("join", "game", "--server", "fake-dest")
         self.assertEqual(code, 4)
         self.assertIn(platform.runnable("vcharon: the sync failed; you are in game: run vcharon "
                                         "sync game --full --project web again"), out)
@@ -509,7 +509,7 @@ class ConcurrencyTest(ChannelCase):
                 got = self.both([a, b], ["create", channel, "--server", "fake-dest"])
                 codes = sorted(g[0] for g in got)
                 self.assertEqual(codes, [0, 1], got)
-                loser = [g for g in got if g[0] == 1][0]
+                loser = next(g for g in got if g[0] == 1)
                 self.assertIn("ERROR channel: the channel %s already exists" % channel, loser[2])
                 # one leader, no empty channel, no second member
                 self.assertEqual(len(os.listdir(os.path.join(self.root, channel))), 1)
@@ -523,7 +523,7 @@ class ConcurrencyTest(ChannelCase):
             f.write("[vcharon]\nbox = mac\n")
         got = self.both([a, b], ["join", "game", "--server", "fake-dest"])
         self.assertEqual(sorted(g[0] for g in got), [0, 1], got)
-        loser = [g for g in got if g[0] == 1][0]
+        loser = next(g for g in got if g[0] == 1)
         self.assertIn("ERROR channel: the name mac-web is taken in game\n  fix: pass --role R to "
                       "join as another member;", loser[2])
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))),
@@ -633,7 +633,7 @@ class ServerCallsTest(ChannelCase):
         out = self.ok("list", "--server", "fake-dest")
         lines = out.splitlines()
         self.assertEqual(lines[0], "vcharon: list  (fake-dest)")
-        game = [l for l in lines if l.startswith("  game  ")][0]
+        game = next(l for l in lines if l.startswith("  game  "))
         self.assertIn("  leader lead  members a, lead  newest ", game)
         self.assertIn("    note: notes.md at its top isn't a member's folder", lines)
         self.assertTrue(any(l.startswith("  two  leader ?") for l in lines), out)
@@ -725,7 +725,7 @@ class LeaveCloseTest(ChannelCase):
             open(lock + ".lock", "ab").close()
         before = self.everything()
         self.use_box("laptop")
-        got, out, err = self.channel("leave", "game", "--project", "ui")
+        got, _out, err = self.channel("leave", "game", "--project", "ui")
         self.assertEqual(got, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR channel: you lead game: close it instead",
@@ -743,7 +743,7 @@ class LeaveCloseTest(ChannelCase):
     def test_a_failed_run_removes_nothing(self):
         before = self.box_files()
         with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
-            code, out, err = self.channel("leave", "game")
+            code, out, _err = self.channel("leave", "game")
         self.assertEqual(code, 4)
         self.assertIn("nothing was removed", out)
         after = self.box_files()
@@ -913,7 +913,7 @@ class SkippedTest(ChannelCase):
             return f.read()
 
     def test_other_jobs_run(self):
-        code, out, err = self.run_jobs("push")
+        code, _out, err = self.run_jobs("push")
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         log = self.vcharon_log()
@@ -926,12 +926,12 @@ class SkippedTest(ChannelCase):
     def test_naming_one_fails_with_its_error(self):
         for name in ("mailbox", "mailbox.up"):
             with self.subTest(name=name):
-                code, out, err = self.run_jobs(name)
+                code, _out, err = self.run_jobs(name)
                 self.assertEqual(code, 3)
                 self.assertEqual(err.splitlines()[0], "ERROR config: the fixed mailbox is "
                                  "retired (M10): delete [mailbox] from vcharon.ini "
                                  "(MAILBOX.md in the vcharon folder, \"Retired\")")
-        code, out, err = self.run_jobs("game.mac-x.down")
+        code, _out, err = self.run_jobs("game.mac-x.down")
         self.assertEqual(code, 3)
         self.assertTrue(err.startswith("ERROR config: channels.d/game.mac-x.ini [game.mac-x]: "
                                        "holds only a channel section"), err)
@@ -941,14 +941,14 @@ class SkippedTest(ChannelCase):
         self.write_record("game", "mac-x", "laptop-ui", project="x")
         for argv in (["sync", "game"], ["watch", "game"], ["read", "game"]):
             with self.subTest(argv=argv):
-                code, out, err = self.run_cli(*argv + ["--project", "x"])
+                code, _out, err = self.run_cli(*argv + ["--project", "x"])
                 self.assertEqual(code, 3)
                 self.assertTrue(err.startswith("ERROR config: channels.d/game.mac-x.ini "
                                                "[game.mac-x]: holds only a channel section"), err)
 
     def test_doctor_lists_them(self):
         os.environ.pop("SSH_AUTH_SOCK", None)
-        code, out, err = self.run_cli("doctor")
+        code, out, _err = self.run_cli("doctor")
         self.assertEqual(code, 0, out)
         warns = [" ".join(l.split()) for l in out.splitlines() if l.startswith("  warn  config")]
         self.assertEqual([w.split(":")[0] for w in warns], [
@@ -1096,8 +1096,8 @@ class ReviewTest(ChannelCase):
         self.assertEqual((self.record("game.mac-web-b")["project"],
                           self.record("game.mac-web-b")["role"]), ("web", "b"))
         os.remove(os.path.join(own, "MEMBER.md"))
-        code, out, err = self.run_cli("sync", "game", "--role", "b")
-        fix = [l for l in err.splitlines() if l.startswith("  fix: ")][0]
+        _code, out, err = self.run_cli("sync", "game", "--role", "b")
+        fix = next(l for l in err.splitlines() if l.startswith("  fix: "))
         self.assertEqual(fix, "  fix: " + platform.runnable(
             "vcharon join game --server fake-dest --project web --role b takes its files "
             "back from the server (a rejoin); MEMBER.md is vcharon's: to drop other files, delete "
@@ -1113,7 +1113,7 @@ class ReviewTest(ChannelCase):
                          "--project web --role b")
         # the gone-channel hint too
         shutil.rmtree(os.path.join(self.root, "game"))
-        code, out, err = self.run_cli("sync", "game", "--role", "b")
+        _code, out, err = self.run_cli("sync", "game", "--role", "b")
         self.assertIn(" fix: %s\n" % platform.runnable(
             channel_cmd.CHANNEL_GONE_HINT % ("game", "--project web --role b")), err)
         # an old record without the parts: a placeholder, never flags for another name
@@ -1230,7 +1230,7 @@ class ReviewTest(ChannelCase):
                 real = channels._DIR.rename
                 calls = []
 
-                def rename(handle, old, new):
+                def rename(handle, old, new, calls=calls, codes=codes, real=real):
                     calls.append(old)
                     if len(calls) <= len(codes):
                         e = OSError(13, "in use")
@@ -1250,16 +1250,16 @@ class ReviewTest(ChannelCase):
             with self.subTest(winerror=winerror):
                 calls = []
 
-                def rename(handle, old, new):
+                def rename(handle, old, new, calls=calls, winerror=winerror):
                     calls.append(old)
                     e = OSError(13, "denied")
                     e.winerror = winerror
                     raise e
 
-                with mock.patch.object(channels._DIR, "rename", rename), \
-                        mock.patch.object(channels.fsops, "RETRY_DELAY", 0):
-                    with self.assertRaises(VCharonError):
-                        channels.remove(self.root, "game", "lead")
+                with (mock.patch.object(channels._DIR, "rename", rename),
+                      mock.patch.object(channels.fsops, "RETRY_DELAY", 0),
+                      self.assertRaises(VCharonError)):
+                    channels.remove(self.root, "game", "lead")
                 self.assertEqual(len(calls), calls_made)
                 self.assertTrue(os.path.isdir(os.path.join(self.root, "game", "lead")))
 
@@ -1273,15 +1273,15 @@ class ReviewTest(ChannelCase):
                                         (32, "in_use", "%s: another program has it open"
                                          % path)):
             with self.subTest(winerror=winerror):
-                def rename(handle, old, new):
+                def rename(handle, old, new, winerror=winerror):
                     e = PermissionError(13, "拒绝访问。")
                     e.winerror = winerror
                     raise e
 
-                with mock.patch.object(channels._DIR, "rename", rename), \
-                        mock.patch.object(channels.fsops, "RETRY_DELAY", 0):
-                    with self.assertRaises(VCharonError) as cm:
-                        channels.remove(self.root, "game", "lead")
+                with (mock.patch.object(channels._DIR, "rename", rename),
+                      mock.patch.object(channels.fsops, "RETRY_DELAY", 0),
+                      self.assertRaises(VCharonError) as cm):
+                    channels.remove(self.root, "game", "lead")
                 self.assertEqual((cm.exception.code, cm.exception.message), (code, message))
                 self.assertEqual(cm.exception.hint,
                                  "something has a file or its current folder inside %s (a "
@@ -1292,9 +1292,9 @@ class ReviewTest(ChannelCase):
         def denied(handle, old, new):
             raise PermissionError(13, "Permission denied")
 
-        with mock.patch.object(channels._DIR, "rename", denied):
-            with self.assertRaises(VCharonError) as cm:
-                channels.remove(self.root, "game", "lead")
+        with (mock.patch.object(channels._DIR, "rename", denied),
+              self.assertRaises(VCharonError) as cm):
+            channels.remove(self.root, "game", "lead")
         self.assertEqual(cm.exception.hint, "check the owner and permissions of %s" % path)
         self.assertEqual(read_tree(self.root), before)
 
@@ -1324,7 +1324,8 @@ class ReviewTest(ChannelCase):
         self.use_box("laptop")
         # the local tree can't be made: after the claim and the record
         write_tree(self.homes["laptop"], {"joined": b"a file in the way"})
-        code, out, err = self.channel("create", "game", "--server", "fake-dest", "--project", "ui")
+        code, _out, _err = self.channel("create", "game", "--server", "fake-dest",
+                                        "--project", "ui")
         self.assertNotEqual(code, 0)
         self.assertEqual(os.listdir(self.root), [])
         self.assertFalse(os.path.exists(channel_cmd.record_path("game", "laptop-ui")))
@@ -1337,9 +1338,9 @@ class ReviewTest(ChannelCase):
                 raise PermissionError(13, "Permission denied", name)
             return real(handle, name, mode)
 
-        with mock.patch.object(channels._DIR, "mkdir", mkdir):
-            with self.assertRaises(VCharonError) as cm:
-                channels.claim(self.root, "game", "lead", True)
+        with (mock.patch.object(channels._DIR, "mkdir", mkdir),
+              self.assertRaises(VCharonError) as cm):
+            channels.claim(self.root, "game", "lead", True)
         self.assertEqual(cm.exception.code, "permission")
         self.assertEqual(os.listdir(self.root), [])
 
@@ -1357,7 +1358,7 @@ class ReviewTest(ChannelCase):
         section = os.path.join(self.homes["mac"], "channels.d", "game.mac-web.ini")
         os.remove(section)
         os.mkdir(section)
-        code, out, err = self.channel("join", "game", "--server", "fake-dest")
+        code, _out, _err = self.channel("join", "game", "--server", "fake-dest")
         self.assertNotEqual(code, 0)
         self.assertEqual(os.listdir(srv), ["MEMBER.md"])
         self.assertTrue(os.path.exists(channel_cmd.record_path("game", "mac-web")))
@@ -1647,9 +1648,9 @@ class ClaimerTest(ChannelCase):
         os.makedirs(os.path.dirname(path))
         open(path, "wb").close()
         sleeps = []
-        with mock.patch.object(platform.time, "sleep", sleeps.append):
-            with self.assertRaises(VCharonError) as cm:
-                platform.client_id()
+        with (mock.patch.object(platform.time, "sleep", sleeps.append),
+              self.assertRaises(VCharonError) as cm):
+            platform.client_id()
         self.assertEqual(cm.exception.message, "%s isn't a client id (32 hex digits)" % path)
         self.assertEqual(sleeps, [platform.CLIENT_ID_PAUSE] * (platform.CLIENT_ID_TRIES - 1))
         self.assertEqual(os.path.getsize(path), 0)
@@ -1711,10 +1712,10 @@ class ClaimerTest(ChannelCase):
             self.assertEqual(os.listdir(folder), ["client-id"])
             # any other rename error is an error, and leaves no file behind
             os.remove(path)
-            with mock.patch.object(platform.os, "rename",
-                                   side_effect=OSError(errno.EIO, "I/O error")):
-                with self.assertRaises(VCharonError):
-                    platform.client_id()
+            with (mock.patch.object(platform.os, "rename",
+                                    side_effect=OSError(errno.EIO, "I/O error")),
+                  self.assertRaises(VCharonError)):
+                platform.client_id()
         self.assertEqual(os.listdir(folder), [])
 
     @unittest.skipUnless(os.name == "nt", "only Windows' rename refuses an existing file")
@@ -1747,25 +1748,25 @@ class ClaimerTest(ChannelCase):
     def test_a_mac_or_windows_without_its_id_is_refused(self):
         # those always have one: a missing id is a failed read, never a random id kept
         for osn in ("darwin", "windows"):
-            with self.subTest(osn=osn):
-                with mock.patch.object(platform, "os_name", return_value=osn), \
-                        mock.patch.object(platform, "machine_id", return_value=None):
-                    path = platform.client_id_path()
-                    for make in (True, False):
-                        with self.assertRaises(VCharonError) as cm:
-                            platform.client_id(make)
-                        self.assertTrue(cm.exception.message.startswith(
-                            "couldn't read this machine's id ("), cm.exception.message)
-                        self.assertEqual(cm.exception.hint, "run the command again; if it "
-                                         "keeps failing, your user can write %s by hand: 32 "
-                                         "hex digits (0-9, a-f), then a line: random" % path)
-                    self.assertFalse(os.path.exists(path))
-                    # the way out the fix names: a file written by hand is taken
-                    os.makedirs(os.path.dirname(path), exist_ok=True)
-                    with open(path, "w") as f:
-                        f.write("d" * 32 + "\nrandom\n")
-                    self.assertEqual(platform.client_id(), ("d" * 32, "random"))
-                    os.remove(path)
+            with (self.subTest(osn=osn),
+                  mock.patch.object(platform, "os_name", return_value=osn),
+                  mock.patch.object(platform, "machine_id", return_value=None)):
+                path = platform.client_id_path()
+                for make in (True, False):
+                    with self.assertRaises(VCharonError) as cm:
+                        platform.client_id(make)
+                    self.assertTrue(cm.exception.message.startswith(
+                        "couldn't read this machine's id ("), cm.exception.message)
+                    self.assertEqual(cm.exception.hint, "run the command again; if it "
+                                     "keeps failing, your user can write %s by hand: 32 "
+                                     "hex digits (0-9, a-f), then a line: random" % path)
+                self.assertFalse(os.path.exists(path))
+                # the way out the fix names: a file written by hand is taken
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("d" * 32 + "\nrandom\n")
+                self.assertEqual(platform.client_id(), ("d" * 32, "random"))
+                os.remove(path)
         with mock.patch.object(platform, "machine_id", return_value=None), \
                 mock.patch.object(platform, "os_name", return_value="linux"):
             self.assertEqual(platform.client_id()[1], "random")

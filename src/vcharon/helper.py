@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import io
 import os
@@ -37,7 +38,8 @@ class HelperConn:
 
     def __init__(self, inp, out):
         self._inp = inp
-        self._out = open(out, "wb", buffering=65536)
+        # open for the connection's life, past __init__
+        self._out = open(out, "wb", buffering=65536)  # noqa: SIM115
 
     def write_raw(self, data):
         self._write(data)
@@ -133,13 +135,11 @@ class Helper:
                 continue
             try:
                 obj.close()
-            except Exception:
-                try:
+            except Exception:  # noqa: BLE001
+                with contextlib.suppress(Exception):
                     sys.stderr.write("vcharon: closing a plugin failed:\n%s"
                                      % traceback.format_exc())
                     sys.stderr.flush()
-                except Exception:
-                    pass
 
     def ok(self, call_id, result):
         self.conn.send_json(proto.ok_msg(call_id, result))
@@ -330,7 +330,7 @@ def sink_commit(h, call_id, args):
                              detail=traceback.format_exc())
         # The reply says what was done before the failure (decision 3 of the M3 plan).
         h.conn.send_json(proto.err_msg(call_id, e, done=stage.done_to_json(h.sink.done)))
-        return None
+        return
     h.ok(call_id, stage.done_to_json(done))
 
 
@@ -419,7 +419,7 @@ def serve(h):
             # After a protocol error the two sides may be out of step (DESIGN §7.2).
             if e.code == "protocol":
                 return 3
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             h.err(call_id, VCharonError("internal", "%s: %s" % (type(e).__name__, e),
                                         detail=traceback.format_exc()))
 

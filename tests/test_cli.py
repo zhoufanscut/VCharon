@@ -13,8 +13,8 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import textwrap
+import time
 import unittest
 from unittest import mock
 
@@ -25,8 +25,15 @@ from vcharon.proto import VCharonError
 
 from tests import util
 from tests.test_lock import hold_in_child, stop_child
-from tests.util import (CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, helper_override,
-                        read_tree, write_tree)
+from tests.util import (
+    CAN_SYMLINK,
+    FAKE_SSH,
+    TEST_MACHINE_ID,
+    FakeSshCase,
+    helper_override,
+    read_tree,
+    write_tree,
+)
 
 PULL_HINT = ("the vcharon on the server may be broken, or the server compromised; nothing was "
              "changed")
@@ -135,7 +142,7 @@ class CliTest(FakeSshCase):
     def test_ping_permission_denied(self):
         os.environ["FAKE_SSH_EXIT"] = "255"
         os.environ["FAKE_SSH_STDERR"] = "Permission denied (publickey)."
-        code, out, err = self.run_cli("ping", "fake-dest")
+        code, _out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 4)
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR connect: ssh couldn't log in to fake-dest "
@@ -148,7 +155,7 @@ class CliTest(FakeSshCase):
 
     def test_a_bug_is_internal(self):
         with mock.patch.object(ssh.Session, "echo", side_effect=RuntimeError("oops")):
-            code, out, err = self.run_cli("ping", "fake-dest")
+            code, _out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 1)
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR internal: RuntimeError: oops")
@@ -160,7 +167,7 @@ class CliTest(FakeSshCase):
         for argv in ([], ["nope"], ["ping"], ["ping", "a", "b"], ["ping", "-x", "host"],
                      ["ping", "--", "-oProxyCommand=x"], ["ping", "bad host"]):
             with self.subTest(argv=argv):
-                code, out, err = self.run_cli(*argv)
+                code, _out, err = self.run_cli(*argv)
                 self.assertEqual(code, 3)
                 self.assertTrue(err.startswith("ERROR config: "), err)
                 self.assertIn("  fix: ", err)
@@ -168,7 +175,7 @@ class CliTest(FakeSshCase):
     def test_bad_config_exits_3(self):
         with open(os.path.join(self.vcharon_home, "vcharon.ini"), "w") as f:
             f.write("[vcharon]\nidle_timeout = 0\n")
-        code, out, err = self.run_cli("ping", "fake-dest")
+        code, _out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 3)
         self.assertIn("ERROR config: vcharon.ini [vcharon] idle_timeout: must be a whole number",
                       err)
@@ -200,26 +207,27 @@ class CliTest(FakeSshCase):
                 self.assertTrue(err.startswith("ERROR config: "), err)
 
     def test_verbose_prints_the_log(self):
-        code, out, err = self.run_cli("ping", "fake-dest", "-v")
+        code, _out, err = self.run_cli("ping", "fake-dest", "-v")
         self.assertEqual(code, 0)
         self.assertIn("  info  starting ssh: ", err)
 
     @unittest.skipUnless(os.name == "posix", "sends SIGINT")
     def test_ctrl_c_kills_ssh_and_exits_130(self):
         os.environ["FAKE_SSH_STALL"] = "30"
-        script = ("import sys\n"
+        # A shell may start background jobs with SIGINT ignored; Python then never sees it, so
+        # the child puts back Python's own handler before it prints anything.
+        script = ("import signal, sys\n"
+                  "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
                   "sys.path[:0] = [%r]\n"
                   "from vcharon import cli, ssh\n"
                   "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
                   "sys.exit(cli.main(['ping', 'fake-dest']))\n" % (VCHARON_DIR, FAKE_SSH))
-        # A shell may start background jobs with SIGINT ignored; Python then never sees it.
         proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, universal_newlines=True,
-                                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+                                stderr=subprocess.PIPE, universal_newlines=True)
         self.assertEqual(proc.stdout.readline(), "vcharon: ping fake-dest\n")
         time.sleep(0.5)
         proc.send_signal(signal.SIGINT)
-        out, err = proc.communicate(timeout=20)
+        _out, err = proc.communicate(timeout=20)
         self.assertEqual(proc.returncode, 130)
         self.assertEqual(err, "vcharon: interrupted\n")
         with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
@@ -494,7 +502,7 @@ class JobTest(FakeSshCase):
         os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         write_tree(self.src, {"new.txt": b"n"})
         before = self.state_bytes()
-        out, err = self.failed(3, "push")
+        _out, err = self.failed(3, "push")
         self.assertEqual(self.state_bytes(), before)
         root = os.path.realpath(self.inbox)
         self.assertEqual(err[0], 'ERROR state_mismatch: the state of push was saved for another '
@@ -515,7 +523,7 @@ class JobTest(FakeSshCase):
         os.remove(link)
         os.symlink(second, link)
         before = self.state_bytes("pull")
-        out, err = self.failed(3, "pull")
+        _out, err = self.failed(3, "pull")
         self.assertEqual(self.state_bytes("pull"), before)
         # the binding holds the resolved root (on macOS the temp dir is under /private)
         self.assertEqual(err[0], 'ERROR state_mismatch: the state of pull was saved for another '
@@ -562,11 +570,11 @@ class JobTest(FakeSshCase):
     def test_8_busy(self):
         held = state.lock("push")
         self.addCleanup(held.release)
-        out, err = self.failed(2, "push")
+        _out, err = self.failed(2, "push")
         self.assertEqual(err[:2], ["ERROR busy: another run of push is in progress",
                                    "  fix: wait for it to finish"])
         self.assertFalse(os.path.exists(self.argv_file))
-        code, out, err = self.reset_job("push")
+        code, _out, err = self.reset_job("push")
         self.assertEqual(code, 2)
         self.assertEqual(err.splitlines()[0], "ERROR busy: another run of push is in progress")
         held.release()
@@ -624,7 +632,7 @@ class JobTest(FakeSshCase):
         shutil.rmtree(outbox)
         os.mkdir(outbox)
         before = self.state_bytes("pull")
-        out, err = self.failed(1, "pull")
+        _out, err = self.failed(1, "pull")
         self.assertEqual(err[:2], ["ERROR empty_source: %s is empty, but earlier runs sent 3 paths "
                                    "from it" % outbox,
                                    "  fix: check that its disk is mounted; if it's really empty, "
@@ -672,7 +680,7 @@ class JobTest(FakeSshCase):
         self.addCleanup(os.chmod, e, 0o755)
         full = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
         with mock.patch.object(state, "save", side_effect=full):
-            out, err = self.failed(1, "push")
+            _out, err = self.failed(1, "push")
         # the run's own error; the failed save is only logged
         self.assertEqual(err[:3], ["ERROR permission: e/1: Permission denied",
                                    "  done    1 written, 0 deleted before the failure",
@@ -690,7 +698,7 @@ class JobTest(FakeSshCase):
             raise KeyboardInterrupt
 
         with mock.patch.object(engine.Engine, "run", interrupted):
-            code, out, err = self.run_jobs("push")
+            code, _out, err = self.run_jobs("push")
         self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         self.assertEqual(self.state_bytes(), before)
         self.assertIn("  error  interrupted", self.job_log())
@@ -698,7 +706,7 @@ class JobTest(FakeSshCase):
 
     def test_no_machine_id(self):
         with with_helper(NO_MACHINE):
-            out, err = self.failed(3, "push")
+            _out, err = self.failed(3, "push")
         self.assertEqual(err[:2], ["ERROR state_mismatch: the server fake-dest has no machine id, "
                                    "so vcharon can't tie the state of push to it",
                                    "  fix: " + platform.runnable(state.NO_MACHINE_HINT)])
@@ -709,7 +717,7 @@ class JobTest(FakeSshCase):
         # M11a: a Mac or Windows box has a machine id now; the client refuses it by its OS
         for osn in ("darwin", "windows"):
             os.environ["VCHARON_TEST_OS"] = osn
-            out, err = self.failed(3, "push")
+            _out, err = self.failed(3, "push")
             self.assertEqual(err[:2], ["ERROR state_mismatch: fake-dest runs %s: only a Linux "
                                        "server is supported as a remote end" % osn,
                                        "  fix: point fake-dest at a Linux server"])
@@ -757,7 +765,7 @@ class JobTest(FakeSshCase):
         b = os.path.join(back, "b")
         os.chmod(b, 0o555)
         self.addCleanup(os.chmod, b, 0o755)
-        out, err = self.failed(1, "pull")
+        _out, err = self.failed(1, "pull")
         self.assertEqual(err[:3], ["ERROR permission: b/1: Permission denied",
                                    "  done    2 written, 0 deleted before the failure",
                                    "  fix: check the owner and permissions of b/1"])
@@ -812,15 +820,15 @@ class JobTest(FakeSshCase):
     # usage and config errors
 
     def test_unknown_job_and_missing_config(self):
-        out, err = self.failed(3, "nope")
+        _out, err = self.failed(3, "nope")
         self.assertEqual(err[:2], ["ERROR config: no channel section nope in %s"
                                    % os.path.join(self.vcharon_home, "channels.d"),
                                    "  fix: " + cli.NO_SECTION_HINT])
         self.write_config(PUSH.format(src=self.src) + "from.pth = x\n")
-        out, err = self.failed(3, "push")
+        _out, err = self.failed(3, "push")
         self.assertEqual(err[0], "ERROR bad_options: from.pth: unknown option")
         os.remove(self.config)
-        out, err = self.failed(3, "push")
+        _out, err = self.failed(3, "push")
         # no config file: as no section (a join writes the section, and needs no config file)
         self.assertEqual(err[:2], ["ERROR config: no channel section push in %s"
                                    % os.path.join(self.vcharon_home, "channels.d"),
@@ -829,11 +837,11 @@ class JobTest(FakeSshCase):
         self.assertFalse(os.path.exists(state.path("push")))
 
     def test_verbose(self):
-        code, out, err = self.run_jobs("push", "-v")
+        code, _out, err = self.run_jobs("push", "-v")
         self.assertEqual(code, 0, err)
         self.assertIn("  info  vcharon 0.1.0 sync push; Python ", err)
         self.assertIn("  info  starting ssh: ", err)
-        code, out, err = self.reset_job("push", verbose=True)
+        code, _out, err = self.reset_job("push", verbose=True)
         self.assertIn("  info  state reset: removed ", err)
 
 
@@ -1035,7 +1043,7 @@ class MultiJobTest(FakeSshCase):
         self.assertFalse(os.path.exists(state.path("a")))
 
     def test_unknown_second_job(self):
-        code, out, err = self.run_jobs("a", "nope")
+        code, _out, err = self.run_jobs("a", "nope")
         self.assertEqual(code, 3)
         self.assertTrue(err.startswith("ERROR config: no channel section nope"), err)
         self.assertEqual(self.dests(), [])
@@ -1097,13 +1105,13 @@ class MultiJobTest(FakeSshCase):
             f.write("{}")
         message = ("state_mismatch: the state file %s can't be read: it has no schema, job, "
                    "fingerprint, identity, sink, source, saved" % state.path("b"))
-        code, out, err = self.run_jobs("a", "b")
+        code, _out, err = self.run_jobs("a", "b")
         self.assertEqual(code, 3)
         self.assertEqual(err.splitlines()[0], "ERROR b: " + message)
         self.assertEqual([l for l in err.splitlines() if l.startswith("ERROR")],
                          ["ERROR b: " + message])
         self.assertEqual(self.inbox("a"), {"a.txt": b"a"})
-        code, out, err = self.run_jobs("b")
+        code, _out, err = self.run_jobs("b")
         self.assertEqual(code, 3)
         self.assertEqual(err.splitlines()[0], "ERROR " + message)
         logged = [line.split("  error  ", 1)[1] for line in self.job_log("b").splitlines()
@@ -1111,7 +1119,7 @@ class MultiJobTest(FakeSshCase):
         self.assertEqual([line for line in logged if "can't be read" in line], [message] * 2)
         self.assertNotIn("b: state_mismatch", self.job_log("b"))
         # an error no single job owns keeps its text
-        code, out, err = self.run_jobs("a", "nope")
+        code, _out, err = self.run_jobs("a", "nope")
         self.assertEqual(code, 3)
         self.assertEqual(err.splitlines()[0], "ERROR config: no channel section nope in %s"
                          % os.path.join(self.vcharon_home, "channels.d"))
@@ -1142,7 +1150,7 @@ class MultiJobTest(FakeSshCase):
 
     def test_a_connect_failure_skips_its_group(self):
         os.environ["FAKE_SSH_EXIT"] = "255"
-        code, out, err = self.run_jobs("a", "b")
+        code, out, _err = self.run_jobs("a", "b")
         self.assertEqual(code, 4)
         self.assertEqual(out.splitlines()[1],
                          "vcharon: b  skipped: the connection to fake-dest broke")
@@ -1175,7 +1183,7 @@ class MultiJobTest(FakeSshCase):
             return real(session)
 
         with mock.patch.object(ssh.Session, "open", opened):
-            code, out, err = self.run_jobs("a", "c")
+            code, _out, err = self.run_jobs("a", "c")
         self.assertEqual(code, 0, err)
         for name, dest in (("a", "fake-dest"), ("c", "other-dest")):
             with open(state.path(name), encoding="utf-8") as f:
@@ -1280,7 +1288,7 @@ class MultiJobTest(FakeSshCase):
                "_real.HANDLERS['sink.commit'] = sink_commit\n"
                "from vcharon.proto import VCharonError\n")
         with with_helper(bad):
-            code, out, err = self.run_jobs("a", "b")
+            code, _out, _err = self.run_jobs("a", "b")
         self.assertEqual(code, 1)
         warning = "sink.commit failed without saying what it did"
         self.assertEqual(self.job_log("a").count(warning), 1)
@@ -1512,7 +1520,7 @@ class RepeatTest(FakeSshCase):
 
     def test_the_summary_line(self):
         with mock.patch.object(cli, "REPEAT_SUMMARY", 0):
-            code, lines, err, _ = self.repeat("a", "b", between=[lambda: None])
+            code, _lines, err, _ = self.repeat("a", "b", between=[lambda: None])
         self.assertEqual((code, err), (0, ""))
         summaries = re.findall(r"  info  (repeat: \d+ rounds since [-0-9: ]+, nothing to do in "
                                r"\d+)\n", self.job_log("a"))
@@ -1701,7 +1709,7 @@ class MailboxTest(FakeSshCase):
         # M10: MEMBER.md gone while up has sent it is an emptied or replaced folder: neither
         # job runs, and the server's copy stays (the M10 review's probe)
         os.remove(os.path.join(self.own, "MEMBER.md"))
-        code, out, err = self.run_cli(*SYNC)
+        code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1)
         self.assertEqual([l for l in err.splitlines() if l.startswith(("ERROR", "  fix"))][:2], [
             "ERROR mb.windows.up: not_found: the own folder %s has no MEMBER.md, which "
@@ -1713,7 +1721,7 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(read_tree(os.path.join(self.server, "windows")),
                          {"MEMBER.md": MEMBER, "extra.md": b"extra"})
         # vcharon sync --reset up refuses while MEMBER.md is gone: the rejoin is the fix
-        code, out, err = self.run_cli(*SYNC + ("--reset", "up"))
+        code, _out, err = self.run_cli(*SYNC + ("--reset", "up"))
         self.assertEqual(code, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR channel: your own folder %s has no MEMBER.md: forgetting what up has sent "
@@ -1740,7 +1748,7 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(lines[1], "  nothing to do")
         self.assertEqual(read_tree(self.own), {"MEMBER.md": MEMBER, "RESULTS.md": b"results"})
         # M10: up never makes it again (create = no); its fix line says to leave
-        code, out, err = self.run_jobs("mb.windows.up")
+        code, _out, err = self.run_jobs("mb.windows.up")
         self.assertEqual(code, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR not_found: the root %s doesn't exist" % os.path.join(self.server, "windows"),
@@ -1863,7 +1871,7 @@ class MailboxTest(FakeSshCase):
         # refused there, as before M9 (data safety), and the server's watcher warns
         self.folding()
         write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
-        code, out, err = self.run_cli(*SYNC)
+        code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1)
         self.assertIn("ERROR mb.windows.down: collision: debian/Notes.md and debian/notes.md are "
                       "the same path on macOS", err)
@@ -1962,7 +1970,7 @@ class MailboxTest(FakeSshCase):
         os.chmod(debian, 0o555)
         self.addCleanup(os.chmod, debian, 0o755)
         write_tree(self.server, {"debian/new.md": b"n"})
-        code, out, err = self.run_cli(*SYNC)
+        code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1)
         self.assertIn("ERROR mb.windows.down: permission: ", err)
         self.assertNotIn("writer", err)
@@ -1977,7 +1985,7 @@ class MailboxTest(FakeSshCase):
                 os.makedirs(root, exist_ok=True)
                 os.chmod(root, mode)
                 try:
-                    code, out, err = self.run_cli(*SYNC)
+                    code, _out, err = self.run_cli(*SYNC)
                 finally:
                     os.chmod(root, 0o755)
                 self.assertEqual(code, 1)
@@ -1997,7 +2005,7 @@ class MailboxTest(FakeSshCase):
         shutil.rmtree(os.path.join(self.local, "debian"))
         os.symlink(elsewhere, os.path.join(self.local, "debian"))
         write_tree(self.server, {"debian/new.md": b"n"})
-        code, out, err = self.run_cli(*SYNC)
+        code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1)
         self.assertIn("ERROR mb.windows.down: unsafe_path: ", err)
         self.assertIn("\n  fix: %s\n" % fsops.LINK_HINT, err)
@@ -2010,20 +2018,20 @@ class MailboxTest(FakeSshCase):
         self.write_config(PULL.format(dst=dst).replace("outbox", "vcharon_mailbox"))
         self.folding()
         write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
-        code, out, err = self.run_jobs("pull")
+        code, _out, err = self.run_jobs("pull")
         self.assertEqual(code, 1)
         self.assertIn("ERROR collision: debian/Notes.md and debian/notes.md are the same path "
                       "on macOS\n  fix: rename or exclude one of them at the source\n", err)
         os.remove(os.path.join(self.server, "debian", "notes.md"))
         write_tree(self.server, {"debian/CON.md": b"c"})
         self.folding("windows")
-        code, out, err = self.run_jobs("pull")
+        code, _out, err = self.run_jobs("pull")
         self.assertIn("ERROR unsafe_path: debian/CON.md: CON.md is a reserved name on Windows"
                       "\n  fix: rename or exclude these paths at the source\n", err)
         os.remove(os.path.join(self.server, "debian", "CON.md"))
         if CAN_SYMLINK:
             os.symlink("STEPS.md", os.path.join(self.server, "debian", "lnk"))
-            code, out, err = self.run_jobs("pull")
+            code, _out, err = self.run_jobs("pull")
             self.assertIn("ERROR unsafe_path: debian/lnk: a symlink\n  fix: "
                           "remove them, or skip them with symlinks = skip\n", err)
 
@@ -2105,7 +2113,7 @@ class MailboxTest(FakeSshCase):
         shutil.rmtree(self.server)
         write_tree(self.own, {"hello.md": b"hi"})
         for attempt in range(2):
-            code, out, err = self.run_cli(*SYNC)
+            code, _out, err = self.run_cli(*SYNC)
             self.assertEqual(code, 1)
             errors = [l for l in err.splitlines() if l.startswith(("ERROR", "  fix"))]
             self.assertEqual(errors, [
@@ -2124,7 +2132,7 @@ class MailboxTest(FakeSshCase):
                          % self.local)
         self.assertEqual(len(lines), 3)
         self.assertTrue(os.path.isdir(self.own))
-        code, out, err = self.run_jobs("mb.windows", "mb.windows.up")
+        code, _out, err = self.run_jobs("mb.windows", "mb.windows.up")
         self.assertEqual(code, 3)
         self.assertEqual(err.splitlines()[0], "ERROR config: mb.windows.up is named twice")
 
@@ -2160,7 +2168,7 @@ class MailboxTest(FakeSshCase):
         os.remove(os.path.join(self.own, "MEMBER.md"))
         shutil.rmtree(self.local)
         for attempt in range(2):
-            code, out, err = self.run_cli(*SYNC)
+            code, _out, err = self.run_cli(*SYNC)
             self.assertEqual(code, 1)
             errors = [l for l in err.splitlines() if l.startswith(("ERROR", "  fix"))]
             self.assertEqual(errors, [
@@ -2186,7 +2194,7 @@ class MailboxTest(FakeSshCase):
         lines = self.jobs_ok("mb.windows.down", "--dry-run")
         self.assertEqual(lines[1:3], ["  put     1 file, 1 dir (5 B)", "          debian/"])
         self.assertFalse(os.path.exists(self.local))
-        code, out, err = self.run_cli(*SYNC, "--dry-run")
+        _code, _out, _err = self.run_cli(*SYNC, "--dry-run")
         self.assertFalse(os.path.exists(self.local))
 
     def test_down_allows_an_empty_tree(self):
@@ -2256,7 +2264,7 @@ class MailboxTest(FakeSshCase):
         write_tree(self.home, {"elsewhere/windows/": None})
         write_channel_section(self, MAILBOX.format(local=self.local).replace(
             "= vcharon_mailbox", "= elsewhere"))
-        code, out, err = self.run_cli(*SYNC)
+        code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 3)
         self.assertEqual([l for l in err.splitlines() if l.startswith("ERROR")],
                          ["ERROR mb.windows.%s: state_mismatch: the state of mb.windows.%s was "
@@ -2359,9 +2367,8 @@ class EntryPointTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def run_vcharon(self, *args, cwd=None):
-        return subprocess.run([sys.executable] + list(args), cwd=cwd, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, universal_newlines=True, timeout=60,
-                              encoding="utf-8")
+        return subprocess.run([sys.executable] + list(args), cwd=cwd, capture_output=True,
+                              text=True, timeout=60, encoding="utf-8", check=False)
 
     def test_dash_m(self):
         # from a folder that isn't the repo, so the installed package is the one that runs; -P
@@ -2401,7 +2408,7 @@ class BrokenPipeTest(FakeSshCase):
         os.close(r)
         try:
             ran = subprocess.run([sys.executable, "-m", "vcharon", "doctor"], stdout=w,
-                                 stderr=subprocess.PIPE, timeout=60)
+                                 stderr=subprocess.PIPE, timeout=60, check=False)
         finally:
             os.close(w)
         self.assertEqual((ran.returncode, ran.stderr), (1, b""))

@@ -9,7 +9,6 @@ import os
 import pathlib
 import shutil
 import socket
-import stat
 import subprocess
 import tempfile
 import time
@@ -591,7 +590,7 @@ class PathCases:
         state = self.state_of()
         write_tree(self.src, {"r.txt": b"original"})
         os.utime(self.at("r.txt"), (MTIME + 60, MTIME + 60))
-        src, p = self.planned(state)
+        _src, p = self.planned(state)
         self.assertEqual(p.entries, [put_file("r.txt", 8, MTIME + 60, self.exec_bit(False))])
 
     def test_keep_name_with_a_state(self):
@@ -599,7 +598,7 @@ class PathCases:
         state = self.state_of(keep_name="yes")
         self.assertEqual(sorted(state["sent"]), ["src", "src/a", "src/a/b.txt"])
         self.assertEqual(state["sent"]["src"], "d")
-        src, p = self.planned(state, keep_name="yes")
+        _src, p = self.planned(state, keep_name="yes")
         self.assertEqual(p.entries, [])
 
     def test_full(self):
@@ -620,7 +619,7 @@ class PathCases:
 
     def test_full_single_file(self):
         write_tree(self.tmp, {"one.bin": b"single"})
-        src, p = self.planned({}, full=True, path=os.path.join(self.tmp, "one.bin"))
+        _src, p = self.planned({}, full=True, path=os.path.join(self.tmp, "one.bin"))
         self.assertEqual(p.entries[0].sha256, hashlib.sha256(b"single").hexdigest())
         self.assertEqual(p.state["sent"], {"one.bin": [6, p.entries[0].mtime,
                                                        self.exec_bit(False)]})
@@ -698,7 +697,7 @@ class PathCases:
         write_tree(self.src, {"docs/sub/readme": b"lower, another file"})
         if sorted(os.listdir(self.at("docs/sub"))) != ["README", "readme"]:
             self.skipTest("this file system folds these names together")
-        src, p = self.planned(state)
+        _src, p = self.planned(state)
         self.assertEqual(paths(p), ["docs/sub/README", "docs/sub/readme"])
         with self.assertRaises(VCharonError) as cm:
             pathrules.check_plan(p, "windows")
@@ -727,7 +726,7 @@ class PathCases:
         state = self.state_of()
         write_tree(self.src, {nfd: b"decomposed, another file"})
         self.both_kept(nfc, nfd)
-        src, p = self.planned(state)
+        _src, p = self.planned(state)
         # walk order: by code point
         self.assertEqual(paths(p), [nfd, nfc])
         with self.assertRaises(VCharonError) as cm:
@@ -753,7 +752,7 @@ class PathCases:
         write_tree(self.src, {"README": b"u", "readme": b"l", "A/x": b"x", "a/y": b"y"})
         self.both_kept("A", "README", "a", "readme")
         state = self.state_of()
-        src, p = self.planned(state, prune="yes")
+        _src, p = self.planned(state, prune="yes")
         self.assertEqual((p.entries, p.state), ([], state))
         # an unrelated change brings no partners along
         write_tree(self.src, {"other.txt": b"o"})
@@ -768,7 +767,7 @@ class PathCases:
         os.remove(self.at("gone.txt"))
         shutil.rmtree(self.at("d"))
         os.rmdir(self.at("old"))
-        src, p = self.planned(state, prune="yes")
+        _src, p = self.planned(state, prune="yes")
         # only what earlier runs sent, sorted by path, never as trees
         self.assertEqual(p.entries, [delete("d", why="gone from the source"),
                                      delete("d/gone.txt", why="gone from the source"),
@@ -776,7 +775,7 @@ class PathCases:
                                      delete("old", why="gone from the source")])
         self.assertEqual(p.state, {"sent": {"keep.txt": state["sent"]["keep.txt"]}})
         # without prune nothing is deleted, and the gone paths stay in sent
-        src, p = self.planned(state)
+        _src, p = self.planned(state)
         self.assertEqual((p.entries, p.state), ([], state))
 
     def test_5_kind_changes(self):
@@ -814,14 +813,14 @@ class PathCases:
                 if gone:
                     os.remove(self.at("x.log"))
                     shutil.rmtree(self.at("build"))
-                src, p = self.planned(state, prune="yes", exclude="*.log,build")
+                _src, p = self.planned(state, prune="yes", exclude="*.log,build")
                 self.assertEqual(p.entries, [])
                 self.assertEqual(p.state, {"sent": {"keep.txt": state["sent"]["keep.txt"]}})
         # a pattern with / matches the whole relative path; keep_name's prefix is left out
         write_tree(self.src, {"docs/a.md": b"a", "docs/b.txt": b"b"})
         state = self.state_of(keep_name="yes")
         shutil.rmtree(self.at("docs"))
-        src, p = self.planned(state, keep_name="yes", prune="yes", exclude="docs/*.md,src")
+        _src, p = self.planned(state, keep_name="yes", prune="yes", exclude="docs/*.md,src")
         self.assertEqual(p.entries, [delete("src/docs", why="gone from the source"),
                                      delete("src/docs/b.txt", why="gone from the source")])
         self.assertEqual(sorted(p.state["sent"]), ["src", "src/keep.txt"])
@@ -835,7 +834,7 @@ class PathCases:
         keep = self.value("keep.txt")
         state = {"sent": {"Foo.cpp": stale, "keep.txt": keep, "Build": "d",
                           "Build/x.o": stale, "Docs": "d", "Docs/a.md": stale}}
-        src, p = self.planned(state, prune="yes", exclude="foo.cpp,build,docs/*.md")
+        _src, p = self.planned(state, prune="yes", exclude="foo.cpp,build,docs/*.md")
         # Docs itself matches nothing: it's gone from the source, so it's deleted (a directory
         # is removed only if empty)
         self.assertEqual([(e.op, e.path) for e in p.entries],
@@ -850,7 +849,7 @@ class PathCases:
         write_tree(self.src, {"README.md": b"r"})
         state = self.state_of(exclude="readme.md")
         self.assertEqual(list(state["sent"]), ["README.md"])
-        src, p = self.planned(state, prune="yes", exclude="readme.md")
+        _src, p = self.planned(state, prune="yes", exclude="readme.md")
         self.assertEqual((p.entries, p.state), ([], state))
 
     def test_6_empty_source(self):
@@ -869,7 +868,7 @@ class PathCases:
             os.symlink(self.outside, self.at("link"))
         self.refused_with(state, "empty_source", prune="yes", exclude="*.log", symlinks="skip")
         # with allow_empty, every sent path is a delete
-        src, p = self.planned(state, prune="yes", allow_empty="yes", exclude="*.log",
+        _src, p = self.planned(state, prune="yes", allow_empty="yes", exclude="*.log",
                               symlinks="skip")
         self.assertEqual(p.entries, [delete(path, why="gone from the source")
                                      for path in ("a.txt", "d", "d/b.txt")])
@@ -889,7 +888,7 @@ class PathCases:
         # the source directory's own entry doesn't count
         self.assertEqual(e.message, "%s is empty, but earlier runs sent 1 path from it"
                          % self.src)
-        src, p = self.planned({"sent": {"src": "d"}}, keep_name="yes", prune="yes")
+        _src, p = self.planned({"sent": {"src": "d"}}, keep_name="yes", prune="yes")
         self.assertEqual(p.entries, [])
 
     def refused_with(self, state, code, **options):
@@ -1014,11 +1013,11 @@ class PathCases:
         # edited: planned, and that state saved
         write_tree(self.src, {"f.txt": b"edited\n"})
         os.utime(self.at("f.txt"), (MTIME, MTIME))
-        src, p = self.planned(state, exclude=".svn")
+        _src, p = self.planned(state, exclude=".svn")
         self.assertEqual(paths(p), ["f.txt"])
         state = json.loads(json.dumps(p.state))
         run(svn + ["revert", self.at("f.txt")])
-        src, p = self.planned(state, exclude=".svn")
+        _src, p = self.planned(state, exclude=".svn")
         self.assertEqual(paths(p), ["f.txt"])
         self.assertEqual(p.entries[0].size, len(b"committed bytes\n"))
         self.assertNotEqual(p.entries[0].mtime, MTIME)
@@ -1029,7 +1028,7 @@ class PathCases:
     def test_a_member_folder_over_the_limits(self):
         # the pull's source: each member folder over max_bytes or max_files is left out of
         # the plan, with a note, and keeps its sent entries as they were
-        limits = dict(mailbox_me="me", prune="yes", max_bytes="100", max_files="3")
+        limits = {"mailbox_me": "me", "prune": "yes", "max_bytes": "100", "max_files": "3"}
         write_tree(self.src, {"me/x": b"x", "a/MEMBER.md": b"m", "a/old.txt": b"o",
                               "b/b.txt": b"b"})
         first = self.state_of(**limits)

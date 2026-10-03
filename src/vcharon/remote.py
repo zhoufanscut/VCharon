@@ -117,7 +117,7 @@ class RemoteSink:
             return
         try:
             self.session.call("sink.abort")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.log.warn("sink.abort failed: %s" % e)
 
     def close(self):

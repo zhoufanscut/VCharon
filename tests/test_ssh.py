@@ -17,8 +17,8 @@ REMOTE = "python3 -I -c 'import sys,base64;exec(base64.b64decode(sys.stdin.buffe
 
 
 def settings(**overrides):
-    base = dict(ssh_path="/usr/bin/ssh", connect_timeout=10, handshake_timeout=30,
-                idle_timeout=300, run_timeout=0, compress=False)
+    base = {"ssh_path": "/usr/bin/ssh", "connect_timeout": 10, "handshake_timeout": 30,
+            "idle_timeout": 300, "run_timeout": 0, "compress": False}
     base.update(overrides)
     return config.Settings(**base)
 

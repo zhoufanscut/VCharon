@@ -15,8 +15,25 @@ import threading
 import time
 import traceback
 
-from . import (VERSION, channel_cmd, charter, config, doctor, entries, fsops, keys, pathrules,
-               platform, plugin, proto, remote, ssh, stage, state)
+from . import (
+    VERSION,
+    channel_cmd,
+    charter,
+    config,
+    doctor,
+    entries,
+    fsops,
+    keys,
+    pathrules,
+    platform,
+    plugin,
+    proto,
+    remote,
+    ssh,
+    stage,
+    state,
+)
+
 # `run` is the name of _Run objects here.
 from . import run as engine
 from .log import HeldLog, Log
@@ -282,7 +299,7 @@ def _guarded(fn, run):
         run.log_line("error", "interrupted")
         sys.stderr.write("vcharon: interrupted\n")
         return 130
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         run.log_line("error", traceback.format_exc(), create=True)
         run.show_error(VCharonError("internal", "%s: %s" % (type(e).__name__, e)),
                        logged=True)
@@ -433,7 +450,7 @@ def _post(args, run):
         raise _usage("no --body, and stdin is a terminal", "give --body TEXT, or the body on "
                      "stdin: a file, or a quoted heredoc (<<'EOF')")
     cfg = load_config()
-    record, flags = _membership(args, cfg)
+    record, _flags = _membership(args, cfg)
     limits = channel_cmd.channel_limits(record)
     name = record["name"]
     steps = len(parts) == 1 and parts[0].casefold() == post_mod.STEPS_FILE.casefold()
@@ -627,10 +644,8 @@ class _Run:
 
     def log_line(self, level, msg, create=False):
         if self.log is None and create:
-            try:
+            with contextlib.suppress(Exception):
                 self.log = Log(os.path.join(platform.log_dir(), "vcharon.log"))
-            except Exception:
-                pass
         if self.log is not None:
             self.log.write(level, msg)
 
@@ -770,8 +785,7 @@ def pull_name(path):
     when the text can't tell (empty, ~, ~user, or a name that comes out "", "." or "..")."""
     if not path or (path.startswith("~") and "/" not in path):
         return None
-    if path.startswith("~/"):
-        path = path[2:]
+    path = path.removeprefix("~/")
     name = posixpath.basename(posixpath.normpath(path))
     return None if name in ("", ".", "..") else name
 
@@ -1255,7 +1269,7 @@ def _repeat_one(args, jr, conn, stack):
     except BrokenPipeError:
         # stdout's reader is gone: no job's error, the whole command's (_guarded)
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         if conn.session is not None and not _still_usable(conn.session, e):
             conn.broke = e
         jr.status = "failed"
@@ -1295,7 +1309,7 @@ def _one_of_group(args, jr, conn, stack, last):
     except BrokenPipeError:
         # stdout's reader is gone: no job's error, the whole command's (_guarded)
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         error, trace = e, traceback.format_exc()
         if conn.session is not None and not _still_usable(conn.session, e):
             conn.broke = e
@@ -1582,7 +1596,7 @@ def _save_after_failure(name, fingerprint, eng, binding, log):
     try:
         state.save(name, state.State(fingerprint, eng.plan.identity, binding, eng.state_after,
                                      state.now()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log.warn("couldn't save the state of %s after the failure: %s" % (name, e))
         return
     log.info("saved the state of %s: what the failed commit wrote" % name)

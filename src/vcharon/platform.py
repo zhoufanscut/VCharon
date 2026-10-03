@@ -347,7 +347,7 @@ def machine_id(paths=("/etc/machine-id", "/var/lib/dbus/machine-id"), ioreg=_ior
         return None
     try:
         uuid = reader()
-    except Exception:
+    except Exception:  # noqa: BLE001
         # no ioreg, no winreg, a timeout, a key that isn't there: no id, as on a Linux box
         # without the files
         return None
@@ -592,7 +592,7 @@ def distro_warning(hello):
 def user():
     try:
         return getpass.getuser()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ""
 
 

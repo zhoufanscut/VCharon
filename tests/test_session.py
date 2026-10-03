@@ -266,7 +266,7 @@ class SessionTest(FakeSshCase):
                 f.write(evil)
         # The trap works on a Python without -I...
         subprocess.run([sys.executable, "-c", "import base64"], cwd=self.home,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         self.assertTrue(os.path.exists(flag))
         os.remove(flag)
         # ...but not on the helper's.

@@ -107,7 +107,7 @@ class SaveLoadTest(StateCase):
         # compact UTF-8
         self.assertEqual(data, json.dumps(doc, ensure_ascii=False,
                                           separators=(",", ":")).encode("utf-8"))
-        self.assertIn("中 文".encode("utf-8"), data)
+        self.assertIn("中 文".encode(), data)
         self.assertEqual(os.listdir(self.dir), ["j.json"])
         self.assertEqual(state.path("j"), os.path.join(self.tmp, "state", "j.json"))
         # saved again: replaced
@@ -121,10 +121,10 @@ class SaveLoadTest(StateCase):
         with open(state.path("j"), "rb") as f:
             before = f.read()
         failing = OSError(errno.EIO, os.strerror(errno.EIO))
-        with mock.patch.object(os, "replace", side_effect=failing):
-            with self.assertRaises(VCharonError) as cm:
-                state.save("j", state.State("c" * 64, None, {"end": "local", "root": "/x"},
-                                            None, state.now()))
+        with (mock.patch.object(os, "replace", side_effect=failing),
+              self.assertRaises(VCharonError) as cm):
+            state.save("j", state.State("c" * 64, None, {"end": "local", "root": "/x"},
+                                        None, state.now()))
         self.assertEqual(cm.exception.code, "io")
         self.assertIn(state.path("j"), cm.exception.message)
         # no temp file left, and the old file intact

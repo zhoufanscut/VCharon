@@ -1046,8 +1046,8 @@ def run_sync(job, sync_args):
     stderr (parse_failure). All but the code are None on success."""
     try:
         ran = subprocess.run(sync_argv(sync_args), stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             timeout=RUN_TIMEOUT, env=platform.child_env())
+                             capture_output=True, timeout=RUN_TIMEOUT,
+                             env=platform.child_env(), check=False)
     except subprocess.TimeoutExpired:
         return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
     except OSError as e:

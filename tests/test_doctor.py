@@ -21,8 +21,14 @@ from vcharon import bundle, doctor, keys, platform, plugins, ssh, state
 
 from tests import util
 from tests.test_plugin import probe_module
-from tests.util import (TEST_MACHINE_ID, FakeSshCase, helper_override, read_tree,
-                        start_failure_text, write_tree)
+from tests.util import (
+    TEST_MACHINE_ID,
+    FakeSshCase,
+    helper_override,
+    read_tree,
+    start_failure_text,
+    write_tree,
+)
 
 CONFIG = """
 [push]
@@ -311,7 +317,7 @@ class DoctorTest(DoctorCase):
         with open(blocker, "w") as f:
             f.write("a file where a directory should be")
         os.environ["VCHARON_HOME"] = blocker
-        got, out, err = self.run_cli("doctor")
+        got, out, _err = self.run_cli("doctor")
         self.assertEqual(got, 1)
         dirs = [line for line in out.splitlines() if line.startswith("  FAIL  dirs")]
         self.assertEqual(len(dirs), 2, out)
@@ -383,7 +389,7 @@ class DoctorTest(DoctorCase):
                          [("ok", "laptop (set in %s)" % platform.config_path())])
         path = platform.client_id_path()
         self.assertFalse(os.path.exists(path))
-        cid, origin = platform.client_id()
+        _cid, origin = platform.client_id()
         self.assertEqual(origin, "random")
         self.assertEqual(self.of(self.doctor(code=0), "machine")[1],
                          ("ok", USED % (path, "random")))
@@ -587,7 +593,7 @@ class ClockTest(DoctorCase):
             with self.subTest(shift=shift):
                 lines, level = self.clock(shift, 0)
                 self.assertEqual(level, "warn")
-                at = [i for i, line in enumerate(lines) if "  clock " in line][0]
+                at = next(i for i, line in enumerate(lines) if "  clock " in line)
                 self.assertEqual(lines[at + 1].strip(), "fix: " + doctor.CLOCK_HINT)
                 sign = "+" if shift > 0 else "-"
                 self.assertIn("clock " + sign, lines[at])

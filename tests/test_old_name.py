@@ -30,7 +30,7 @@ def _git_files():
     try:
         # empty exactly at the top: nothing to decode or compare
         prefix = subprocess.run(["git", "rev-parse", "--show-prefix"], cwd=ROOT,
-                                capture_output=True)
+                                capture_output=True, check=False)
         if prefix.returncode != 0 or prefix.stdout.strip():
             return None
         listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others",

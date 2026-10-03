@@ -79,7 +79,8 @@ def _member_file(folder):
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 os.close(fd)
                 return None
-            reader = open(fd, "rb", buffering=0)
+            # _read_head closes it
+            reader = open(fd, "rb", buffering=0)  # noqa: SIM115
         except BaseException:
             os.close(fd)
             raise

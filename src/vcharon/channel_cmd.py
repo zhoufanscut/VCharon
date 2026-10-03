@@ -15,8 +15,19 @@ import sys
 import tempfile
 import time
 
-from . import (VERSION, channels, charter, config, entries, fsops, pathrules, platform, plugin,
-               ssh, state)
+from . import (
+    VERSION,
+    channels,
+    charter,
+    config,
+    entries,
+    fsops,
+    pathrules,
+    platform,
+    plugin,
+    ssh,
+    state,
+)
 from . import run as engine
 from .lock import Lock
 from .log import Log
@@ -662,7 +673,7 @@ def _create(args, cfg, name, log, say):
         got = server.claim(channel, name, True)
         made = []
         try:
-            own, remote_text, _ = _write_member(cfg, server, channel, name, name, section,
+            own, _remote_text, _ = _write_member(cfg, server, channel, name, name, section,
                                                 made, got, args.ident, args.fields, info,
                                                 create=True)
         except BaseException:
@@ -670,7 +681,7 @@ def _create(args, cfg, name, log, say):
             _undo(made)
             try:
                 server.release(channel, name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
             raise
     say("  claimed %s/%s; you lead it" % (channel, name))
@@ -847,7 +858,7 @@ def _join(args, cfg, name, log, say):
                 _undo(made)
                 try:
                     server.release(channel, name)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
             raise
         say("  %s %s/%s; the leader is %s" % ("took back" if rejoin else "claimed", channel,
@@ -893,7 +904,7 @@ def _release_quietly(server, channel, name, log):
     """Releases a claim a failed join made; a failure to is only logged."""
     try:
         server.release(channel, name)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
 
 

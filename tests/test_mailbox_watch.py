@@ -355,7 +355,7 @@ class SnapshotTest(WatchCase):
         write_tree(self.tree, {"mac/y": b"y", "mac/x": b"xx"})
         os.remove(os.path.join(self.tree, "mac", "gone"))
         # the first round comes at once, with no sleep
-        code, lines = self.run_dir(rounds=1)
+        _code, lines = self.run_dir(rounds=1)
         self.assertEqual(lines, [watching(self.tree, 2, ", since " + saved),
                                  "gone mac/gone", "changed mac/x", "new mac/y"])
         # and that round's snapshot is saved: nothing again
@@ -405,7 +405,7 @@ class SnapshotTest(WatchCase):
                 with open(path, "wb") as f:
                     f.write(data)
                 # a fresh baseline: the changed mtime isn't printed
-                code, lines = self.run_dir(lambda: None)
+                _code, lines = self.run_dir(lambda: None)
                 self.assertEqual(lines, ["note: ignoring the saved snapshot %s: %s" % (path, why),
                                          watching(self.tree, 1)])
 
@@ -413,7 +413,7 @@ class SnapshotTest(WatchCase):
         write_tree(self.tree, {"mac/x": b"x"})
         self.run_dir(rounds=0)
         write_tree(self.tree, {"mac/y": b"y"})
-        code, lines = self.run_dir(lambda: None, fresh=True)
+        _code, lines = self.run_dir(lambda: None, fresh=True)
         self.assertEqual(lines, [watching(self.tree, 2, ", fresh start")])
         # the fresh baseline is saved
         self.assertEqual(self.run_dir(rounds=1)[1][1:], [])
@@ -452,7 +452,7 @@ class SnapshotTest(WatchCase):
 
         clock = Clock()
         with mock.patch.object(watch, "save_snapshot", save):
-            code, lines = self.run_dir(lambda: None, lambda: None, made, lambda: None,
+            _code, lines = self.run_dir(lambda: None, lambda: None, made, lambda: None,
                                        clock=clock, timer=clock)
         self.assertEqual(lines, [watching(self.tree, 1), "new mac/y"])
         # the start's, then the change's; the quiet rounds wrote nothing
@@ -471,7 +471,7 @@ class SnapshotTest(WatchCase):
             write_tree(self.tree, {"mac/y": b"y"})
 
         with mock.patch.object(watch, "save_snapshot", full):
-            code, lines = self.run_dir(made, lambda: None)
+            _code, lines = self.run_dir(made, lambda: None)
         line = "ERROR can't save the snapshot %s: No space left on device" % self.state()
         self.assertEqual(lines, [watching(self.tree, 1), line, "new mac/y"])
 
@@ -539,7 +539,7 @@ class LockTest(WatchCase):
             # a lock that let it through fails here, not by watching for 25 minutes
             ran = AssertionError("the second watch started")
             with mock.patch.object(watch, "_loop", side_effect=ran):
-                code, out, err = self.cli("--until-change")
+                code, out, _err = self.cli("--until-change")
             codes.extend([code, out])
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
@@ -692,7 +692,7 @@ class WarnTest(WatchCase):
         write_tree(self.tree, {"debian/STEPS.md": b"s", "mac/x": b"x", "debian/mac/a": b"a",
                                "mac/Mac/b": b"b"})
         self.assertEqual(watch.warnings(self.tree, "debian"), [])
-        code, lines = self.run_dir(lambda: None)
+        _code, lines = self.run_dir(lambda: None)
         self.assertEqual(lines, [watching(self.tree, 2)])
 
     def test_once_while_it_lasts_then_cleared(self):
@@ -704,7 +704,7 @@ class WarnTest(WatchCase):
         def removed():
             shutil.rmtree(os.path.join(self.tree, "Mac"))
 
-        code, lines = self.run_dir(stray, lambda: None, removed, lambda: None)
+        _code, lines = self.run_dir(stray, lambda: None, removed, lambda: None)
         text = "Mac/ at the top isn't a writer's folder: clients leave it out"
         self.assertEqual(lines, [watching(self.tree, 0), "new Mac/CASE.txt",
                                  "WARN " + text, "gone Mac/CASE.txt", "WARN cleared: " + text])
@@ -760,7 +760,7 @@ class WarnTest(WatchCase):
             json.dump({"version": 2, "root": self.tree, "me": "debian", "saved": "then",
                        "files": {k: list(v) for k, v in files.items()}, "seen": {},
                        "heads": {}, "loose": []}, f)
-        code, lines = self.run_dir(rounds=1)
+        _code, lines = self.run_dir(rounds=1)
         self.assertEqual(lines, [watching(self.tree, 0, ", since then"),
                                  "WARN Debian/ at the top isn't a writer's folder: clients "
                                  "leave it out"])
@@ -768,7 +768,7 @@ class WarnTest(WatchCase):
         with open(self.state(), "w", encoding="utf-8") as f:
             json.dump({"version": 2, "root": self.tree, "me": "debian", "saved": "then",
                        "files": {}, "warnings": [1], "seen": {}, "heads": {}, "loose": []}, f)
-        code, lines = self.run_dir(rounds=0)
+        _code, lines = self.run_dir(rounds=0)
         self.assertEqual(lines[0], "note: ignoring the saved snapshot %s: it has another "
                                    "shape" % self.state())
 
@@ -917,7 +917,7 @@ class UntilChangeTest(WatchCase):
         lost = "ERROR lost: the connection closed"
         busy = "ERROR busy: another run of mailbox.up is in progress"
         self.saved_error(lost)
-        run, runs = self.fake_runs([(1, lost, {}), (2, busy, {}), (2, busy, {}),
+        run, _runs = self.fake_runs([(1, lost, {}), (2, busy, {}), (2, busy, {}),
                                     (2, busy, lambda: self.post("debian", 2, "steps",
                                                                 to="@all", file="STEPS.md"))])
         code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
@@ -933,7 +933,7 @@ class UntilChangeTest(WatchCase):
         self.lines = []
         os.remove(os.path.join(self.tree, "debian", "STEPS.md"))
         self.saved_error(lost)
-        run, runs = self.fake_runs([(2, busy, {}), (1, lost, {})])
+        run, _runs = self.fake_runs([(2, busy, {}), (1, lost, {})])
         code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(lambda: None), run=run, until_change=True,
                                max_minutes=25, rounds=2)
@@ -1108,7 +1108,7 @@ class UntilChangeTest(WatchCase):
     def test_continuous_mode_shows_the_saved_error_again(self):
         lost = "ERROR lost: the connection closed"
         self.saved_error(lost)
-        run, runs = self.fake_runs([(1, lost, {}), (1, lost, {}),
+        run, _runs = self.fake_runs([(1, lost, {}), (1, lost, {}),
                                     (4, "ERROR connect: x", {}), (0, None, {})])
         code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
                                sleep=Rounds(*[lambda: None] * 3), run=run, rounds=4)
@@ -1244,12 +1244,12 @@ class UntilChangeTest(WatchCase):
                                "ERROR aborted: couldn't read file 7: x")):
             with self.subTest(first=first):
                 self.lines = []
-                code, lines, runs = self.until_change([(1, first, {}), (0, None, {})],
+                code, lines, _runs = self.until_change([(1, first, {}), (0, None, {})],
                                                       rounds=2)
                 self.assertEqual((code, lines), (0, [first, "ok again"]))
-                code, lines, runs = self.until_change([(1, first, {}), (1, second, {})])
+                code, lines, _runs = self.until_change([(1, first, {}), (1, second, {})])
                 self.assertEqual((code, lines), (0, [first, second, "EXIT change"]))
-                code, lines, runs = self.until_change([(0, None, {})])
+                code, lines, _runs = self.until_change([(0, None, {})])
                 self.assertEqual(lines, ["ok again", "EXIT change"])
 
     def test_a_blip_right_after_a_recovery(self):
@@ -1273,32 +1273,32 @@ class UntilChangeTest(WatchCase):
     def test_alternating_connection_errors_wake_once_per_streak(self):
         a = "ERROR connect: couldn't reach devbox"
         b = "ERROR lost: the connection closed"
-        code, lines, runs = self.until_change([(4, a, {}), (1, b, {}), (4, a, {})])
+        code, lines, _runs = self.until_change([(4, a, {}), (1, b, {}), (4, a, {})])
         self.assertEqual((code, lines), (0, [a, b, "EXIT change"]))
         # restarted, still flapping: every new text printed, none a change
-        code, lines, runs = self.until_change([(4, a, {}), (1, b, {}), (4, a, {}), (1, b, {})],
+        code, lines, _runs = self.until_change([(4, a, {}), (1, b, {}), (4, a, {}), (1, b, {})],
                                               max_errors=2, rounds=4)
         self.assertEqual((code, lines), (0, [a, b, a, b]))
         # the next good round ends the streak, and wakes
-        code, lines, runs = self.until_change([(0, None, {})])
+        code, lines, _runs = self.until_change([(0, None, {})])
         self.assertEqual((code, lines), (0, ["ok again", "EXIT change"]))
 
     def test_a_blip_inside_a_blocked_down_wakes_nobody(self):
         d = "ERROR collision: debian/N.md and debian/n.md are the same path on Windows"
         lost = "ERROR lost: the connection closed"
-        code, lines, runs = self.until_change([(1, d, {})])
+        code, lines, _runs = self.until_change([(1, d, {})])
         self.assertEqual((code, lines), (0, [d, "EXIT change"]))
-        code, lines, runs = self.until_change([(1, d, {}), (1, lost, {}), (1, d, {}),
+        code, lines, _runs = self.until_change([(1, d, {}), (1, lost, {}), (1, d, {}),
                                                (0, None, {})])
         self.assertEqual((code, lines), (0, [d, lost, d, "ok again", "EXIT change"]))
 
     def test_a_growing_count_wakes_once(self):
         one = "ERROR unsafe_path: debian/a: a symlink (and 1 more; see the log)"
         two = "ERROR unsafe_path: debian/a: a symlink (and 2 more; see the log)"
-        code, lines, runs = self.until_change([(1, one, {}), (1, two, {}), (1, two, {})],
+        code, lines, _runs = self.until_change([(1, one, {}), (1, two, {}), (1, two, {})],
                                               rounds=3)
         self.assertEqual((code, lines), (0, [one, "EXIT change"]))
-        code, lines, runs = self.until_change([(1, one, {}), (1, two, {})], rounds=2)
+        code, lines, _runs = self.until_change([(1, one, {}), (1, two, {})], rounds=2)
         self.assertEqual((code, lines), (0, [one, two]))
 
     def test_a_b_a_counts_each_once(self):
@@ -1781,7 +1781,7 @@ class StreamTest(WatchCase):
         with mock.patch.object(sys, "frozen", True, create=True), \
                 mock.patch.object(sys, "_MEIPASS", self.tmp, create=True), \
                 mock.patch.object(sys, "executable", binary):
-            code, lines = self.watch([["out", "ROUND 0"]], rounds=1)
+            code, _lines = self.watch([["out", "ROUND 0"]], rounds=1)
         self.assertEqual(code, 0)
         argv, env = self.spawned[0]
         self.assertEqual(argv, [binary, "sync", "mb", "--project", "p", "--repeat", "2"])
@@ -1789,12 +1789,12 @@ class StreamTest(WatchCase):
 
     def test_utf8_lines(self):
         line = "ERROR mb.windows.down: unsafe_path: mac/中文: x"
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["raw", (line + "\n").encode("utf-8").hex()],
              ["raw", b"ERROR mb.windows.down: lost: \xff\r\n".hex()], ["out", "ROUND 1"],
              ["out", "ROUND 0"]], rounds=2)
         self.assertEqual(lines[1:], [line, "ok again"])
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["raw", b"ERROR mb.windows.down: lost: \xff\r\n".hex()], ["out", "ROUND 1"]],
             rounds=1, fresh=True)
         self.assertEqual(lines[1:], ["ERROR mb.windows.down: lost: �"])
@@ -1817,7 +1817,7 @@ class StreamTest(WatchCase):
 
     def test_a_round_cut_off(self):
         lost = "ERROR mb.windows.down: lost: the connection closed"
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["out", "ROUND 0"], ["out", lost], ["out", "  fix: run again"], ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
         self.assertEqual(lines[1:], [lost, "  fix: run again", "ok again"])
@@ -1907,7 +1907,7 @@ class StreamTest(WatchCase):
         # vcharon sync --repeat exits after a round whose error broke the connection; what it
         # says on stderr then (seen in the M15a review: an abort at shutdown) is no new error
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["out", connect], ["out", "ROUND 4"], ["err", "Fatal Python error: x"],
              ["exit", 134]],
             [["out", "ROUND 0"]], rounds=2)
@@ -1933,14 +1933,14 @@ class StreamTest(WatchCase):
 
     def test_a_note_before_the_first_round_is_no_crash_line(self):
         # stderr from before round 1 is never a later crash's error line
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["err", "note: skipped channels.d/x.ini"], ["pause", 0.5], ["out", "ROUND 0"],
              ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
         self.assertEqual(lines[1:], ["ERROR vcharon sync of mb.windows exited with 1", "ok again"])
 
     def test_a_crash_after_a_good_round_is_a_round(self):
-        code, lines = self.watch(
+        _code, lines = self.watch(
             [["out", "ROUND 0"], ["pause", 0.5], ["err", "Traceback (most recent call last):"],
              ["err", "RuntimeError: x"], ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
@@ -2035,7 +2035,7 @@ class EntriesTest(WatchCase):
             self.post("debian", 2, "for windows", to="@windows")
             with open(os.path.join(self.tree, "windows", "NOTES.md"), "ab") as f:
                 f.write("# NOTES\n\n## 2026-10-01 09:00 — hand-written\n\n"
-                        "## 2026-10-01 09:01 — debian#9 — copied\nto: @mac\n".encode("utf-8"))
+                        "## 2026-10-01 09:01 — debian#9 — copied\nto: @mac\n".encode())
 
         code, lines = self.run_mac(posted, lambda: None, until_change=True, max_minutes=25)
         # the rounds ran out: no EXIT
@@ -2079,7 +2079,7 @@ class EntriesTest(WatchCase):
             self.post("debian", 2, "from debian", to="@all")
             self.post("windows", 2, "from windows", to="@all")
 
-        code, lines = self.run_mac(posted)
+        _code, lines = self.run_mac(posted)
         self.assertEqual(lines[1:], ["to all: windows#2 — from windows  (windows/RESULTS.md)",
                                      "note: @all from debian, not the leader: ignored"])
 
@@ -2105,7 +2105,7 @@ class EntriesTest(WatchCase):
         def two():
             self.post("windows", 2, "two", to="@mac", file="A.md")
 
-        code, lines = self.run_mac(three, two, lambda: None)
+        _code, lines = self.run_mac(three, two, lambda: None)
         self.assertEqual(lines[1:], ["to you: windows#3 — three  (windows/B.md)",
                                      "to you: windows#2 — two  (windows/A.md)"])
         self.assertEqual(self.snapshot()["seen"]["windows"], {"low": 3, "more": []})
@@ -2121,7 +2121,7 @@ class EntriesTest(WatchCase):
         # while no watcher ran
         self.post("windows", 2, "two", to="@mac", when="2026-10-01 09:01")
         self.post("debian", 2, "steps", to="@all", file="STEPS.md", when="2026-10-01 09:02")
-        code, lines = self.run_mac(rounds=1)
+        _code, lines = self.run_mac(rounds=1)
         self.assertEqual(lines[1:], ["to you: windows#2 — two  (windows/RESULTS.md)",
                                      "to all: debian#2 — steps  (debian/STEPS.md)"])
         self.assertEqual(self.run_mac(rounds=1)[1][1:], [])
@@ -2157,7 +2157,7 @@ class EntriesTest(WatchCase):
     def test_the_start_is_a_baseline(self):
         self.post("windows", 2, "two", to="@mac")
         self.post("debian", 2, "steps", to="@all")
-        code, lines = self.run_mac(lambda: None, fresh=True)
+        _code, lines = self.run_mac(lambda: None, fresh=True)
         self.assertEqual(lines, [watching(self.tree, 4, ", fresh start")])
         self.assertEqual(self.snapshot()["seen"], {"debian": {"low": 2, "more": []},
                                                    "windows": {"low": 2, "more": []}})
@@ -2187,7 +2187,7 @@ class EntriesTest(WatchCase):
         with open(self.state(me="mac"), "w", encoding="utf-8") as f:
             json.dump({"version": 1, "root": self.tree, "me": "mac", "saved": "then",
                        "files": {}, "warnings": []}, f)
-        code, lines = self.run_mac(lambda: None)
+        _code, lines = self.run_mac(lambda: None)
         # its files would have made every entry new: a baseline instead
         self.assertEqual(lines, ["note: ignoring the saved snapshot %s: it is from before "
                                  "channels (version 1): a fresh start" % self.state(me="mac"),
@@ -2206,7 +2206,7 @@ class EntriesTest(WatchCase):
             os.chmod(path, 0o644)
 
         # the restart's first round comes at once, and can't read it; the next can
-        code, lines = self.run_mac(readable, rounds=2)
+        _code, lines = self.run_mac(readable, rounds=2)
         self.assertEqual(lines[1:], ["to you: windows#2 — two  (windows/RESULTS.md)"])
 
     def test_server_mode_needs_member_md(self):
@@ -2386,7 +2386,7 @@ class ClosedTest(WatchCase):
         results = [(1, error, {}, fix), (1, error, {}, fix), (1, error, {}, "another text")]
 
         def run(job, sync_args):
-            code, line, spec, why = results.pop(0)
+            code, line, _spec, why = results.pop(0)
             return code, line, why
 
         def watch_it(rounds, until_change=True):
@@ -2471,7 +2471,7 @@ class CommandTest(WatchCase):
             raise KeyboardInterrupt
 
         with mock.patch.object(watch, "watch_dir", interrupted):
-            code, out, err = self.cli()
+            code, _out, err = self.cli()
             self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         with mock.patch.object(watch, "watch_job", interrupted):
             for argv in (["--every", "5"], ["--until-change", "--fresh"],
@@ -2531,8 +2531,8 @@ class CommandTest(WatchCase):
                 "sys.exit(cli.main(['watch', 'mb', '--project', 'q']))\n")
         env = dict(os.environ, PYTHONIOENCODING="gbk")
         ran = subprocess.run([sys.executable, "-c", code], env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-        want = "new mañana.md\n".encode("utf-8").replace(b"\n", os.linesep.encode())
+                             capture_output=True, timeout=60, check=False)
+        want = "new mañana.md\n".encode().replace(b"\n", os.linesep.encode())
         self.assertEqual((ran.returncode, ran.stdout), (0, want), ran.stderr)
 
     def test_a_real_until_change_run(self):

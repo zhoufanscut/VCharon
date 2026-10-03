@@ -20,8 +20,8 @@ from tests.util import CAN_SYMLINK, TEST_MACHINE_ID, write_tree
 # a member of the channel, for the record that finds it (DESIGN §7.2)
 READ = ["read", "mb", "--project", "p"]
 
-# this box's clock for every view here
-NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)
+# this box's clock for every view here: naive local time, as read._now() gives
+NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)  # noqa: DTZ001
 MINUTE = "2026-10-02 10:12"
 
 # M10: a channel section, in channels.d/ next to vcharon.ini, as test_mailbox_watch.py's
