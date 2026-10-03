@@ -50,6 +50,14 @@ and made a tool of its own.
   `EXIT updated`, exit 14: start it again. `vcharon doctor` shows how VCharon was installed
   (`install` in `--json`).
 
+### Since 0.1.0rc1
+
+- The Linux binary is expected to be about 10 MB, down from 23.3 MB in 0.1.0rc1: libpython
+  and the extension modules are now stripped of debug info when it is built (Linux only).
+  Measured on Debian 13 with the Python build CI uses (3.13.15 from actions/setup-python):
+  24.2 MB unstripped, 9.7 MB stripped, and the stripped binary passes `tests/smoke.sh`. The
+  release workflow itself hasn't built it yet.
+
 ### What was checked
 
 - Unit tests (about 1,100), with the server side run through a stand-in for ssh: the suite runs

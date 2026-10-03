@@ -1518,6 +1518,13 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   itself into a temp folder at each start: about 0.3 s for `vcharon --version` on a Linux dev
   box, against 0.1 s for `python -m vcharon --version`. So a `--no-stream` watcher, which
   starts a child every round, pays that each round; the streaming child starts once.
+- **Stripped on Linux**: the spec sets `strip` on Linux, so PyInstaller runs `strip` on every
+  shared library it packs (libpython, the extension modules; not its own bootloader). The
+  Python CI builds with (actions/setup-python) ships libpython and the extension modules with
+  debug info (the system libraries it packs are already stripped), which more than doubled the
+  binary (24.2 MB against 9.7 MB). A missing `strip` would only be a warning in PyInstaller,
+  so the spec stops the build instead. Not on macOS: its binary is small already (8.8 MB in
+  0.1.0rc1) and stripping there is untested; not on Windows.
 - **The package's files on disk**: the spec collects every file of the package as data, the
   `.py` files too, under the binary's unpack folder (`sys._MEIPASS/vcharon/`). The PYZ holds
   only bytecode, and the bundle sent to a server is source: `bundle._sources()` reads it from

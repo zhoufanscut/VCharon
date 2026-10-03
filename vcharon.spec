@@ -12,6 +12,9 @@
 #   importlib, and update.py is imported only inside vcharon --update; the analysis follows
 #   neither.
 
+import shutil
+import sys
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = collect_data_files("vcharon", include_py_files=True)
@@ -21,6 +24,15 @@ hiddenimports = collect_submodules("vcharon", filter=lambda name: not name.endsw
 # 6.22.3 already puts all of encodings in base_library.zip, unpacked to disk at start; named
 # here so a change of that default can't drop them.
 hiddenimports += ["encodings.utf_16_le", "encodings.utf_8_sig"]
+
+# Strip the collected shared libraries on Linux: CI's Python (actions/setup-python) ships
+# libpython and its extension modules with debug info, which more than doubled the binary. In a
+# one-file build PyInstaller strips every BINARY and EXTENSION it packs, not the bootloader; a
+# failed strip is only a warning there, so a missing strip(1) stops the build instead. Not on
+# macOS (its binary is small already, and stripping there is untested); not on Windows.
+strip = sys.platform.startswith("linux")
+if strip and shutil.which("strip") is None:
+    raise SystemExit("vcharon.spec: no strip on the PATH; install binutils")
 
 a = Analysis(
     ["src/vcharon/__main__.py"],
@@ -42,7 +54,7 @@ exe = EXE(
     name="vcharon",
     console=True,
     upx=False,
-    strip=False,
+    strip=strip,
     debug=False,
     runtime_tmpdir=None,
 )
