@@ -25,9 +25,6 @@ and what was checked where, is [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-**Available from the first release.** The repository and its releases aren't public yet, so
-none of the commands below works today; they are what the first release ships.
-
 Standalone binary (recommended; it carries its own Python):
 
 ```sh
@@ -46,13 +43,16 @@ did. The Linux binary needs a glibc at least as new as that of the `ubuntu-lates
 runner it was built on; on an older system, use pipx or uv. Intel Macs and Linux on arm64 have
 no binary: use pipx or uv.
 
-With pipx or uv, from GitHub (needs Python 3.13 or later):
+With pipx or uv, from GitHub (needs Python 3.13 or later), pinned to a release's tag:
 
 ```sh
-pipx install git+https://github.com/zhoufanscut/VCharon
-uv tool install git+https://github.com/zhoufanscut/VCharon
-uvx --from git+https://github.com/zhoufanscut/VCharon vcharon --version   # run without installing
+pipx install git+https://github.com/zhoufanscut/VCharon@v0.1.0
+uv tool install git+https://github.com/zhoufanscut/VCharon@v0.1.0
+uvx --from git+https://github.com/zhoufanscut/VCharon@v0.1.0 vcharon --version   # no install
 ```
+
+Without `@<tag>`, they install the latest commit of `main`, which may be ahead of the latest
+release.
 
 From a source checkout, for development: `python3 -m venv .venv && .venv/bin/pip install -e .`
 ([AGENTS.md](AGENTS.md)).
@@ -60,11 +60,22 @@ From a source checkout, for development: `python3 -m venv .venv && .venv/bin/pip
 Check it: `vcharon --version` prints the version, and `vcharon doctor` checks this machine, one
 line per check, each problem with a `fix:` line.
 
-By hand, from a release's assets (a release candidate, say, fetched with `gh release download`):
-unpack `vcharon` from the `.tar.gz` (or `vcharon.exe` from the `.zip`), check the archive
-against its `.sha256`, and put the binary on your PATH. On macOS, a file downloaded by a browser
-carries a quarantine flag that stops it from running; remove it if present (a file fetched with
-`gh` or `curl` has none, and the command then fails harmlessly):
+By hand: download your platform's archive and its `.sha256` from the
+[latest release](https://github.com/zhoufanscut/VCharon/releases/latest)
+(`vcharon-linux-x64.tar.gz`, `vcharon-darwin-arm64.tar.gz` or `vcharon-win-x64.zip`), check the
+archive against the `.sha256`, unpack `vcharon` (or `vcharon.exe`), and put it on your PATH:
+
+```sh
+base=https://github.com/zhoufanscut/VCharon/releases/latest/download
+curl -fsSLO "$base/vcharon-linux-x64.tar.gz"
+curl -fsSLO "$base/vcharon-linux-x64.tar.gz.sha256"
+sha256sum -c vcharon-linux-x64.tar.gz.sha256     # macOS: shasum -a 256 -c …
+tar -xzf vcharon-linux-x64.tar.gz vcharon
+```
+
+On macOS, a file downloaded by a browser carries a quarantine flag that stops it from running;
+remove it if present (a file fetched with `curl` has none, and the command then fails
+harmlessly):
 
 ```sh
 xattr -d com.apple.quarantine vcharon 2>/dev/null || true
@@ -87,9 +98,9 @@ doubt.
 | where | what | checked |
 |---|---|---|
 | your machines (where agents run) | Linux, macOS, Windows 10 or 11 | the unit tests run in CI on all three |
-| a server for remote members | Linux with `python3` 3.13 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (0.1.0rc1); the unit tests run the server side through a stand-in for ssh |
+| a server for remote members | Linux with `python3` 3.13 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (two real runs before 0.1.0); the unit tests run the server side through a stand-in for ssh |
 | a channel only for agents on one machine | any of the three | Linux, by hand |
-| Python | the binaries carry their own (3.13); pipx, uv and the server need 3.13 or later | 3.13 on Linux, macOS and Windows |
+| Python | the binaries carry their own (3.13); pipx, uv and the server need 3.13 or later | 3.13 and 3.14 on Linux, macOS and Windows (CI) |
 | the ssh client | the system's OpenSSH: `/usr/bin/ssh` on Linux and macOS, Windows' own `ssh.exe` (not Git for Windows' ssh, which can't use the Windows ssh-agent service) | |
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).
@@ -261,8 +272,7 @@ Windows' OpenSSH: export it, or make a key for OpenSSH.
 
 ## Update
 
-It updates the standalone binary, which comes with the first release; any other install gets
-the command that updates it.
+It updates the standalone binary; any other install gets the command that updates it.
 
 ```sh
 vcharon --update          # shows what's out, then asks before installing

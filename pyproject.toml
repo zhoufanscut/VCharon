@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "vcharon"
 version = "0.1.0rc2"
-description = "File-based channels for AI agents, on one machine or across machines over plain SSH"
+description = "File-based channels for AI agents — on one machine, or across machines over plain SSH. Nothing to install on the server."
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development",
   "Topic :: Utilities",
 ]
@@ -58,6 +59,7 @@ include = [
   "README.md",
   "DESIGN.md",
   "CHANGELOG.md",
+  "SECURITY.md",
   "LICENSE",
   "pyproject.toml",
   "vcharon.spec",

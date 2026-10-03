@@ -129,24 +129,25 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
 - Update DESIGN.md in the same commit as the behaviour it describes, and the guide when an agent
   would see the change.
 - Every change a user or an agent can see (a flag, an output line, a `--json` field, an exit
-  code, a channel format) gets a line under the CHANGELOG's unreleased section in the same commit.
+  code, a channel format) gets a line under the CHANGELOG's `## Unreleased` section, at its top,
+  in the same commit (start one when the top entry is a released version).
   A change to anything DESIGN.md lists under "Stable" says how to adapt.
 
 ## Releases
 
 `.github/workflows/release.yml` builds, checks and publishes on a tag `v<version>` (DESIGN,
-"Releases"). No release is public yet: while the repo is private, release candidates
-(`0.1.0rc1`, …) are published as GitHub pre-releases, which `--update` and the installers
-never pick. The steps:
+"Releases"). The steps:
 
 1. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
    `version` in `pyproject.toml`.
-2. The CHANGELOG's unreleased section gets the version and the release date, with what was
+2. The CHANGELOG's `## Unreleased` heading becomes `## <version> — <date>`, with what was
    checked on which OS, marked measured or inferred.
 3. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
-   doesn't match both version strings, runs the suite, builds one binary per platform
+   doesn't match both version strings, or whose CHANGELOG heading isn't `## <version> —
+   YYYY-MM-DD`, then runs the suite, builds one binary per platform
    (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, runs the installer against it,
-   and publishes the binary, its archive and the archive's `.sha256`, as a pre-release when the
-   version has a pre-release label.
+   and publishes the binary, its archive and the archive's `.sha256`. A version with a
+   pre-release label (`0.2.0rc1`) is published as a GitHub pre-release, which `--update` and the
+   installers never offer: a way to test a build in real use before the release.
 4. These agree on the release asset names and change together: `release.yml` and
    `tests/pack.py`, `install.sh`/`install.ps1` (and `tests/install_check.sh`), and the updater.

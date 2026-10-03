@@ -118,8 +118,9 @@ def parse_version(text):
     a pre-release's (0, rank, n), which sorts below a final release's (1,), and a post-release's
     (2, n), above it ("0.1.0.post1" -> ((0, 1, 0), (2, 1))). None when nothing numeric is
     there. Lenient, since a tag is typed by a person: a leading v, a +build tail and a short 0.4
-    are taken. A release candidate is tagged before the final, so 0.1.0rc1 ->
-    0.1.0rc2 -> 0.1.0 must each be an update."""
+    are taken. A release candidate is tagged before the final, so 0.1.0rc1 < 0.1.0rc2 < 0.1.0
+    must each sort as newer than the one before (--update itself never offers a pre-release:
+    releases/latest leaves them out)."""
     if not isinstance(text, str):
         return None
     m = _VERSION.match(text.strip().split("+")[0])

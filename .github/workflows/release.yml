@@ -29,13 +29,13 @@ jobs:
 
       # the pre-release test is --update's own (update.parse_version): what it ranks below the
       # final release, GitHub must not offer as the latest
-      - name: Check the tag against both version strings
+      - name: Check the tag against both version strings and the CHANGELOG
         id: check
         env:
           PYTHONPATH: src
         run: |
           python - "$GITHUB_REF_NAME" <<'PYEOF'
-          import os, re, sys, tomllib
+          import datetime, os, re, sys, tomllib
           from vcharon import VERSION, update
           tag = sys.argv[1]
           version = tag[1:] if tag.startswith("v") else tag
@@ -47,6 +47,21 @@ jobs:
           parsed = update.parse_version(version)
           if parsed is None or not re.fullmatch(r"[0-9A-Za-z.]+", version):
               sys.exit("tag %s: %r isn't a version" % (tag, version))
+          # the release's CHANGELOG entry, dated: "## <version> — YYYY-MM-DD" (an em dash)
+          with open("CHANGELOG.md", encoding="utf-8") as f:
+              changelog = f.read()
+          heading = re.search(r"^## %s — (.*)$" % re.escape(version), changelog, re.M)
+          if heading is None:
+              sys.exit("tag %s: CHANGELOG.md has no heading '## %s — YYYY-MM-DD'"
+                       % (tag, version))
+          try:
+              datetime.date.fromisoformat(heading.group(1).strip())
+              dated = re.fullmatch(r"\d{4}-\d{2}-\d{2}", heading.group(1).strip())
+          except ValueError:
+              dated = None
+          if not dated:
+              sys.exit("tag %s: CHANGELOG.md's heading for %s is dated %r; give it the "
+                       "release date, YYYY-MM-DD" % (tag, version, heading.group(1).strip()))
           prerelease = parsed[1][0] == 0
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write("version=%s\nprerelease=%s\n" % (version, str(prerelease).lower()))
@@ -59,7 +74,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
-      # every row runs to its end: a release candidate's failures are all seen in one run
+      # every row runs to its end: a failed release's failures are all seen in one run
       fail-fast: false
       matrix:
         include:

@@ -22,14 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # the floor (3.13) and the newest Python, on each OS the binaries are built for
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.13", "3.14"]
         include:
-          - os: ubuntu-latest
-            python-version: "3.13"
-          - os: macos-latest
-            python-version: "3.13"
+          # its log then names the last test that started, if one hangs
           - os: windows-latest
-            python-version: "3.13"
-            # its log then names the last test that started, if one hangs
             test-flags: "-v"
 
     steps:
@@ -50,8 +48,7 @@ jobs:
         run: python -m unittest discover -s tests -t . ${{ matrix.test-flags }}
 
       # one row is enough: the result doesn't depend on the OS or Python (target-version is
-      # fixed in pyproject.toml), and the other rows' minutes count more while private. After
-      # the tests, so a lint error never hides a test result.
+      # fixed in pyproject.toml). After the tests, so a lint error never hides a test result.
       - name: Lint (ruff)
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' }}
         run: ruff check src tests

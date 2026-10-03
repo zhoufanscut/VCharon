@@ -1492,10 +1492,10 @@ version check at start-up.
 - **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
   number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` < `0.1.0rc2` <
   `0.1.0`, and a post-release (`post`) above it: `0.1.0.post1` is newer than `0.1.0`. `--update`
-  reads only full releases (`releases/latest` never returns a pre-release), so a release candidate
-  is fetched with `gh release download`, never through `--update`. A tag that doesn't parse is never
-  newer. `--force` with an older release says it "can be installed"; with the same one, "can be
-  reinstalled".
+  reads only full releases (`releases/latest` never returns a pre-release), so a pre-release is
+  installed by hand from its release page, never through `--update`. A tag that doesn't parse is
+  never newer. `--force` with an older release says it "can be installed"; with the same one, "can
+  be reinstalled".
 - **Checked before the question**: how VCharon was installed, that a binary is published for
   this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
   pipx command), that the binary's folder is writable (by making and removing a temp folder in
@@ -1554,7 +1554,7 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   debug info (the system libraries it packs are already stripped), which more than doubled the
   binary (24.2 MB against 9.7 MB). A missing `strip` would only be a warning in PyInstaller,
   so the spec stops the build instead. Not on macOS: its binary is small already (8.8 MB in
-  0.1.0rc1) and stripping there is untested; not on Windows.
+  the first release candidate) and stripping there is untested; not on Windows.
 - **The package's files on disk**: the spec collects every file of the package as data, the
   `.py` files too, under the binary's unpack folder (`sys._MEIPASS/vcharon/`). The PYZ holds
   only bytecode, and the bundle sent to a server is source: `bundle._sources()` reads it from
@@ -1601,8 +1601,9 @@ A tag `v<version>` runs `.github/workflows/release.yml`. Pushing the tag publish
 maintainer asks before tagging.
 
 - **The tag must match both version strings**, `VERSION` in `src/vcharon/__init__.py` and
-  `version` in `pyproject.toml` (a leading `v` stripped); any other tag stops the release before
-  a build.
+  `version` in `pyproject.toml` (a leading `v` stripped), and CHANGELOG.md must have the
+  version's dated heading, `## <version> — YYYY-MM-DD`; anything else stops the release before a
+  build, so no release goes out with an undated or missing entry.
 - **One build per platform**, each on its own runner, all steps in bash (Git Bash on Windows):
   the unit tests, `pyinstaller vcharon.spec`, `tests/smoke.sh` with the tag's version, then
   packing and the installer check. The Linux row also pings the runner's own sshd from the binary
@@ -1728,8 +1729,8 @@ which and how to adapt. A channel format change is always a minor version at lea
   where VCharon came from; every reference by name to a section of DESIGN.md or README.md names
   a heading that exists, and none goes by a section number; every `vcharon <verb>` string
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
-- CI runs the suite on Linux, macOS and Windows (Python 3.13), and `ruff check src tests` on one
-  row.
+- CI runs the suite on Linux, macOS and Windows, each with Python 3.13 and 3.14, and `ruff check src
+  tests` on one row.
 - CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`: sshd started, a
   key without a passphrase authorized, `localhost` in `known_hosts`, and setup-python's 3.13 linked
   as `/usr/local/bin/python3`, since the runner's own `python3` is below the floor and the server

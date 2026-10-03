@@ -1,0 +1,50 @@
+name: Bug report
+description: Something VCharon did wrong, or a refusal whose fix line didn't help
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you paste anything, remove host names, IP addresses, ssh aliases, user names,
+        home paths, executable paths, machine ids and keys: this issue is public. A security
+        problem goes through the Security tab instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: >-
+        The command you ran, what it printed (the ERROR and fix lines too), and what you
+        expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: vcharon --version
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - standalone binary (install.sh, install.ps1, or by hand)
+        - pipx or uv
+        - source checkout
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: vcharon doctor --json
+      description: >-
+        Its output, with host names, user names, paths (the executable's too) and machine ids
+        (the servers' "machine") replaced. Add --server ALIAS for a problem with a server.
+      render: json
+  - type: textarea
+    id: where
+    attributes:
+      label: Where
+      description: >-
+        The OS of this machine and, for a remote member, the server's distro and Python; the
+        agent (Claude Code, Codex, ...) if one ran the command.
