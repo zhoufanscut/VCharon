@@ -155,6 +155,37 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(modules, {"vcharon": "X = 1\n", "vcharon.a": "A = 1\n"})
         self.assertEqual(packages, ["vcharon"])
 
+    def test_summary_reads_back_what_a_session_sends(self):
+        modules, _packages = bundle._sources()
+        found = bundle.summary()
+        self.assertEqual((found["modules"], found["has_helper"]), (len(modules), True))
+        # compressed, so another nonce may change it by a few bytes
+        self.assertAlmostEqual(found["bytes"], len(bundle.build(NONCE)), delta=200)
+        with mock.patch.object(bundle, "_sources", return_value=({"vcharon": ""}, ["vcharon"])):
+            self.assertEqual(bundle.summary()["has_helper"], False)
+
+    def test_a_binary_reads_the_sources_beside_its_bytecode(self):
+        # a one-file binary's vcharon.__file__ is <_MEIPASS>/vcharon/__init__.pyc, and the
+        # spec puts the .py files beside it: those are what a session sends
+        meipass = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, meipass, True)
+        package = os.path.join(meipass, "vcharon")
+        os.makedirs(os.path.join(package, "plugins"))
+        os.makedirs(os.path.join(package, "guide"))
+        for rel, data in (("__init__.py", "X = 1\n"), ("helper.py", "H = 1\n"),
+                          ("plugins/__init__.py", ""), ("plugins/dir.py", "D = 1\n"),
+                          ("guide/__init__.py", ""), ("guide/start.md", "# start\n")):
+            with open(os.path.join(package, *rel.split("/")), "w", encoding="utf-8") as f:
+                f.write(data)
+        with mock.patch.object(bundle.vcharon, "__file__",
+                               os.path.join(package, "__init__.pyc")):
+            modules, packages = bundle._sources()
+            found = bundle.summary()
+        self.assertEqual(sorted(modules), ["vcharon", "vcharon.helper", "vcharon.plugins",
+                                           "vcharon.plugins.dir"])
+        self.assertEqual(packages, ["vcharon", "vcharon.plugins"])
+        self.assertEqual((found["modules"], found["has_helper"]), (4, True))
+
     def test_extra_modules(self):
         _size, doc = unpack(bundle.build(NONCE, {"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"}))
         self.assertEqual(doc["modules"]["vcharon.extra"], "X = 1\n")

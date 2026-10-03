@@ -16,7 +16,7 @@ instead. Never work around a refusal by editing vcharon's files by hand.
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
 
-The watcher has its own (0, 10 to 14): `vcharon guide watch`.
+The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 
 ## Joining and creating
 

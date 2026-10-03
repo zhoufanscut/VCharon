@@ -63,16 +63,18 @@ Lines; * marks the ones that count for --until-change:
                                    for a channel folder that's gone (a closed channel); a command
                                    in it is as this box runs vcharon
     ok again                       the first good round after a failed one
-    EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated
+    EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
                                    the last line, when it exits on its own (exit 0, 10, 11,
-                                   13, 14); EXIT closed right after the ERROR and fix (and log)
+                                   13, 14, 15); EXIT closed right after the ERROR and fix (and log)
                                    lines of a
                                    channel that's gone, in every mode and on every start while
                                    it stays gone: don't restart, run the fix line's leave;
                                    EXIT updated when vcharon was replaced while it ran (an
                                    update), seen at the top of a round, from the streaming
                                    child's exit 14, or after an unexpected error in a binary
-                                   (cli.py): start it again, which runs the new one
+                                   (cli.py): start it again, which runs the new one;
+                                   EXIT orphaned when a binary's bootloader process is gone
+                                   (killed with SIGKILL): no one is left to read the watcher
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
@@ -155,6 +157,7 @@ BUSY = 2
 # exit codes of the watcher itself (vcharon guide watch)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
 EXIT_UPDATED = install.EXIT_UPDATED
+EXIT_ORPHANED = install.EXIT_ORPHANED
 # the saved snapshot's format: 2 since channels, whose entries it keeps
 SNAPSHOT_VERSION = 2
 # the hex digits of a heading's sha256 kept for the edit check
@@ -908,7 +911,7 @@ class _Watch:
 
 
 def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_errors, rounds,
-          error_seconds=None, start=None, updated=None):
+          error_seconds=None, start=None, updated=None, orphaned=None):
     """Runs rounds; returns the exit code. step() runs one round and returns (change lines,
     failed, saved): failed is None for a skipped (busy) round; saved is False if the snapshot
     couldn't be saved. The limits are checked between rounds, never during one. error_seconds
@@ -917,7 +920,8 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     from, if the caller took it (a streaming child's --max-minutes deadline counts from it
     too). updated(): whether vcharon's code changed since the start (install.Watchdog),
     asked at the top of each round, before any other work: EXIT updated (DESIGN, "Running
-    watchers")."""
+    watchers"); orphaned(): whether a binary's bootloader parent is gone, asked next: EXIT
+    orphaned."""
     start = timer() if start is None else start
     errors = 0
     # error_seconds: the time of the failed rounds in a row, each from the end of the round
@@ -932,6 +936,9 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
         if updated is not None and updated():
             w.say("EXIT updated")
             return EXIT_UPDATED
+        if orphaned is not None and orphaned():
+            w.say("EXIT orphaned")
+            return EXIT_ORPHANED
         changes, failed, saved = step()
         done += 1
         if w.updated:
@@ -985,11 +992,11 @@ def _locked(w, state):
 
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
-              max_errors=10, folder_limits=None, updated=None):
+              max_errors=10, folder_limits=None, updated=None, orphaned=None):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
-    WARN line. updated: _loop's. Returns the exit code. Refused (VCharonError) unless
+    WARN line. updated, orphaned: _loop's. Returns the exit code. Refused (VCharonError) unless
     root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
     closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
@@ -1022,7 +1029,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
             return changes, None if w.told() else error is not None, saved
 
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
-                     max_errors, rounds, updated=updated)
+                     max_errors, rounds, updated=updated, orphaned=orphaned)
     finally:
         lk.release()
 
@@ -1380,14 +1387,14 @@ def is_gone(fix):
 def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
-              updated=None):
+              updated=None, orphaned=None):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
     membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
     <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
-    way."""
+    way. orphaned: _loop's."""
     local, me, leader = mailbox_of(job)
     state = snapshot_path(local, me, job)
     # the members the pull left out for their size, as the sync saved them after its down:
@@ -1450,7 +1457,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
 
         # the client's first round runs at once, as it always did
         return _loop(w, every, sleep, step, timer, True, until_change, max_minutes,
-                     max_errors, rounds, error_seconds, start=start, updated=updated)
+                     max_errors, rounds, error_seconds, start=start, updated=updated,
+                     orphaned=orphaned)
     finally:
         # every way out: any EXIT, Ctrl-C, a crash; the lock even if the stop fails
         try:

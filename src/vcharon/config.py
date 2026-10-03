@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import configparser
 import dataclasses
 import os
@@ -14,6 +15,11 @@ from . import channels, charter, fsops, pathrules, platform, ssh
 from .helper import TICK_EVERY
 from .proto import VCharonError
 from .run import Side
+
+# The codec the config is read with, found now: Python imports a codec's module at its first
+# use, and a long-running command imports nothing after its start (DESIGN, "Running watchers").
+# Python 3.13's site.py loads it when it reads a .pth file; 3.11's doesn't, and a binary reads none.
+codecs.lookup("utf-8-sig")
 
 # A busy helper ticks at most every TICK_EVERY seconds; a shorter idle limit would kill it.
 MIN_IDLE = 3 * TICK_EVERY

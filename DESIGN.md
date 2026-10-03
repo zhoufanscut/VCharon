@@ -1282,8 +1282,8 @@ Every verb also takes `-v` (log lines to stderr too).
   (how VCharon was installed, Python, config, box, ssh client, agent keys, folders, machine
   id), each server of the channels joined or the one named (login through the `-v` probe,
   Python, distro, clock, an echo of 4 MiB), and each channel section's jobs; it only reads,
-  apart from a temp file in the state and log dirs. `ping` connects, echoes all 256 byte values plus 1 MiB of random bytes, and
-  prints the round trip.
+  apart from a temp file in the state and log dirs. `ping` connects, echoes all 256 byte
+  values plus 1 MiB of random bytes, and prints the round trip.
 - `sync` is for remote members only (a local member's folder is in the channel itself). `--full`
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
@@ -1329,9 +1329,10 @@ OK  2 jobs  (0.7 s)
 | 4 | couldn't connect, or couldn't start the helper |
 | 130 | Ctrl-C |
 
-The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher runs, 13 closed, and
-14 updated (VCharon was replaced while it ran; `sync --repeat` exits 14 too). A usage error is 3,
-not argparse's 2, since 2 means busy.
+The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher runs, 13 closed, 14
+updated (VCharon was replaced while it ran; `sync --repeat` exits 14 too), and 15 orphaned (a
+binary's bootloader process is gone; `sync --repeat` too). A usage error is 3, not argparse's
+2, since 2 means busy.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -1396,9 +1397,13 @@ line of text>` for the agent or its user.
 A watcher and `sync --repeat` run for a long time while the program under them may be replaced
 (a `pipx install --force`, a binary swapped by an update). A one-file binary reads its code
 archive from its own file, by path, at each first-time import; after a swap, an old process
-importing a module for the first time would read the new file at the old offsets. Inferred
-from PyInstaller's source (its bootloader and `pyimod01_archive.py`), not yet seen with a built
-binary.
+importing a module for the first time reads the new file at the old offsets. Measured on Linux
+with PyInstaller 6.22.3 (a watcher of a built binary, the binary replaced with `os.replace` as
+`--update` does): the running process holds no file descriptor on its binary. In a build
+changed to import one module for the first time at the top of a round, before the check, that
+import failed with a `zlib` error ("incorrect header check") after a swap with another build,
+and worked after a swap with a byte-identical copy. The checks below turned each case, and the
+unchanged build's, into `EXIT updated` and exit 14 within a round, with no traceback.
 
 - So the long-running commands import every module they can need at start, in every install
   mode: `cli.py` imports every module of the package at its top, the plugins too (which
@@ -1419,6 +1424,20 @@ binary.
   checks the file first: changed, `EXIT updated` and 14 (a round's error in `sync --repeat` is
   raised to that check, not shown); unchanged, the usual `internal` error.
 - The fix for 14 is to start the watcher again: that runs the new VCharon.
+- **Orphans.** A one-file binary runs as two processes: the bootloader, and the Python child
+  it starts. A signal the bootloader can't catch (SIGKILL; `TerminateProcess` on Windows) ends
+  the bootloader alone; the child runs on, holding the watcher's lock, and its unpack folder
+  stays. Measured on Linux: after a SIGKILL of the bootloader, the child ran on until it was
+  stopped by hand. So in a binary, `watch` and `sync --repeat` note their parent at start
+  (POSIX: the parent pid; Windows: a handle on the parent, opened with `SYNCHRONIZE`) and check
+  it at the top of each round, after the update check: gone (POSIX: another parent pid, not
+  only 1, since a subreaper may take the child), they log one line, print `EXIT orphaned` and
+  exit 15 through the normal path, which releases the lock. A new code, not 11: nothing failed,
+  and a restart is right only if the user didn't mean to stop it. Not in a Python install,
+  where the command is the process that was signalled. Measured on Linux with the binary: the
+  child printed `EXIT orphaned` and exited 1.9 s after the SIGKILL (rounds every 2 s), and a
+  new watcher then started. The unpack folder (about 20 MB) still stays: only the bootloader
+  removes it.
 
 ### Self-update
 
@@ -1438,7 +1457,9 @@ version check at start-up.
   an older one (this build is ahead of the latest release).
 - **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
   number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` -> `0.1.0rc2`
-  -> `0.1.0` are each an update. A tag that doesn't parse is never newer.
+  -> `0.1.0` are each an update, and a post-release (`post`) above it: `0.1.0.post1` is newer
+  than `0.1.0`. A tag that doesn't parse is never newer. `--force` with an older release says it
+  "can be installed"; with the same one, "can be reinstalled".
 - **Checked before the question**: how VCharon was installed, that a binary is published for
   this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
   pipx command), that the binary's folder is writable (by making and removing a temp folder in
@@ -1450,19 +1471,20 @@ version check at start-up.
 - **The swap**, in this order: download the archive into a temp folder inside the binary's own
   folder (one filesystem, so the last rename can't hit `EXDEV`); check the release's
   `<archive>.sha256`, one line `<hex>  <file>` whose first word counts (a mismatch fails, and so
-  does a file whose first word isn't a sha256; none published warns and goes on); extract only
-  the binary, never everything, to a path of its own: the `.tar.gz`'s top-level `vcharon`, or
-  the `.zip`'s entry named exactly `vcharon.exe` (no folder part), a file of at most 200 MB, streamed with `ZipFile.open` to
-  `vcharon.new.exe`; run the new binary's `--version` and require the release's version; then
-  replace. POSIX: `os.replace` over the running binary, which keeps running from its own inode.
-  Windows, where a running `.exe` can be renamed but not replaced: rename it to a unique
-  `vcharon.exe.old-<unix time>`, move the new one in, and rename the old one back if that
-  fails; each rename is tried a few times over about two seconds, since antivirus often holds a
-  new file for a moment. Any way out of the move, a Ctrl-C too, renames the old one back; if
-  even that fails, the error's fix names both paths, and the temp folder holding the new one is
-  kept. Every start of a Windows binary deletes the `.old-*` copies next to it that it can. Any
-  other failure leaves the old binary as it was; temp folders a killed run left are removed by
-  a later run once an hour old.
+  does a file whose first word isn't a sha256; none published warns and goes on); extract only the
+  binary, never everything, to a path of its own: the `.tar.gz`'s top-level `vcharon`, or the
+  `.zip`'s entry named exactly `vcharon.exe` (no folder part), a file of at most 200 MB, streamed
+  with `ZipFile.open` to `vcharon.new.exe`; run the new binary's `--version` and require the
+  release's version; then replace. POSIX: `os.replace` over the running binary, which keeps running
+  from its own inode. Windows, where a running `.exe` can be renamed but not replaced: rename it to
+  a unique `vcharon.exe.old-<unix time>`, move the new one in, and rename the old one back if that
+  fails; each rename is tried a few times over about two seconds, since antivirus often holds a new
+  file for a moment. Any way out of the swap, a Ctrl-C too, renames the old one back once it was
+  moved and nothing is at the binary's path (a Ctrl-C just after the move leaves the new one); if
+  even that fails, a Ctrl-C included, the error keeps the move's own error, its fix names both
+  paths, and the temp folder holding the new one is kept. Every start of a Windows binary deletes
+  the `.old-*` copies next to it that it can. Any other failure leaves the old binary as it was;
+  temp folders a killed run left are removed by a later run once an hour old.
 - **Network**: https only, also after a redirect; `GITHUB_TOKEN` (or `GH_TOKEN`) is sent to
   `api.github.com` only, and dropped on a redirect to another host; timeouts per socket
   operation (15 s for the API, 120 s for a download). A binary whose OpenSSL can't find its
@@ -1478,8 +1500,53 @@ version check at start-up.
 - `not_writable`'s fix runs the installer again: `install.sh` on Linux and macOS, `install.ps1`
   on Windows. A new binary that won't run here (`smoke_failed`; on Linux most often a glibc
   older than the build machine's) and a broken release point to pipx; only the failures a later
-  try can fix say to try again. `doctor` prints the install kind and a binary's path, so a user knows what
-  `--update` touches.
+  try can fix say to try again. `doctor` prints the install kind and a binary's path, so a user
+  knows what `--update` touches.
+
+### Packaging
+
+VCharon ships as a wheel and as a standalone binary per platform, built by PyInstaller from
+`vcharon.spec` (the `build` extra pins its version).
+
+- **One file**, console, named `vcharon` (`vcharon.exe` on Windows). A one-file binary unpacks
+  itself into a temp folder at each start: about 0.3 s for `vcharon --version` on a Linux dev
+  box, against 0.1 s for `python -m vcharon --version`. So a `--no-stream` watcher, which
+  starts a child every round, pays that each round; the streaming child starts once.
+- **The package's files on disk**: the spec collects every file of the package as data, the
+  `.py` files too, under the binary's unpack folder (`sys._MEIPASS/vcharon/`). The PYZ holds
+  only bytecode, and the bundle sent to a server is source: `bundle._sources()` reads it from
+  `vcharon.__file__`'s folder, which is that folder in a binary. The guide and `SKILL.md` are
+  read with `importlib.resources`, which finds them there too.
+- **Every module named**: the spec's `hiddenimports` lists every module of the package (but
+  the `__main__` ones), since `plugin.py` loads plugins by name and `update.py` is imported only
+  by `--update`; the analysis follows neither. The codecs looked up by name at start
+  (`utf-16-le`, `utf-8-sig`) come with all of `encodings`, in `base_library.zip`.
+- **Proof in every build**: `doctor` builds the bundle the way a session does and reads it back
+  (its `bundle` line; `--json`'s `helper_bundle`: module count, whether `vcharon.helper` is in
+  it, size). `tests/smoke.sh DIST WORK` runs a built binary through `--version`, `doctor
+  --json` (the bundle has the helper; the install kind is `binary`), `setup --box ci`, `create
+  smoke --local`, `post`, `read --json`, `guide`, `skill install` and `close`, everything in
+  WORK; `SMOKE_PING=<dest>` adds `ping`, which runs the helper on a real server.
+- **Installers**: `install.sh` (Linux, macOS) and `install.ps1` (Windows) read the latest release,
+  download the archive and its `.sha256` (a mismatch fails, a file without a sha256 fails, none
+  published warns), take only the binary out (`vcharon` from the `.tar.gz`, the entry named exactly
+  `vcharon.exe` from the `.zip`, at most 200 MB), run its `--version` and require the release's
+  version, then move it in with a rename in the target folder: `~/.local/bin/vcharon`, or
+  `%LOCALAPPDATA%\Programs\vcharon\vcharon.exe` (a running one is renamed to `vcharon.exe.old-<unix
+  time>` first). `install.sh` prints the line that puts `~/.local/bin` on the PATH when it isn't;
+  `install.ps1` adds its folder to the user's PATH. An Intel Mac, Linux arm64 and Windows on ARM
+  get the pipx command. Only their own tests set `VCHARON_INSTALL_API_URL` and
+  `VCHARON_INSTALL_DOWNLOAD_URL`, to a local fake release (both then allow plain http to
+  `127.0.0.1` or `localhost` exactly, and refuse any URL with an `@`; otherwise https only, and
+  `install.sh` holds redirects to https too). Only a 404 for the `.sha256` warns; any other failure
+  to get it fails, as for `--update`, where only a release that lists no `.sha256` warns.
+  `install.sh` writes only the archive member's bytes (`tar -O`, so a link member gives an empty
+  file, which fails the version check), gives that check 60 s (without `timeout(1)`: TERM, then
+  KILL after 5 s), and cleans up on INT, TERM and HUP. `install.ps1` stops a binary that overruns
+  the 60 s, and its child, best effort; its two moves are retried 5 times 0.5 s apart, a stop
+  between them puts the old binary back, and its work folder is kept while no binary is in place.
+  `install.sh` is tested under sh and dash against a local fake release; **`install.ps1` has not
+  been run yet** (no Windows here).
 
 ## Stable
 
@@ -1487,7 +1554,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 
 - **Verbs and flags**: the command line above, with each flag's meaning.
 - **Exit codes**: 0, 1, 2, 3, 4 and 130 ([Exit codes](#exit-codes)); the watcher's 0 (change),
-  10 (quiet), 11 (error), 12 (another watcher runs), 13 (closed) and 14 (updated).
+  10 (quiet), 11 (error), 12 (another watcher runs), 13 (closed), 14 (updated) and 15
+  (orphaned).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
     every <n> s]`
@@ -1498,9 +1566,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
-  - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`; `ERROR
-    another watcher is running on this mailbox (<lock>)` with exit 12. The text after an
-    `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
+  - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
+    orphaned`; `ERROR another watcher is running on this mailbox (<lock>)` with exit 12. The text
+    after an `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "leader", "leaders",
     "members", "member_info", "newest", "strays", "format", "limits"}`, `member_info` each
@@ -1512,11 +1580,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     `box_source`.
   - `read`: `{"channel", "folder", "synced", "members", "count", "entries", "notes"}`; each entry
     `{"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}`.
-  - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command",
-    "install", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
-    "warnings", "checks"}`; `install` `{"kind", "path"}`; `dirs` `{"state", "logs", "joined",
-    "channels"}`; each server `{"server", "python", "os", "distro", "distro_id",
-    "distro_version", "tested"}`; each check `{"level", "subject", "text", "fix", "note"}`.
+  - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
+    "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
+    "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",
+    "bytes"}` (`{"modules": 0, "has_helper": false, "bytes": null}` when it couldn't be built);
+    `dirs` `{"state", "logs", "joined", "channels"}`; each server `{"server", "python", "os",
+    "distro", "distro_id", "distro_version", "tested"}`; each check `{"level", "subject", "text",
+    "fix", "note"}`.
   - `--update --json`: the fields in [Self-update](#self-update).
 
   A field may be added in a minor version; none is removed or changes meaning without a
@@ -1567,6 +1637,9 @@ which and how to adapt. A channel format change is always a minor version at lea
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
 - CI runs the suite on Linux (Python 3.11 and 3.13), macOS and Windows (3.13), and `ruff check
   src tests` on one row.
+- `install.sh` runs under `sh` against a fake release on a local HTTP server, with `uname`
+  faked for each platform (POSIX only). A built binary is checked by `tests/smoke.sh`
+  ([Packaging](#packaging)).
 
 ## Rules for the code
 

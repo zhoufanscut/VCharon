@@ -109,13 +109,16 @@ _VERSION = re.compile(r"\A[vV]?(\d+(?:\.\d+)*)(?:[-._]?([A-Za-z]+)[-._]?(\d*))?"
 # pre-release labels, in order; an unknown label ranks lowest, below every final release
 _PRE = {"dev": 0, "a": 1, "alpha": 1, "b": 2, "beta": 2, "c": 3, "pre": 3, "preview": 3,
         "rc": 3}
+# post-release labels: they sort above the final release (0.1.0.post1 is after 0.1.0)
+_POST = ("post", "rev", "r")
 
 
 def parse_version(text):
     """"v0.3.1" -> ((0, 3, 1), (1,)); "0.1.0rc2" -> ((0, 1, 0), (0, 3, 2)): the numbers, then
-    a pre-release's (0, rank, n), which sorts below a final release's (1,). None when nothing
-    numeric is there. Lenient, since a tag is typed by a person: a leading v, a +build tail and
-    a short 0.4 are taken. A release candidate is tagged before the final, so 0.1.0rc1 ->
+    a pre-release's (0, rank, n), which sorts below a final release's (1,), and a post-release's
+    (2, n), above it ("0.1.0.post1" -> ((0, 1, 0), (2, 1))). None when nothing numeric is
+    there. Lenient, since a tag is typed by a person: a leading v, a +build tail and a short 0.4
+    are taken. A release candidate is tagged before the final, so 0.1.0rc1 ->
     0.1.0rc2 -> 0.1.0 must each be an update."""
     if not isinstance(text, str):
         return None
@@ -126,6 +129,8 @@ def parse_version(text):
     label = (m.group(2) or "").lower()
     if not label:
         return numbers, (1,)
+    if label in _POST:
+        return numbers, (2, int(m.group(3) or 0))
     return numbers, (0, _PRE.get(label, -1), int(m.group(3) or 0))
 
 
@@ -483,33 +488,55 @@ def old_name(target, now=None, exists=None):
     return "%s%s%d" % (target, install.OLD_MARK, t)
 
 
-def swap_windows(staged, target, rename=None, sleep=None, now=None):
+def swap_windows(staged, target, rename=None, sleep=None, now=None, exists=None):
     """The Windows swap: the running target renamed to a unique .old-<time> name, then staged
-    moved to target; if that move fails, the old one is renamed back. rename, sleep, now:
-    os.rename, time.sleep and time.time, the tests' to replace (they run it on every OS).
-    Raises what stopped the move (an OSError, a Ctrl-C) after the old one is back; when even
-    the way back fails, UpdateError install_failed, whose fix names both paths."""
+    moved to target; if that move fails, the old one is renamed back. rename, sleep, now,
+    exists: os.rename, time.sleep, time.time and os.path.lexists, the tests' to replace (they
+    run it on every OS). Raises what stopped the swap (an OSError, a Ctrl-C) after the old one
+    is back; when even the way back fails, UpdateError install_failed, whose fix names both
+    paths."""
     rename = rename or os.rename
     sleep = sleep or time.sleep
-    old = old_name(target, now)
-    _rename(target, old, rename, sleep)
-    moved = False
+    exists = exists or os.path.lexists
+    old = old_name(target, now, exists)
+    # set by the first rename itself, not after _rename returns: a Ctrl-C between the two would
+    # leave a moved binary that nothing puts back. The old name was free before, so finding it
+    # taken covers the few instructions between the rename and the flag.
+    old_moved = False
+
+    def move_old(src, dst):
+        nonlocal old_moved
+        rename(src, dst)
+        old_moved = True
+
     try:
+        _rename(target, old, move_old, sleep)
         _rename(staged, target, rename, sleep)
-        moved = True
-    finally:
-        if not moved:
-            # any way out, a Ctrl-C too: no binary at target is the one outcome to avoid
+    except BaseException as stop:
+        # any way out, a Ctrl-C too: no binary at target is the one outcome to avoid. Only
+        # when target is empty: the new one may be in place already (stopped after its move)
+        if (old_moved or exists(old)) and not exists(target):
             try:
                 _rename(old, target, rename, sleep)
-            except OSError as back:
-                raise UpdateError("install_failed", "the new binary couldn't be moved to %s, "
-                                  "and the old one couldn't be put back (%s): it is %s now"
-                                  % (target, back.strerror or back, old),
-                                  "rename %s back to %s" % (old, target)) from back
+            except (OSError, KeyboardInterrupt) as back:
+                raise UpdateError(
+                    "install_failed", "the new binary couldn't be moved to %s (%s), and the old "
+                    "one couldn't be put back (%s): it is %s now"
+                    % (target, _why(stop), _why(back), old),
+                    "rename %s back to %s" % (old, target)) from back
+        raise
     # the old copy: deleted here if it can be (it can't while it runs), else at a later start
     with contextlib.suppress(OSError):
         os.remove(old)
+
+
+def _why(error):
+    """An error's own words, for a message: the OS's text, or what stopped it."""
+    if isinstance(error, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
+    return str(error) or type(error).__name__
 
 
 def sweep_stale(folder):

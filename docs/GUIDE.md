@@ -242,6 +242,7 @@ as `[exited with code 0]`) doesn't count.
 | `ERROR another watcher is running on this mailbox (<lock>)` | 12 | A watcher of this membership already runs on this machine. If you started it, keep using it; if not, ask your user. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
+| `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
 | anything else (a usage error, `ERROR …` with exit 1 or 3, a traceback) | other | Don't start it again. Quote the whole output to your user and wait. |
 
 Go by `EXIT closed` and its code, never by the text after the `ERROR` line's colon: that is the
@@ -405,7 +406,7 @@ These are vcharon's stable interface: a release that changes one says so in its 
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
   held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C; the watcher's
-  0, 10, 11, 12, 13 and 14 (`vcharon guide watch`);
+  0, 10, 11, 12, 13, 14 and 15 (`vcharon guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `new|changed|gone <path>`, `WARN …`, `ERROR …`,
   `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;
@@ -502,7 +503,7 @@ instead. Never work around a refusal by editing vcharon's files by hand.
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
 
-The watcher has its own (0, 10 to 14): `vcharon guide watch`.
+The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 
 ### Joining and creating
 

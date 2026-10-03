@@ -40,6 +40,17 @@ def build(nonce, extra_modules=None):
     return struct.pack(">Q", len(blob)) + blob
 
 
+def summary():
+    """{"modules", "has_helper", "bytes"}: the bundle a session sends, built as a session builds
+    it and read back as the loader reads it, so doctor shows the helper's source is there (in a
+    binary, the .py files the spec collects under sys._MEIPASS). bytes: the bundle's size."""
+    blob = build(os.urandom(16).hex())
+    size = struct.unpack(">Q", blob[:8])[0]
+    modules = json.loads(zlib.decompress(blob[8:8 + size]).decode("utf-8"))["modules"]
+    return {"modules": len(modules), "has_helper": "vcharon.helper" in modules,
+            "bytes": len(blob)}
+
+
 # subpackages that only the client runs (post, read, watch; guide; skill install), left out of
 # the bundle
 CLIENT_ONLY = ("mailbox", "guide", "skill")

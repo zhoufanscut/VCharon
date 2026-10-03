@@ -70,5 +70,15 @@ and made a tool of its own.
   release: **not yet run** (there is none yet).
 - `EXIT updated`: a watcher and `sync --repeat` exit 14 when a stand-in file for the binary is
   replaced under them (unit tests, Linux): **measured**. A real binary swapped under a running
-  watcher: **not yet run**.
-- The standalone binaries, `install.sh` and `install.ps1`: **not built yet.**
+  local watcher (Linux, PyInstaller 6.22.3, replaced with `os.replace` as `--update` does):
+  **measured**, `EXIT updated` and 14 within a round, also when a module is imported for the
+  first time after the swap (that import fails with a `zlib` error, and the crash check turns
+  it into 14). Streaming and on macOS or Windows: **not yet run**.
+- `EXIT orphaned`: a local watcher of the Linux binary whose bootloader was killed with SIGKILL
+  exits 15 within a round and frees its lock (a new watcher starts): **measured**. Its unpack
+  folder (about 20 MB) stays in the temp folder. On macOS and Windows: **not yet run**.
+- The standalone binary: built and smoke-tested (`tests/smoke.sh`) on Linux only, with
+  `vcharon ping` run once against this machine's own sshd. macOS and Windows: **not built
+  yet**. **Nothing has been released.**
+- `install.sh`: **tested** under sh and dash against a fake release on a local HTTP server,
+  never against GitHub. `install.ps1`: **not yet run** (no Windows here).

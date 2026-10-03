@@ -57,7 +57,8 @@ LIST_MAX = 50
 EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 3 usage or config,
   4 couldn't connect or start the helper, 130 Ctrl-C.
   watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher runs,
-  13 the channel is closed, 14 vcharon was updated (start it again).
+  13 the channel is closed, 14 vcharon was updated (start it again), 15 a binary's
+  bootloader process was killed.
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -615,7 +616,8 @@ def _watch(args, run):
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
-              "max_errors": args.max_errors or 10, "updated": dog.changed}
+              "max_errors": args.max_errors or 10, "updated": dog.changed,
+              "orphaned": lambda: run.orphaned("watch")}
     if record["ssh"] is None:
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
@@ -799,7 +801,9 @@ def _update(args, run):
              "can't replace it (only the standalone binary)" % inst.kind, doc["command"])
     # everything that makes it impossible, before the question
     guarded(lambda: update_mod.preflight(inst, release))
-    if not _confirm_update(release, args.update_yes, as_json, args.update_force, available):
+    older = update_mod.compare(release.version, VERSION) == -1
+    if not _confirm_update(release, args.update_yes, as_json, args.update_force, available,
+                           older):
         if as_json:
             return _print_json(dict(doc, ok=True))
         return 0
@@ -819,12 +823,13 @@ def _update(args, run):
     return 0
 
 
-def _confirm_update(release, yes, as_json, force=False, available=True):
+def _confirm_update(release, yes, as_json, force=False, available=True, older=False):
     """Whether to install: --yes is the one yes. --json and no terminal count as no (the
     release is reported, nothing installed), so an agent can't install by accident; so do
     Ctrl-C and Ctrl-D at the question. The only question vcharon asks besides vcharon key.
-    force, available: the line that says how keeps a --force given, and a release that isn't
-    newer (only --force gets here with one) is one to reinstall."""
+    force, available, older: the line that says how keeps a --force given, and a release that
+    isn't newer (only --force gets here with one) is one to reinstall, or, older than this
+    build, one that can be installed."""
     if yes:
         return True
     if as_json or not _stdin_is_terminal():
@@ -834,6 +839,8 @@ def _confirm_update(release, yes, as_json, force=False, available=True):
                                                " --force" if force else "")
             if available:
                 _say("  %s is available; to install it: %s" % (release.version, command))
+            elif older:
+                _say("  %s can be installed: %s" % (release.version, command))
             else:
                 _say("  %s can be reinstalled: %s" % (release.version, command))
         return False
@@ -866,13 +873,25 @@ class _Run:
         # how it says EXIT updated; None for the others
         self.watchdog = None
         self.updated_line = None
+        self.orphaned_line = None
 
     def watch_code(self, say):
         """Starts the watchdog of a long-running command (watch, sync --repeat); say prints
-        its EXIT updated line. Returns the watchdog."""
+        its EXIT updated and EXIT orphaned lines. Returns the watchdog."""
         self.watchdog = install.Watchdog()
         self.updated_line = lambda: say("EXIT updated")
+        self.orphaned_line = lambda: say("EXIT orphaned")
         return self.watchdog
+
+    def orphaned(self, what):
+        """Whether the watchdog's binary lost its bootloader parent; logs one line when it
+        did. what: the command, for the log."""
+        if self.watchdog is None or not self.watchdog.orphaned():
+            return False
+        self.log_line("info", "%s: the process that started this one (pid %d) is gone; "
+                      "exiting with %d" % (what, self.watchdog.parent.pid,
+                                           install.EXIT_ORPHANED), create=True)
+        return True
 
     def log_line(self, level, msg, create=False):
         if self.log is None and create:
@@ -1419,6 +1438,9 @@ def _repeat(args, run, todo):
                              % install.EXIT_UPDATED)
                 run.updated_line()
                 return install.EXIT_UPDATED
+            if run.orphaned("repeat"):
+                run.orphaned_line()
+                return install.EXIT_ORPHANED
             if conn.session is not None:
                 conn.session.start_round()
             code, idle = _round(args, todo, conn, stack)

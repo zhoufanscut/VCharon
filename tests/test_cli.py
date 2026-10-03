@@ -1441,6 +1441,22 @@ class RepeatTest(FakeSshCase):
         self.assertIn("ssh exited with code 0", self.job_log("a"))
         self.assert_locks_free("a", "b")
 
+    def test_an_orphan_at_the_top_of_a_round(self):
+        # a binary whose bootloader parent was killed: exits on its own, locks freed
+        ppids = [4242]
+
+        def kill_parent():
+            ppids[0] = 1
+
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(install.os, "getppid", lambda: ppids[0]):
+            code, lines, err, _ = self.repeat("a", "b", between=[kill_parent])
+        self.assertEqual((code, err), (install.EXIT_ORPHANED, ""))
+        self.assertEqual(lines, ["ROUND 0", "EXIT orphaned"])
+        self.assertIn("repeat: the process that started this one (pid 4242) is gone; exiting "
+                      "with 15", self.job_log("a"))
+        self.assert_locks_free("a", "b")
+
     def crash_in_round_two(self, swap):
         """_run_one, raising in the second round, after the swap if there is one."""
         real = cli._run_one
@@ -1622,7 +1638,10 @@ class RepeatTest(FakeSshCase):
                 "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
                 "%s"
                 "sys.exit(cli.main(sys.argv[1:]))\n" % (VCHARON_DIR, FAKE_SSH, before))
-        return subprocess.Popen([sys.executable, "-c", code] + list(argv),
+        # -S: no site, so no .pth file is read, as in a binary and on 3.11. 3.13's site.py
+        # decodes .pth files with utf-8-sig, which would hide a lazy import of that codec from
+        # the import checks; the path insert above stands in for the editable install's .pth.
+        return subprocess.Popen([sys.executable, "-S", "-c", code] + list(argv),
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
 

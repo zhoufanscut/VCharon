@@ -62,6 +62,7 @@ as `[exited with code 0]`) doesn't count.
 | `ERROR another watcher is running on this mailbox (<lock>)` | 12 | A watcher of this membership already runs on this machine. If you started it, keep using it; if not, ask your user. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
+| `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
 | anything else (a usage error, `ERROR …` with exit 1 or 3, a traceback) | other | Don't start it again. Quote the whole output to your user and wait. |
 
 Go by `EXIT closed` and its code, never by the text after the `ERROR` line's colon: that is the

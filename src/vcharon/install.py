@@ -13,6 +13,13 @@ import sys
 
 from . import platform
 
+# Imported at start, as everything a long-running command needs (DESIGN, "Running watchers"):
+# the Windows calls that watch a binary's parent process.
+if sys.platform == "win32":
+    import _winapi
+else:
+    _winapi = None
+
 # Distribution is GitHub only. The same repo is named in install.sh and install.ps1; the
 # three change together.
 REPO = "zhoufanscut/VCharon"
@@ -25,6 +32,11 @@ INSTALL_PS1 = "irm https://raw.githubusercontent.com/%s/main/install.ps1 | iex" 
 OLD_MARK = ".old-"
 # A long-running command's exit code, and the watcher's line, when vcharon changed under it.
 EXIT_UPDATED = 14
+# ... and when the one-file binary's bootloader that started it is gone (killed with SIGKILL,
+# say): no one can stop this process any more, so it ends itself.
+EXIT_ORPHANED = 15
+# OpenProcess's right to wait on a process
+SYNCHRONIZE = 0x00100000
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,10 +137,19 @@ class Watchdog:
     def __init__(self, path=None):
         self.path = code_path() if path is None else path
         self.start = identity(self.path)
+        # only in a binary: there, the process that started this one is the bootloader
+        self.parent = Parent() if platform.is_frozen() else None
 
     def changed(self):
         """Whether the code's file is another one now, or gone."""
         return identity(self.path) != self.start
+
+    def orphaned(self):
+        """Whether a binary's bootloader parent is gone. A one-file binary runs as two
+        processes, the bootloader and its Python child; a signal the bootloader can't catch
+        (SIGKILL; TerminateProcess) ends it alone, and the child would run on, holding its
+        locks, with no one left to stop it."""
+        return self.parent is not None and self.parent.gone()
 
     def after_crash(self):
         """Whether an unexpected exception may come from an update: a one-file binary reads
@@ -136,6 +157,34 @@ class Watchdog:
         read gets the new file at the old offsets (an ImportError, a zlib error, bad marshal
         data). Only a binary: an installed package's files are whole files either way."""
         return platform.is_frozen() and self.changed()
+
+
+class Parent:
+    """This process's parent, as it was at start, and whether it has gone since. POSIX: the
+    parent pid changes when the parent dies (the child is taken by init or a subreaper), so it
+    is compared with the one at start, never with 1. Windows: a handle opened at start, which
+    is signalled once the parent ends; without one (OpenProcess refused), never gone.
+
+    It takes the parent for this binary's own bootloader. A binary started with its launcher's
+    _PYI_* environment and no PYINSTALLER_RESET_ENVIRONMENT runs without a bootloader of its
+    own, and would take the launcher for it. So every place vcharon starts itself sets the
+    reset (platform.child_env) or strips _PYI_* (update.child_env); a test holds the list."""
+
+    def __init__(self):
+        self.pid = os.getppid()
+        self.handle = None
+        if platform.os_name() == "windows" and _winapi is not None:
+            try:
+                self.handle = _winapi.OpenProcess(SYNCHRONIZE, False, self.pid)
+            except OSError:
+                self.handle = None
+
+    def gone(self):
+        if platform.os_name() == "windows":
+            if self.handle is None:
+                return False
+            return _winapi.WaitForSingleObject(self.handle, 0) == _winapi.WAIT_OBJECT_0
+        return os.getppid() != self.pid
 
 
 def sweep_old(executable=None):

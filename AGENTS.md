@@ -25,6 +25,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once: the package
 .venv/bin/ruff check src tests                               # lint; CI runs exactly this
 
 .venv/bin/python -m vcharon.guide --write docs/GUIDE.md      # after editing src/vcharon/guide/*.md
+
+.venv/bin/pip install -e ".[build]" && .venv/bin/pyinstaller vcharon.spec   # the binary, in dist/
+sh tests/smoke.sh dist /tmp/vc-smoke                         # its smoke test, all in /tmp/vc-smoke
 ```
 
 - **`-t .` matters**: it makes `tests` a package, so `tests/__init__.py`'s sandbox loads before

@@ -20,6 +20,7 @@ import http.client
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -36,6 +37,7 @@ from unittest import mock
 
 import vcharon
 from vcharon import charter, cli, install, platform, update
+from vcharon.mailbox import watch
 
 from tests.util import FakeSshCase
 
@@ -187,6 +189,8 @@ class VersionTest(unittest.TestCase):
                            ("0.4.0.rc.2", ((0, 4, 0), (0, 3, 2))),
                            ("1.0.0b3", ((1, 0, 0), (0, 2, 3))),
                            ("1.0.0+build7", ((1, 0, 0), final)),
+                           ("0.1.0.post1", ((0, 1, 0), (2, 1))),
+                           ("0.1.0post2", ((0, 1, 0), (2, 2))),
                            ("nightly", None), ("", None), (None, None)):
             with self.subTest(text=text):
                 self.assertEqual(update.parse_version(text), want)
@@ -194,7 +198,7 @@ class VersionTest(unittest.TestCase):
     def test_release_candidates_come_before_their_final(self):
         # tagged in this order: each is an update over the one before
         order = ["0.0.9", "0.1.0dev1", "0.1.0a1", "0.1.0b1", "0.1.0rc1", "0.1.0rc2", "v0.1.0",
-                 "0.1.1rc1", "0.1.1"]
+                 "0.1.0.post1", "0.1.0.post2", "0.1.1rc1", "0.1.1"]
         for i, older in enumerate(order):
             for newer in order[i + 1:]:
                 with self.subTest(older=older, newer=newer):
@@ -563,6 +567,22 @@ class ApplyTest(UpdateCase):
         self.assertFalse(result.verified)
         self.assertTrue(any(s.startswith("warning: ") for s in steps), steps)
         self.assertEqual(read(self.target), fake_binary())
+
+    def test_a_listed_checksum_that_wont_download_fails(self):
+        # only a release that lists no .sha256 warns; one it lists but that won't come is an
+        # error, never "not verified"
+        tarball = make_tarball(os.path.join(self.tmp, TARBALL))
+        release = update.Release("v9.9.9", "9.9.9", "u", "",
+                                 {TARBALL: DOWNLOAD, TARBALL + ".sha256": SUMS})
+        for error in (update.UpdateError("not_found", "HTTP 404"),
+                      update.UpdateError("http_error", "HTTP 500"),
+                      update.UpdateError("network", "connection reset")):
+            with self.subTest(kind=error.kind):
+                self.serve(Net({DOWNLOAD: read(tarball), SUMS: error}))
+                with self.assertRaises(update.UpdateError) as caught:
+                    update.apply_update(release, self.inst)
+                self.assertEqual(caught.exception.kind, error.kind)
+                self.assert_untouched()
 
     def test_an_unusable_checksum_file_fails(self):
         # published but empty or not a sha256: not the same as none published
@@ -1083,8 +1103,71 @@ class WindowsSwapTest(unittest.TestCase):
         old = self.target + ".old-9"
         self.assertEqual((caught.exception.kind, caught.exception.fix),
                          ("install_failed", "rename %s back to %s" % (old, self.target)))
-        self.assertIn(old, caught.exception.message)
+        # the move's own error and the way back's, both
+        self.assertEqual(caught.exception.message,
+                         "the new binary couldn't be moved to %s (held), and the old one "
+                         "couldn't be put back (held): it is %s now" % (self.target, old))
         self.assertEqual(read(old), b"old")
+
+    def test_a_ctrl_c_on_the_way_back_still_says_where_the_old_one_is(self):
+        def rename(src, dst):
+            if src == self.target:
+                os.rename(src, dst)
+                return
+            if src == self.staged:
+                raise PermissionError(13, "held")
+            raise KeyboardInterrupt
+
+        with self.assertRaises(update.UpdateError) as caught:
+            update.swap_windows(self.staged, self.target, rename=rename, sleep=self.sleep,
+                                now=lambda: 12)
+        old = self.target + ".old-12"
+        self.assertEqual((caught.exception.kind, caught.exception.fix),
+                         ("install_failed", "rename %s back to %s" % (old, self.target)))
+        self.assertIn("(held)", caught.exception.message)
+        self.assertIn("(interrupted)", caught.exception.message)
+        self.assertEqual(read(old), b"old")
+
+    def test_a_ctrl_c_just_after_the_first_rename_puts_it_back(self):
+        # the rename was done, but never returned: the old one is moved all the same
+        def rename(src, dst):
+            os.rename(src, dst)
+            if src == self.target and dst.endswith(".old-13"):
+                raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            update.swap_windows(self.staged, self.target, rename=rename, sleep=self.sleep,
+                                now=lambda: 13)
+        self.assertEqual(read(self.target), b"old")
+        self.assertEqual(read(self.staged), b"new")
+        self.assertEqual(sorted(os.listdir(self.tmp)), ["vcharon.exe", "work"])
+
+    def test_a_ctrl_c_once_the_new_one_is_in_leaves_it(self):
+        # stopped after the move: the new binary is at target, nothing is lost, and the old
+        # copy waits for a later start's sweep
+        def rename(src, dst):
+            os.rename(src, dst)
+            if src == self.staged:
+                raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            update.swap_windows(self.staged, self.target, rename=rename, sleep=self.sleep,
+                                now=lambda: 14)
+        self.assertEqual(read(self.target), b"new")
+        self.assertEqual(read(self.target + ".old-14"), b"old")
+
+    def test_nothing_moved_nothing_put_back(self):
+        calls = []
+
+        def rename(src, dst):
+            calls.append(os.path.basename(src))
+            raise PermissionError(13, "in use")
+
+        with self.assertRaises(PermissionError):
+            update.swap_windows(self.staged, self.target, rename=rename, sleep=self.sleep,
+                                now=lambda: 15)
+        self.assertEqual(calls, ["vcharon.exe"] * update.RENAME_TRIES)
+        self.assertEqual(read(self.target), b"old")
 
     def test_a_ctrl_c_during_the_move_puts_the_old_one_back(self):
         calls = []
@@ -1212,6 +1295,125 @@ class SweepOldTest(unittest.TestCase):
 
 
 # --- the watchers' check ---
+
+class OrphanTest(unittest.TestCase):
+    """A binary's check that its bootloader parent is still there: a SIGKILL ends the
+    bootloader alone, and the Python child would run on with its locks."""
+
+    def test_not_in_a_python_install(self):
+        with mock.patch.object(platform, "is_frozen", return_value=False):
+            dog = install.Watchdog(__file__)
+        self.assertIsNone(dog.parent)
+        self.assertFalse(dog.orphaned())
+
+    def test_posix_compares_with_the_parent_at_start(self):
+        ppids = [4242]
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(platform, "os_name", return_value="linux"), \
+                mock.patch.object(install.os, "getppid", lambda: ppids[0]):
+            dog = install.Watchdog(__file__)
+            self.assertEqual(dog.parent.pid, 4242)
+            self.assertFalse(dog.orphaned())
+            # taken by a subreaper, not init: any other pid counts, not only 1
+            ppids[0] = 977
+            self.assertTrue(dog.orphaned())
+            ppids[0] = 1
+            self.assertTrue(dog.orphaned())
+
+    def test_windows_waits_on_a_handle_opened_at_start(self):
+        class FakeWinapi:
+            WAIT_OBJECT_0 = 0
+            WAIT_TIMEOUT = 258
+
+            def __init__(self):
+                self.opened = []
+                self.state = self.WAIT_TIMEOUT
+
+            def OpenProcess(self, access, inherit, pid):
+                self.opened.append((access, inherit, pid))
+                return 77
+
+            def WaitForSingleObject(self, handle, ms):
+                assert (handle, ms) == (77, 0)
+                return self.state
+
+        fake = FakeWinapi()
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.object(install, "_winapi", fake), \
+                mock.patch.object(install.os, "getppid", lambda: 3100):
+            dog = install.Watchdog(__file__)
+            self.assertEqual(fake.opened, [(install.SYNCHRONIZE, False, 3100)])
+            self.assertFalse(dog.orphaned())
+            fake.state = fake.WAIT_OBJECT_0
+            self.assertTrue(dog.orphaned())
+
+    def test_windows_without_a_handle_is_never_orphaned(self):
+        class Refusing:
+            WAIT_OBJECT_0 = 0
+
+            def OpenProcess(self, access, inherit, pid):
+                raise PermissionError(5, "Access is denied")
+
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.object(install, "_winapi", Refusing()):
+            dog = install.Watchdog(__file__)
+            self.assertFalse(dog.orphaned())
+
+    def test_every_self_start_gets_its_own_bootloader(self):
+        # The orphan check takes the parent for the bootloader. A binary started with the
+        # parent's _PYI_* environment and no reset runs without one of its own, and would
+        # take its launcher for it: each place vcharon starts itself must reset or strip.
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.dict(os.environ, {"_PYI_ARCHIVE_FILE": "/x", "_MEIPASS2": "/m"}):
+            # the streaming sync child
+            spawned = []
+
+            def spawn(argv, env):
+                spawned.append(env)
+                raise OSError("only the environment was wanted")
+
+            with self.assertRaises(OSError):
+                watch.Stream("mb.debian", ["mb"], 2, spawn=spawn)._start()
+            self.assertEqual(spawned[0]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+            # a --no-stream round's sync
+            ran = []
+
+            def run(argv, **kw):
+                ran.append(kw["env"])
+                return types.SimpleNamespace(returncode=0, stderr=b"")
+
+            with mock.patch.object(watch.subprocess, "run", run):
+                watch.run_sync("mb.debian", ["mb"])
+            self.assertEqual(ran[0]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+            # the downloaded binary's --version
+            env = update.child_env()
+            self.assertEqual(env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+            self.assertFalse([k for k in env if k.startswith(("_PYI_", "_MEIPASS"))])
+        # and these are all the places: a new one must join the checks above
+        starts = []
+        root = os.path.dirname(os.path.abspath(vcharon.__file__))
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if name.endswith(".py"):
+                    with open(os.path.join(dirpath, name), encoding="utf-8") as f:
+                        text = f.read()
+                    rel = os.path.relpath(os.path.join(dirpath, name), root)
+                    starts += ["%s:%s" % (rel.replace(os.sep, "/"), m.group(1))
+                               for m in re.finditer(r"\b(sync_argv|smoke_argv|self_argv)\(",
+                                                    text)]
+        self.assertEqual(sorted(starts), sorted([
+            # each name's def and its docstring mentions count too
+            "platform.py:self_argv", "platform.py:self_argv",
+            "mailbox/watch.py:sync_argv", "mailbox/watch.py:self_argv",
+            "mailbox/watch.py:sync_argv", "mailbox/watch.py:sync_argv",
+            "update.py:smoke_argv", "update.py:smoke_argv"]))
+
+    def test_the_exit_code_is_its_own(self):
+        self.assertEqual(install.EXIT_ORPHANED, 15)
+        self.assertNotIn(install.EXIT_ORPHANED, (0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 130))
+
 
 class WatchdogTest(unittest.TestCase):
     """The identity a long-running command compares at the top of each round: size,
@@ -1530,7 +1732,7 @@ class UpdateFlagTest(FakeSshCase):
                         SUMS: "%s  %s\n" % (sha256(tarball), TARBALL)}))
         code, out, _ = self.run_cli("--update", "--force")
         self.assertEqual((code, out.splitlines()[-1]),
-                         (0, "  0.0.1 can be reinstalled: vcharon --update --force --yes"))
+                         (0, "  0.0.1 can be installed: vcharon --update --force --yes"))
         code, doc, _ = self.run_json("--update", "--force", "--yes", "--json")
         self.assertEqual((code, doc["changed"], doc["installed"]), (0, True, "0.0.1"))
 

@@ -6,16 +6,51 @@ build-backend = "hatchling.build"
 name = "vcharon"
 version = "0.1.0"
 description = "File-based channels for AI agents, on one machine or across machines over plain SSH"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "zhoufanscut" }]
+keywords = ["ai", "agents", "ssh", "channels", "cli", "claude-code", "codex"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+  "Topic :: Utilities",
+]
+# standard library only: the standalone binary carries nothing else
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["ruff>=0.16.10,<0.17"]
+# the standalone binary: pyinstaller vcharon.spec. Pinned: vcharon.spec was checked against
+# this version's collect_data_files and collect_submodules, and the one-file bootloader's
+# behaviour under a running watcher was measured with it (DESIGN, "Running watchers").
+build = ["pyinstaller==6.22.3"]
+
+[project.scripts]
+vcharon = "vcharon.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/zhoufanscut/VCharon"
+Repository = "https://github.com/zhoufanscut/VCharon"
+Issues = "https://github.com/zhoufanscut/VCharon/issues"
+Changelog = "https://github.com/zhoufanscut/VCharon/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vcharon"]
+# guide/*.md and skill/SKILL.md ship because they sit under the package; importlib.resources
+# reads them (in a binary too, where vcharon.spec collects them). No force-include: it would
+# add those paths a second time.
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -27,6 +62,9 @@ include = [
   "CHANGELOG.md",
   "LICENSE",
   "pyproject.toml",
+  "vcharon.spec",
+  "install.sh",
+  "install.ps1",
 ]
 
 [tool.ruff]

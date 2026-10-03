@@ -2,27 +2,29 @@
 each (DESIGN, "Command line"); client. It only reads, apart from a temp file in the state and log
 dirs, and its log. It never prompts.
 
---json prints one object instead: {"version", "protocol", "format", "python", "executable",
-"os", "command", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
-"warnings", "checks"}. "dirs" is {"state", "logs", "joined", "channels"}: the folders vcharon
-writes here (joined: a remote member's copies of its channels; channels: the channel root of
-local members). "format" is the newest channel format this vcharon reads; "servers" one object
-for each server whose session opened and echoed: {"server", "python", "os", "distro", "distro_id",
-"distro_version", "tested"}, the distro fields from its /etc/os-release (PRETTY_NAME, ID,
-VERSION_ID; null each when missing) and "tested" true for Debian 13 or later.
-"command" is how this box runs vcharon (the fix lines' spelling); "install" {"kind", "path"}:
-how it was installed ("binary", "pipx", "uv", "pip" or "source") and the file vcharon --update
-replaces (a binary) or the checkout (source), else null; "box" this machine's part of
-member names and "box_source" "config" ([vcharon] box) or "os" (the default), both null when
-the config can't be read; "claimer_source" what the id this machine claims member folders with
-comes from: "client-id file (from the machine id)" or "client-id file (random)"; before the
-first join has made that file, the source it will be made from; null when the file can't be
-read, or can't be made (a Mac or Windows box whose id couldn't be read); "ok" is true when no
-check failed; "failed" and "warnings" count the checks of those levels; each of "checks" is
-{"level", "subject", "text", "fix", "note"}, in the order the lines would print: "level" is
-"ok", "warn" or "FAIL", "subject" what was checked (python, config, a server's alias, a job's
-name, …), "fix" the fix line's text (as this box runs vcharon) and "note" an ok line's note,
-each null when there is none."""
+--json prints one object instead: {"version", "protocol", "format", "python", "executable", "os",
+"command", "install", "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers",
+"ok", "failed", "warnings", "checks"}. "dirs" is {"state", "logs", "joined", "channels"}: the
+folders vcharon writes here (joined: a remote member's copies of its channels; channels: the
+channel root of local members). "format" is the newest channel format this vcharon reads;
+"servers" one object for each server whose session opened and echoed: {"server", "python", "os",
+"distro", "distro_id", "distro_version", "tested"}, the distro fields from its /etc/os-release
+(PRETTY_NAME, ID, VERSION_ID; null each when missing) and "tested" true for Debian 13 or later.
+"command" is how this box runs vcharon (the fix lines' spelling); "install" {"kind", "path"}: how
+it was installed ("binary", "pipx", "uv", "pip" or "source") and the file vcharon --update
+replaces (a binary) or the checkout (source), else null; "helper_bundle" {"modules",
+"has_helper", "bytes"}: the bundle sent to a server, built here as a session builds it: its
+module count, whether vcharon.helper is in it, and its size ({"modules": 0, "has_helper": false,
+"bytes": null} when it couldn't be built); "box" this machine's part of member names and
+"box_source" "config" ([vcharon] box) or "os" (the default), both null when the config can't be
+read; "claimer_source" what the id this machine claims member folders with comes from: "client-id
+file (from the machine id)" or "client-id file (random)"; before the first join has made that
+file, the source it will be made from; null when the file can't be read, or can't be made (a Mac
+or Windows box whose id couldn't be read); "ok" is true when no check failed; "failed" and
+"warnings" count the checks of those levels; each of "checks" is {"level", "subject", "text",
+"fix", "note"}, in the order the lines would print: "level" is "ok", "warn" or "FAIL", "subject"
+what was checked (python, config, a server's alias, a job's name, …), "fix" the fix line's text
+(as this box runs vcharon) and "note" an ok line's note, each null when there is none."""
 
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ import time
 from . import (
     PROTOCOL,
     VERSION,
+    bundle,
     channels,
     charter,
     config,
@@ -53,8 +56,8 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("vcharon", "install", "python", "config", "box", "ssh", "agent", "dirs",
-                   "machine")
+CLIENT_SUBJECTS = ("vcharon", "install", "bundle", "python", "config", "box", "ssh", "agent",
+                   "dirs", "machine")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
@@ -62,6 +65,8 @@ CLOCK_WARN = 30
 CLOCK_HINT = "sync both clocks (NTP); channel entries are ordered by each box's own clock"
 # a Linux box without /etc/machine-id
 LINUX_ID_HINT = "as root, run systemd-machine-id-setup: it writes /etc/machine-id"
+# a bundle without the helper: the package's .py files are missing from this install
+BUNDLE_HINT = "this install is broken: install vcharon again"
 ZONE_HINT = "give both the same time zone; entry headings carry local time with no zone"
 
 
@@ -160,6 +165,27 @@ def _install(rep):
         text = "with %s: vcharon --update prints the command that updates it" % inst.kind
     rep.check("ok", "install", text)
     return {"kind": inst.kind, "path": inst.path}
+
+
+def _bundle(rep):
+    """The bundle a session sends to the server, built as a session builds it: its module count
+    and that vcharon.helper is in it. In a binary that proves the spec collected the package's
+    .py files, which nothing else run here reads. Returns --json's "helper_bundle"."""
+    try:
+        found = bundle.summary()
+    except Exception as e:  # noqa: BLE001
+        # a file that won't read or decode, or a bundle that won't read back: a check line,
+        # never a crash of the doctor
+        rep.check("FAIL", "bundle", "couldn't build the helper's bundle: %s: %s"
+                  % (type(e).__name__, e), BUNDLE_HINT)
+        return {"modules": 0, "has_helper": False, "bytes": None}
+    if not found["has_helper"]:
+        rep.check("FAIL", "bundle", "the helper's bundle has %s and no vcharon.helper: no server "
+                  "can run it" % _counted(found["modules"], "module"), BUNDLE_HINT)
+    else:
+        rep.check("ok", "bundle", "the helper's bundle: %s, %.0f kB, vcharon.helper in it"
+                  % (_counted(found["modules"], "module"), found["bytes"] / 1000))
+    return found
 
 
 def _python(rep):
@@ -532,6 +558,7 @@ def main(args, run):
     say("vcharon: doctor%s" % (" --server " + target if target is not None else ""))
     _vcharon(rep)
     installed = _install(rep)
+    helper_bundle = _bundle(rep)
     _python(rep)
     _config(rep, cfg, cfg_err, not dests)
     _box(rep, cfg)
@@ -556,7 +583,7 @@ def main(args, run):
         print(json.dumps({"version": VERSION, "protocol": PROTOCOL, "format": charter.FORMAT,
                           "python": platform.python_version(), "executable": sys.executable,
                           "os": platform.os_name(), "command": platform.self_command(),
-                          "install": installed,
+                          "install": installed, "helper_bundle": helper_bundle,
                           "box": cfg.box_name if cfg is not None else None,
                           "box_source": cfg.box_source if cfg is not None else None,
                           "claimer_source": claimer_source, "dirs": folders(),

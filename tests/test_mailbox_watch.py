@@ -23,7 +23,7 @@ from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.util import write_tree
+from tests.util import PACKAGE_DIR, write_tree
 
 # what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
 SYNC = ["mb", "--project", "p"]
@@ -62,6 +62,14 @@ class Rounds:
         if self.clock is not None:
             self.clock.t += seconds
         self.steps.pop(0)()
+
+
+def no_site_env():
+    """The environment of a child run with -S (no site, so no .pth file read, as in a binary
+    and on 3.11; 3.13's site.py decodes .pth files with utf-8-sig, which would hide a lazy
+    import of that codec from the import checks): the package found through PYTHONPATH, in
+    place of the editable install's .pth."""
+    return dict(os.environ, PYTHONPATH=os.path.dirname(PACKAGE_DIR))
 
 
 def never(seconds):
@@ -1751,9 +1759,10 @@ class StreamTest(WatchCase):
                 "with open(%r, 'w') as f:\n"
                 "    json.dump(sorted(set(sys.modules) - start[0]), f)\n"
                 "sys.exit(code)\n" % (FAKE_CHILD, json.dumps(acts), imported))
-        child = subprocess.Popen([sys.executable, "-c", code, "watch", "mb", "--project", "p",
-                                  "--fresh"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
+        child = subprocess.Popen([sys.executable, "-S", "-c", code, "watch", "mb", "--project",
+                                  "p", "--fresh"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env=no_site_env())
         try:
             out, err = child.communicate(timeout=60)
         finally:
@@ -2514,8 +2523,10 @@ class CommandTest(WatchCase):
         calls = []
 
         def interrupted(*args, **kw):
-            # each gets the watchdog's check for its rounds (UpdatedTest)
+            # each gets the watchdog's check for its rounds (UpdatedTest), and the orphan
+            # check, false outside a binary
             self.assertIsInstance(kw.pop("updated").__self__, install.Watchdog)
+            self.assertFalse(kw.pop("orphaned")())
             calls.append((args, kw))
             raise KeyboardInterrupt
 
@@ -2659,6 +2670,42 @@ class UpdatedTest(WatchCase):
         self.assertEqual(code, watch.EXIT_UPDATED)
         self.assertEqual(self.said(), [watching(self.tree, 0), "new windows/x", "EXIT updated"])
 
+    def test_an_orphan_exits_after_the_update_check(self):
+        # a binary's bootloader killed: the round top ends the watch, and the lock is freed
+        def sleep(seconds):
+            write_tree(self.tree, {"windows/x": b"x"})
+
+        checks = iter([False, True])
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
+                               updated=lambda: False, orphaned=lambda: next(checks))
+        self.assertEqual(code, watch.EXIT_ORPHANED)
+        self.assertEqual(self.said(), [watching(self.tree, 0), "new windows/x",
+                                       "EXIT orphaned"])
+        # free: another watcher starts
+        self.lines.clear()
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
+                               rounds=1)
+        self.assertEqual(code, 0)
+
+    def test_an_orphan_through_the_command_line(self):
+        # a frozen binary whose parent pid changed after the start; the log says why
+        ppids = [4242]
+        rounds = []
+
+        def sleep(seconds):
+            rounds.append(seconds)
+            if len(rounds) == 2:
+                ppids[0] = 1
+
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(install.os, "getppid", lambda: ppids[0]):
+            code, out, err = self.watch_with(sleep=sleep)
+        self.assertEqual((code, err), (15, ""))
+        self.assertEqual(self.said(out.splitlines()), [watching(self.tree, 0), "EXIT orphaned"])
+        with open(os.path.join(platform.log_dir(), "vcharon.log"), encoding="utf-8") as f:
+            self.assertIn("watch: the process that started this one (pid 4242) is gone; "
+                          "exiting with 15", f.read())
+
     def test_through_the_command_line(self):
         rounds = []
 
@@ -2691,9 +2738,9 @@ class UpdatedTest(WatchCase):
                 "with open(%r, 'w') as f:\n"
                 "    json.dump(sorted(set(sys.modules) - start[0]), f)\n"
                 "sys.exit(code)\n" % (self.code, imported))
-        child = subprocess.Popen([sys.executable, "-c", code, "watch", "mb", "--project", "q",
-                                  "--every", "1"], stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
+        child = subprocess.Popen([sys.executable, "-S", "-c", code, "watch", "mb", "--project",
+                                  "q", "--every", "1"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, env=no_site_env())
         try:
             lines = [util.readline(child.stdout).decode("utf-8")]
             self.post("mac", 1, "first", to="@debian")
