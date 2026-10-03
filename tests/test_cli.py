@@ -148,7 +148,7 @@ class CliTest(FakeSshCase):
         self.assertEqual(lines[0], "ERROR connect: ssh couldn't log in to fake-dest "
                          "(Permission denied)")
         self.assertIn("  | Permission denied (publickey).", lines)
-        # the command as this box runs vcharon (M14a)
+        # the command as this box runs vcharon
         self.assertIn(platform.runnable("  fix: add your key to the server, or run: vcharon key "
                                         "fake-dest"), lines)
         self.assertIn("  log: %s" % os.path.join(self.vcharon_home, "logs", "vcharon.log"), lines)
@@ -253,7 +253,7 @@ class CliTest(FakeSshCase):
 
 
 class Utf8ConsoleTest(unittest.TestCase):
-    """The Windows console switch (decision 24 of the M5 plan)."""
+    """The Windows console switch."""
 
     def test_windows(self):
         out, err = mock.Mock(), mock.Mock()
@@ -307,8 +307,8 @@ def with_helper(code):
 
 
 class JobTest(FakeSshCase):
-    """The sync's runner (cli.run_jobs), jobs and state through fake ssh (decisions 16-20 of
-    the M4 plan); the remote end is under the fake server's home."""
+    """The sync's runner (cli.run_jobs), jobs and state through fake ssh; the remote end is
+    under the fake server's home."""
 
     def setUp(self):
         FakeSshCase.setUp(self)
@@ -366,7 +366,7 @@ class JobTest(FakeSshCase):
         os.makedirs(dst, exist_ok=True)
         self.write_config(PULL.format(dst=dst))
 
-    # decision 19's lines; item 1
+    # a run's lines
 
     def test_push(self):
         lines = self.ok("push")
@@ -714,7 +714,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(read_tree(self.inbox), {})
 
     def test_a_server_that_isnt_linux(self):
-        # M11a: a Mac or Windows box has a machine id now; the client refuses it by its OS
+        # a Mac or Windows box has a machine id now; the client refuses it by its OS
         for osn in ("darwin", "windows"):
             os.environ["VCHARON_TEST_OS"] = osn
             _out, err = self.failed(3, "push")
@@ -809,7 +809,7 @@ class JobTest(FakeSshCase):
                                    "object)", "removed %s" % state.path("push")])
 
     def test_source_that_saves_no_state(self):
-        # a saved null: the next run gets {} (decision 1 of the M4 plan)
+        # a saved null: the next run gets {}
         self.ok("push")
         doc = self.saved()
         doc["source"] = None
@@ -901,7 +901,7 @@ SUMMARY_FAILED = r"\AFAILED  %s  \(\d+\.\d s\)\Z"
 
 
 class MultiJobTest(FakeSshCase):
-    """The sync's runner with several jobs (M7a): one connection per run of jobs with one
+    """The sync's runner with several jobs: one connection per run of jobs with one
     session key, per-job blocks, logs and states, the summary line and the exit code."""
 
     def setUp(self):
@@ -1035,7 +1035,7 @@ class MultiJobTest(FakeSshCase):
         code, out, err = self.run_jobs("a", "b")
         self.assertEqual(code, 3)
         self.assertEqual(out, "")
-        # the option's text doesn't name the job; with several jobs the line does (M9c)
+        # the option's text doesn't name the job; with several jobs the line does
         self.assertTrue(err.startswith("ERROR b: bad_options: "), err)
         self.assertIn("bogus", err.splitlines()[0])
         self.assertEqual(self.dests(), [])
@@ -1098,7 +1098,7 @@ class MultiJobTest(FakeSshCase):
                          [["ERROR b", "state_mismatch"], ["ERROR c", "connect"]])
 
     def test_the_error_line_names_the_failing_job(self):
-        # M9c: with several jobs the console's ERROR line says which failed; one job's line,
+        # with several jobs the console's ERROR line says which failed; one job's line,
         # and the job's log in both runs, are as before
         os.makedirs(os.path.dirname(state.path("b")), exist_ok=True)
         with open(state.path("b"), "w", encoding="utf-8") as f:
@@ -1296,7 +1296,7 @@ class MultiJobTest(FakeSshCase):
         self.assertIn("starting ssh", self.job_log("a"))
 
     def test_one_job_as_before(self):
-        # decision 1 of M7a: one job prints no summary line, and no skip or share line
+        # one job prints no summary line, and no skip or share line
         # anywhere; its error goes to stderr alone
         lines = self.run_jobs("a")[1].splitlines()
         self.assertEqual(lines[:2], ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local,
@@ -1336,7 +1336,7 @@ class Between:
 
 
 class RepeatTest(FakeSshCase):
-    """The sync's --repeat (DESIGN §14 M15): rounds of the jobs on one session, per-round locks,
+    """The sync's --repeat: rounds of the jobs on one session, per-round locks,
     the round's lines on stdout, its exit, and a quiet disk while there's nothing to do. On
     MultiJobTest's jobs and helpers, without its tests."""
 
@@ -1560,8 +1560,8 @@ class RepeatTest(FakeSshCase):
                                 stderr=subprocess.PIPE)
 
     def test_a_broken_connection_with_stdin_open_in_a_child(self):
-        # the M15a review: the stdin thread, blocked in sys.stdin.buffer, aborted the exit at
-        # interpreter shutdown ("Fatal Python error"), and the watcher took that for an error
+        # a stdin thread blocked in sys.stdin.buffer would abort the exit at interpreter
+        # shutdown ("Fatal Python error"), and the watcher would take that for an error
         os.environ["FAKE_SSH_EXIT"] = "255"
         argv = self.channel() + ["--repeat", "1"]
         for _ in range(3):
@@ -1603,7 +1603,7 @@ class RepeatTest(FakeSshCase):
         self.assert_locks_free("mb.windows.up", "mb.windows.down")
 
 
-# A channel section (M10), in channels.d/: the M7b-M9c fixed [mailbox], with a leader, a
+# A channel section, in channels.d/: a mailbox section with a leader, a
 # <channel>.<me> name, a pre-made server folder and MEMBER.md, as vcharon channel join leaves them.
 MAILBOX = """
 [mb.windows]
@@ -1626,7 +1626,7 @@ REAL_CHECK_PLAN = pathrules.check_plan
 
 
 def write_channel_section(case, text, section="mb.windows"):
-    """text, dedented, as $VCHARON_HOME/channels.d/<section>.ini (M10)."""
+    """text, dedented, as $VCHARON_HOME/channels.d/<section>.ini."""
     folder = os.path.join(case.vcharon_home, "channels.d")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, section + ".ini"), "w", encoding="utf-8") as f:
@@ -1634,7 +1634,7 @@ def write_channel_section(case, text, section="mb.windows"):
 
 
 class MailboxTest(FakeSshCase):
-    """A channel section end to end (the M7b plan, ported to M10): the fake server's home
+    """A channel section end to end: the fake server's home
     holds the channel vcharon_mailbox/, led by "debian", and this client is the member
     "windows", joined: its server folder is made, its local own folder holds MEMBER.md."""
 
@@ -1650,7 +1650,7 @@ class MailboxTest(FakeSshCase):
         # the leader made the channel first; the claim made this member's folder
         write_tree(self.server, {"debian/STEPS.md": b"steps", "windows/": None})
         write_tree(self.own, {"MEMBER.md": MEMBER})
-        # vcharon sync finds the membership by its record (DESIGN §7.2)
+        # vcharon sync finds the membership by its record (DESIGN, "Which membership")
         self.write_record("mb", "windows", "debian")
 
     def ok(self, *argv):
@@ -1670,8 +1670,7 @@ class MailboxTest(FakeSshCase):
 
     def test_round_trip(self):
         lines = self.ok(*SYNC)
-        # up sends MEMBER.md, which join wrote (M10: before, the run made the client's folders
-        # and up had nothing to send)
+        # up sends MEMBER.md, which join wrote
         self.assertEqual(lines[:2], ["vcharon: mb.windows.up  %s -> "
                                      "fake-dest:vcharon_mailbox/windows" % self.own,
                                      "  put     1 file, 0 dirs (%d B)" % len(MEMBER)])
@@ -1706,8 +1705,8 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(read_tree(os.path.join(self.server, "windows")),
                          {"MEMBER.md": MEMBER, "extra.md": b"extra"})
         self.assertNotIn("debian/STEPS.md", read_tree(self.local))
-        # M10: MEMBER.md gone while up has sent it is an emptied or replaced folder: neither
-        # job runs, and the server's copy stays (the M10 review's probe)
+        # MEMBER.md gone while up has sent it is an emptied or replaced folder: neither job
+        # runs, and the server's copy stays
         os.remove(os.path.join(self.own, "MEMBER.md"))
         code, _out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1)
@@ -1738,7 +1737,7 @@ class MailboxTest(FakeSshCase):
                          {"MEMBER.md": MEMBER, "extra.md": b"extra"})
 
     def test_the_server_removes_this_writers_folder(self):
-        # the server's windows/ goes: down never planned it (M9), so it has nothing to delete,
+        # the server's windows/ goes: down never planned it, so it has nothing to delete,
         # and the client's own files stay
         write_tree(self.own, {"RESULTS.md": b"results"})
         self.ok(*SYNC)
@@ -1747,22 +1746,22 @@ class MailboxTest(FakeSshCase):
         lines = self.jobs_ok("mb.windows.down")
         self.assertEqual(lines[1], "  nothing to do")
         self.assertEqual(read_tree(self.own), {"MEMBER.md": MEMBER, "RESULTS.md": b"results"})
-        # M10: up never makes it again (create = no); its fix line says to leave
+        # up never makes it again (create = no); its fix line says to leave
         code, _out, err = self.run_jobs("mb.windows.up")
         self.assertEqual(code, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR not_found: the root %s doesn't exist" % os.path.join(self.server, "windows"),
             "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p"))])
-        # the job's log keeps the plain text: read later, maybe on another box (M14a)
+        # the job's log keeps the plain text: read later, maybe on another box
         with open(os.path.join(self.vcharon_home, "logs", "mb.windows.up.log"),
                   encoding="utf-8") as f:
             self.assertIn("fix: " + cli.CHANNEL_GONE_HINT % ("mb", "--project p"), f.read())
         self.assertFalse(os.path.exists(os.path.join(self.server, "windows")))
 
-    # --- M9: case twins can't stall the mailbox ---
+    # --- case twins can't stall the mailbox ---
 
     def folding(self, osn="darwin"):
-        """The client's sink checks plans as a client on osn does (the M9 plan's repro)."""
+        """The client's sink checks plans as a client on osn does."""
         # the module's own, not one an earlier subtest patched in
         real = REAL_CHECK_PLAN
         patcher = mock.patch.object(pathrules, "check_plan",
@@ -1837,8 +1836,8 @@ class MailboxTest(FakeSshCase):
                       if not p.endswith("/") and p != "windows/MEMBER.md")
 
     def test_strays_at_the_top_dont_block(self):
-        # the M9 plan's rows 1, 2 and 4, on a macOS client and (row 2) a Windows one: each
-        # was "ERROR collision" or a pulled stray before M9
+        # each case below, on the client OS it names: none may be an "ERROR collision" or a
+        # pulled stray
         rows = (({"windows/RESULTS.md": b"r", "Windows/CASE.md": b"c"}, "darwin",
                  "Windows/"),
                 ({"Debian/CASE.md": b"c"}, "darwin", "Debian/"),
@@ -1867,8 +1866,8 @@ class MailboxTest(FakeSshCase):
 
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
     def test_twins_inside_a_writers_folder_still_refuse(self):
-        # row 3: a twin below the top would make one file of two on the client; the run is
-        # refused there, as before M9 (data safety), and the server's watcher warns
+        # a twin below the top would make one file of two on the client; the run is
+        # refused there (data safety), and the server's watcher warns
         self.folding()
         write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
         code, _out, err = self.run_cli(*SYNC)
@@ -1877,23 +1876,24 @@ class MailboxTest(FakeSshCase):
                       "the same path on macOS", err)
         self.assertEqual(self.files_here(), [])
 
-    # --- after the M9 real run: fix lines a mailbox writer can follow ---
+    # --- fix lines a mailbox writer can follow ---
 
-    DOWN_FIX = ("  fix: the writer of each folder named above %s (MAILBOX.md in the vcharon "
-                "folder, §5); your up still runs")
-    # with the writer's folder (M9c): MailboxTest's writer is windows
+    DOWN_FIX = ("  fix: the writer of each folder named above %s; your up still runs; more: "
+                "vcharon guide errors")
+    # with the writer's folder: MailboxTest's writer is windows
     UP_FIX = "  fix: %s in your own folder (windows/)"
 
     def refused(self, job, error, fix):
         """A sync: a job fails with error and fix, on the console and in its log;
         the other job still runs. The console's ERROR line names the job, as the watcher
-        shows it (M9c); the job's own log has the line as before."""
+        shows it; the job's own log has the line as before."""
         code, out, err = self.run_cli(*SYNC)
         self.assertEqual(code, 1, err)
         lines = err.splitlines()
         shown = "ERROR mb.windows.%s: %s" % (job, error[len("ERROR "):])
         self.assertIn(shown, lines)
-        self.assertEqual(lines[lines.index(shown) + 1], fix)
+        # the console spells a command as this install runs vcharon; the log keeps it plain
+        self.assertEqual(lines[lines.index(shown) + 1], platform.runnable(fix))
         # the watcher's line: vcharon's first stderr line
         self.assertEqual(lines[0], shown)
         self.assertEqual(sum(1 for line in lines if "fix:" in line), 1, err)
@@ -2056,8 +2056,8 @@ class MailboxTest(FakeSshCase):
             "debian"] * 6 + ["mac"] * 2)
 
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
-    def test_a_down_state_from_before_m9(self):
-        # A pre-M9 down planned the own folder and every top-level name: its sent may hold
+    def test_a_down_state_from_an_older_version(self):
+        # An older down planned the own folder and every top-level name: its sent may hold
         # windows, Windows/ and top-level files. It runs without a reset (exclude
         # semantics, DESIGN §9.2): those paths leave sent, and nothing is deleted here.
         write_tree(self.own, {"RESULTS.md": b"results"})
@@ -2091,7 +2091,7 @@ class MailboxTest(FakeSshCase):
         self.assertIn("notes.md", read_tree(self.local))
 
     def test_a_writer_folder_that_was_sent_as_a_file(self):
-        # sent as a top-level file before M9, now another writer's folder: a kind change,
+        # sent as a top-level file by an older version, now another writer's folder: a kind change,
         # a delete and a put, as for any path
         self.ok(*SYNC)
         write_tree(self.local, {"mac": b"old"})
@@ -2106,8 +2106,7 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(read_tree(os.path.join(self.local, "mac")), {"hello.md": b"hi"})
 
     def test_a_closed_channel(self):
-        # Rewritten for M10: before, up's create made the server's tree once the own folder
-        # had a file. Now the channel's folder gone (closed) fails both jobs with not_found,
+        # The channel's folder gone (closed) fails both jobs with not_found,
         # whose fix line says to leave, never "create it"; nothing is made at the server, even
         # with something to send.
         shutil.rmtree(self.server)
@@ -2228,8 +2227,8 @@ class MailboxTest(FakeSshCase):
         self.assertTrue(lines[0].endswith("%s doesn't exist yet; vcharon sync mb --project p "
                                           "makes it" % self.own), lines[0])
         self.assertTrue(lines[1].endswith("%s: a directory" % self.server), lines[1])
-        # M10: the server's tree missing is a closed channel, a FAIL that says to leave (before,
-        # "ok, a sync makes it once your own folder has a file"); so is up's folder there
+        # the server's tree missing is a closed channel, a FAIL that says to leave; so is up's
+        # folder there
         shutil.rmtree(self.server)
         code, out, err = self.run_cli("doctor")
         self.assertEqual(code, 1, out)
@@ -2258,7 +2257,7 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(doctor._made_by_the_run(job, *failing), failing)
 
     def test_changing_the_tree_is_a_state_mismatch_for_both(self):
-        # M10: a section is named <channel>.<me>, so its writer can't change under one name;
+        # a section is named <channel>.<me>, so its writer can't change under one name;
         # the fingerprint (with the writer's name) still binds both jobs to the section's keys
         self.ok(*SYNC)
         write_tree(self.home, {"elsewhere/windows/": None})
@@ -2273,7 +2272,7 @@ class MailboxTest(FakeSshCase):
                           for name in ("up", "down")])
 
     def test_same_second_edit(self):
-        # the M7b plan's measurement: a file rewritten with the same size right after the
+        # a file rewritten with the same size right after the
         # run that sent it. sent keeps st_mtime, a float, so the edit shows wherever the file
         # system's mtimes are finer than the time between the two writes.
         path = os.path.join(self.own, "LOG.md")

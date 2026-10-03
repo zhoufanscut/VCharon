@@ -34,7 +34,7 @@ def terminal():
 def agent_state(settings):
     """(state, n): ("keys", n) when the agent answers with n keys, ("empty", 0) when it holds
     none, ("none", 0) when no agent answers (ssh-add -l exits 2, or another code, or times
-    out), and ("error", <why>) when ssh-add can't be started (review W3)."""
+    out), and ("error", <why>) when ssh-add can't be started."""
     argv = ssh.ssh_add_prefix(settings) + ["-l"]
     try:
         ran = fsops.run(argv, timeout=10)
@@ -71,7 +71,7 @@ def agent_text(state, n):
 
 
 def no_key_hint(dest, state):
-    """The hint for "accepts none of your keys" (decision 17-a of the M5 plan): a forwarded
+    """The hint for "accepts none of your keys": a forwarded
     agent that ended with its login looks just like a missing key."""
     sock = os.environ.get("SSH_AUTH_SOCK")
     if platform.os_name() != "windows" and sock and state == "none":
@@ -135,7 +135,7 @@ def needs_terminal():
 
 
 def _tool(settings, key_file, agent, say, log):
-    """Runs the OS's own tool on the terminal to unlock key_file (decision 12 of the M5 plan).
+    """Runs the OS's own tool on the terminal to unlock key_file.
     agent: agent_state()'s answer."""
     state = agent[0]
     if state == "error":
@@ -182,11 +182,11 @@ def _agent_only(key, say):
     if platform.os_name() == "linux":
         say("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
             "login that brought it is open; for cron, use a key without a passphrase on this "
-            "machine (see vcharon/README.md)")
+            "machine (README.md, \"Keys\")")
 
 
 def unlock(settings, dest, key_file, log, say):
-    """vcharon key (decisions 10-14 of the M5 plan): finds the key, unlocks it with the OS's
+    """vcharon key: finds the key, unlocks it with the OS's
     own tool when it's locked, and tests a BatchMode login to dest. Returns 0 or raises.
     dest may be None when key_file is given; key_file is absolute, or None to find the key
     with a -v probe."""

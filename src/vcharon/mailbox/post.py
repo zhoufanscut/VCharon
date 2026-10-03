@@ -1,5 +1,5 @@
-"""vcharon post C: post an entry to your own folder in a channel, atomically (DESIGN §14 M10,
-the guide's post topic).
+"""vcharon post C: post an entry to your own folder in a channel, atomically (the guide's
+post topic).
 
     vcharon post game --to @mac-ui --title "step 3 done" < body.md
     vcharon post game --to @all --re mac-ui#3 --title "steps" --steps --body "one line"
@@ -9,7 +9,7 @@ A member posts into RESULTS.md in its own folder: results, questions, DONE, and 
 answers too. The leader's plan goes into STEPS.md (--steps, the leader only); any other .md
 file of the own folder, a subfolder's too, with --file (NOTES.md, logs/run.md). vcharon writes
 MEMBER.md and CHANNEL.md itself. The command line finds the own folder from your membership
-(DESIGN §7.2); post() below takes the file's path, and checks it. It appends
+(DESIGN, "Which membership"); post() below takes the file's path, and checks it. It appends
 
     ## <local time YYYY-mm-dd HH:MM> — <name>#<n> — <title>
     to: @<name> ...

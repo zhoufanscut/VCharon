@@ -1,4 +1,4 @@
-"""vcharon key (decisions 8-15 of the M5 plan), through fake ssh and fake ssh-add."""
+"""vcharon key, through fake ssh and fake ssh-add."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ ADMIN = ("once, in an admin PowerShell: Get-Service ssh-agent | Set-Service -Sta
 EVAL = 'start one in this shell: eval "$(ssh-agent -s)", then run vcharon key again'
 LINUX_NOTE = ("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
               "login that brought it is open; for cron, use a key without a passphrase on this "
-              "machine (see vcharon/README.md)")
+              "machine (README.md, \"Keys\")")
 
 
 def accepts(ident, *flags):
@@ -220,7 +220,7 @@ class KeyTest(KeyCase):
                 self.assertEqual(self.adds(), [[key]])
 
     def test_not_runnable_isnt_a_locked_key(self):
-        # review B1: bash's own "Permission denied" for a remote_python it can't run
+        # bash's own "Permission denied" for a remote_python it can't run
         os.environ["SSH_AUTH_SOCK"] = "/x"
         self.agent(0, "3072 SHA256:x me (RSA)\n")
         os.environ.update(FAKE_SSH_STDERR=accepts(self.key) + "\nbash: line 1: /usr/bin/python3: "
@@ -230,7 +230,6 @@ class KeyTest(KeyCase):
         self.assertEqual(self.adds(), [])
 
     def test_ssh_add_cant_start(self):
-        # review W3
         missing = os.path.join(self.tmp, "no-such-ssh-add")
         os.environ["SSH_AUTH_SOCK"] = "/x"
         self.locked()
@@ -243,7 +242,7 @@ class KeyTest(KeyCase):
         self.assertFalse(any(line.startswith("  run") for line in out))
 
     def test_run_terminal_cant_start(self):
-        # review W3: an OSError from run_terminal isn't "a bug in vcharon"
+        # an OSError from run_terminal isn't "a bug in vcharon"
         os.environ["SSH_AUTH_SOCK"] = "/x"
         self.agent(1)
         self.locked()
@@ -399,7 +398,7 @@ sys.exit(cli.main(sys.argv[1:]))
 
 
 class UndecodableKeyNameTest(KeyCase):
-    """Review N1: a key file whose name isn't valid UTF-8 (the byte 0xff) is shown as \\xff,
+    """A key file whose name isn't valid UTF-8 (the byte 0xff) is shown as \\xff,
     and still reaches ssh-add unchanged."""
 
     def setUp(self):

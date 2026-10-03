@@ -398,7 +398,7 @@ class HandleCases:
             if isinstance(d, fsops.FdDir):
                 self.assertIsNone(d.fd)
 
-    # the source side (M3)
+    # the source side
 
     def test_same_device_false(self):
         write_tree(self.root, {"d/": None})
@@ -415,7 +415,7 @@ class HandleCases:
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
     def test_search_only_root(self):
-        # a drop box: x without r (W2 of the M3 review)
+        # a drop box: x without r
         if os.geteuid() == 0:
             self.skipTest("root can read every directory")
         if self.cls is fsops.FdDir and not fsops._SEARCH:
@@ -582,7 +582,7 @@ def _gone(pid, seconds=5):
 
 
 class RunTest(unittest.TestCase):
-    """fsops.run and run_terminal (decisions 1 and 2 of the M5 plan)."""
+    """fsops.run and run_terminal."""
 
     def py(self, code):
         return [sys.executable, "-c", code]
@@ -593,7 +593,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual(ran, fsops.Ran(3, b"out\xff", b"err\n"))
 
     def test_env(self):
-        # decision 8 of the M6 plan: None inherits; a dict is the whole environment
+        # None inherits; a dict is the whole environment
         code = "import os; print(os.environ.get('VCHARON_TEST_RUN_ENV'))"
         with mock.patch.dict(os.environ, {"VCHARON_TEST_RUN_ENV": "inherited"}):
             self.assertEqual(fsops.run(self.py(code), timeout=30).out.strip(), b"inherited")
@@ -682,7 +682,7 @@ class RunTest(unittest.TestCase):
 
     @unittest.skipUnless(POSIX, "sh")
     def test_exited_before_the_timeout(self):
-        # review W6: the program exited; only a child it left behind held the pipes
+        # the program exited; only a child it left behind held the pipes
         ran = fsops.run(["/bin/sh", "-c", "sleep 8 & echo done"], timeout=1, new_session=True)
         self.assertEqual((ran.rc, ran.out.strip()), (0, b"done"))
 
@@ -697,7 +697,7 @@ class RunTest(unittest.TestCase):
         return proc
 
     def test_stuck_pipes(self):
-        # review W1: on Windows a reader thread of communicate still holds the pipes, and
+        # on Windows a reader thread of communicate still holds the pipes, and
         # close() would block; POSIX closes them
         for windows in (True, False):
             with self.subTest(windows=windows):

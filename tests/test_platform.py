@@ -151,7 +151,7 @@ class FilesTest(unittest.TestCase):
             self.assertEqual(platform.machine_id((good,)), "f" * 32)
 
     def test_machine_id_from_the_os(self):
-        # M11a: macOS's IOPlatformUUID and Windows' MachineGuid, hashed, where the files are
+        # macOS's IOPlatformUUID and Windows' MachineGuid, hashed, where the files are
         # missing
         uuid = "4C4C4544-0042-3510-8051-B4C04F4D4D32"
         hashed = hashlib.sha256(b"vcharon:4c4c4544-0042-3510-8051-b4c04f4d4d32").hexdigest()[:32]
@@ -343,7 +343,7 @@ HOST = "windows" if os.name == "nt" else "linux"
 
 
 class VCharonCommandTest(unittest.TestCase):
-    """How a fix line runs vcharon on this box (M14a): the pure core for every OS, on any OS."""
+    """How a fix line runs vcharon on this box: the pure core for every OS, on any OS."""
 
     def test_posix_quotes_a_space_and_shell_marks(self):
         self.assertEqual(platform.command_for("/opt/my py/bin/python3", "/home/me/my vcharon",

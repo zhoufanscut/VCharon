@@ -20,14 +20,14 @@ KEYS = ("schema", "job", "fingerprint", "identity", "sink", "source", "saved")
 _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 # for a server with no machine id, which no job's state can be tied to (DESIGN §7.3)
 NO_MACHINE_HINT = "give the server one (systemd-machine-id-setup, as root)"
-# for a remote end that isn't Linux (M11a), with its alias
+# for a remote end that isn't Linux, with its alias
 LINUX_HINT = "point %s at a Linux server"
 
 
 def not_linux(hello, where):
-    """The refusal of a remote end whose helper doesn't run on Linux (DESIGN §14 M11a), or None
-    for a Linux one. Until M11a only "no machine id" kept a Mac or Windows box from being one;
-    now both have an id, so every place that checks the remote machine id checks this first."""
+    """The refusal of a remote end whose helper doesn't run on Linux, or None
+    for a Linux one. A Mac or Windows box has a machine id too, so every place that checks the
+    remote machine id checks this first."""
     osn = hello.get("os")
     if osn == "linux":
         return None

@@ -792,7 +792,7 @@ class StagerCases:
         self.assertEqual(read_tree(self.root), {"link": b"same", "fifo": b"same"})
         self.assertEqual(read_tree(self.outside), {"z.txt": b"z", "b/": None,
                                                    "same.txt": b"same"})
-        # a directory is still M2's kind_change
+        # a directory is still a kind_change
         write_tree(self.root, {"dir/": None})
         e = self.refused_at_check([hashed("dir", b"same")], "kind_change")
         self.assertEqual(e.message, "dir is a directory at the target, but the plan puts a file "

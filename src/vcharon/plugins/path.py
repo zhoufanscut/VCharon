@@ -81,7 +81,7 @@ def _changed(where):
 
 
 def _walk_error(e, where, hint=LIST_HINT):
-    """Decision 10 of the M3 plan: listing or entering the directory at where failed. hint:
+    """Listing or entering the directory at where failed. hint:
     for a directory it can't list, ROOT_LIST_HINT at the root."""
     if isinstance(e, VCharonError):
         # the handle's own refusals: the directory is now a link, or no directory at all
@@ -129,8 +129,8 @@ def _malformed(what):
 
 
 def _sent_of(state):
-    """The sent map of a saved state, {"sent": {path: "d" or [size, mtime, exec]}}, checked
-    (decision 2 of the M4 plan); {} means nothing was sent yet."""
+    """The sent map of a saved state, {"sent": {path: "d" or [size, mtime, exec]}}, checked; {}
+    means nothing was sent yet."""
     if not isinstance(state, dict):
         raise _malformed("it isn't an object")
     for key in state:
@@ -254,7 +254,7 @@ class Source(plugin.Source):
     # --- plan ---
 
     def plan(self, state, full=False):
-        """state None (a one-off pull): everything, as in M3, and no state back. A dict: only what
+        """state None (a one-off pull): everything, and no state back. A dict: only what
         changed since that state, and the new one (DESIGN §9.2). full: everything, each file
         with its sha256 (DESIGN §10.5)."""
         if self._planned:
@@ -270,7 +270,7 @@ class Source(plugin.Source):
             # It would reach the identity and the plan's names.
             raise pathrules.refusal("unsafe_path", ["%s: the path isn't valid UTF-8"
                                                     % _escaped(abs_path)], NAME_HINT)
-        # The name comes from the path as given (decision 4 of the M3 plan): cp of a symlink
+        # The name comes from the path as given: cp of a symlink
         # named current.log sends current.log. Only the top is ever followed.
         name = os.path.basename(abs_path)
         real = os.path.realpath(abs_path)
@@ -310,7 +310,7 @@ class Source(plugin.Source):
         return Plan(entries, identity=identity, state=new_state, notes=notes)
 
     def _open_root(self, path, where):
-        # Neither the owner rule nor the device rule applies to a source (decision 5).
+        # Neither the owner rule nor the device rule applies to a source.
         try:
             self._root = self._handles().open_root(path, same_device=False)
         except (OSError, VCharonError) as e:
@@ -374,7 +374,7 @@ class Source(plugin.Source):
         return False
 
     def _scan(self, d, where, hint=LIST_HINT):
-        """d's entries, sorted by name (decision 6) and last first, for pop()."""
+        """d's entries, sorted by name and last first, for pop()."""
         try:
             items = d.scan()
         except (OSError, VCharonError) as e:
@@ -384,7 +384,7 @@ class Source(plugin.Source):
 
     def _hash(self, d, name, path):
         """(fstat, sha256) of the regular file name in d, read through the handle as open()
-        reads it (decision 6 of the M4 plan). The stat is of the same fd, taken before the
+        reads it. The stat is of the same fd, taken before the
         bytes are read: a change while they're read then shows on the next run.
         FileNotFoundError propagates; any other failure maps as open() maps it."""
         shown = pathrules.show(path)
@@ -502,7 +502,7 @@ class Source(plugin.Source):
         if links:
             raise pathrules.refusal("unsafe_path", links, LINKS_HINT)
         if self._strays:
-            # the log only: the console shows what a run did, as before (the M9 plan)
+            # the log only: the console shows what a run did, as before
             self.ctx.log("left out at the top, not another writer's folder: %s"
                          % ", ".join(self._strays[:pathrules.MAX_LISTED])
                          + (" (and %d more)" % (len(self._strays) - pathrules.MAX_LISTED)
@@ -620,7 +620,7 @@ class Source(plugin.Source):
         as a file then becomes a delete and a put, as any kind change). Met by the walk but
         left out: yes, whatever sent says, so a writer's folder the server turned into a
         symlink or a file deletes nothing here. Gone from the source: by its name, and by
-        its kind as sent (a top-level file sent before M9 is dropped, not deleted)."""
+        its kind as sent (a top-level file in an older state is dropped, not deleted)."""
         if name in walked:
             return False
         if name in self._top_names:
@@ -628,7 +628,7 @@ class Source(plugin.Source):
         return self._top_left_out(name, sent.get(name, "d") == "d")
 
     def _since(self, sent, walked, files, single, top, abs_path, full):
-        """Decisions 3 and 4 of the M4 plan: the entries of a run with a state, their
+        """The entries of a run with a state, their
         {index: parts} for open(), and the new state."""
         prune = self.options["prune"]
         found = {e.path: e for e in walked}

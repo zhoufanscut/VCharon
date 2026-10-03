@@ -40,8 +40,9 @@ def build(nonce, extra_modules=None):
     return struct.pack(">Q", len(blob)) + blob
 
 
-# subpackages that only the client runs (post, read, watch), left out of the bundle
-CLIENT_ONLY = ("mailbox",)
+# subpackages that only the client runs (post, read, watch; guide; skill install), left out of
+# the bundle
+CLIENT_ONLY = ("mailbox", "guide", "skill")
 
 
 def _sources(root=None):

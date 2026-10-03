@@ -3,8 +3,10 @@ line each (DESIGN §13); client. It only reads, apart from a temp file in the st
 dirs, and its log. It never prompts.
 
 --json prints one object instead: {"version", "protocol", "format", "python", "executable",
-"os", "command", "box", "box_source", "claimer_source", "servers", "ok", "failed", "warnings",
-"checks"}. "format" is the newest channel format this vcharon reads; "servers" one object
+"os", "command", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
+"warnings", "checks"}. "dirs" is {"state", "logs", "joined", "channels"}: the folders vcharon
+writes here (joined: a remote member's copies of its channels; channels: the channel root of
+local members). "format" is the newest channel format this vcharon reads; "servers" one object
 for each server whose session opened and echoed: {"server", "python", "os", "distro", "distro_id",
 "distro_version", "tested"}, the distro fields from its /etc/os-release (PRETTY_NAME, ID,
 VERSION_ID; null each when missing) and "tested" true for Debian 13 or later.
@@ -28,7 +30,19 @@ import sys
 import tempfile
 import time
 
-from . import PROTOCOL, VERSION, charter, config, fsops, keys, platform, plugin, ssh, state
+from . import (
+    PROTOCOL,
+    VERSION,
+    channels,
+    charter,
+    config,
+    fsops,
+    keys,
+    platform,
+    plugin,
+    ssh,
+    state,
+)
 from .log import Log
 from .proto import VCharonError
 
@@ -38,7 +52,7 @@ ECHO_BYTES = 4 << 20
 SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("vcharon", "python", "config", "box", "ssh", "agent", "dirs", "machine")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
-# A chosen line, not a derived one (M12b): headings carry the minute, so any gap can reorder
+# A chosen line, not a derived one: headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
 CLOCK_WARN = 30
 CLOCK_HINT = "sync both clocks (NTP); channel entries are ordered by each box's own clock"
@@ -52,7 +66,7 @@ def _counted(n, word):
 
 
 class Report:
-    """The check lines (decision 17 of the M5 plan), and how many failed or warned."""
+    """The check lines, and how many failed or warned."""
 
     def __init__(self, say, subjects):
         self.say = say
@@ -69,7 +83,7 @@ class Report:
             self.failed += 1
         elif level == "warn":
             self.warnings += 1
-        # as this box runs vcharon (M14a)
+        # as this box runs vcharon
         fix = platform.runnable(hint) if level != "ok" and hint else None
         note = note if level == "ok" and note else None
         self.checks.append({"level": level, "subject": subject, "text": text, "fix": fix,
@@ -97,7 +111,7 @@ class _Dest:
 
 
 def _scope(target, cfg):
-    """[_Dest] in the order they're checked (decision 16 of the M5 plan): the server target
+    """[_Dest] in the order they're checked: the server target
     (--server) alone, or every channel section's. A target must be a good destination: a bad
     one is a usage error, before any line."""
     if target is not None:
@@ -120,7 +134,7 @@ def _scope(target, cfg):
     return list(dests.values())
 
 
-# --- the client (decision 18) ---
+# --- the client ---
 
 def _vcharon(rep):
     """This vcharon's version, and how it's run here: the spelling of every fix line."""
@@ -187,7 +201,7 @@ def _agent(rep, agent, dests):
         rep.check("ok", "agent", text)
         return
     if state_ == "error":
-        # ssh-add itself is missing: no agent question can be answered (review W3)
+        # ssh-add itself is missing: no agent question can be answered
         rep.check("warn", "agent", text, ssh.START_HINT)
         return
     dest = dests[0].dest if len(dests) == 1 else "ALIAS"
@@ -206,10 +220,22 @@ def _agent(rep, agent, dests):
     rep.check("warn", "agent", text, hint)
 
 
+def folders():
+    """{"state", "logs", "joined", "channels"}: the folders vcharon writes on this machine. A
+    remote member's copies of its channels are under joined (its own folder and the other
+    members' alike); a local member's channels under channels, the channel root here."""
+    return {"state": platform.state_dir(), "logs": platform.log_dir(),
+            "joined": os.path.expanduser(platform.joined_dir()),
+            "channels": channels.root_path()}
+
+
 def _dirs(rep):
-    folders = (platform.state_dir(), platform.log_dir())
+    where = folders()
+    # only the state and log dirs are made and tried here: the others may not exist yet, and
+    # doctor makes nothing else
+    tried = (where["state"], where["logs"])
     good = True
-    for folder in folders:
+    for folder in tried:
         try:
             os.makedirs(folder, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=folder, prefix=".vcharon-doctor-", suffix=".tmp")
@@ -220,11 +246,12 @@ def _dirs(rep):
             rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e),
                       "fix its permissions, or set VCHARON_HOME")
     if good:
-        rep.check("ok", "dirs", "state %s, logs %s" % folders)
+        rep.check("ok", "dirs", "state %s, logs %s, joined %s, channels %s"
+                  % (where["state"], where["logs"], where["joined"], where["channels"]))
 
 
 def _machine(rep):
-    """This machine's id (M11d), so an agent checking it needs no python3 -c, and the
+    """This machine's id, so an agent checking it needs no python3 -c, and the
     client-id file the claimer id in MEMBER.md comes from. Only a warn without a machine id:
     a client of remote jobs needs none. Returns the claimer's source, as --json gives it, or
     None when the file can't be read."""
@@ -246,7 +273,7 @@ def _machine(rep):
     return "client-id file (%s)" % origin
 
 
-# --- a destination (decision 19) ---
+# --- a destination ---
 
 def utc_text(offset):
     """Seconds east of UTC as UTC+hh:mm."""
@@ -256,7 +283,7 @@ def utc_text(offset):
 
 
 def clock_checks(hello, received, local_offset):
-    """[(level, text, hint)]: the server's clock and time zone against this machine's (M12b),
+    """[(level, text, hint)]: the server's clock and time zone against this machine's,
     from the hello, this machine's time.time() when it was read, and this machine's
     utc_offset. A field the hello lacks gives no line."""
     checks = []
@@ -336,7 +363,7 @@ def _server(rep, d, session):
                   % session.junk_bytes, "make its startup files print nothing when the shell "
                   "isn't interactive; the log has the text")
     if hello.get("os") != "linux":
-        # M11a: a Mac or Windows box has a machine id now; it still isn't a server
+        # a Mac or Windows box has a machine id, but it still isn't a server
         rep.check("FAIL", dest, state.not_linux(hello, dest), state.LINUX_HINT % dest)
     elif not hello.get("machine"):
         rep.check("warn", dest, "no machine id: jobs can't keep state there",
@@ -364,7 +391,7 @@ def server_json(dest, hello):
             "tested": platform.distro_warning(hello) is None}
 
 
-# --- a job (decisions 20, 21) ---
+# --- a job ---
 
 def _sent_counts(source):
     if isinstance(source, dict) and set(source) == {"sent"} and isinstance(source["sent"], dict):
@@ -425,7 +452,7 @@ def _job(rep, job, session, hello, log):
                 checks = [("FAIL", e.message, e.hint)]
         for level, message, fix in checks:
             if job.mailbox is not None and side.end == "remote" and level == "FAIL":
-                # the closed channel's hint, as a sync shows it (M10)
+                # the closed channel's hint, as a sync shows it
                 from . import cli
                 fix = cli.channel_gone_hint(job, "not_found", fix) or fix
             elif job.mailbox is not None and role == "source":
@@ -436,7 +463,7 @@ def _job(rep, job, session, hello, log):
 def _made_by_the_run(job, level, message, fix):
     """A channel section's own folder on the client may not exist before its first run: the
     run makes it while up has sent nothing (DESIGN §12). The server's tree is never made by a
-    run since M10: its absence is a closed channel."""
+    run: its absence is a closed channel."""
     if not (level == "FAIL" and message.startswith("from.path ")
             and message.endswith(" doesn't exist")) or job.source.end == "remote":
         return level, message, fix
@@ -457,8 +484,7 @@ def _made_by_the_run(job, level, message, fix):
 # --- the command ---
 
 def main(args, run):
-    """vcharon doctor [--server ALIAS] [--json]: exit 0 when no check failed, else 1
-    (decisions 16-22 of the M5 plan)."""
+    """vcharon doctor [--server ALIAS] [--json]: exit 0 when no check failed, else 1."""
     started = time.monotonic()
     log = run.log = Log(os.path.join(platform.log_dir(), "vcharon.log"), console=args.verbose)
     target = args.server
@@ -511,7 +537,8 @@ def main(args, run):
                           "os": platform.os_name(), "command": platform.self_command(),
                           "box": cfg.box_name if cfg is not None else None,
                           "box_source": cfg.box_source if cfg is not None else None,
-                          "claimer_source": claimer_source, "servers": servers,
+                          "claimer_source": claimer_source, "dirs": folders(),
+                          "servers": servers,
                           "ok": not rep.failed, "failed": rep.failed,
                           "warnings": rep.warnings, "checks": rep.checks},
                          ensure_ascii=False))

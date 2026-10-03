@@ -287,7 +287,7 @@ class Stager:
                 removed[f] = all(removed.get(f + (pathrules.fold(n, self.osn),), False)
                                  for n in child_names.get(f, ()))
 
-        # The kind rules (decision 10 of the M2 plan), in plan order.
+        # The kind rules, in plan order.
         for i, e in enumerate(entries):
             if e.op != "put":
                 continue
@@ -380,7 +380,7 @@ class Stager:
                 sub = None
                 listing = None
                 if child[0] and k == LINK:
-                    # decision 9 of the M2 plan: even when the plan deletes it
+                    # even when the plan deletes it
                     raise _link(self._current)
                 if child[0] and k == DIR:
                     sub = d.enter(name)

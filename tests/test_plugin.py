@@ -320,7 +320,7 @@ class CtxTest(unittest.TestCase):
 
 
 class DoctorTest(PluginCase):
-    """plugin.doctor and the checks' JSON (decision 21 of the M5 plan)."""
+    """plugin.doctor and the checks' JSON."""
 
     def module(self, needs=(), checks=(), fail=None):
         module = probe_module("doc")

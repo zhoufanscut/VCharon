@@ -117,7 +117,7 @@ def stage_from(sink, source):
 
 
 class SinkDoctorTest(SinkCase):
-    """The dir sink's doctor (decision 21 of the M5 plan): it only reads."""
+    """The dir sink's doctor: it only reads."""
 
     def doctor(self, name, **raw):
         return plugin.doctor("local", name, "sink", raw, plugin.Ctx("local", home=self.tmp))
@@ -159,7 +159,7 @@ class SinkDoctorTest(SinkCase):
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
     def test_missing_root_under_a_read_only_parent(self):
-        # review W5: the first run couldn't create it
+        # the first run couldn't create it
         if os.geteuid() == 0:
             self.skipTest("root can write anywhere")
         ro = os.path.join(self.root, "ro")

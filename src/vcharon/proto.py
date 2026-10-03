@@ -12,7 +12,7 @@ EXIT = {"config": 3, "bad_options": 3, "missing_capability": 3, "state_mismatch"
         "unsafe_path": 1, "unsafe_dir": 1, "collision": 1, "kind_change": 1,
         "too_many_deletes": 1, "empty_source": 1, "vanished": 1, "in_use": 1,
         "permission": 1, "no_space": 1, "aborted": 1, "io": 1, "too_big": 1, "internal": 1,
-        "channel": 1}
+        "channel": 1, "refused": 1}
 
 
 class VCharonError(Exception):

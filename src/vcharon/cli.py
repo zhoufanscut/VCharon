@@ -23,12 +23,14 @@ from . import (
     doctor,
     entries,
     fsops,
+    guide,
     keys,
     pathrules,
     platform,
     plugin,
     proto,
     remote,
+    skill,
     ssh,
     stage,
     state,
@@ -65,7 +67,7 @@ class _Parser(argparse.ArgumentParser):
                            "vcharon --help")
 
 
-# --repeat's limit: the watcher's --every for a streaming watch is 1 to 300 too (M15).
+# --repeat's limit: the watcher's --every for a streaming watch is 1 to 300 too.
 REPEAT_MAX = 300
 
 
@@ -127,21 +129,21 @@ def _parser():
     one.add_argument("--box", metavar="NAME", help="this machine's part of every member name, "
                      "at most %d of a-z0-9_- (default: the OS: mac, win, linux)" % config.BOX_MAX)
     key = verb("key", "unlock an ssh key into this OS's agent or keychain, so runs stop failing "
-               "after a reboot", "vcharon key dev")
+               "after a reboot", "vcharon key devbox")
     key.add_argument("dest", metavar="ALIAS", nargs="?",
                      help="the server whose key to unlock, and test")
     key.add_argument("--key", metavar="FILE", dest="key_file",
                      help="the private key file to unlock, instead of the one ssh finds")
     doc = verb("doctor", "check this machine, the servers of your channels and their syncs; "
-               "changes nothing", "vcharon doctor --server dev")
+               "changes nothing", "vcharon doctor --server devbox")
     doc.add_argument("--server", metavar="ALIAS", help="check this server only")
     as_json(doc)
-    ping = verb("ping", "connect, echo 1 MiB, check the server's Python", "vcharon ping dev")
+    ping = verb("ping", "connect, echo 1 MiB, check the server's Python", "vcharon ping devbox")
     ping.add_argument("dest", metavar="ALIAS", help="an ~/.ssh/config alias, user@host, or "
                       "ssh://user@host:port")
 
     one = verb("list", "list a server's channels, their leaders and members",
-               "vcharon list --server dev")
+               "vcharon list --server devbox")
     where(one)
     as_json(one)
     def agent(one):
@@ -149,7 +151,7 @@ def _parser():
                          "MEMBER.md and vcharon list (default: found from the environment, "
                          "else other)")
 
-    one = verb("create", "create a channel; you lead it", "vcharon create game --server dev")
+    one = verb("create", "create a channel; you lead it", "vcharon create myapp --server devbox")
     channel(one)
     where(one)
     ident(one)
@@ -164,7 +166,7 @@ def _parser():
         low, high = charter.BOUNDS[key]
         one.add_argument(flag, dest=key, metavar="N", type=_number(low, high, what),
                          help="%s; %d to %d" % (default, low, high))
-    one = verb("join", "join a channel as a member", "vcharon join game --server dev")
+    one = verb("join", "join a channel as a member", "vcharon join myapp --server devbox")
     channel(one)
     where(one)
     ident(one)
@@ -174,21 +176,21 @@ def _parser():
     one.add_argument("--takeover", action="store_true", help="with --rejoin: take the folder "
                      "though another machine's id holds it; only when the user confirms this "
                      "is that machine")
-    one = verb("leave", "leave a channel (a member; the leader closes it)", "vcharon leave game")
+    one = verb("leave", "leave a channel (a member; the leader closes it)", "vcharon leave myapp")
     channel(one)
     ident(one)
-    one = verb("close", "close and delete a channel (its leader only)", "vcharon close game")
+    one = verb("close", "close and delete a channel (its leader only)", "vcharon close myapp")
     channel(one)
     ident(one)
     one = verb("whoami", "your name, folder, local or remote, server; without C, every "
-               "channel you joined from this project", "vcharon whoami game --json")
+               "channel you joined from this project", "vcharon whoami myapp --json")
     one.add_argument("channel", metavar="C", nargs="?", help="the channel's name")
     ident(one)
     as_json(one)
 
     one = verb("post", "post an entry to a .md file in your own folder, RESULTS.md unless "
                "--file names another",
-               "vcharon post game --to @mac-web --title \"step 2 done\" --body \"tests pass\"")
+               "vcharon post myapp --to @mac-myapp --title \"step 2 done\" --body \"tests pass\"")
     channel(one)
     one.add_argument("--to", nargs="+", required=True, metavar="@NAME",
                      help="@<name> ..., or @all (the leader only); one argument or several")
@@ -201,7 +203,7 @@ def _parser():
     one.add_argument("--steps", action="store_true", help="the leader's plan: --file STEPS.md, "
                      "the leader only")
     ident(one)
-    one = verb("read", "every member's entries, in one order", "vcharon read game --last 20")
+    one = verb("read", "every member's entries, in one order", "vcharon read myapp --last 20")
     channel(one)
     one.add_argument("--last", type=_number(1, 1000000, "entries"), metavar="N",
                      help="only the newest N entries")
@@ -210,7 +212,7 @@ def _parser():
     ident(one)
     as_json(one)
     one = verb("watch", "print what reaches you, one line per entry",
-               "vcharon watch game --until-change")
+               "vcharon watch myapp --until-change")
     channel(one)
     one.add_argument("--until-change", action="store_true", help="exit after the first round "
                      "that printed a change or an error that counts (for a background command)")
@@ -231,7 +233,7 @@ def _parser():
                      % watch_mod.STREAM_ERROR_ROUND)
     ident(one)
     one = verb("sync", "a remote member: push your folder, pull the others'",
-               "vcharon sync game --full")
+               "vcharon sync myapp --full")
     channel(one)
     one.add_argument("--repeat", type=_repeat_seconds, metavar="S",
                      help="keep one connection open and sync again and again, S (1 to %d) "
@@ -245,6 +247,24 @@ def _parser():
                      "synced: up (your folder, sent) or down (the others', pulled); the next "
                      "sync --full compares by content")
     ident(one)
+
+    one = verb("guide", "the agent guide for this vcharon, or one of its topics",
+               "vcharon guide watch")
+    one.add_argument("topic", metavar="TOPIC", nargs="?", help="one of: %s"
+                     % ", ".join(guide.TOPICS))
+    one = verb("skill", "write the skill that points agents at vcharon guide",
+               "vcharon skill install --claude")
+    actions = one.add_subparsers(dest="action", metavar="<action>")
+    actions.required = True
+    one = actions.add_parser("install", help="write it for Claude Code and Codex (no flag: "
+                             "both)", description="Write the skill where each agent looks for "
+                             "user skills; a file that vcharon didn't write is refused.",
+                             epilog="example: vcharon skill install --codex",
+                             formatter_class=argparse.RawDescriptionHelpFormatter,
+                             allow_abbrev=False)
+    for agent, parts in skill.AGENTS:
+        one.add_argument("--" + agent, action="store_true", help="~/%s/%s/SKILL.md"
+                         % ("/".join(parts), skill.NAME))
     return parser
 
 
@@ -327,8 +347,8 @@ def _usage(message, hint):
 # --- a membership's commands: whoami, post, read, watch, sync ---
 
 def _membership(args, cfg):
-    """(the record of the membership args mean, the flags that find it again): DESIGN
-    §7.2."""
+    """(the record of the membership args mean, the flags that find it again): DESIGN,
+    "Which membership"."""
     record = channel_cmd.membership(cfg, args.channel, args.project, args.role)
     project = record.get("project") or channel_cmd.project_part(args.project)
     role = record.get("role") if "project" in record else args.role
@@ -624,7 +644,24 @@ COMMANDS = {
     "list": channel_cmd.main, "create": channel_cmd.main, "join": channel_cmd.main,
     "leave": channel_cmd.main, "close": channel_cmd.main,
     "whoami": _whoami, "post": _post, "read": _read, "watch": _watch, "sync": _sync,
+    "guide": lambda args, run: _guide(args), "skill": lambda args, run: _skill(args),
 }
+
+
+def _guide(args):
+    """vcharon guide [TOPIC]: the text as it ships, on stdout."""
+    text = guide.page(args.topic)
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    return 0
+
+
+def _skill(args):
+    """vcharon skill install [--claude] [--codex]: no flag means every agent."""
+    agents = [a for a, _ in skill.AGENTS if getattr(args, a)] or [a for a, _ in skill.AGENTS]
+    _say("vcharon: skill install")
+    skill.install(agents, _say)
+    _say("OK")
+    return 0
 
 
 class _Run:
@@ -636,10 +673,10 @@ class _Run:
         # what a failed commit did, as the error block shows it; None if nothing
         self.done_line = None
         # the job whose error this is, in a sync of a section's two jobs: its console ERROR
-        # line names it (M9c); None for one job and every other command
+        # line names it; None for one job and every other command
         self.job_name = None
         # where the error block goes: stderr, or with vcharon sync --repeat the round's lines,
-        # which go to stdout (M15)
+        # which go to stdout
         self.out = None
 
     def log_line(self, level, msg, create=False):
@@ -668,7 +705,7 @@ class _Run:
         if self.done_line:
             lines.append(self.done_line)
         if hint:
-            # as this box runs vcharon (M14a); the log keeps the plain text, read later by a
+            # as this box runs vcharon; the log keeps the plain text, read later by a
             # person, maybe on another box
             lines.append("  fix: %s" % platform.runnable(hint))
         if self.log is not None:
@@ -687,7 +724,7 @@ def _say(line):
 
 
 def load_config():
-    """config.load, and each skipped section's line in vcharon.log (M10): never on stderr, whose
+    """config.load, and each skipped section's line in vcharon.log: never on stderr, whose
     first line a remote member's watcher takes for the round's error."""
     cfg = config.load()
     if cfg.skipped:
@@ -919,7 +956,7 @@ def _jobs_named(cfg, name):
     jobs = cfg.named(name)
     skip = cfg.skipped_for(name) if jobs is None else None
     if skip is not None:
-        # its own file's error; every other job still runs (M10)
+        # its own file's error; every other job still runs
         raise skip.error
     if jobs is None:
         raise VCharonError("config", "no channel section %s in %s"
@@ -943,7 +980,7 @@ class _JobRun:
     code: int = 0
     ok_line: str = None
     # vcharon sync --repeat: the job's own log, while log is the round's HeldLog; and whether
-    # the round wrote its state (M15)
+    # the round wrote its state
     real_log: Log = None
     saved_state: bool = False
 
@@ -968,7 +1005,7 @@ class _Conn:
 
 
 def session_key(job):
-    """Jobs next to each other with the same key share one connection (M7a): the destination
+    """Jobs next to each other with the same key share one connection: the destination
     as written, and every [vcharon] setting, each of which the ssh command or the Session
     reads."""
     return (job.ssh, dataclasses.astuple(job.settings))
@@ -1000,7 +1037,7 @@ def _named_once(names):
 
 
 def _run_job(args, run):
-    """The jobs of a sync (decision 16 of the M4 plan, M7a): the arguments, every job's
+    """The jobs of a sync: the arguments, every job's
     config and plugins, the logs, every lock, then each job in the order given; the jobs
     next to each other with one session key share one connection. One job prints and logs
     exactly as ever; several end with a summary line."""
@@ -1022,7 +1059,7 @@ def _run_job(args, run):
             plugin.check_side(job.source.end, job.source.plugin, "source", job.source.options)
             plugin.check_side(job.sink.end, job.sink.plugin, "sink", job.sink.options)
         except VCharonError:
-            # Its text names an option, not the job; with several jobs, say which (M9c).
+            # Its text names an option, not the job; with several jobs, say which.
             if len(jobs) > 1:
                 run.job_name = job.name
             raise
@@ -1040,7 +1077,7 @@ def _run_job(args, run):
                  % (job.name, job.from_text, shown[0], job.to_text, shown[1]))
         errors = _Run()
         errors.log = log
-        # With several jobs, a job's console ERROR line names it (M9c); one job's is as ever.
+        # With several jobs, a job's console ERROR line names it; one job's is as ever.
         if len(jobs) > 1:
             errors.job_name = job.name
         todo.append(_JobRun(job, log, shown, errors, real_log=log))
@@ -1100,7 +1137,7 @@ def _skip(jr, conn):
     jr.code = conn.broke.exit_code if isinstance(conn.broke, VCharonError) else 1
 
 
-# --- vcharon sync --repeat (DESIGN §14 M15) ---
+# --- vcharon sync --repeat ---
 
 # The opener's log gets one line this often, in seconds, while rounds have nothing to do.
 REPEAT_SUMMARY = 600
@@ -1120,7 +1157,7 @@ def _watch_stdin(ended):
     fd, never sys.stdin.buffer: a thread blocked in a BufferedReader holds its lock, and an
     exit while stdin is still open (a broken connection, a Ctrl-C) then aborts at interpreter
     shutdown ("Fatal Python error: _enter_buffered_busy"), on stderr, which the watcher would
-    take for a new error (the M15a review)."""
+    take for a new error."""
     try:
         fd = sys.stdin.fileno()
     except (AttributeError, OSError, ValueError):
@@ -1218,7 +1255,7 @@ def _round(args, todo, conn, stack):
         jr.errors = _Run()
         jr.errors.log = jr.log
         jr.errors.out = out
-        # named, as with several jobs: the watcher's error keys read the name (M9c)
+        # named, as with several jobs: the watcher's error keys read the name
         jr.errors.job_name = jr.name
         jr.status, jr.code, jr.saved_state = None, 0, False
         try:
@@ -1363,7 +1400,7 @@ def _session(conn, stack, jr):
                 % (conn.opener.name, conn.opener.log.run_id))
     remote.reset(conn.session)
     # After the reset: what the helper says while it closes the job before stays in that
-    # job's log; what it says from here on is this job's (M9).
+    # job's log; what it says from here on is this job's.
     conn.session.helper_log = jr.log
     return conn.session
 
@@ -1384,7 +1421,7 @@ def _own_folder(job, log, dry_run):
     """A mailbox job's folders on the client, <local> and <local>/<me>: up's path source
     never creates its own path. Only while up has sent nothing: a folder that vanished after
     that must not come back empty, or up's prune would empty the server's copy. Down checks it
-    too, so that a run of down alone reports it as well; down itself never plans <me>/ (M9),
+    too, so that a run of down alone reports it as well; down itself never plans <me>/,
     so it wouldn't make the folder again. Nothing is made in a dry run."""
     path = plugin.Ctx("local").resolve(job.mailbox.own_folder, "mailbox.local")
     up = job.mailbox.section + ".up"
@@ -1396,7 +1433,7 @@ def _own_folder(job, log, dry_run):
     sent = saved.source.get("sent") if saved is not None and isinstance(saved.source,
                                                                           dict) else None
     if os.path.isdir(path):
-        # M10: a channel member's folder always holds MEMBER.md. Gone while up has sent it,
+        # A channel member's folder always holds MEMBER.md. Gone while up has sent it,
         # the folder was emptied or replaced (a failed restore, a stray .DS_Store in a new
         # one): up's prune would delete the server's copy, so neither job runs.
         if (job.mailbox.channel and isinstance(sent, dict) and entries.MEMBER_FILE in sent
@@ -1427,15 +1464,15 @@ def _own_folder(job, log, dry_run):
 
 # The general hints for a name the source can't send or list: each tells the source's owner to
 # rename, exclude or skip it. A mailbox section can't exclude or skip, and only a folder's writer
-# can change it (the M9 real run); _mailbox_hint swaps them. Compared as text, since an error
+# can change it; _mailbox_hint swaps them. Compared as text, since an error
 # from the helper arrives with its hint as text.
 SOURCE_HINTS = frozenset([pathrules.UNSAFE_HINT, pathrules.COLLISION_HINT,
                           path_plugin.LINKS_HINT, path_plugin.NAME_HINT])
-MAILBOX_DOWN_HINT = ("the writer of each folder named above %s (MAILBOX.md in the vcharon "
-                     "folder, §5); your up still runs")
-# with the writer's folder, since up's paths are relative to it (M9c)
+MAILBOX_DOWN_HINT = ("the writer of each folder named above %s; your up still runs; more: "
+                     "vcharon guide errors")
+# with the writer's folder, since up's paths are relative to it
 MAILBOX_UP_HINT = "%s in your own folder (%s/)"
-# in channel_cmd since M13: a local member's watch prints it too
+# kept in channel_cmd: a local member's watch prints it too
 CHANNEL_GONE_HINT = channel_cmd.CHANNEL_GONE_HINT
 
 
@@ -1494,7 +1531,7 @@ def _run_one(args, jr, conn, stack):
     if saved is not None and saved.fingerprint != fingerprint:
         raise VCharonError("state_mismatch", state.config_changed(job), hint)
 
-    # --repeat prints only a round's errors and its ROUND line (M15); the log keeps the rest
+    # --repeat prints only a round's errors and its ROUND line; the log keeps the rest
     quiet = args.repeat is not None
 
     def say(line):
@@ -1510,7 +1547,7 @@ def _run_one(args, jr, conn, stack):
     session = _session(conn, stack, jr)
     machine = conn.machine
     # Every job has a remote end, and its state is tied to that server (DESIGN §7.3), which
-    # must be Linux (M11a).
+    # must be Linux.
     state.need_linux({"os": conn.os}, job.ssh, state.LINUX_HINT % job.ssh)
     if not machine:
         raise VCharonError("state_mismatch", "the server %s has no machine id, so vcharon can't "
@@ -1553,7 +1590,7 @@ def _run_one(args, jr, conn, stack):
            if done is not None else None)
     if new is not None and quiet and _same_state(saved, new):
         # --repeat: a round that changed nothing writes nothing, or every round would fsync
-        # two files (M15)
+        # two files
         new = None
     if new is not None:
         try:

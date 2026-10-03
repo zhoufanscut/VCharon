@@ -1,4 +1,4 @@
-"""End to end through fake ssh: the M1 "done when" cases (DESIGN §14)."""
+"""End to end through fake ssh: a session's handshake, calls and failures."""
 
 from __future__ import annotations
 
@@ -216,10 +216,10 @@ class SessionTest(FakeSshCase):
         self.assertEqual(hello["machine"], TEST_MACHINE_ID)
         self.assertEqual(hello["home"], self.home)
         self.assertEqual(hello["python"], platform.python_version())
-        # fake_ssh says linux, as a real server is (M11a)
+        # fake_ssh says linux, as a real server is
         self.assertEqual(hello["os"], "linux")
         self.assertIsInstance(hello["user"], str)
-        # M12b: the server's clock and zone; the fake server is this machine
+        # the server's clock and zone; the fake server is this machine
         self.assertEqual(hello["utc_offset"], time.localtime().tm_gmtoff)
         self.assertLessEqual(hello["time"], s.hello_received)
         self.assertAlmostEqual(s.clock_gap, hello["time"] - s.hello_received)
@@ -550,7 +550,7 @@ class SessionTest(FakeSshCase):
         self.assertEqual(s.ssh_exit, 0)
 
     def test_plugin_doctor(self):
-        """The helper's plugin.doctor (decision 21 of the M5 plan)."""
+        """The helper's plugin.doctor."""
         os.mkdir(os.path.join(self.home, "outbox"))
         s = self.session()
         s.open()

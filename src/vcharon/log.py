@@ -83,7 +83,7 @@ class Log:
 class HeldLog(Log):
     """A Log whose lines wait in memory until flush() hands them to its target; dropped with
     the object otherwise. vcharon sync --repeat logs a round only when it did something, so a
-    quiet watch doesn't roll the log every half hour (DESIGN §14 M15)."""
+    quiet watch doesn't roll the log every half hour."""
 
     def __init__(self, target):
         Log.__init__(self, target.path, run_id=target.run_id)

@@ -1,4 +1,4 @@
-"""The engine through fake ssh: the M3 "done when" cases of DESIGN §14, each as a push and as a
+"""The engine through fake ssh: each case as a push and as a
 pull. The "remote" end is this machine, under the fake server's home.
 
 Set VCHARON_TEST_REPORT=1 to print the times and memory peaks of the big cases to stderr."""
@@ -540,7 +540,7 @@ class RunTest(FakeSshCase):
                 self.assertEqual(s.ssh_exit, 3)
 
     def test_10_helper_removes_its_stage_dir_when_it_exits(self):
-        # decision 17 of the M3 plan: after bye, and at end of file, without any sink.abort
+        # after bye, and at end of file, without any sink.abort
         dst = os.path.join(self.home, "dst")
         os.mkdir(dst)
         args = {"plugin": "dir", "options": {"path": "dst"},
@@ -560,7 +560,7 @@ class RunTest(FakeSshCase):
                 self.assertEqual(s.ssh_exit, 0)
                 self.assertEqual(read_tree(dst), {})
 
-    # M7a: job.reset between two jobs on one connection
+    # job.reset between two jobs on one connection
 
     def test_job_reset(self):
         write_tree(os.path.join(self.home, "src"), {"f": b"f"})
@@ -701,7 +701,7 @@ class RunTest(FakeSshCase):
             eng.session.close()
         self.assertEqual(fd_count(), before)
 
-    # M4: runs that keep state (DESIGN §9.2, §10.5), items 1-5, 9 and 10 of DESIGN §14
+    # runs that keep state (DESIGN §9.2, §10.5)
 
     def job_sides(self, direction, src, dst, **options):
         """A job's sides: path, without keep_name, onto dir."""

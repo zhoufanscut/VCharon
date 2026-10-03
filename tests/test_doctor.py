@@ -1,7 +1,6 @@
-"""vcharon doctor (decisions 16-22 of the M5 plan), through fake ssh and fake ssh-add.
+"""vcharon doctor, through fake ssh and fake ssh-add.
 
-Item 1 of DESIGN §14's M5: doctor reports each failure class of §6.4 (RowTest, one case per
-row).
+Doctor reports each failure class of DESIGN §6.4 (RowTest, one case per row).
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import bundle, doctor, keys, platform, plugins, ssh, state
+from vcharon import bundle, channels, doctor, keys, platform, plugins, ssh, state
 
 from tests import util
 from tests.test_plugin import probe_module
@@ -162,9 +161,10 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines[3], "  ok    ssh        OpenSSH_fake 1.0, for vcharon's tests "
                                    "(%s)" % platform.default_ssh_path())
         self.assertEqual(lines[4], "  ok    agent      holds 1 key")
-        self.assertEqual(lines[5], "  ok    dirs       state %s, logs %s"
-                         % (os.path.join(self.vcharon_home, "state"),
-                            os.path.join(self.vcharon_home, "logs")))
+        self.assertEqual(lines[5], "  ok    dirs       state %s, logs %s, joined %s, "
+                         "channels %s" % (os.path.join(self.vcharon_home, "state"),
+                            os.path.join(self.vcharon_home, "logs"),
+                            os.path.join(self.vcharon_home, "joined"), channels.root_path()))
         self.assertEqual(lines[6], "  ok    machine    %s" % TEST_MACHINE_ID)
         self.assertEqual(lines.pop(7), "  ok    machine    " + USED % (
             os.path.join(self.vcharon_home, "state", "client-id"),
@@ -172,7 +172,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines[7], "  ok    fake-dest  logs in")
         self.assertRegex(lines[8], r"\A  ok    fake-dest  Python \d+\.\d+\.\d+ on .+, user .*; "
                          r"handshake \d+\.\d\d s\Z")
-        # M12b: the fake server is this machine, so its clock and zone are ours
+        # the fake server is this machine, so its clock and zone are ours
         self.assertRegex(lines[9], r"\A  ok    fake-dest  clock [+-]\d\.\d s from this "
                          r"machine\Z")
         self.assertRegex(lines[10], r"\A  ok    fake-dest  echo 4 MiB byte-identical in "
@@ -198,10 +198,16 @@ class DoctorTest(DoctorCase):
         [line] = out.splitlines()
         doc = json.loads(line)
         self.assertEqual(sorted(doc), ["box", "box_source", "checks", "claimer_source",
-                                       "command", "executable", "failed", "format", "ok", "os",
-                                       "protocol", "python", "servers", "version",
+                                       "command", "dirs", "executable", "failed", "format", "ok",
+                                       "os", "protocol", "python", "servers", "version",
                                        "warnings"])
         self.assertEqual(doc["format"], 1)
+        # the folders vcharon writes, as the dirs line names them
+        self.assertEqual(doc["dirs"], {
+            "state": os.path.join(self.vcharon_home, "state"),
+            "logs": os.path.join(self.vcharon_home, "logs"),
+            "joined": os.path.join(self.vcharon_home, "joined"),
+            "channels": channels.root_path()})
         self.assertEqual(doc["servers"], [{
             "server": "fake-dest", "python": platform.python_version(), "os": "linux",
             "distro": "Debian GNU/Linux 13 (trixie)", "distro_id": "debian",
@@ -291,7 +297,7 @@ class DoctorTest(DoctorCase):
         self.assertIn("Start-Service ssh-agent", "\n".join(lines))
 
     def test_ssh_add_cant_start(self):
-        # review W3: not "none", which would send you after an agent
+        # not "none", which would send you after an agent
         self.write_config("")
         missing = os.path.join(self.tmp, "no-such-ssh-add")
         self.patch(ssh, "ssh_add_prefix", side_effect=lambda settings: [missing])
@@ -325,7 +331,7 @@ class DoctorTest(DoctorCase):
                                            % os.path.join(blocker, "state")), dirs)
 
     def test_machine(self):
-        # M11d: this machine's id, with or without a destination in scope
+        # this machine's id, with or without a destination in scope
         for argv in ((), ("--server", "fake-dest")):
             with self.subTest(argv=argv):
                 lines = self.doctor(*argv, code=0)
@@ -433,7 +439,7 @@ class DoctorTest(DoctorCase):
         self.assertRegex(lines[-1], r"\AFAIL  2 failed, 2 warnings  \(\d+\.\d s\)\Z")
 
     def test_a_server_that_isnt_linux(self):
-        # M11a: a FAIL for the destination and for each job on it, not the no-machine warning
+        # a FAIL for the destination and for each job on it, not the no-machine warning
         os.environ["VCHARON_TEST_OS"] = "darwin"
         lines = self.doctor(code=1)
         refused = "fake-dest runs darwin: only a Linux server is supported as a remote end"
@@ -567,7 +573,7 @@ class DoctorTest(DoctorCase):
 
 
 class ClockTest(DoctorCase):
-    """M12b: the server's clock and time zone against this machine's, after the handshake
+    """The server's clock and time zone against this machine's, after the handshake
     line; the fake server's hello moved by VCHARON_TEST_CLOCK_SHIFT and VCHARON_TEST_UTC_OFFSET."""
 
     def clock(self, shift, code):
@@ -701,7 +707,7 @@ class RowTest(DoctorCase):
         dest = self.of(lines, "fake-dest")
         self.assertEqual(dest[-1], ("FAIL", message), lines)
         at = lines.index("  FAIL  fake-dest  " + message)
-        # a command in it as this box runs vcharon (M14a)
+        # a command in it as this box runs vcharon
         self.assertEqual(lines[at + 1], "                   fix: " + platform.runnable(fix))
         # no session, no echo, no remote side of the jobs
         self.assertFalse(any("echo" in text for level, text in dest), lines)
@@ -751,7 +757,7 @@ class RowTest(DoctorCase):
         self.failed("python3 isn't runnable on fake-dest", "check remote_python in vcharon.ini")
 
     def test_not_runnable_with_an_accepted_key(self):
-        # review B1: bash exits 126 with its own "Permission denied"; that's no locked key
+        # bash exits 126 with its own "Permission denied"; that's no locked key
         key = os.path.join(self.tmp, "id_ed25519")
         with open(key, "w") as f:
             f.write("k")

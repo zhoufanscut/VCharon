@@ -121,7 +121,7 @@ class Helper:
         self.called = set()
 
     def _plugin_log(self, msg):
-        # Logging never fails a run (decision 17 of the M3 plan).
+        # Logging never fails a run.
         try:
             self.log(msg)
         except (VCharonError, OSError):
@@ -160,8 +160,8 @@ class Helper:
 def hello():
     """DESIGN §7.3. VCHARON_TEST_OS stands in for the OS's name in it, as VCHARON_TEST_MACHINE_ID
     does for the id: tests on a Mac or Windows run their helper there, and the client takes
-    only a Linux one (M11a). VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
-    VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests (M12b).
+    only a Linux one. VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
+    VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests.
     VCHARON_TEST_OS_RELEASE names the file read in place of /etc/os-release (tests)."""
     offset = os.environ.get("VCHARON_TEST_UTC_OFFSET")
     test_release = os.environ.get("VCHARON_TEST_OS_RELEASE")
@@ -328,7 +328,7 @@ def sink_commit(h, call_id, args):
         if not isinstance(e, VCharonError):
             e = VCharonError("internal", "%s: %s" % (type(e).__name__, e),
                              detail=traceback.format_exc())
-        # The reply says what was done before the failure (decision 3 of the M3 plan).
+        # The reply says what was done before the failure.
         h.conn.send_json(proto.err_msg(call_id, e, done=stage.done_to_json(h.sink.done)))
         return
     h.ok(call_id, stage.done_to_json(done))
@@ -353,7 +353,7 @@ def job_reset(h, call_id, args):
     h.ok(call_id, {})
 
 
-# The channel root's calls (DESIGN §14 M10). The root is never an argument: the helper uses the
+# The channel root's calls. The root is never an argument: the helper uses the
 # fixed root, or VCHARON_CHANNELS_ROOT in its environment (tests). Each function checks the names
 # again and works only directly below the root.
 
@@ -441,8 +441,8 @@ def main(nonce):
     except BrokenPipeError:
         return 1
     finally:
-        # Every way out: after bye, at end of file, after an error (decision 17 of the M3
-        # plan). A sink that didn't commit removes its stage dir here.
+        # Every way out: after bye, at end of file, after an error. A sink that didn't commit
+        # removes its stage dir here.
         if h is not None:
             h.close_plugins()
         conn.close()

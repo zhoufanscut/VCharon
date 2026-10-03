@@ -1,4 +1,4 @@
-"""vcharon read: a channel's entries, every member's, in one order (DESIGN §14 M12a)."""
+"""vcharon read: a channel's entries, every member's, in one order."""
 
 from __future__ import annotations
 
@@ -17,14 +17,14 @@ from vcharon.mailbox import read as view
 from tests import util
 from tests.util import CAN_SYMLINK, TEST_MACHINE_ID, write_tree
 
-# a member of the channel, for the record that finds it (DESIGN §7.2)
+# a member of the channel, for the record that finds it (DESIGN, "Which membership")
 READ = ["read", "mb", "--project", "p"]
 
 # this box's clock for every view here: naive local time, as read._now() gives
 NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)  # noqa: DTZ001
 MINUTE = "2026-10-02 10:12"
 
-# M10: a channel section, in channels.d/ next to vcharon.ini, as test_mailbox_watch.py's
+# a channel section, in channels.d/ next to vcharon.ini, as test_mailbox_watch.py's
 MAILBOX = """
 [mb.windows]
 ssh            = devbox
@@ -262,7 +262,7 @@ class OutputTest(ViewCase):
         self.record("zz", None, missing)
         code, lines, err = self.main()
         self.assertEqual((code, lines), (1, []))
-        # the text after the colon is the OS's, localized on Windows (MAILBOX §5)
+        # the text after the colon is the OS's, localized on Windows
         self.assertTrue(err.startswith("ERROR can't read %s: " % missing), err)
         self.assertEqual(err.count("\n"), 1)
 

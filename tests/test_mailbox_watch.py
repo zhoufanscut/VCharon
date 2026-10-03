@@ -1,6 +1,6 @@
-"""vcharon watch: scans, the lines it prints, both modes (the M7b plan); the time on each line,
-the saved snapshot, its lock, --until-change and the limits (the M8 plan); a channel's entries,
-snapshot version 2 (DESIGN §14 M10)."""
+"""vcharon watch: scans, the lines it prints, both modes; the time on each line,
+the saved snapshot, its lock, --until-change and the limits; a channel's entries,
+snapshot version 2."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ class WatchCase(unittest.TestCase):
 
     def local_record(self, me="debian", leader="debian", project="q", role=None):
         """me's join record as a local member of mb, whose folder is self.tree: vcharon watch
-        mb --project <project> then watches it as me (DESIGN §7.2)."""
+        mb --project <project> then watches it as me (DESIGN, "Which membership")."""
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": me, "leader": leader,
                                   "ssh": None, "remote": self.tree,
                                   "machine": util.TEST_MACHINE_ID, "project": project,
@@ -169,7 +169,7 @@ class ScanTest(WatchCase):
         new = {"a": (1, 1), "b": (1, 2), "d": (1, 1)}
         self.assertEqual(watch.diff(old, new), ["changed b", "gone c", "new d"])
         self.assertEqual(watch.diff(new, new), [])
-        # M10: a member's .md files are read for entries, never shown as files; the top's are
+        # a member's .md files are read for entries, never shown as files; the top's are
         old = {"m/a.md": (1, 1), "m/b.md": (1, 1), "m/x.MD": (1, 1), "top.md": (1, 1)}
         new = {"m/a.md": (1, 2), "m/c.md": (1, 1), "m/x.MD": (1, 2), "top.md": (1, 2)}
         self.assertEqual(watch.diff(old, new), ["changed m/x.MD", "changed top.md"])
@@ -177,7 +177,7 @@ class ScanTest(WatchCase):
 
 class ServerModeTest(WatchCase):
     def test_rounds(self):
-        # M10: files that aren't entry files; entries have their own tests (EntriesTest)
+        # files that aren't entry files; entries have their own tests (EntriesTest)
         write_tree(self.tree, {"windows/run.log": b"r", "debian/STEPS.md": b"s"})
 
         def change():
@@ -286,9 +286,9 @@ class RootTest(WatchCase):
                                sleep=Rounds(gone, clock=clock), rounds=3)
         self.assertEqual(len(why), 1)
         self.assertTrue(why[0])
-        # the channel's folder gone: a closed channel's fix (M13), with a placeholder for the
-        # flags, since this member has no record, its command as this box runs vcharon (M14a);
-        # then EXIT closed, even in continuous mode (M14b)
+        # the channel's folder gone: a closed channel's fix, with a placeholder for the
+        # flags, since this member has no record, its command as this box runs vcharon;
+        # then EXIT closed, even in continuous mode
         self.assertEqual((code, self.lines), (watch.EXIT_CLOSED, [
             "2026-10-01 09:05:46 " + watching(self.tree, 1),
             "2026-10-01 09:05:47 ERROR can't read %s: %s" % (self.tree, why[0]),
@@ -298,7 +298,7 @@ class RootTest(WatchCase):
             "2026-10-01 09:05:47 EXIT closed"]))
 
     def test_missing_at_the_start_is_empty(self):
-        # M10: in client mode, before the first run (server mode's tree holds the member's
+        # in client mode, before the first run (server mode's tree holds the member's
         # MEMBER.md, so it's there); what the first run brings is all new
         sync_args = ClientModeTest.write_config(self)
         shutil.rmtree(self.tree)
@@ -396,7 +396,7 @@ class SnapshotTest(WatchCase):
                           (other(loose=[1]), "it has another shape"),
                           (other(root="/elsewhere"), "it is for /elsewhere"),
                           (other(me="mac"), "it is for the member mac"),
-                          # M10: a snapshot from before channels, whatever else it holds
+                          # a snapshot from before channels, whatever else it holds
                           (json.dumps(v1).encode(), "it is from before channels (version 1): "
                                                     "a fresh start"),
                           (other(version=1), "it is from before channels (version 1): a "
@@ -438,7 +438,7 @@ class SnapshotTest(WatchCase):
         self.assertEqual(self.run_dir(rounds=1)[1][1:], ["new mac/y"])
 
     def test_an_unchanged_snapshot_isnt_written_again(self):
-        # M15: a streaming watch has a round every 2 s; a quiet one doesn't fsync each
+        # a streaming watch has a round every 2 s; a quiet one doesn't fsync each
         write_tree(self.tree, {"mac/x": b"x"})
         real = watch.save_snapshot
         saves = []
@@ -552,7 +552,7 @@ class LockTest(WatchCase):
 class KeyTest(WatchCase):
     @unittest.skipUnless(util.CAN_SYMLINK, "no symlinks here")
     def test_two_spellings_of_one_dir_take_one_lock(self):
-        # M11a: the snapshot and lock name come from normcase(realpath(--dir)), so a watcher
+        # the snapshot and lock name come from normcase(realpath(--dir)), so a watcher
         # started through a link sees the one already running (exit 12)
         alias = os.path.join(self.tmp, "alias")
         os.symlink(self.tree, alias)
@@ -571,8 +571,8 @@ class KeyTest(WatchCase):
 
     @unittest.skipUnless(os.name == "posix", "normcase folds case on Windows")
     def test_a_plain_path_keeps_its_name(self):
-        # with no links the name is the one before M11a (sha256 of the path as main passed
-        # it), so a running watcher keeps its snapshot
+        # with no links the name is the sha256 of the path as main passed it, so a running
+        # watcher keeps its snapshot
         real = os.path.realpath(self.tree)
         old = hashlib.sha256(os.fsencode(real)).hexdigest()[:12]
         self.assertTrue(watch.snapshot_path(real, "debian")
@@ -581,7 +581,7 @@ class KeyTest(WatchCase):
     @unittest.skipUnless(util.CAN_SYMLINK, "no symlinks here")
     def test_a_restart_under_another_spelling_goes_on(self):
         # the saved snapshot is the same folder's under either spelling: what came while no
-        # watcher ran is printed, both ways (the M11a review's A -> B -> A)
+        # watcher ran is printed, both ways (A -> B -> A)
         alias = os.path.join(self.tmp, "alias")
         os.symlink(self.tree, alias)
 
@@ -605,7 +605,7 @@ class KeyTest(WatchCase):
 
 
 class WarnTest(WatchCase):
-    """Server mode's WARN lines (the M9 plan): names clients leave out at the top, and case
+    """Server mode's WARN lines: names clients leave out at the top, and case
     twins in a writer's folder."""
 
     def run_dir(self, *steps, rounds=None, **kw):
@@ -750,8 +750,8 @@ class WarnTest(WatchCase):
         self.assertEqual(lines[1:], ["WARN " + text, "WARN cleared: " + text])
 
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
-    def test_a_snapshot_from_before_m9(self):
-        # no "warnings" key (as before M9; M10's version 2 always writes it): usable; what
+    def test_a_snapshot_without_warnings(self):
+        # no "warnings" key (version 2 always writes it now): usable; what
         # holds now is shown in its first round
         write_tree(self.tree, {"debian/STEPS.md": b"s", "Debian/": None})
         files = watch.scan(self.tree, "debian")
@@ -794,7 +794,7 @@ class UntilChangeTest(WatchCase):
         write_tree(self.tree, {"mac/x": b"x"})
 
         def files():
-            # M10: files alone wake nobody; an entry announces them
+            # files alone wake nobody; an entry announces them
             write_tree(self.tree, {"mac/y": b"y"})
 
         def made():
@@ -833,7 +833,7 @@ class UntilChangeTest(WatchCase):
         runs = []
 
         def run(job, sync_args):
-            # (code, line, what it brings) and, if given, the fix line's text (M13)
+            # (code, line, what it brings) and, if given, the fix line's text
             result = results.pop(0)
             code, line, spec = result[:3]
             runs.append(code)
@@ -902,7 +902,7 @@ class UntilChangeTest(WatchCase):
                                  "EXIT error"])
 
     def test_a_long_block_never_ends_with_error(self):
-        # the agent was woken for it: its rounds don't feed --max-errors (the M9 review)
+        # the agent was woken for it: its rounds don't feed --max-errors
         d = "ERROR collision: debian/N.md and debian/n.md are the same path on Windows"
         self.saved_error(d)
         code, lines, runs = self.until_change([(1, d, {})] * 12, rounds=12, max_errors=3)
@@ -949,7 +949,7 @@ class UntilChangeTest(WatchCase):
                                  "EXIT error"])
 
     def test_a_new_error_is_a_change(self):
-        # the M9 real run: a blocked down printed its ERROR and the watcher kept going
+        # a blocked down printed its ERROR and the watcher kept going
         collision = ("ERROR collision: debian/twin/Notes.md and debian/twin/notes.md are the "
                      "same path on Windows")
         run, runs = self.fake_runs([(0, None, {}), (1, collision, {}), (1, collision, {})])
@@ -1169,7 +1169,7 @@ class UntilChangeTest(WatchCase):
                 self.assertEqual(watch.error_key(line), key)
 
     def test_the_keys_with_the_job(self):
-        # M9c: a sync names the failing job; the connection's errors and the retry and
+        # a sync names the failing job; the connection's errors and the retry and
         # too_many_deletes codes are keyed as without it, a content error keeps it
         for line, key in (
                 ("ERROR mailbox.up: connect: couldn't reach devbox", "transport"),
@@ -1205,7 +1205,7 @@ class UntilChangeTest(WatchCase):
         self.assertEqual(self.snapshot()["counted"], ["transport"])
 
     def test_an_error_saved_before_the_job_names(self):
-        # a snapshot saved by a watcher before M9c: read as ever; its content error's new text
+        # a snapshot saved by an older watcher: read as ever; its content error's new text
         # is another key, one extra wake, and then no more
         old = "ERROR collision: debian/N.md and debian/n.md are the same path on Windows"
         new = "ERROR mailbox.down: collision: debian/N.md and debian/n.md are the same path on " \
@@ -1436,7 +1436,7 @@ class UntilChangeTest(WatchCase):
             self.assertEqual(list(json.load(f)["files"]), ["debian/STEPS.md"])
 
 
-# M10: a channel section, in channels.d/ next to vcharon.ini: the member windows of the channel
+# a channel section, in channels.d/ next to vcharon.ini: the member windows of the channel
 # mb, led by debian
 MAILBOX = """
 [mb.windows]
@@ -1559,7 +1559,7 @@ class ClientModeTest(WatchCase):
                     sys.stderr.write("\\nERROR lost: gone\\n  fix: run again\\n")
                     sys.exit(1)
                 if sys.argv[2] == "gone":
-                    # the sync's block for a closed channel (the M13 measurement), after a
+                    # the sync's block for a closed channel, as measured, after a
                     # line that isn't an ERROR
                     sys.stderr.write("note: x\\nERROR mb.w.up: not_found: no root\\n"
                                      "  fix: the channel is closed: leave it\\n  log: l\\n")
@@ -1628,7 +1628,7 @@ class ClientModeTest(WatchCase):
                               None))
 
 
-# A stand-in for the streaming child, `vcharon sync C --repeat <every>` (M15): it does the
+# A stand-in for the streaming child, `vcharon sync C --repeat <every>`: it does the
 # actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
 # sync --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
 # at the end of a file; exit: exit with that code now; deaf: ignore the end of stdin for 60 s;
@@ -1660,7 +1660,7 @@ sys.stdin.buffer.read()
 
 
 class StreamTest(WatchCase):
-    """A streaming watch (DESIGN §14 M15): one long-lived vcharon sync --repeat child, its rounds
+    """A streaming watch: one long-lived vcharon sync --repeat child, its rounds
     as steps, its restarts with the backoff, the wake rules in time, and the child stopped on
     every way out. The child is FAKE_CHILD."""
 
@@ -1905,7 +1905,7 @@ class StreamTest(WatchCase):
 
     def test_stderr_after_a_broken_round_is_its_way_out(self):
         # vcharon sync --repeat exits after a round whose error broke the connection; what it
-        # says on stderr then (seen in the M15a review: an abort at shutdown) is no new error
+        # says on stderr then (seen once: an abort at shutdown) is no new error
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
         _code, lines = self.watch(
             [["out", connect], ["out", "ROUND 4"], ["err", "Fatal Python error: x"],
@@ -1916,7 +1916,7 @@ class StreamTest(WatchCase):
         self.assert_all_stopped()
 
     def test_a_mixed_round_that_broke(self):
-        # review pass 2: up's content error first, then down's lost: the round broke the
+        # up's content error first, then down's lost: the round broke the
         # connection, so the child's exit is no step of its own (no "exited with" key)
         up = "ERROR mb.windows.up: unsafe_path: lnk: a symlink"
         lost = "ERROR mb.windows.down: lost: the connection closed"
@@ -1987,7 +1987,7 @@ class StreamTest(WatchCase):
 
 
 class EntriesTest(WatchCase):
-    """A channel's entries (DESIGN §14 M10, "The watcher in a channel"). Server mode, as the
+    """A channel's entries ("The watcher in a channel"). Server mode, as the
     member mac of the channel mb, led by debian (setUp's debian/MEMBER.md)."""
 
     def setUp(self):
@@ -2173,7 +2173,7 @@ class EntriesTest(WatchCase):
             "new top.md", "new windows/README", "new windows/p.patch", "new windows/sub/run.log",
             "WARN top.md at the top isn't a writer's folder: clients leave it out",
             "EXIT change"])
-        # the WARN counted (M9), the files didn't: without it, no EXIT
+        # the WARN counted, the files didn't: without it, no EXIT
         os.remove(os.path.join(self.tree, "top.md"))
         self.run_mac(rounds=1)
         code, lines = self.run_mac(lambda: write_tree(self.tree, {"windows/q.patch": b"q"}),
@@ -2242,10 +2242,10 @@ class EntriesTest(WatchCase):
 
 
 class ClosedTest(WatchCase):
-    """A closed channel says so in the watcher (DESIGN §14 M13): the fix line after the ERROR
+    """A closed channel says so in the watcher: the fix line after the ERROR
     line."""
 
-    # the fix as the watcher prints it: the leave command as this box runs vcharon (M14a)
+    # the fix as the watcher prints it: the leave command as this box runs vcharon
     GONE = platform.runnable("the channel is closed, or your folder in it is gone: vcharon leave "
                              "mb --project web --role b")
 
@@ -2291,7 +2291,7 @@ class ClosedTest(WatchCase):
                                        max_minutes=25, fresh=True)
                 error = self.said()[1]
                 self.assertTrue(error.startswith("ERROR can't read %s: " % self.tree), error)
-                # the fix right after the ERROR line, then EXIT closed, in both modes (M14b)
+                # the fix right after the ERROR line, then EXIT closed, in both modes
                 self.assertEqual((code, self.said()), (
                     watch.EXIT_CLOSED, [watching(self.tree, 1, ", fresh start"), error,
                                         "  fix: " + self.GONE, "EXIT closed"]))
@@ -2348,7 +2348,7 @@ class ClosedTest(WatchCase):
                 self.assertEqual(self.job_watch(results, 3, until_change, fresh=True), (
                     watch.EXIT_CLOSED, [error, "  fix: " + self.GONE, "  log: l", "EXIT closed"]))
                 # a restart from the saved snapshot: shown again, and EXIT closed again,
-                # though the saved error doesn't count again (M9)
+                # though the saved error doesn't count again
                 results = [(1, error, fix), (0, None, None)]
                 self.assertEqual(self.job_watch(results, 2, until_change), (
                     watch.EXIT_CLOSED, [error, "  fix: " + self.GONE, "  log: l", "EXIT closed"]))
@@ -2447,7 +2447,7 @@ class CommandTest(WatchCase):
                 ("q", ["--until-change", "--max-errors", "0"]),
                 ("q", ["--until-change", "--max-errors", "1001"]),
                 ("q", ["--max-errors", "3"]),
-                # M15: a streaming watch's --every is vcharon sync --repeat's, 1 to 300
+                # a streaming watch's --every is vcharon sync --repeat's, 1 to 300
                 ("p", ["--every", "301"]), ("p", ["--every", "0"]),
                 # a local member has no sync to stream
                 ("q", ["--no-stream"])):
@@ -2483,7 +2483,7 @@ class CommandTest(WatchCase):
         # the local member's channel folder, from its record; the remote member's section,
         # and the sync's arguments that find it again
         plain = {"fresh": False, "until_change": False, "max_minutes": None, "max_errors": 10}
-        # a remote member streams by default, every 2 s (M15); --no-stream syncs every 30 s
+        # a remote member streams by default, every 2 s; --no-stream syncs every 30 s
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
             # a local member's watch holds another folder over the channel's limits
@@ -2563,7 +2563,7 @@ class CommandTest(WatchCase):
 
 class LooseTest(WatchCase):
     def test_an_entry_without_its_folders_id_is_told_once(self):
-        # the M10 review's surviving mutant: loose entries are remembered by hash
+        # loose entries are remembered by hash (a mutant other tests let survive)
         self.post("mac", 1, "no id", name="other")
         with open(os.path.join(self.tree, "mac", "RESULTS.md"), "a", encoding="utf-8") as f:
             f.write("\n## 2026-10-01 09:01 — an old heading\n\nbody\n")

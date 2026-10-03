@@ -156,7 +156,7 @@ Probe = collections.namedtuple("Probe", "rc lines accepted error")
 # type: RSA, ED25519, ... or ""; agent: the agent holds the key.
 AcceptedKey = collections.namedtuple("AcceptedKey", "ident type agent")
 
-# Only ssh's own debug line counts, from its start: the server can't print one (review W2).
+# Only ssh's own debug line counts, from its start: the server can't print one.
 _ACCEPTS = "debug1: Server accepts key: "
 # After this line, stderr can carry the server's own text.
 _AUTHENTICATED = "Authenticated to "
@@ -189,7 +189,7 @@ def unvis(text):
 
 def shown(text):
     """text as output and logs show it: a byte that isn't UTF-8, which unvis() or the OS kept
-    as a surrogate, becomes \\xNN, since a real UTF-8 stdout refuses surrogates (review N1).
+    as a surrogate, becomes \\xNN, since a real UTF-8 stdout refuses surrogates.
     Only for showing: files and ssh-add get text itself."""
     return text.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
 
@@ -248,14 +248,14 @@ def verbose_probe(settings, dest, log):
 def denied(probe):
     """True when ssh itself failed (255, as classify_exit asks) and its own messages, not its
     debug lines, say Permission denied. bash's "Permission denied" for a remote_python it
-    can't run exits 126 (review B1)."""
+    can't run exits 126."""
     return probe.rc == 255 and any("Permission denied" in line for line in probe.lines
                                    if not line.startswith("debug"))
 
 
 def _key_file(ident):
     """True when ident names a key file here: an absolute path, so a name the server made up
-    can't point at a file in the current directory (review W2)."""
+    can't point at a file in the current directory."""
     return os.path.isabs(ident) and os.path.isfile(ident)
 
 
@@ -284,7 +284,7 @@ def key_kind(key):
 
 
 def clock_gap(hello, received):
-    """The server's clock minus this machine's, in seconds, + when the server is ahead (M12b):
+    """The server's clock minus this machine's, in seconds, + when the server is ahead:
     the hello's time against `received`, this machine's time.time() when the hello was read.
     So it is the true gap minus the hello's one-way delay. None without a time in the hello."""
     t = hello.get("time")
@@ -384,7 +384,7 @@ class Session:
         self.junk_bytes = 0
         self.ssh_exit = None
         self.handshake_seconds = None
-        # time.time() when the hello was read, and the server's clock minus it (M12b)
+        # time.time() when the hello was read, and the server's clock minus it
         self.hello_received = None
         self.clock_gap = None
         self._nonce = os.urandom(16).hex()
@@ -475,7 +475,7 @@ class Session:
             self._stderr_thread.join(2)
             raise classify_exit(rc, self._tail_lines(), self.dest, self.settings, killed=killed)
         kind, msg = self._next()
-        # the clock gap's other end (M12b): as soon as the hello is read
+        # the clock gap's other end: as soon as the hello is read
         received = time.time()
         if (kind != proto.J or msg["t"] != "hello" or msg.get("protocol") != PROTOCOL
                 or msg.get("version") != VERSION):
@@ -634,7 +634,7 @@ class Session:
                 return
 
     def start_round(self):
-        """vcharon sync --repeat: run_timeout counts from now, within this round (M15)."""
+        """vcharon sync --repeat: run_timeout counts from now, within this round."""
         with self._lock:
             self._run_from = time.monotonic()
 

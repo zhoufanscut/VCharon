@@ -32,8 +32,8 @@ class Settings:
 
 @dataclasses.dataclass
 class Mailbox:
-    """A mailbox section's own values (DESIGN §12), on each job it expands into. Since M10
-    every one is a channel section, [<channel>.<me>] in channels.d/."""
+    """A mailbox section's own values (DESIGN §12), on each job it expands into. Every
+    one is a channel section, [<channel>.<me>] in channels.d/."""
 
     section: str
     me: str
@@ -68,7 +68,7 @@ class Job:
 
 @dataclasses.dataclass
 class Skipped:
-    """A section vcharon goes on without (DESIGN §14 M10): a channels.d/ file that is broken or
+    """A section vcharon goes on without: a channels.d/ file that is broken or
     clashes, or a retired mailbox section in vcharon.ini. Only a command that names it fails, with
     its error; vcharon doctor lists it, every other command logs it."""
 
@@ -157,12 +157,12 @@ MAILBOX_JOBS = (".up", ".down")
 MAILBOX_LIMITS = {"mailbox.max_mb": "max_mb", "mailbox.max_files": "max_files"}
 # so S.down stays a job name
 MAILBOX_NAME_MAX = 64 - len(".down")
-# [vcharon] box: at most this long, so a member's name <box>-<project>-<role> fits 32 (M10)
+# [vcharon] box: at most this long, so a member's name <box>-<project>-<role> fits 32
 BOX_MAX = 10
-# next to the config file: one channel section per file (DESIGN §14 M10)
+# next to the config file: one channel section per file
 CHANNELS_DIR = "channels.d"
-RETIRED = ("the fixed mailbox is retired (M10): delete [%s] from %s (MAILBOX.md in the "
-           "vcharon folder, \"Retired\")")
+RETIRED = ("[%s] is a mailbox section, which %s doesn't hold: delete it (channel sections live "
+           "in channels.d/ next to it)")
 
 
 def job_name_problem(name):
@@ -460,7 +460,7 @@ def _setting(settings, key, value, where, hint):
 def _read_jobs(parser, name, hint, settings, path):
     """The sections besides [vcharon]; (name -> Job, mailbox sections, the folded names taken,
     [Skipped]). The config file holds no jobs of its own: a section here with mailbox keys is
-    the retired fixed mailbox, skipped (M10) with its names still taken; any other section is
+    the retired fixed mailbox, skipped with its names still taken; any other section is
     refused. Channel sections live in channels.d/."""
     jobs = {}
     mailboxes = {}
@@ -502,7 +502,7 @@ def _read_jobs(parser, name, hint, settings, path):
 
 
 def channels_dir(config_path):
-    """channels.d/ next to the config file (DESIGN §14 M10)."""
+    """channels.d/ next to the config file."""
     return os.path.join(os.path.dirname(config_path), CHANNELS_DIR)
 
 
@@ -598,7 +598,7 @@ def _read_channel_file(path, where, section, hint, settings):
 
 
 def _read_mailbox(parser, section, name, hint, base):
-    """A channel section (DESIGN §12, §14 M10): its two jobs, up then down. Up pushes the
+    """A channel section (DESIGN §12): its two jobs, up then down. Up pushes the
     writer's own folder; down pulls the rest of the tree, less the writer's own folder."""
     def refuse(key, what):
         where = "%s [%s]" % (name, section) + (" " + key if key else "")
@@ -671,7 +671,7 @@ def _read_mailbox(parser, section, name, hint, base):
     up = Job(section + ".up", values["ssh"],
              Side("local", "path", dict({"path": box.own_folder, "prune": "yes",
                                          "allow_empty": "yes"}, **sizes)),
-             # never create (M10): the claim made <remote>/<me>; with create, a member's up
+             # never create: the claim made <remote>/<me>; with create, a member's up
              # would make a closed channel again
              Side("remote", "dir", {"path": posixpath.join(remote, me), "create": "no"}),
              settings, "local:path", "remote:dir", box)

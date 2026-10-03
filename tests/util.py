@@ -172,7 +172,8 @@ class FakeSshCase(unittest.TestCase):
     def write_record(self, channel, name, leader, ssh="fake-dest", remote="vcharon_mailbox",
                      project="p", role=None):
         """A join record, as vcharon join writes it, for a membership a test made by hand: so
-        the commands that find it by channel, project and role (DESIGN §7.2) find it."""
+        the commands that find it by channel, project and role (DESIGN, "Which membership")
+        find it."""
         from vcharon import channel_cmd
         doc = {"version": channel_cmd.RECORD_VERSION, "channel": channel, "name": name,
                "leader": leader, "ssh": ssh, "remote": remote,

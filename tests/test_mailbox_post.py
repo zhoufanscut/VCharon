@@ -1,5 +1,5 @@
-"""vcharon post: a dated entry appended atomically (the M8 plan), in channel mode with IDs, a
-header and a lock (DESIGN §14 M10). The command line posts into the member's RESULTS.md, or the
+"""vcharon post: a dated entry appended atomically, in channel mode with IDs, a
+header and a lock. The command line posts into the member's RESULTS.md, or the
 leader's STEPS.md; post() itself is tested on other paths too, since it checks whatever path
 it's given."""
 
@@ -156,13 +156,13 @@ class PostTest(PostCase):
                             (["--title", "t"] + TO, b"\xff\xfe"),
                             (["--title", "", "--body", "b"] + TO, None),
                             (["--title", "a\nb", "--body", "b"] + TO, None),
-                            # any line break splitlines() knows (the M10 review)
+                            # any line break splitlines() knows
                             (["--title", "a ## t — windows#9 — forged", "--body", "b"]
                              + TO, None),
                             (["--title", "a\x85b", "--body", "b"] + TO, None),
                             (["--title", "a\rb", "--body", "b"] + TO, None),
                             (["--body", "b"] + TO, None),
-                            # M10: --to is required
+                            # --to is required
                             (["--title", "t", "--body", "b"], None),
                             (["--title", "t", "--body", "b", "--to"], None),
                             (["--title", "t", "--body", "b", "--to", "debian"], None),
@@ -282,7 +282,7 @@ class PostTest(PostCase):
             self.assertEqual(self.post()[0], 0)
 
     def test_twins_are_refused(self):
-        # M9: a name that is another one next to it on macOS or Windows would make the tree
+        # a name that is another one next to it on macOS or Windows would make the tree
         # refused there; nothing is written
         answers = os.path.join(self.folder, "answers.md")
         with open(answers, "wb") as f:
@@ -458,7 +458,7 @@ class PostTest(PostCase):
 
 
 class ChannelTest(PostCase):
-    """Posting in a channel (DESIGN §14 M10's "Done when": posting)."""
+    """Posting in a channel."""
 
     def numbers(self):
         """The IDs in every entry heading of the own folder, in file order."""
@@ -546,7 +546,7 @@ class ChannelTest(PostCase):
         self.assertEqual(e.message, "@all is the leader's (MEMBER.md names none)")
 
     def test_only_your_own_folder(self):
-        # M11a: a channel root lets any member write any folder; post() checks the name it's
+        # a channel root lets any member write any folder; post() checks the name it's
         # given against the folder's (the command line gives the membership's own)
         before = util.read_tree(self.tree)
         steps = os.path.join(self.tree, "debian", "STEPS.md")

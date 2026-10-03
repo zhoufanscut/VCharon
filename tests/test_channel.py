@@ -1,4 +1,4 @@
-"""vcharon list, create, join, leave and close, and the channel root (M10): names, the claim,
+"""vcharon list, create, join, leave and close, and the channel root: names, the claim,
 records, sections, close and leave, the helper's channel calls, and channels.d/ through the
 commands."""
 
@@ -230,9 +230,8 @@ class CreateJoinTest(ChannelCase):
             ("format", "1"), ("created by", "vcharon " + vcharon.VERSION), ("max mb", "50"),
             ("max files", "1000"), ("max entry kb", "1000")])
         self.assertEqual(dict(ch[0].header)["rules"], channel_cmd.RULES)
-        # vcharon is self-contained: the rules are found by the vcharon folder, not a checkout
-        self.assertEqual(channel_cmd.RULES,
-                         "MAILBOX.md in the vcharon folder (the vcharon skill)")
+        # the rules ship with vcharon itself: a command, not a path in a checkout
+        self.assertEqual(channel_cmd.RULES, "vcharon guide rules")
 
     def test_create_local_and_join(self):
         # a server member leads; a Mac member joins over ssh
@@ -364,7 +363,7 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.record("game.mac-web")["leader"], "laptop-ui")
 
     def test_a_remote_end_must_be_linux(self):
-        # M11a: a Mac or Windows box has a machine id now, so the client refuses it by its OS
+        # a Mac or Windows box has a machine id now, so the client refuses it by its OS
         refused = ("ERROR state_mismatch: fake-dest runs %s: only a Linux server is supported "
                    "as a remote end")
         fix = "  fix: only a Linux server takes remote members: check the alias"
@@ -713,7 +712,8 @@ class LeaveCloseTest(ChannelCase):
         self.assertTrue(os.path.isdir(os.path.join(self.root, "game", "mac-web")))
         got, out, err = self.channel("leave", "game")
         self.assertEqual(got, 1)
-        # only the role member is left from this project: it names the role (DESIGN §7.2)
+        # only the role member is left from this project: it names the role (DESIGN, "Which
+        # membership")
         self.assertEqual(err.splitlines()[:2], [
             "ERROR channel: you are in game from web only with a role",
             "  fix: pass --role b"])
@@ -758,7 +758,7 @@ class LeaveCloseTest(ChannelCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
 
     def test_local_leave_after_the_channel_is_gone(self):
-        # a local member: its server is this machine, not "the server" (M11d)
+        # a local member: its server is this machine, not "the server"
         self.use_box("linux")
         self.ok("join", "game", "--local", "--project", "x")
         shutil.rmtree(os.path.join(self.root, "game"))
@@ -810,7 +810,7 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(os.listdir(self.root), [])
         self.assertFalse(any("game.laptop-ui" in p for p in self.box_files("laptop")),
                          self.box_files("laptop"))
-        # a member's post and run make no channel again: up never creates (M10)
+        # a member's post and run make no channel again: up never creates
         self.use_box("mac")
         own = os.path.join(self.joined("game.mac-web"), "mac-web")
         entries.post(os.path.join(own, "RESULTS.md"), own, "mac-web", "late", ["@laptop-ui"],
@@ -819,7 +819,7 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(code, 1)
         self.assertEqual(os.listdir(self.root), [])
         fixes = [l for l in err.splitlines() if l.startswith("  fix: ")]
-        # the leave command as this box runs vcharon (M14a)
+        # the leave command as this box runs vcharon
         self.assertEqual(fixes, ["  fix: " + platform.runnable(
             "the channel is closed, or your folder in it is gone: vcharon leave game "
             "--project web")] * 2)
@@ -917,9 +917,9 @@ class SkippedTest(ChannelCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         log = self.vcharon_log()
-        self.assertIn("skipped vcharon.ini [mailbox]: the fixed mailbox is retired (M10): delete "
-                      "[mailbox] from vcharon.ini (MAILBOX.md in the vcharon folder, "
-                      "\"Retired\")", log)
+        self.assertIn("skipped vcharon.ini [mailbox]: [mailbox] is a mailbox section, which "
+                      "vcharon.ini doesn't hold: delete it (channel sections live in "
+                      "channels.d/ next to it)", log)
         self.assertIn("skipped channels.d/game.mac-x.ini: [game.mac-x]: holds only a channel "
                       "section, with mailbox keys", log)
 
@@ -928,9 +928,9 @@ class SkippedTest(ChannelCase):
             with self.subTest(name=name):
                 code, _out, err = self.run_jobs(name)
                 self.assertEqual(code, 3)
-                self.assertEqual(err.splitlines()[0], "ERROR config: the fixed mailbox is "
-                                 "retired (M10): delete [mailbox] from vcharon.ini "
-                                 "(MAILBOX.md in the vcharon folder, \"Retired\")")
+                self.assertEqual(err.splitlines()[0], "ERROR config: [mailbox] is a mailbox "
+                                 "section, which vcharon.ini doesn't hold: delete it (channel "
+                                 "sections live in channels.d/ next to it)")
         code, _out, err = self.run_jobs("game.mac-x.down")
         self.assertEqual(code, 3)
         self.assertTrue(err.startswith("ERROR config: channels.d/game.mac-x.ini [game.mac-x]: "
@@ -957,8 +957,8 @@ class SkippedTest(ChannelCase):
 
 
 class ReviewTest(ChannelCase):
-    """The M10 review's findings: its probes as tests, and tests that kill its surviving
-    mutants."""
+    """Probes of the channel commands as tests, and tests that kill mutants of them that
+    other tests let survive."""
 
     def member(self):
         """The leader laptop-ui (remote), and this box's member mac-web with three entries
@@ -1024,7 +1024,7 @@ class ReviewTest(ChannelCase):
         self.assertFalse(channel_cmd.needs_pull("game.mac-web", self.own))
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertNotIn("pulled", out)
-        # the re-review's Q7: a file deleted on purpose, MEMBER.md still here. Every new
+        # a file deleted on purpose, MEMBER.md still here. Every new
         # session rejoins, so the rejoin must not bring it back; its run deletes it at the
         # server
         os.remove(os.path.join(self.own, "work.patch"))
@@ -1050,7 +1050,7 @@ class ReviewTest(ChannelCase):
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
     def test_the_pull_never_writes_through_a_link(self):
-        # the re-review's Q2: own/sub replaced by a link to a folder outside the tree
+        # own/sub replaced by a link to a folder outside the tree
         self.member()
         write_tree(self.own, {"sub/a.txt": b"a", "sub/b.txt": b"b"})
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
@@ -1070,7 +1070,7 @@ class ReviewTest(ChannelCase):
 
     @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0, "needs POSIX modes, not root")
     def test_a_failed_move_is_a_plain_error(self):
-        # the re-review's Q3: a folder of the own tree that can't be written
+        # a folder of the own tree that can't be written
         self.member()
         write_tree(self.own, {"sub/x.txt": b"x"})
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
@@ -1088,7 +1088,7 @@ class ReviewTest(ChannelCase):
                           if f.startswith(".vcharon-pull-")], [])
 
     def test_hints_rebuild_a_role_members_name(self):
-        # the re-review's Q6: the -b member's fix line must not claim mac-web
+        # the -b member's fix line must not claim mac-web
         self.lead()
         self.ok("join", "game", "--server", "fake-dest", "--role", "b")
         own = os.path.join(self.joined("game.mac-web-b"), "mac-web-b")
@@ -1188,7 +1188,7 @@ class ReviewTest(ChannelCase):
 
     def test_post_into_another_members_copy(self):
         # the command line posts into the member's own folder only; post() itself still
-        # refuses another member's copy, and a name that isn't the folder's (M11a)
+        # refuses another member's copy, and a name that isn't the folder's
         self.member()
         target = os.path.join(self.local, "laptop-ui", "STEPS.md")
         with self.assertRaises(VCharonError) as cm:
@@ -1222,8 +1222,8 @@ class ReviewTest(ChannelCase):
                          entries.lock_path(os.path.join(alias, "mac-web")))
 
     def test_remove_retries_a_rename_in_use(self):
-        # M11a: on Windows a watcher scanning the channel holds a handle, and the rename fails
-        # for a moment: winerror 32 or 5 (faked here; 5 measured on Windows, M11c run 2)
+        # on Windows a watcher scanning the channel holds a handle, and the rename fails for
+        # a moment: winerror 32 or 5 (faked here; 5 was measured on Windows)
         for codes in ((32, 32), (5, 32), (5, 5)):
             with self.subTest(codes=codes):
                 write_tree(self.root, {"game/lead/CHANNEL.md": b"c", "game/a/MEMBER.md": b"m"})
@@ -1298,7 +1298,7 @@ class ReviewTest(ChannelCase):
         self.assertEqual(cm.exception.hint, "check the owner and permissions of %s" % path)
         self.assertEqual(read_tree(self.root), before)
 
-    # --- the review's surviving mutants ---
+    # --- cases that kill mutants other tests let survive ---
 
     def test_remove_refuses_a_non_leader(self):
         write_tree(self.root, {"game/lead/CHANNEL.md": b"c", "game/a/MEMBER.md": b"m"})

@@ -83,8 +83,8 @@ class FingerprintTest(StateCase):
         self.assertEqual(missing, hashlib.sha256(want.encode("utf-8")).hexdigest())
 
     def test_jobs_keep_their_fingerprint(self):
-        # M7b added the writer's name for mailbox jobs only: a state file saved before it
-        # still matches its job
+        # the writer's name is in the fingerprint of mailbox jobs only: a state file saved
+        # without it still matches its job
         self.assertEqual(state.fingerprint(self.job()),
                          "36763e7a62c050af30605c45b1d4951828978bf10747e05828128e99c453c7f4")
 

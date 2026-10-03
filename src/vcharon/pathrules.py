@@ -53,7 +53,7 @@ def _split_problem(path):
     for part in parts:
         if part in ("", ".", ".."):
             return None, "has an empty, \".\" or \"..\" part"
-        # decision 4 of the M2 plan: stage dir names are vcharon's own, in any case
+        # stage dir names are vcharon's own, in any case
         if part.casefold().startswith(STAGE_PREFIX):
             return None, "uses a name reserved for vcharon's stage dirs"
     return parts, None
@@ -195,7 +195,7 @@ def _check_collisions(plan, all_parts, osn):
                     % (show("/".join(parts[:k + 1])), show(needs)))
                 break
             level = node[0]
-    # decision 5: the tree delete already removes it, and both would be counted
+    # the tree delete already removes it, and both would be counted
     for folded, path in deletes.items():
         level = tree_trie
         for f in folded[:-1]:

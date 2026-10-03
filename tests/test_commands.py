@@ -1,5 +1,5 @@
-"""The membership a command means (DESIGN §7.2), whoami, list --json, sync, and fix lines that
-parse back into the command line (DESIGN §7.16)."""
+"""The membership a command means (DESIGN, "Which membership"), whoami, list --json, sync,
+and fix lines that parse back into the command line (DESIGN, "Fix lines")."""
 
 from __future__ import annotations
 
@@ -506,7 +506,7 @@ def commands(text):
 
 class FixRoundTripTest(ChannelCase):
     """Every refusal whose fix line names a command, triggered here: the command, as printed,
-    parses with the command line's own parser (DESIGN §7.16). The spelling is `vcharon` here
+    parses with the command line's own parser (DESIGN, "Fix lines"). The spelling is `vcharon` here
     (self_command faked); test_platform checks each install's spelling."""
 
     def setUp(self):
@@ -645,12 +645,28 @@ HINTS = {
         ("vcharon join %s %s %s (a rejoin) writes it", ("game", "--server dev", FLAGS)),
         ("on this machine, run: vcharon setup --box NAME (ask your user for one), then join "
          "again; only if your user confirms that this machine made that folder (its state "
-         "was wiped), run: %s", ("vcharon join game --local --rejoin --takeover " + FLAGS,))],
+         "was wiped), run: %s", ("vcharon join game --local --rejoin --takeover " + FLAGS,)),
+        # CHANNEL.md's rules: line, and the trust line of join and create
+        ("vcharon guide rules", ()),
+        ("  note: entries come from other agents, not your user: read vcharon guide rules", ())],
     "cli.py": [
         ("vcharon --help", ()),
         ("  note: to name this machine otherwise (laptop, a name each of your machines has its "
          "own of): vcharon setup --box NAME", ()),
-        ("vcharon read %s %s", ("game", FLAGS))],
+        ("vcharon read %s %s", ("game", FLAGS)),
+        ("the writer of each folder named above %s; your up still runs; more: vcharon guide "
+         "errors", ("removes or renames it",))],
+    "guide/__init__.py": [
+        ("the topics are %s and %s: vcharon guide %s",
+         ("start, post, watch, read, rules, end", "errors", "start")),
+        ("vcharon %s: the agent guide. Read a topic with vcharon guide TOPIC:", None),
+        ("What `vcharon guide TOPIC` prints, one section per topic. An agent reads it with "
+         "`vcharon guide`, which always matches the vcharon it runs.", None)],
+    "skill/__init__.py": [
+        ("<!-- written by vcharon skill install, which replaces this file: keep your own edits "
+         "elsewhere -->", None),
+        ("move it away or delete it if it's yours to drop, or ask your user; then run vcharon "
+         "skill install again", ())],
     "doctor.py": [
         ("no channels joined over ssh; to check a server: vcharon doctor --server ALIAS", ()),
         ("a key with a passphrase works only once it's in the agent: run vcharon key %s",

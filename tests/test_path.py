@@ -107,7 +107,7 @@ class PathCases:
 
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_file_through_a_symlink(self):
-        # decision 4 of the M3 plan: the name is the link's, the bytes are the target's
+        # the name is the link's, the bytes are the target's
         write_tree(self.tmp, {"logs/2026-09-27.log": b"today"})
         link = os.path.join(self.tmp, "current.log")
         os.symlink(os.path.join("logs", "2026-09-27.log"), link)
@@ -144,7 +144,7 @@ class PathCases:
                               "a.txt": b"1", "中/文 件.txt": b"zh", "a b/c": b"c", "e/": None})
         os.utime(self.at("a/z.txt"), (MTIME, MTIME))
         p = self.plan()
-        # decision 6: depth first, by code point, each directory right before what it holds
+        # depth first, by code point, each directory right before what it holds
         self.assertEqual(paths(p), ["B", "B/x", "a", "a/m", "a/z.txt", "a b", "a b/c", "a.txt",
                                     "b.txt", "e", "中", "中/文 件.txt"])
         self.assertEqual(p.entries[1], put_file("B/x", 1, p.entries[1].mtime,
@@ -523,7 +523,7 @@ class PathCases:
         return [st.st_size, st.st_mtime, self.exec_bit(bool(st.st_mode & 0o100))]
 
     def test_no_state(self):
-        # decision 1 of the M4 plan: a one-off pull keeps none, and gets none
+        # a one-off pull keeps none, and gets none
         write_tree(self.src, {"a/b.txt": b"b", "c.txt": b"c"})
         src, p = self.planned(None)
         self.assertEqual(paths(p), ["a", "a/b.txt", "c.txt"])
@@ -958,7 +958,7 @@ class PathCases:
         self.assertEqual(after, {"sent": {}})
         self.assertEqual(paths(self.planned(after, prune="yes")[1]), ["foo.cpp"])
 
-    # --- a malformed state (decision 2 of the M4 plan) ---
+    # --- a malformed state ---
 
     def test_malformed_states(self):
         write_tree(self.src, {"a": b"a"})
@@ -1091,7 +1091,7 @@ class PathPathSourceTest(PathCases, unittest.TestCase):
 
 
 class PathDoctorTest(unittest.TestCase):
-    """The path source's doctor (decision 21 of the M5 plan): it only reads."""
+    """The path source's doctor: it only reads."""
 
     def setUp(self):
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="vcharon-test-"))

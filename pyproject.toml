@@ -21,6 +21,7 @@ packages = ["src/vcharon"]
 include = [
   "src/",
   "tests/",
+  "docs/",
   "LICENSE",
   "pyproject.toml",
 ]

@@ -1,4 +1,4 @@
-"""The channel root (DESIGN §14 M10): list, claim, release and remove channel and member
+"""The channel root: list, claim, release and remove channel and member
 folders, directly below the root; on both ends (the helper's channel.* calls, and vcharon's
 --local in-process)."""
 
@@ -90,7 +90,7 @@ def _member_file(folder):
 
 
 def refused(text, hint):
-    """A refused channel check: what's wrong, and its fix line (DESIGN §14 M10)."""
+    """A refused channel check: what's wrong, and its fix line."""
     return VCharonError("channel", text, hint)
 
 
@@ -432,7 +432,7 @@ def remove(root, channel, name, tick=_no_tick):
                                  os.urandom(3).hex())
         # On Windows a rename fails while another process holds the folder: measured
         # winerror 5 (access denied) on 2026-10-02 for an open file in it, a process whose
-        # current folder is in it, and a Git Bash shell cd'd there (DESIGN §14 M11). 32, a
+        # current folder is in it, and a Git Bash shell cd'd there. 32, a
         # sharing violation, is kept for open files; not seen. The retry (about 1 s) can't
         # outlast a real hold, so that refusal gets its own fix.
         try:

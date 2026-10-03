@@ -1,4 +1,4 @@
-"""Channel entries (M10): their text, parsing, numbers, the own folder, and the locked
+"""Channel entries: their text, parsing, numbers, the own folder, and the locked
 append."""
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class TextTest(EntriesCase):
 
 
 class LineBreakTest(EntriesCase):
-    """Entries split on "\n" only (the M10 review): str.splitlines() also splits on \x85,
+    """Entries split on "\n" only: str.splitlines() also splits on \x85,
     \u2028, \x0b, \x0c, \x1c-\x1e and a lone \r, which let a body or a title forge a
     heading."""
 

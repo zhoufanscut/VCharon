@@ -32,7 +32,7 @@ _UNSAFE = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
 # or `, then one of these and a space, the end, or a mark that ends a clause; never `vcharon's`,
 # `vcharon/`, `vcharon sync's`, a path, or the `-m vcharon` of a command runnable() wrote
 COMMANDS = ("setup", "key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
-            "post", "read", "watch", "sync", "--version", "--help")
+            "post", "read", "watch", "sync", "guide", "skill", "--version", "--help")
 _VCHARON_WORD = re.compile(r"(?:\A|(?<=[ (`]))(?<!-m )vcharon (%s)(?=\Z|[\s),.;`])"
                            % "|".join(re.escape(c) for c in COMMANDS))
 IOREG = "/usr/sbin/ioreg"
@@ -116,7 +116,7 @@ def log_dir():
 
 
 def joined_dir():
-    """The base of the channels' local trees (DESIGN §14 M10), as a channel section's
+    """The base of the channels' local trees, as a channel section's
     mailbox.local spells it. Set per OS, not taken from the state dir: macOS's has a space."""
     base = _vcharon_home()
     if base:
@@ -321,7 +321,7 @@ def _machine_guid():
 
 
 def _hashed(uuid):
-    """A device id as vcharon keeps it (DESIGN §14 M11a): a record stores the id and a refusal
+    """A device id as vcharon keeps it: a record stores the id and a refusal
     prints it, so never the OS's own id; 32 hex digits, as /etc/machine-id has."""
     return hashlib.sha256(("vcharon:" + uuid.lower()).encode("ascii")).hexdigest()[:32]
 

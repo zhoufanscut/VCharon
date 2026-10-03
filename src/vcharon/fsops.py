@@ -162,8 +162,8 @@ _private_groups = {}
 
 
 def private_group(gid):
-    """True if gid is your primary group, named after you, with nobody else in it (decision 1
-    of the M2 plan). A lookup that fails means no."""
+    """True if gid is your primary group, named after you, with nobody else in it. A lookup
+    that fails means no."""
     if gid not in _private_groups:
         try:
             me = pwd.getpwuid(os.geteuid())
@@ -745,7 +745,7 @@ def run(argv, timeout, new_session=False, env=None):
         except subprocess.TimeoutExpired:
             pass
         # The program may have exited, and only a child it left behind holds the pipes: then
-        # its exit code stands (review W6).
+        # its exit code stands.
         rc = proc.poll()
         _kill(proc, group)
         try:

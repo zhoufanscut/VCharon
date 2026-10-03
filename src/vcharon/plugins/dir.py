@@ -40,7 +40,7 @@ class Sink(plugin.StagerSink):
 
 def root_check(root, ok_text, missing_text):
     """The doctor check of a checked root: writable, or missing (so create is on) under an
-    ancestor the first run can create it in (review W5)."""
+    ancestor the first run can create it in."""
     if os.path.isdir(root):
         if os.access(root, os.W_OK | os.X_OK):
             return ("ok", ok_text, None)

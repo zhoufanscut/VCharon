@@ -183,7 +183,7 @@ class ConfigTest(ConfigCase):
                                             "join writes" % section)
 
 
-# A channel section (M10): the retired fixed mailbox's [mailbox], now in channels.d/, with a
+# A channel section: the retired fixed mailbox's [mailbox], now in channels.d/, with a
 # leader and a <channel>.<me> name.
 MAILBOX = """
 [ch.windows]
@@ -225,7 +225,7 @@ class MailboxCase(ConfigCase):
 
 
 class MailboxTest(MailboxCase):
-    """A channel section and its two jobs (the M7b plan, ported to M10's channels.d/)."""
+    """A channel section in channels.d/ and its two jobs."""
 
     def test_two_jobs(self):
         cfg = self.load_channel(MAILBOX + "idle_timeout = 600\n", VCHARON)
@@ -238,7 +238,7 @@ class MailboxTest(MailboxCase):
         sizes = {"max_bytes": "50000000", "max_files": "1000"}
         self.assertEqual(up.source, Side("local", "path", dict({"path": own, "prune": "yes",
                                                                 "allow_empty": "yes"}, **sizes)))
-        # M10: up never creates; the claim made the member's folder
+        # up never creates; the claim made the member's folder
         self.assertEqual(up.sink, Side("remote", "dir", {"path": "~/vcharon_mailbox/windows",
                                                          "create": "no"}))
         self.assertEqual((down.from_text, down.to_text), ("remote:path", "local:dir"))
@@ -269,7 +269,7 @@ class MailboxTest(MailboxCase):
     def test_writer_names(self):
         for me in ("a", "0", "win-1_x", "x" * 32):
             with self.subTest(me=me):
-                # each its own local tree: one tree per section (M10)
+                # each its own local tree: one tree per section
                 cfg = self.load_channel(MAILBOX.replace("windows", me).replace(
                     "local  = ~/vcharon_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
                 self.assertEqual(cfg.jobs["ch.%s.up" % me].mailbox.me, me)
@@ -282,7 +282,7 @@ class MailboxTest(MailboxCase):
                 self.assertEqual(e.message, "%s mailbox.me: a writer's name has only lowercase "
                                             "letters, digits, '-' and '_', starts with a letter "
                                             "or digit, and is at most 32 characters long" % WHERE)
-        # matches the pattern, but a Windows client can't hold the folder (M9)
+        # matches the pattern, but a Windows client can't hold the folder
         for me in ("con", "nul", "aux", "prn", "com1", "lpt9"):
             with self.subTest(me=me):
                 e = self.channel_refused(MAILBOX.replace("= windows", "= %s" % me))
@@ -297,14 +297,14 @@ class MailboxTest(MailboxCase):
             with self.subTest(me=me):
                 self.load_channel(MAILBOX.replace("windows", me).replace(
                     "local  = ~/vcharon_mailbox", "local  = ~/l-" + me), file="ch.%s.ini" % me)
-        # the leader follows the same rule (M10)
+        # the leader follows the same rule
         for leader in ("Laptop-ui", "con", "x" * 33):
             with self.subTest(leader=leader):
                 e = self.channel_refused(MAILBOX.replace("= laptop-ui", "= %s" % leader))
                 self.assertTrue(e.message.startswith("%s mailbox.leader: " % WHERE), e.message)
 
     def test_mailbox_me_is_a_mailbox_sections_own(self):
-        # down's path option: no one is told of it (M9)
+        # down's path option: no one is told of it
         from vcharon import plugin
         from vcharon.proto import VCharonError
         with self.assertRaises(VCharonError) as cm:
@@ -394,7 +394,7 @@ class MailboxTest(MailboxCase):
                                         name)
                 if file != "ch.windows.ini":
                     os.remove(os.path.join(self.tmp, "channels.d", file))
-        # the leader isn't in it: it changes nothing vcharon sends (M10)
+        # the leader isn't in it: it changes nothing vcharon sends
         cfg = self.load_channel(MAILBOX.replace("= laptop-ui", "= mac-other"))
         self.assertEqual({n[len("ch.windows"):]: state.fingerprint(j)
                           for n, j in cfg.jobs.items()}, prints)
@@ -436,7 +436,7 @@ class MailboxTest(MailboxCase):
 
 
 class ChannelsDirTest(MailboxCase):
-    """channels.d/ (DESIGN §14 M10, Config): one file per section, read after vcharon.ini; a
+    """channels.d/ (DESIGN, "Config"): one file per section, read after vcharon.ini; a
     broken or clashing file is skipped, fatal only for a command that names it."""
 
     def test_one_section_per_file_in_name_order(self):
@@ -518,7 +518,7 @@ class ChannelsDirTest(MailboxCase):
         self.assertEqual(config.channels_dir(cfg.path), os.path.join(other, "channels.d"))
 
     def test_two_sections_with_one_local_tree(self):
-        # one tree per (channel, member): both skipped, each naming the other (M10 review)
+        # one tree per (channel, member): both skipped, each naming the other
         self.write_channel(MAILBOX, "ch.windows.ini")
         self.write_channel(MAILBOX.replace("ch.windows", "zz.windows"), "zz.windows.ini")
         # another spelling of the same folder
@@ -565,8 +565,8 @@ class ChannelsDirTest(MailboxCase):
         cfg = self.load(VCHARON + fixed)
         self.assertEqual(list(cfg.jobs), [])
         self.assertEqual(cfg.mailboxes, {})
-        message = ('the fixed mailbox is retired (M10): delete [mailbox] from vcharon.ini '
-                   '(MAILBOX.md in the vcharon folder, "Retired")')
+        message = ("[mailbox] is a mailbox section, which vcharon.ini doesn't hold: delete it "
+                   "(channel sections live in channels.d/ next to it)")
         self.assertEqual([s.line for s in cfg.skipped],
                          ["skipped vcharon.ini [mailbox]: " + message])
         for name in ("mailbox", "mailbox.up", "mailbox.down"):

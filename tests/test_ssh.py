@@ -187,7 +187,7 @@ class QueueTest(unittest.TestCase):
         self.assertIs(q.get(0.05), ssh._EMPTY)
 
 
-# the line measured against the test server (M5 plan §3)
+# the line as measured against a real server
 AGENT_LINE = ('debug1: Server accepts key: "me@laptop" RSA '
               'SHA256:abcDEF0123456789abcDEF0123456789abcDEF01234 agent')
 
@@ -237,7 +237,7 @@ class ParseAcceptedTest(unittest.TestCase):
              ("/k", "ED25519-SK", True)),
             ("debug1: Server accepts key: /k RSA MD5:aa:bb", ("/k", "RSA", False)),
             (AGENT_LINE, ('"me@laptop"', "RSA", True)),
-            # ssh's log doubles a backslash (review B2)
+            # ssh's log doubles a backslash
             ("debug1: Server accepts key: C:\\\\Users\\\\A B/.ssh/id_ed25519 ED25519 %s" % fp,
              ("C:\\Users\\A B/.ssh/id_ed25519", "ED25519", False)),
             ("debug1: Server accepts key: just a comment", ("just a comment", "", False)),
@@ -250,13 +250,12 @@ class ParseAcceptedTest(unittest.TestCase):
     def test_other_lines(self):
         for line in ("debug1: Offering public key: /k RSA SHA256:x", "", "Server accepts key",
                      # the phrase in the middle of a line, as remote stderr could print it
-                     # (review W2)
                      "x debug1: Server accepts key: /k RSA SHA256:x",
                      "Server accepts key: /k RSA SHA256:x"):
             self.assertIsNone(ssh.parse_accepted(line), line)
 
     def test_escapes_are_decoded(self):
-        """Review B2: ssh's log escapes the ident as strnvis(VIS_SAFE | VIS_OCTAL) does."""
+        """ssh's log escapes the ident as strnvis(VIS_SAFE | VIS_OCTAL) does."""
         cases = [("k\\\\ey\\303\\251", "k\\eyé"),
                  ("C:\\\\Users\\\\A B/.ssh/id_ed25519", "C:\\Users\\A B/.ssh/id_ed25519"),
                  ("\\344\\270\\255/id", "中/id"),
@@ -298,7 +297,7 @@ class ProbeKeyTest(unittest.TestCase):
         self.assertEqual(ssh.probe_key(self.probe(255, missing, comment)).ident, self.a + "-gone")
 
     def test_escaped_file_is_a_file(self):
-        # review B2: a key file with a non-ASCII name, as ssh prints it
+        # a key file with a non-ASCII name, as ssh prints it
         path = os.path.join(os.path.dirname(self.a), "id_é")
         with open(path, "w") as f:
             f.write("key")
@@ -310,7 +309,7 @@ class ProbeKeyTest(unittest.TestCase):
         self.assertEqual(ssh.key_kind(key), "file")
 
     def test_relative_ident_isnt_a_file(self):
-        # review W2: a name the server made up can't point at a file in the current directory
+        # a name the server made up can't point at a file in the current directory
         old = os.getcwd()
         os.chdir(os.path.dirname(self.a))
         self.addCleanup(os.chdir, old)
@@ -363,14 +362,14 @@ class VerboseProbeTest(unittest.TestCase):
         self.assertTrue(ssh.denied(self.probe(255, "x@h: Permission denied (publickey).\n")))
 
     def test_denied_needs_ssh_own_exit(self):
-        # review B1: bash's "Permission denied" for a remote_python it can't run exits 126
+        # bash's "Permission denied" for a remote_python it can't run exits 126
         probe = self.probe(126, "debug1: Server accepts key: /k RSA SHA256:x\n"
                                 "bash: line 1: /usr/bin/python3: Permission denied\n")
         self.assertFalse(ssh.denied(probe))
         self.assertIn("isn't runnable", probe.error.message)
 
     def test_stops_at_authenticated(self):
-        # review W2: after the login, stderr is the server's, which could forge a line
+        # after the login, stderr is the server's, which could forge a line
         probe = self.probe(0, "debug1: Server accepts key: /real RSA SHA256:x\n"
                               "Authenticated to devbox ([192.0.2.1]:22) using \"publickey\".\n"
                               "debug1: Server accepts key: /forged RSA SHA256:y agent\n")

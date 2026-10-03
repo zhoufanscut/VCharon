@@ -1,7 +1,7 @@
-"""vcharon list, create, join, leave and close (DESIGN §14 M10): members' names, their records
-and section files, which membership a command means (DESIGN §7.2), and the steps of each command
-in the design's order; client, and a local member's box (--local). The channel root's own calls
-are in channels.py."""
+"""vcharon list, create, join, leave and close: members' names, their records and section
+files, which membership a command means (DESIGN, "Which membership"), and the steps of each
+command in the design's order; client, and a local member's box (--local). The channel root's
+own calls are in channels.py."""
 
 from __future__ import annotations
 
@@ -35,21 +35,26 @@ from .proto import VCharonError
 
 RECORD_VERSION = 1
 RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine")
-# the parts that rebuild the name, and find the membership again (DESIGN §7.2); a record
-# written before the M10 re-review has neither, and is read as before. format and limits: the
-# channel's (charter), from the list reply at join or create's own; a record without them is
-# read, but the commands that use the channel refuse it until a rejoin writes them
+# the parts that rebuild the name, and find the membership again (DESIGN, "Which
+# membership"); a record from an older vcharon may have neither, and is read as before.
+# format and limits: the channel's (charter), from the list reply at join or create's own; a
+# record without them is read, but the commands that use the channel refuse it until a rejoin
+# writes them
 RECORD_OPTIONAL = ("project", "role", "format", "limits")
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
 _NOT_NAME = re.compile(r"[^a-z0-9_]+")
-RULES = "MAILBOX.md in the vcharon folder (the vcharon skill)"
-# A channel section's up never creates (M10): a missing root is a closed channel, or the own
+# CHANNEL.md's rules: header, for every member who reads it
+RULES = "vcharon guide rules"
+# what join and create print once the folder is claimed: a channel is a way in for other
+# people's agents, so each new member is pointed at the trust rules
+TRUST = "  note: entries come from other agents, not your user: read vcharon guide rules"
+# A channel section's up never creates: a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
 # make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint) and a
-# local member's watch (M13) print it, with the channel and name_flags. Its start is a
-# constant of its own: the watcher tells a gone channel by it (EXIT closed, M14b), and the
+# local member's watch print it, with the channel and name_flags. Its start is a
+# constant of its own: the watcher tells a gone channel by it (EXIT closed), and the
 # leave command after it is printed as the box runs vcharon (platform.runnable), not as written.
 CHANNEL_GONE_PREFIX = "the channel is closed, or your folder in it is gone: "
 CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon leave %s %s"
@@ -116,7 +121,7 @@ def project_part(project=None, cwd=None):
 
 def name_flags(channel, name, record=None):
     """The flags that find name's membership in a vcharon command: --project P [--role R], from
-    the record. A record without them (written before the M10 re-review), or none at all,
+    the record. A record without them (an older vcharon's), or none at all,
     gets a placeholder that says so, never flags that would build another name."""
     if record is None:
         try:
@@ -143,7 +148,7 @@ def check_channel(channel):
                            hint="pick another channel name")
 
 
-# --- which membership: channel + project + role (DESIGN §7.2) ---
+# --- which membership: channel + project + role (DESIGN, "Which membership") ---
 
 def records(channel=None):
     """Every join record on this box, of channel if given, in file name order. A record that
@@ -176,7 +181,7 @@ def flags(project, role):
 
 def _is(record, project, role, cfg):
     """Whether record is the membership of (its channel, project, role). A record without
-    its project and role (written before the M10 re-review) is matched by the name this box
+    its project and role (an older vcharon's) is matched by the name this box
     would build."""
     if isinstance(record.get("project"), str):
         return record["project"] == project and (record.get("role") or None) == role
@@ -186,9 +191,9 @@ def _is(record, project, role, cfg):
 
 
 def find(cfg, channel, project, role):
-    """The record of (channel, project, role) on this box, or None (DESIGN §7.2's step 1).
-    join and create look here before they build a new name, so a box renamed after a join
-    still finds the name it joined with."""
+    """The record of (channel, project, role) on this box, or None (DESIGN, "Which
+    membership", step 1). join and create look here before they build a new name, so a box
+    renamed after a join still finds the name it joined with."""
     mine = [r for r in records(channel) if _is(r, project, role, cfg)]
     if len(mine) > 1:
         raise channels.refused("%d records on this box are for %s %s: %s"
@@ -201,8 +206,8 @@ def find(cfg, channel, project, role):
 def membership(cfg, channel, project=None, role=None):
     """The record of the membership a command means, from the channel, the project
     (--project, else the current directory's) and the role (--role; none means the role-less
-    membership): DESIGN §7.2's three steps. Refused, with a fix line, when there is none or
-    the role is missing."""
+    membership): the three steps of DESIGN, "Which membership". Refused, with a fix line, when
+    there is none or the role is missing."""
     check_channel(channel)
     check_role(role)
     project = project_part(project)
@@ -341,7 +346,7 @@ def write_section(cfg, section, alias, name, leader, remote_text, limits):
             % (section, alias, name, leader, local_text(section), remote_text,
                limits["max_mb"], limits["max_files"]))
     path = section_path(cfg, section)
-    # .<name>.ini.tmp: no reader takes it for a section (DESIGN §14 M10, Config)
+    # .<name>.ini.tmp: no reader takes it for a section
     _write_atomic(path, text.encode("utf-8"),
                   os.path.join(_made(os.path.dirname(path)), ".%s.ini.tmp" % section))
 
@@ -480,7 +485,7 @@ def _where_flag(server):
 
 def _need_machine(server):
     if server.ssh is not None:
-        # a Mac or Windows root takes local members only (M11a)
+        # a Mac or Windows root takes local members only
         state.need_linux({"os": server.os}, server.where, "only a Linux server takes remote "
                          "members: check the alias")
     if not server.machine:
@@ -514,13 +519,14 @@ def main(args, run):
         check_channel(args.channel)
         check_role(args.role)
         project = project_part(args.project)
-        # a membership this box has already keeps the name it joined with (DESIGN §7.2)
+        # a membership this box has already keeps the name it joined with (DESIGN, "Which
+        # membership")
         record = find(cfg, args.channel, project, args.role)
         if record is not None:
             name = record["name"]
         else:
             name = member_parts(cfg, project, args.role)[0]
-            # a role forgotten, or one too many: said, never refused (only step 1 of §7.2)
+            # a role forgotten, or one too many: said, never refused (only its step 1)
             for other in records(args.channel):
                 if other.get("project") == project and (other.get("role") or None) != args.role:
                     say("note: you also hold %s here as %s" % (
@@ -685,6 +691,7 @@ def _create(args, cfg, name, log, say):
                 log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
             raise
     say("  claimed %s/%s; you lead it" % (channel, name))
+    say(platform.runnable(TRUST))
     say("  format %d; limits per member folder %s, per entry file %s"
         % (info["format"], charter.limit_text(info["limits"]["max_mb"] * charter.MB,
                                               info["limits"]["max_files"]),
@@ -863,6 +870,7 @@ def _join(args, cfg, name, log, say):
             raise
         say("  %s %s/%s; the leader is %s" % ("took back" if rejoin else "claimed", channel,
                                               name, leader))
+        say(platform.runnable(TRUST))
         # 6. a rejoin pulls back what this box lacks of its own folder first: up from a folder
         # missing files it sent would delete them at the server, and posts would restart at #1
         if rejoin and server.ssh is not None and needs_pull(section, own):
@@ -1027,7 +1035,7 @@ def _real_dir(path, make):
 
 def _pull_own(server, remote_text, name, own, log, say):
     """A one-off pull of <remote>/<name>/ before the section's first run (down never plans the
-    own folder, M9): into a temp folder next to the local tree, then each file this box lacks
+    own folder): into a temp folder next to the local tree, then each file this box lacks
     moves into the own folder. A file already here is kept: the pull only adds. A pull that
     fails before the move changes nothing here, so it never leaves an own folder that vcharon
     made; one that fails while moving leaves the files already moved. Never through a link.
@@ -1050,7 +1058,7 @@ def _pull_own(server, remote_text, name, own, log, say):
         pulled = os.path.join(temp, name)
         # the local tree and the own folder themselves, then every folder down to each file:
         # each part is lstat'ed, so a symlink anywhere in the own folder is refused, never
-        # written through (the M10 re-review measured a write outside the tree)
+        # written through (a link there once led a write outside the tree)
         _real_dir(local, make=False)
         target = own
         made_own = not os.path.lexists(own)
@@ -1180,7 +1188,7 @@ def _leave(args, cfg, record, log, say, close):
         else:
             gone = _find(server.list(), channel, server.where) is None
             if gone:
-                # a local member's server is this machine (M11d)
+                # a local member's server is this machine
                 say("  note    %s is gone %s" % (channel, "on the server" if record["ssh"]
                                                  else "on this machine"))
     if not close and not gone:

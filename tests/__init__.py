@@ -33,7 +33,7 @@ if not os.environ.get("VCHARON_TEST_SSH"):
                       APPDATA=os.path.join(_home, "AppData", "Roaming"),
                       LOCALAPPDATA=os.path.join(_home, "AppData", "Local"))
 
-from vcharon import channels, platform
+from vcharon import channels, platform, skill
 
 
 def _under(path, top):
@@ -58,6 +58,6 @@ def _guarded(fn):
 
 
 for _module, _names in ((platform, ("config_path", "state_dir", "log_dir", "joined_dir")),
-                        (channels, ("root_path",))):
+                        (channels, ("root_path",)), (skill, ("path",))):
     for _name in _names:
         setattr(_module, _name, _guarded(getattr(_module, _name)))

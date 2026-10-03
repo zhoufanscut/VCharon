@@ -1,5 +1,5 @@
-"""vcharon watch C: print what reached you in a channel, one line per entry (DESIGN §14 M10,
-the guide's watch topic).
+"""vcharon watch C: print what reached you in a channel, one line per entry (the guide's
+watch topic).
 
 Two ways to run it. Continuous, the default, for a Claude Code Monitor: it prints only when
 something changed and runs until --max-minutes, a usage error or Ctrl-C. --until-change, for a
@@ -13,14 +13,14 @@ default (watch_dir).
 
 A remote member: each round is a sync of the channel (its section's up and down jobs), then a
 comparison of this box's copy of the channel with the round before (watch_job). It streams by
-default (DESIGN §14 M15): one long-lived child, `vcharon sync C --repeat <every>`, keeps one
+default: one long-lived child, `vcharon sync C --repeat <every>`, keeps one
 ssh connection and prints `ROUND <code>` after each round; each ROUND line is one round here.
 When the child exits it is started again after 2, 4, 8, 16, 30, 30… s (back to 2 after a round
 that worked); every way out of the watch closes its stdin, waits up to 10 s, then kills it.
 Streaming, the wake rules count time: an error of RETRY_KEYS counts once it has held 60 s in a
 row, and --until-change's EXIT error comes after --max-errors × 30 s of failing that woke
 nobody. --no-stream runs `vcharon sync C` each round, every 30 s by default, with the rules in
-rounds, as before M15.
+rounds.
 
 Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
 it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
@@ -73,7 +73,7 @@ Lines; * marks the ones that count for --until-change:
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
 restart prints what came while no watcher ran; a round that changed nothing in it (its saved
-time aside) doesn't write it again (M15), so its saved time, the watching line's `since`, is
+time aside) doesn't write it again, so its saved time, the watching line's `since`, is
 that of the last round that changed it. Per member folder it holds the entry numbers
 seen (every number up to "low", and those in "more": a member's #8 can arrive before its #7),
 each ID's heading hash for the edit check, and the hashes of the entries that have no ID of
@@ -116,13 +116,13 @@ LOG = "  log: "
 LOG_SEP = "\n"
 # A round's sync has its own timeouts; this only keeps a stuck one from stopping the watch.
 RUN_TIMEOUT = 900
-# a remote member's default seconds between rounds: streaming, and with --no-stream (M15)
+# a remote member's default seconds between rounds: streaming, and with --no-stream
 STREAM_EVERY, RUN_EVERY = 2, 30
 # a local member's
 DIR_EVERY = 10
 # a streaming watch's --every, which is vcharon sync --repeat's SECONDS: 1 to this
 STREAM_EVERY_MAX = 300
-# Streaming, a round is seconds, so M9's wake rules count time, not rounds (M15): an error of
+# Streaming, a round is seconds, so the wake rules count time, not rounds: an error of
 # RETRY_KEYS counts once it has held this long in a row (as its second 30-s round did), and
 # with --until-change each --max-errors round is this many seconds of failing that woke nobody.
 STREAM_HOLD = 60
@@ -138,17 +138,17 @@ _ROUND = re.compile(r"\AROUND (\d+)\Z")
 FOLDS = sys.platform in ("win32", "darwin")
 # vcharon's exit code for busy: another run of the job holds its lock (DESIGN §11.3)
 BUSY = 2
-# exit codes of the watcher itself (WATCHING.md)
+# exit codes of the watcher itself (vcharon guide watch)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
-# the saved snapshot's format: 2 since channels (M10), whose entries it keeps
+# the saved snapshot's format: 2 since channels, whose entries it keeps
 SNAPSHOT_VERSION = 2
-# the hex digits of a heading's sha256 kept for the edit check (DESIGN §14 M10)
+# the hex digits of a heading's sha256 kept for the edit check
 HEAD_HEX = 12
 # The key an ERROR line counts under for --until-change (error_key)
 TRANSPORT = "transport"
 # keys that count only in their second failed round in a row: a one-round blip wakes nobody
 RETRY_KEYS = frozenset([TRANSPORT, "vanished", "aborted"])
-# ERROR <code>: ..., or ERROR <job>: <code>: ... from a sync of a section's two jobs (M9c). A
+# ERROR <code>: ..., or ERROR <job>: <code>: ... from a sync of a section's two jobs. A
 # mailbox job's name, S.up or S.down, holds a dot; a code never does.
 _CODE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:up|down): )?([a-z_]+): ")
 _MORE = re.compile(r" \(and \d+ more; see the log\)")
@@ -160,7 +160,7 @@ def error_key(line):
     file changed during the run) and aborted (its text can hold a file's index) are their code,
     since their text changes from run to run; anything else is the text without its "(and N
     more; see the log)" part, which can grow while the cause stays the same. The job's name in
-    the line (M9c) splits none of the first two kinds: up and down losing the connection are
+    the line splits none of the first two kinds: up and down losing the connection are
     one problem. It stays in the text key: a content error in up and one in down are two."""
     m = _CODE.match(line)
     code = m.group(1) if m else None
@@ -228,7 +228,7 @@ def _twins(rel, names, fold):
 
 
 def warnings(root, me):
-    """Server mode's checks of the tree (DESIGN §12, M9), as the texts of WARN lines: every
+    """Server mode's checks of the tree (DESIGN §12), as the texts of WARN lines: every
     name at the top that isn't a writer's folder, which clients leave out; and in a writer's
     folder, <me>'s too, every two names that fold together on macOS or Windows and every name
     such a client can't hold, which make that client refuse the whole run, and every symlink
@@ -349,7 +349,7 @@ def _hex(text):
 
 
 class Marks:
-    """The entries told so far (DESIGN §14 M10): per member folder, the numbers of its own IDs
+    """The entries told so far: per member folder, the numbers of its own IDs
     seen, every one up to low plus those in more; each ID's heading hash, for the edit check;
     and the hashes of the entries without an ID of their folder (loose), each told once."""
 
@@ -463,7 +463,7 @@ def read_entries(root, paths, marks, me, leader, baseline=False):
 
 
 def stamp(t):
-    """A line's time: local, to the second, no zone (MAILBOX.md dates entries that way)."""
+    """A line's time: local, to the second, no zone (entry headings are dated that way)."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
 
 
@@ -485,7 +485,7 @@ def snapshot_path(root, me, job=None):
     else:
         # normcase(realpath), as the post lock: two spellings of one folder (a link, and on
         # Windows another case) get one lock, so exit 12 and leave's and close's lock checks see
-        # every watcher of it (M11a). On Linux with no links the name is as before.
+        # every watcher of it. On Linux with no links the name is as before.
         key = _root_key(root)
         digest = hashlib.sha256(os.fsencode(key)).hexdigest()[:12]
         name = "mailbox-watch-dir-%s-%s.json" % (me, digest)
@@ -502,7 +502,7 @@ def load_snapshot(path, root, me):
     else None; warnings the texts of the WARN lines shown; error the ERROR line shown last and
     still holding, or None; counted the keys (error_key) that woke --until-change in that
     failing streak; marks the entries told (Marks); fix the text of the fix line shown with
-    error, or None (M13). A snapshot without error, counted or fix has none."""
+    error, or None. A snapshot without error, counted or fix has none."""
     nothing = [], None, [], None, None
     try:
         with open(path, "rb") as f:
@@ -516,13 +516,13 @@ def load_snapshot(path, root, me):
     except (UnicodeDecodeError, ValueError):
         return (None, None, "it isn't JSON") + nothing
     if isinstance(doc, dict) and doc.get("version") == 1 and _int(doc["version"]):
-        # M10b's watcher came with M10a's channel sections: no channel was watched by an
-        # older one, whose snapshot knows files, not entries
+        # a version-1 snapshot knows files, not entries, and no channel was ever watched
+        # with one
         return (None, None, "it is from before channels (version 1): a fresh start") + nothing
     if not _snapshot_shape(doc):
         return (None, None, "it has another shape") + nothing
     # by the key snapshot_path names it with, not as typed: a restart under another spelling
-    # of the same folder (a link, another case) goes on from it (M11a review)
+    # of the same folder (a link, another case) goes on from it
     if _root_key(doc["root"]) != _root_key(root):
         return (None, None, "it is for %s" % doc["root"]) + nothing
     if doc["me"] != me:
@@ -539,8 +539,8 @@ def _int(v):
 
 _SNAPSHOT_KEYS = {"version", "root", "me", "saved", "files", "seen", "heads", "loose"}
 # keys a snapshot may lack: "error" and "counted" are written only while a round fails, "fix"
-# only while its error has one (M13); "warnings" is always written, and read as none when it's
-# missing, as since M9
+# only while its error has one; "warnings" is always written, and read as none when it's
+# missing
 _SNAPSHOT_OPTIONAL = {"warnings", "error", "counted", "fix"}
 _HEX = re.compile(r"\A[0-9a-f]{%d}\Z" % HEAD_HEX)
 
@@ -649,7 +649,7 @@ class _Watch:
         # a local member's: (max bytes, max files) of each other member's folder; one over
         # them is held as it was (hold_over), with a WARN line while it lasts
         self.folder_limits = folder_limits
-        # streaming (M15): an error of RETRY_KEYS counts once it has held hold seconds in a
+        # streaming: an error of RETRY_KEYS counts once it has held hold seconds in a
         # row by timer, not in its second round; and the watching line's end
         self.timer = timer
         self.hold = hold
@@ -672,11 +672,11 @@ class _Watch:
         self.error = None
         self.restored = False
         # the fix line's text shown with that error, or None; and server mode's fix for a
-        # channel folder that's gone (M13), printed after its ERROR line
+        # channel folder that's gone, printed after its ERROR line
         self.fix = None
         self.gone = gone
         # whether the last round's error was the channel gone (its fix is CHANNEL_GONE_HINT's):
-        # the watch ends with EXIT closed (M14b)
+        # the watch ends with EXIT closed
         self.closed = False
         # In the failing streak: the keys (error_key) that counted as a change, saved with the
         # snapshot; the keys that never count in it (the start's own error); and the key of
@@ -804,9 +804,9 @@ class _Watch:
         round in a row, so a one-round network blip wakes nobody; "ok again" counts only if an
         error of the streak counted. The keys counted are saved, so the saved error, which the
         first round after a restart prints again if it still holds, doesn't count again: else
-        every restart would wake the agent while a down stays blocked (the M9 real run). The
+        every restart would wake the agent while a down stays blocked. The
         start's own error never counts. The fix line is shown with its error, and never
-        counts or decides when the error is shown again (M13). Streaming (hold set, M15), "its
+        counts or decides when the error is shown again. Streaming (hold set), "its
         second failed round in a row" is "once it has held hold seconds in a row"."""
         change = 0
         if error is not None:
@@ -814,7 +814,7 @@ class _Watch:
                 self.say(error)
                 if fix is not None:
                     # the fix's own line, then the log's, kept apart so the fix's command
-                    # can be run as printed (M14a)
+                    # can be run as printed
                     text, _, log = fix.partition(LOG_SEP)
                     self.say("  fix: %s" % text)
                     if log:
@@ -856,7 +856,7 @@ class _Watch:
         at the next start, never loses them. scanned False: the round's scan failed, so the
         files and their saved time stay as they were; only the error shown changes. A failed
         save is shown once, until it works. Returns False if it failed. A snapshot that
-        holds what the last save wrote, its saved time aside, isn't written again (M15: a
+        holds what the last save wrote, its saved time aside, isn't written again (a
         streaming watch has a round every 2 s), so its saved time is that of the last round
         that changed it: what it holds is still true for every round since."""
         if self.state is None or self.snap is None:
@@ -895,7 +895,7 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     """Runs rounds; returns the exit code. step() runs one round and returns (change lines,
     failed, saved): failed is None for a skipped (busy) round; saved is False if the snapshot
     couldn't be saved. The limits are checked between rounds, never during one. error_seconds
-    (streaming, M15): --until-change's EXIT error comes after that many seconds of failed
+    (streaming): --until-change's EXIT error comes after that many seconds of failed
     rounds, by timer, in place of max_errors rounds. start: the timer's value the limits count
     from, if the caller took it (a streaming child's --max-minutes deadline counts from it
     too)."""
@@ -915,7 +915,7 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
         if w.closed:
             # in every mode, before the rules below: a closed channel's rule is "don't
             # restart; leave", not a change's "restart, then read"; nor is it counted, so a
-            # restart from the saved error ends the same way (M14b)
+            # restart from the saved error ends the same way
             w.say("EXIT closed")
             return EXIT_CLOSED
         now = timer()
@@ -965,7 +965,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     bytes, max files) of each other member's folder; one over them is held as it was, with a
     WARN line. Returns the exit code. Refused (VCharonError) unless root/me/ holds
     MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT closed,
-    before any lock or snapshot (M14b)."""
+    before any lock or snapshot."""
     gone = gone_fix(root, me)
     try:
         os.scandir(root).close()
@@ -1003,7 +1003,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
 
 def sync_argv(sync_args, repeat=None):
     """The child's argv: vcharon sync <sync_args>, started as this vcharon is (self_argv),
-    never through PATH (DESIGN §13); with repeat, --repeat <repeat> (M15). sync_args: the
+    never through PATH (DESIGN §13); with repeat, --repeat <repeat>. sync_args: the
     channel, and the --project and --role that find this membership."""
     argv = platform.self_argv() + ["sync"] + list(sync_args)
     if repeat is not None:
@@ -1014,10 +1014,10 @@ def sync_argv(sync_args, repeat=None):
 def parse_failure(code, lines, job):
     """(exit code, its error line, that line's fix) of a sync's output lines: the first
     line that starts with ERROR, else the first that isn't blank; the fix is the text of that
-    ERROR line's "  fix: " line (M13), with its "  log: " path after it, since a fix can point
+    ERROR line's "  fix: " line, with its "  log: " path after it, since a fix can point
     at lines the watcher doesn't show ("see ssh's messages above"); a log with no fix gives one
     that names the log; else None. Both are None for code 0. One parser for a sync's
-    stderr and a streamed round's lines (M15)."""
+    stderr and a streamed round's lines."""
     if code == 0:
         return 0, None, None
     for i, line in enumerate(lines):
@@ -1083,7 +1083,7 @@ _BROKE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*: )?(connect|timeout|
 
 
 class Stream:
-    """A streaming watch's child (DESIGN §14 M15): one long-lived `vcharon sync C --repeat
+    """A streaming watch's child: one long-lived `vcharon sync C --repeat
     <every>`. A reader thread puts its stdout's lines in a queue, another keeps stderr's last
     20. Each ROUND <code> line ends one round; when the child exits, it's started again after
     BACKOFF's wait. spawn, sleep and timer are the tests' to replace."""
@@ -1302,11 +1302,11 @@ def mailbox_of(job):
 def server_leader(root, me):
     """The leader of a local member's channel: its record's (vcharon join --local wrote it),
     else its MEMBER.md's. Refused if root/me/ holds no MEMBER.md: a local member's watch reads
-    a channel member's folder only (DESIGN §14 M10)."""
+    a channel member's folder only."""
     member = os.path.join(root, me, entries.MEMBER_FILE)
     channel = os.path.basename(root)
     if not entries.own_folder(member, top=os.path.join(root, me)):
-        # a root that's gone never gets here: watch_dir ends with EXIT closed (M14b)
+        # a root that's gone never gets here: watch_dir ends with EXIT closed
         raise VCharonError("channel", "%s isn't there: your folder in the channel holds it, once "
                            "vcharon join --local has written it" % member,
                            "ask the user: your folder in %s lost its %s"
@@ -1326,19 +1326,19 @@ def server_leader(root, me):
 
 
 def gone_fix(root, me):
-    """A local member's fix line for a channel folder that's gone (M13): the sync's text for a
+    """A local member's fix line for a channel folder that's gone: the sync's text for a
     closed channel, with the leave command's flags from me's record (a placeholder without
-    one: name_flags never raises), and the command as this box runs vcharon (M14a)."""
+    one: name_flags never raises), and the command as this box runs vcharon."""
     channel = os.path.basename(root)
     return platform.runnable(channel_cmd.CHANNEL_GONE_HINT
                              % (channel, channel_cmd.name_flags(channel, me)))
 
 
 def is_gone(fix):
-    """Whether a fix line is the one for a channel that's gone (M14b): CHANNEL_GONE_HINT's,
+    """Whether a fix line is the one for a channel that's gone: CHANNEL_GONE_HINT's,
     told by its start, which neither platform.runnable nor run_sync's log part changes.
     The sync swaps that hint in only for a channel job's not_found on up's sink root or
-    down's source root (M10); a local member's scan gives it only for FileNotFoundError on
+    down's source root; a local member's scan gives it only for FileNotFoundError on
     the channel's folder."""
     if not fix:
         return False
@@ -1350,7 +1350,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
-    membership. stream (M15): the rounds are those of one long-lived `vcharon sync C --repeat
+    membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
     <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer."""
     local, me, leader = mailbox_of(job)

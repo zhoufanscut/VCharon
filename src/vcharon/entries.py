@@ -1,4 +1,4 @@
-"""Channel entries (DESIGN §14 M10): their text, parsing them, their numbers, and appending one
+"""Channel entries: their text, parsing them, their numbers, and appending one
 under a lock; client and server member (vcharon join, post and watch).
 
 An entry is a heading with the poster's ID, a header up to the first blank line, and a body:
@@ -24,7 +24,7 @@ from . import pathrules, platform
 from .lock import Lock
 from .proto import VCharonError
 
-# the heading's time: local, to the minute (post's since M7b)
+# the heading's time: local, to the minute
 TIME_FORMAT = "%Y-%m-%d %H:%M"
 MEMBER_FILE = "MEMBER.md"
 CHANNEL_FILE = "CHANNEL.md"
