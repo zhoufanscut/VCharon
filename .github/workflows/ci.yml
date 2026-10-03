@@ -47,3 +47,10 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -t .
+
+      # one row is enough: the result doesn't depend on the OS or Python (target-version is
+      # fixed in pyproject.toml), and the other rows' minutes count more while private. After
+      # the tests, so a lint error never hides a test result.
+      - name: Lint (ruff)
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' }}
+        run: ruff check src tests

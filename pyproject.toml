@@ -12,7 +12,7 @@ authors = [{ name = "zhoufanscut" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = []
+dev = ["ruff>=0.16.10,<0.17"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vcharon"]
@@ -24,3 +24,21 @@ include = [
   "LICENSE",
   "pyproject.toml",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# ruff's default rules, minus these. Each is a design decision; say why when adding one.
+ignore = [
+  "UP031",   # %-formatting is the house style; the fix gives .format() and long lines
+  "G010",    # false positive: vcharon.log.Log has warn(), no warning(); the fix breaks calls
+  "ISC004",  # wrapped strings inside tuples and lists are the house style
+]
+# BLE001 stays on: each deliberate broad catch (cleanup that must not hide the first error, the
+# top-level guard, plugin and wire boundaries) carries its own noqa, so a new one is flagged.
+
+[tool.ruff.lint.isort]
+# imports go stdlib, then vcharon, then the tests' own modules
+known-local-folder = ["tests"]
