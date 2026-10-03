@@ -228,11 +228,15 @@ main() {
       echo "  Add this line to your shell profile (~/.bashrc, ~/.zshrc, ...):"
       echo ""
       echo "    export PATH=\"\${HOME}/.local/bin:\${PATH}\""
-      echo ""
       ;;
   esac
 
-  echo "Run \`vcharon --version\` to check it, then \`vcharon guide\`."
+  echo ""
+  echo "Next:"
+  echo "  vcharon --version        check that it runs"
+  echo "  vcharon skill install    so Claude Code and Codex find vcharon: a skill that"
+  echo "                           points them at vcharon guide"
+  echo "  vcharon guide            the agent guide"
 }
 
 WORK_DIR=""

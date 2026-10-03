@@ -289,7 +289,12 @@ public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wP
         $inSession = ($env:Path -split ';') |
             Where-Object { $_.TrimEnd('\') -ieq $dir.TrimEnd('\') }
         if (-not $inSession) { $env:Path = "$env:Path;$dir" }
-        Write-Host 'Run `vcharon --version` to check it, then `vcharon guide`.'
+        Write-Host ''
+        Write-Host 'Next:'
+        Write-Host '  vcharon --version        check that it runs'
+        Write-Host '  vcharon skill install    so Claude Code and Codex find vcharon: a skill that'
+        Write-Host '                           points them at vcharon guide'
+        Write-Host '  vcharon guide            the agent guide'
     }
 
     try {

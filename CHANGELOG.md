@@ -7,6 +7,14 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `install.sh` and `install.ps1` end with the next steps: `vcharon --version`, then `vcharon
+  skill install` (so Claude Code and Codex find vcharon through a skill that points them at
+  `vcharon guide`), then `vcharon guide`. They said only to check the version and read the
+  guide; in the first channel run on 0.1.0, two members' agents picked another skill because
+  vcharon's wasn't installed (as their user reported).
+
 ## 0.1.0 — 2026-10-03
 
 The first release.

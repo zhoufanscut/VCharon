@@ -158,6 +158,15 @@ class InstallShTest(unittest.TestCase):
         self.assertIn("Checking the checksum ...", out)
         # ~/.local/bin isn't on this PATH: the line to add it
         self.assertIn("is not on your PATH", out)
+        # the next steps end it, skill install among them: agents find vcharon through it;
+        # one blank line before them
+        self.assertEqual(out.splitlines()[-6:], [
+            "",
+            "Next:",
+            "  vcharon --version        check that it runs",
+            "  vcharon skill install    so Claude Code and Codex find vcharon: a skill that",
+            "                           points them at vcharon guide",
+            "  vcharon guide            the agent guide"])
         self.assertEqual(self.server.asked, ["/latest", "/download/%s/%s" % (TAG, ASSET),
                                              "/download/%s/%s.sha256" % (TAG, ASSET)])
         # only the binary came out of the archive, and nothing else is left
