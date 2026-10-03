@@ -28,7 +28,13 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once: the package
 
 .venv/bin/pip install -e ".[build]" && .venv/bin/pyinstaller vcharon.spec   # the binary, in dist/
 sh tests/smoke.sh dist /tmp/vc-smoke                         # its smoke test, all in /tmp/vc-smoke
+python3 tests/pack.py dist vcharon-linux-x64 /tmp/vc-assets  # the release's three assets
+sh tests/install_check.sh /tmp/vc-assets vcharon-linux-x64 <version> /tmp/vc-install
 ```
+
+`tests/ssh_flow.sh` (a channel over real ssh to localhost) and `tests/ci_sshd.sh` are CI's: the
+first writes a channel into the ssh user's real home, the second changes `~/.ssh`. Never run
+them on your own machine.
 
 - **`-t .` matters**: it makes `tests` a package, so `tests/__init__.py`'s sandbox loads before
   any test (below).
@@ -128,9 +134,10 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
 
 ## Releases
 
-Not set up yet: `release.yml`, `install.sh` and `install.ps1` come before the first release;
-`vcharon --update` (`src/vcharon/update.py`) is there, waiting for a release to read. The
-outline, once they exist:
+`.github/workflows/release.yml` builds, checks and publishes on a tag `v<version>` (DESIGN,
+"Releases"). No release is public yet: while the repo is private, release candidates
+(`0.1.0rc1`, …) are published as GitHub pre-releases, which `--update` and the installers
+never pick. The steps:
 
 1. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
    `version` in `pyproject.toml`.
@@ -138,7 +145,8 @@ outline, once they exist:
    checked on which OS, marked measured or inferred.
 3. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
    doesn't match both version strings, runs the suite, builds one binary per platform
-   (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, and uploads the binary, its
-   archive and the archive's `.sha256`.
-4. Three files agree on the release asset names and change together: `release.yml`,
-   `install.sh`/`install.ps1`, and the updater.
+   (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, runs the installer against it,
+   and publishes the binary, its archive and the archive's `.sha256`, as a pre-release when the
+   version has a pre-release label.
+4. These agree on the release asset names and change together: `release.yml` and
+   `tests/pack.py`, `install.sh`/`install.ps1` (and `tests/install_check.sh`), and the updater.

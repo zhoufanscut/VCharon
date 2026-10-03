@@ -1,0 +1,2 @@
+# POSIX sh scripts stay LF on a Windows checkout too (core.autocrlf), or sh refuses them
+*.sh text eol=lf

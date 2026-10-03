@@ -30,7 +30,10 @@ class RealSshTest(unittest.TestCase):
     def setUp(self):
         tmp = self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": tmp})
+        # the suite's sandbox is off here (the real home's ~/.ssh is needed), so the local
+        # channel root, which doctor lists, goes in the temp folder too
+        patcher = mock.patch.dict(os.environ, {
+            "VCHARON_HOME": tmp, "VCHARON_CHANNELS_ROOT": os.path.join(tmp, "channels")})
         patcher.start()
         self.addCleanup(patcher.stop)
 

@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import cli, doctor, fsops, install, pathrules, platform, ssh, stage, state
+from vcharon import VERSION, cli, doctor, fsops, install, pathrules, platform, ssh, stage, state
 from vcharon import run as engine
 from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.proto import VCharonError
@@ -102,14 +102,15 @@ class CliTest(FakeSshCase):
         # the bare version, nothing else (an update's smoke check compares it); the protocol
         # and Python are doctor's
         code, out, err = self.run_cli("--version")
-        self.assertEqual((code, out, err), (0, "0.1.0\n", ""))
+        self.assertEqual((code, out, err), (0, VERSION + "\n", ""))
 
     def test_ping(self):
         code, out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 0, err)
         lines = out.splitlines()
         self.assertEqual(lines[0], "vcharon: ping fake-dest")
-        self.assertRegex(lines[1], r"\A  helper   vcharon 0\.1\.0, protocol 3, Python 3\.")
+        self.assertRegex(lines[1], r"\A  helper   vcharon " + re.escape(VERSION)
+                         + r", protocol 3, Python 3\.")
         self.assertRegex(lines[2], r"\A  server   .+, user .*, home " + re.escape(self.home)
                          + r"\Z")
         self.assertEqual(lines[3], "  machine  0123456789abcdef0123456789abcdef")
@@ -121,7 +122,7 @@ class CliTest(FakeSshCase):
         log = os.path.join(self.vcharon_home, "logs", "vcharon.log")
         with open(log, encoding="utf-8") as f:
             text = f.read()
-        self.assertIn("vcharon 0.1.0 ping fake-dest", text)
+        self.assertIn("vcharon %s ping fake-dest" % VERSION, text)
         self.assertIn("ping OK", text)
 
     def test_ping_warnings(self):
@@ -385,7 +386,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(sorted(doc["source"]["sent"]), ["a.txt", "d", "d/b.txt", "e",
                                                         "中 文.txt"])
         log = self.job_log()
-        self.assertIn("vcharon 0.1.0 sync push; Python ", log)
+        self.assertIn("vcharon %s sync push; Python " % VERSION, log)
         self.assertIn("  info    put     3 files, 2 dirs (1.2 kB)\n", log)
         self.assertIn("transfer: 3 files, 1202 bytes", log)
         # the second run: nothing to do, and nothing moves
@@ -840,7 +841,7 @@ class JobTest(FakeSshCase):
     def test_verbose(self):
         code, _out, err = self.run_jobs("push", "-v")
         self.assertEqual(code, 0, err)
-        self.assertIn("  info  vcharon 0.1.0 sync push; Python ", err)
+        self.assertIn("  info  vcharon %s sync push; Python " % VERSION, err)
         self.assertIn("  info  starting ssh: ", err)
         code, _out, err = self.reset_job("push", verbose=True)
         self.assertIn("  info  state reset: removed ", err)
@@ -965,8 +966,8 @@ class MultiJobTest(FakeSshCase):
                 self.assertEqual(list(json.load(f)["source"]["sent"]), [name + ".txt"])
         # the session's own lines are a's; b says whose connection it used
         a, b = self.job_log("a"), self.job_log("b")
-        self.assertIn("vcharon 0.1.0 sync a b; Python ", a)
-        self.assertIn("vcharon 0.1.0 sync a b; Python ", b)
+        self.assertIn("vcharon %s sync a b; Python " % VERSION, a)
+        self.assertIn("vcharon %s sync a b; Python " % VERSION, b)
         self.assertIn("starting ssh", a)
         self.assertIn("ssh exited with code 0", a)
         self.assertNotIn("starting ssh", b)
@@ -1317,7 +1318,7 @@ class MultiJobTest(FakeSshCase):
         self.assertEqual(err[-1], "  log: %s" % os.path.join(self.vcharon_home, "logs", "b.log"))
         self.assertEqual(len(err), 3)
         self.assertNotIn("shares the connection", self.job_log("a") + self.job_log("b"))
-        self.assertIn("vcharon 0.1.0 sync b; Python ", self.job_log("b"))
+        self.assertIn("vcharon %s sync b; Python " % VERSION, self.job_log("b"))
 
 
 class Between:
@@ -1408,7 +1409,7 @@ class RepeatTest(FakeSshCase):
         self.assertEqual(len(set(map(id, resets))), 1)
         a = self.job_log("a")
         self.assertEqual(a.count("hello from fake-dest"), 1)
-        self.assertIn("vcharon 0.1.0 sync a b --repeat 1; Python ", a)
+        self.assertIn("vcharon %s sync a b --repeat 1; Python " % VERSION, a)
         self.assertIn("repeat: stdin ended; stopping after 3 rounds since ", a)
         self.assertIn("ssh exited with code 0", a)
         self.assertEqual(self.inbox("a"), {"a.txt": b"a"})
@@ -2518,7 +2519,7 @@ class EntryPointTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 result = self.run_vcharon(*argv + ["--version"], cwd=os.environ["VCHARON_HOME"])
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "0.1.0\n")
+                self.assertEqual(result.stdout, VERSION + "\n")
 
     def test_a_usage_error_exits_3_not_2(self):
         # argparse's own code, 2, means busy here

@@ -455,9 +455,9 @@ class SessionTest(FakeSshCase):
     # 15
     def test_hello_mismatch(self):
         source = package_source("__init__.py")
-        self.assertIn('VERSION = "0.1.0"', source)
-        s = self.session(extra_modules={"vcharon": source.replace('VERSION = "0.1.0"',
-                                                                'VERSION = "9.9.9"')})
+        line = 'VERSION = "%s"' % vcharon.VERSION
+        self.assertIn(line, source)
+        s = self.session(extra_modules={"vcharon": source.replace(line, 'VERSION = "9.9.9"')})
         err = self.failure(s.open)
         self.assertEqual(err.code, "protocol")
         self.assertIn("9.9.9", err.message)

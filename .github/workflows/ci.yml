@@ -57,3 +57,36 @@ jobs:
       - name: Lint (ruff)
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' }}
         run: ruff check src tests
+
+  # a real channel over real ssh, to the runner's own sshd: what the unit tests reach only
+  # through a stand-in for ssh
+  ssh:
+    name: "ssh (ubuntu-latest, Python 3.13)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Start sshd, authorize a key for localhost
+        run: sh tests/ci_sshd.sh
+
+      # two members from two VCHARON_HOMEs: create, join, ping, watch, post, sync, read, leave,
+      # close
+      - name: Channel flow over ssh
+        run: sh tests/ssh_flow.sh localhost "$RUNNER_TEMP/ssh-flow"
+
+      - name: Real-ssh unit tests
+        env:
+          VCHARON_TEST_SSH: localhost
+        run: python -m unittest tests.test_real_ssh -v

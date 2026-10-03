@@ -155,8 +155,9 @@ class DoctorTest(DoctorCase):
                                                 "fake-dest", "push", "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
-        self.assertEqual(lines.pop(1), "  ok    vcharon    0.1.0, protocol 3, reads channel "
-                         "formats up to 1; runs as %s" % platform.self_command())
+        self.assertEqual(lines.pop(1), "  ok    vcharon    %s, protocol 3, reads channel "
+                         "formats up to 1; runs as %s"
+                         % (vcharon.VERSION, platform.self_command()))
         # how it was installed: what vcharon --update touches
         self.assertEqual(lines.pop(1), "  ok    install    a checkout, %s: vcharon --update "
                          "prints the git commands that update it" % checkout)

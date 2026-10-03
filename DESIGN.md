@@ -1460,10 +1460,12 @@ version check at start-up.
   check. `--yes` is the one yes; `--force` installs the latest even when it is this version, or
   an older one (this build is ahead of the latest release).
 - **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
-  number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` -> `0.1.0rc2`
-  -> `0.1.0` are each an update, and a post-release (`post`) above it: `0.1.0.post1` is newer
-  than `0.1.0`. A tag that doesn't parse is never newer. `--force` with an older release says it
-  "can be installed"; with the same one, "can be reinstalled".
+  number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` < `0.1.0rc2` <
+  `0.1.0`, and a post-release (`post`) above it: `0.1.0.post1` is newer than `0.1.0`. `--update`
+  reads only full releases (`releases/latest` never returns a pre-release), so a release candidate
+  is fetched with `gh release download`, never through `--update`. A tag that doesn't parse is never
+  newer. `--force` with an older release says it "can be installed"; with the same one, "can be
+  reinstalled".
 - **Checked before the question**: how VCharon was installed, that a binary is published for
   this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
   pipx command), that the binary's folder is writable (by making and removing a temp folder in
@@ -1498,7 +1500,7 @@ version check at start-up.
 - **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;
   once the release is read `latest`, `tag`, `update_available`, `url`, `changed`, `confirmed`;
   `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
-  `missing_asset`, `no_release`, `network`, `rate_limited`, `checksum_mismatch`,
+  `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `checksum_mismatch`,
   `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …), `message` and `fix`;
   another install kind's `command`; an install's `previous`, `installed`, `verified`.
 - `not_writable`'s fix runs the installer again: `install.sh` on Linux and macOS, `install.ps1`
@@ -1551,6 +1553,51 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   between them puts the old binary back, and its work folder is kept while no binary is in place.
   `install.sh` is tested under sh and dash against a local fake release; **`install.ps1` has not
   been run yet** (no Windows here).
+
+### Releases
+
+A tag `v<version>` runs `.github/workflows/release.yml`. Pushing the tag publishes, so the
+maintainer asks before tagging.
+
+- **The tag must match both version strings**, `VERSION` in `src/vcharon/__init__.py` and
+  `version` in `pyproject.toml` (a leading `v` stripped); any other tag stops the release before
+  a build.
+- **One build per platform**, each on its own runner, all steps in bash (Git Bash on Windows):
+  the unit tests, `pyinstaller vcharon.spec`, `tests/smoke.sh` with the tag's version, then
+  packing and the installer check. The Linux row also pings the runner's own sshd from the binary
+  and runs `tests/ssh_flow.sh` with it, so the helper bundled in the binary runs on a real server.
+- **Assets**, nine per release, the names `--update`, `install.sh` and `install.ps1` pick. These
+  agree on them and change together: `release.yml` and `tests/pack.py`, `install.sh` and
+  `install.ps1` (and `tests/install_check.sh`), and `src/vcharon/update.py`:
+
+  | platform | binary | archive (holds the binary and `LICENSE`, at its top) | checksum |
+  |---|---|---|---|
+  | Linux x64 | `vcharon-linux-x64` | `vcharon-linux-x64.tar.gz`, member `vcharon` | `.tar.gz.sha256` |
+  | macOS arm64 | `vcharon-darwin-arm64` | `vcharon-darwin-arm64.tar.gz`, member `vcharon` | `.tar.gz.sha256` |
+  | Windows x64 | `vcharon-win-x64.exe` | `vcharon-win-x64.zip`, entry `vcharon.exe` | `.zip.sha256` |
+
+  The checksum covers the archive, which is what the installers and `--update` download. Each
+  `.sha256` is one line, `<hex>  <archive name>` with an LF, as `sha256sum` prints it: they read
+  its first word.
+- **`tests/pack.py`** packs with Python's `tarfile` and `zipfile`, not `tar` and `zip`: the same
+  on all three runners (Git Bash may have no `zip`; macOS's `tar` adds `._` files for extended
+  attributes), no build machine's owner in the archive, and the zip entry a regular file in its
+  Unix mode (`--update` refuses any other type). It then reads the archive back: exactly the
+  binary and `LICENSE`, the binary's bytes, executable. The workflow checks the `.sha256` again
+  with the system's own `sha256sum` (macOS: `shasum -a 256`).
+- **`tests/install_check.sh`** serves the packed archive as a fake release on `127.0.0.1` through
+  the installers' test-only URL overrides and runs this OS's installer (`install.sh`, or
+  `install.ps1` under `pwsh` on Windows) twice: with a wrong `.sha256`, which must fail and
+  install nothing, then with the real one, whose installed binary must print the tag's version.
+  On Windows `install.ps1` also adds its folder to the user's PATH, so the check runs there only
+  where `CI` is set.
+- **One job publishes**, after all three builds: it takes their assets, checks there are exactly
+  the nine and that each checksum holds, and runs `gh release create`. A version with a
+  pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
+  a GitHub pre-release: `releases/latest` leaves those out, so `--update` and the installers never
+  offer a release candidate.
+- `*.sh` files are LF on every checkout (`.gitattributes`), so a script is the same bytes on
+  every OS: a Windows checkout turns text to CRLF, and a shell other than Git Bash refuses a CR.
 
 ## Stable
 
@@ -1641,9 +1688,19 @@ which and how to adapt. A channel format change is always a minor version at lea
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
 - CI runs the suite on Linux (Python 3.11 and 3.13), macOS and Windows (3.13), and `ruff check
   src tests` on one row.
+- CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`: sshd started, a
+  key without a passphrase authorized, `localhost` in `known_hosts`) and runs a real channel over
+  it: `tests/ssh_flow.sh localhost WORK` pings, then two remote members from two `VCHARON_HOME`s
+  (boxes `ci1` and `ci2`, one project) create and join a channel, the second one's `watch
+  --until-change` wakes on the first one's post and sync, and it ends with `read`, `leave` and
+  `close`; then the real-ssh unit tests (`VCHARON_TEST_SSH=localhost`). The channel is made in
+  the ssh user's real channel root, since the server side reads no test variable over ssh, so
+  `ssh_flow.sh` runs only where `CI` is set (or `SSH_FLOW_REAL_HOME=1`), refuses a root that
+  already holds its channel, and `ci_sshd.sh` only on GitHub Actions.
 - `install.sh` runs under `sh` against a fake release on a local HTTP server, with `uname`
   faked for each platform (POSIX only). A built binary is checked by `tests/smoke.sh`
-  ([Packaging](#packaging)).
+  ([Packaging](#packaging)), and its packed assets by `tests/pack.py` and
+  `tests/install_check.sh` ([Releases](#releases)).
 
 ## Rules for the code
 

@@ -9,7 +9,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## 0.1.0 — unreleased
 
-The first version.
+The first version. Its release candidates are tagged `v0.1.0rc1`, `v0.1.0rc2`, … and published
+as GitHub pre-releases: `vcharon --update`, `install.sh` and `install.ps1` read only the latest
+full release, so they never offer one.
 
 VCharon gives AI agents (Claude Code, Codex, OpenCode, or any CLI with a shell) file-based
 channels, on one machine or across machines over plain ssh, with nothing installed on the
@@ -59,7 +61,12 @@ and made a tool of its own.
   (`run_in_background`) with `vcharon watch C --until-change`: woken within one 10 s round of the
   leader's post, with `to all:` then `EXIT change`, exit 0. **Measured.** A remote (`--server`)
   member under Claude Code: **not yet run.**
-- A channel over real ssh (a remote member syncing with a Debian 13 server): **not yet run.**
+- A channel over real ssh: two remote members on one Linux box (Debian 13, Python 3.13), through
+  its own sshd: `ping`, `create`, `join`, and a `watch --until-change` woken by the other
+  member's `post` and `sync` (`to all:` then `EXIT change`, exit 0). **Measured**, once, by
+  hand. `leave` and `close` over ssh, and a member on another machine: **not yet run.**
+  CI's `ssh` job runs the whole flow (`tests/ssh_flow.sh`) on its Ubuntu runner, ending with
+  `read`, `leave` and `close`: **not yet run** there.
 - Claude Code's Monitor tool, Codex and OpenCode as members, and any agent on macOS or Windows:
   **not yet run.**
 - The default folder and entry limits fit real channels: **not measured**; a guess.
@@ -82,3 +89,7 @@ and made a tool of its own.
   yet**. **Nothing has been released.**
 - `install.sh`: **tested** under sh and dash against a fake release on a local HTTP server,
   never against GitHub. `install.ps1`: **not yet run** (no Windows here).
+- The release workflow (`release.yml`): the tag check, packing (`tests/pack.py`) and the
+  installer check (`tests/install_check.sh`: a wrong `.sha256` refused, the right one installs
+  a binary that prints the version) ran on Linux with the Linux binary: **measured**. The
+  workflow itself, the macOS and Windows rows, and `install.ps1` under it: **not yet run**.

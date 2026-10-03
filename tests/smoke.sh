@@ -22,7 +22,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 if [ $# -ge 3 ]; then
   VERSION="$3"
 else
-  VERSION="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' "${REPO}/src/vcharon/__init__.py")"
+  # a Windows checkout's CRLF
+  VERSION="$(tr -d '\r' < "${REPO}/src/vcharon/__init__.py" | sed -n 's/^VERSION = "\(.*\)"$/\1/p')"
 fi
 PYTHON="${PYTHON:-}"
 if [ -z "${PYTHON}" ]; then
@@ -57,7 +58,8 @@ fail() {
 }
 
 step vcharon --version
-GOT="$(vcharon --version)"
+# a Windows program ends its lines with CRLF, and Git Bash's $(...) keeps the CR
+GOT="$(vcharon --version | tr -d '\r')"
 echo "${GOT}"
 [ "${GOT}" = "${VERSION}" ] || fail "--version printed '${GOT}', expected '${VERSION}'"
 
