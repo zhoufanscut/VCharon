@@ -1731,6 +1731,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
 - CI runs the suite on Linux, macOS and Windows, each with Python 3.13 and 3.14, and `ruff check src
   tests` on one row.
+- A push or pull request that changes only docs (top-level `*.md`, `docs/`, `LICENSE`, the issue
+  templates) skips CI and runs `docs.yml` instead: `tests.test_guide` and `tests.test_old_name`
+  on one Linux row, the guards that read those files. CI's seven runner jobs would test code that
+  didn't change. Its paths and `ci.yml`'s `paths-ignore` are the same list. A release tag still
+  runs the whole suite.
 - CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`: sshd started, a
   key without a passphrase authorized, `localhost` in `known_hosts`, and setup-python's 3.13 linked
   as `/usr/local/bin/python3`, since the runner's own `python3` is below the floor and the server

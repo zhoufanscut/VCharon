@@ -1,10 +1,23 @@
 name: CI
 
+# A push or pull request that changes only the files below skips this workflow (it costs seven
+# runner jobs); docs.yml runs the guards that read those files instead. A push with any other
+# file runs everything. Keep this list and docs.yml's paths the same.
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
   pull_request:
     branches: ["main"]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,50 @@
+name: Docs
+
+# The repo guards that read the docs (tests/test_guide.py: the guide is current, every section
+# reference names a heading that exists, no build history; tests/test_old_name.py), for a push
+# that changes only docs and so skips ci.yml. One runner, about a minute. Keep these paths and
+# ci.yml's paths-ignore the same.
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    name: "doc guards (ubuntu-latest, Python 3.13)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Doc guards
+        run: python -m unittest tests.test_guide tests.test_old_name -v
