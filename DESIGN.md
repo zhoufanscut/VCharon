@@ -461,6 +461,7 @@ Every error the user sees has one of these codes; the last column is the exit co
 | `io` | an OS error with no code of its own | 1 |
 | `too_big` | a message would pass the 64 MiB limit of a J frame; a post over the channel's entry or folder limits; an up whose own folder is over the folder limits ([Limits](#limits)) | 1 |
 | `internal` | a bug; `detail` has the traceback | 1 |
+| `update` | `vcharon --update` failed or was refused; `--json`'s `error` says why ([Self-update](#self-update)) | 1 |
 
 ## Plans
 
@@ -1262,6 +1263,7 @@ Messages
 Other
   vcharon guide  [TOPIC]
   vcharon --version
+  vcharon --update [--yes] [--force] [--json]
 ```
 
 Every verb also takes `-v` (log lines to stderr too).
@@ -1271,14 +1273,16 @@ Every verb also takes `-v` (log lines to stderr too).
 - **No abbreviations** (`allow_abbrev=False`): a prefix such as `--ful` would become part of the
   flags' contract.
 - **`--json`** on every verb that reports something: `list`, `whoami`, `read`, `doctor`. A
-  refusal prints nothing on stdout; `doctor --json` prints its report even when a check fails.
+  refusal prints nothing on stdout; `doctor --json` prints its report even when a check fails,
+  and `--update --json` its object even when it fails (not a usage error, which prints nothing
+  on stdout; [Self-update](#self-update)).
 - **Short help**: `vcharon --help` fits one screen and lists the exit codes; each verb's
   `--help` shows one example.
 - `setup` writes the config, or prints what this machine uses; `doctor` checks this machine
-  (Python, config, box, ssh client, agent keys, folders, machine id), each server of the
-  channels joined or the one named (login through the `-v` probe, Python, distro, clock, an echo
-  of 4 MiB), and each channel section's jobs; it only reads, apart from a temp file in the state
-  and log dirs. `ping` connects, echoes all 256 byte values plus 1 MiB of random bytes, and
+  (how VCharon was installed, Python, config, box, ssh client, agent keys, folders, machine
+  id), each server of the channels joined or the one named (login through the `-v` probe,
+  Python, distro, clock, an echo of 4 MiB), and each channel section's jobs; it only reads,
+  apart from a temp file in the state and log dirs. `ping` connects, echoes all 256 byte values plus 1 MiB of random bytes, and
   prints the round trip.
 - `sync` is for remote members only (a local member's folder is in the channel itself). `--full`
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
@@ -1326,7 +1330,8 @@ OK  2 jobs  (0.7 s)
 | 130 | Ctrl-C |
 
 The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher runs, 13 closed, and
-14 reserved for "updated". A usage error is 3, not argparse's 2, since 2 means busy.
+14 updated (VCharon was replaced while it ran; `sync --repeat` exits 14 too). A usage error is 3,
+not argparse's 2, since 2 means busy.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -1346,7 +1351,8 @@ So that a run from an agent's background shell behaves like one from a terminal:
   `ssh_path`); the member name's project part is the one exception, on purpose;
 - on Windows, stdout and stderr write UTF-8 (`errors="replace"`); every file VCharon writes is
   UTF-8;
-- never prompt (BatchMode, no `input()`), except `vcharon key`;
+- never prompt (BatchMode, no `input()`), except `vcharon key` and `--update`'s `Update now?
+  [y/N]`, which takes no terminal as "no";
 - starting itself as a child (the watcher's sync) uses `platform.self_argv()`: the binary itself,
   or `<python> -P -m vcharon` (`-P`: a `vcharon/` folder in the current folder can't shadow the
   package). A frozen binary's child gets `PYINSTALLER_RESET_ENVIRONMENT=1`, so it unpacks its own
@@ -1379,7 +1385,10 @@ line of text>` for the agent or its user.
   … again"). Not to an `ERROR` line's message, which would turn prose into a command line. The log
   keeps the plain text: a person may read it later on another machine.
 - A text-form line is left as written: `fix: ask your user to run: vcharon --update` is advice
-  to the user, never a command for the agent.
+  to the user, never a command for the agent. `--update` is not one of the `<command>`s, so it
+  is never rewritten: in a pipx, uv, pip or checkout install, `<python> -P -m vcharon --update`
+  would only print the other tool's command, and the user knows how they installed VCharon.
+  `--update`'s own line for a binary, `… --update --yes`, is spelled with `self_command()`.
 - The tests parse every command-form fix line back with the command line's own parser.
 
 ### Running watchers
@@ -1387,12 +1396,90 @@ line of text>` for the agent or its user.
 A watcher and `sync --repeat` run for a long time while the program under them may be replaced
 (a `pipx install --force`, a binary swapped by an update). A one-file binary reads its code
 archive from its own file, by path, at each first-time import; after a swap, an old process
-importing a module for the first time would read the new file at the old offsets.
+importing a module for the first time would read the new file at the old offsets. Inferred
+from PyInstaller's source (its bootloader and `pyimod01_archive.py`), not yet seen with a built
+binary.
 
 - So the long-running commands import every module they can need at start, in every install
-  mode.
-- Exit code 14 and `EXIT updated` are reserved for a watcher that notices VCharon changed under
-  it; this version never exits with 14.
+  mode: `cli.py` imports every module of the package at its top, the plugins too (which
+  `plugin.py` loads by name); the few imports inside functions, there to break an import cycle,
+  only look up a module already loaded. The standard library loads some modules at first use:
+  the UTF-16 codec `pathrules` counts with is looked up when it loads, and the Windows-only
+  `winreg` loads at start on Windows. `update.py` is the one module imported later, by
+  `--update` alone, which imports nothing after its swap. A test runs a watcher and `sync
+  --repeat` in a child through rounds and checks that no module was imported after the start.
+- At the top of each round, before any other work, `watch` and `sync --repeat` compare the
+  code's file with the one they started with: a binary's own file, else the package's
+  `__init__.py` (pipx and pip rewrite it), by size, modification time and file id (`st_ino`,
+  which `os.stat` fills on Windows too). Changed or gone: `EXIT updated`, exit 14. `sync
+  --repeat` does it on its own, never relying on its watcher; a streaming watcher whose child
+  exits 14 says `EXIT updated` too.
+- A failed read of the code can show up as any exception (`ImportError`, a `zlib` error, bad
+  marshal data, `EOFError`). So in a binary, an unexpected exception in a long-running command
+  checks the file first: changed, `EXIT updated` and 14 (a round's error in `sync --repeat` is
+  raised to that check, not shown); unchanged, the usual `internal` error.
+- The fix for 14 is to start the watcher again: that runs the new VCharon.
+
+### Self-update
+
+`vcharon --update [--yes] [--force] [--json]` replaces a standalone binary with the latest GitHub
+release. It is the only network call VCharon makes besides ssh, and only when it is run: no
+version check at start-up.
+
+- **A flag, not a verb**: the verbs are what agents run, and an agent never updates (the guide
+  says to ask the user: it replaces the program every member on the machine runs). Refused, as a
+  usage error (3), with a verb or any flag but `--yes`, `--force` and `--json`; those three are
+  refused without it.
+- **It asks first**: it reads `releases/latest` (GitHub leaves out drafts and pre-releases),
+  prints the current and the latest version, and with nothing newer and no `--force` says so and
+  exits 0. Else `Update now? [y/N]`. No terminal, `--json`, Ctrl-C or anything but `y`/`yes` is
+  "no": it reports and installs nothing, exit 0, so `vcharon --update --json` is the scripted
+  check. `--yes` is the one yes; `--force` installs the latest even when it is this version, or
+  an older one (this build is ahead of the latest release).
+- **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
+  number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` -> `0.1.0rc2`
+  -> `0.1.0` are each an update. A tag that doesn't parse is never newer.
+- **Checked before the question**: how VCharon was installed, that a binary is published for
+  this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
+  pipx command), that the binary's folder is writable (by making and removing a temp folder in
+  it: on Windows `os.access` ignores ACLs), and that the release has the archive. A problem found
+  after a yes would be a question that should never have been asked.
+- **Install kinds**: a PyInstaller binary (both `sys.frozen` and `sys._MEIPASS`) is replaced in
+  place. pipx, uv, pip and a source checkout are refused with the exact command, pinned to the
+  release's tag, as the fix line; nothing changes.
+- **The swap**, in this order: download the archive into a temp folder inside the binary's own
+  folder (one filesystem, so the last rename can't hit `EXDEV`); check the release's
+  `<archive>.sha256`, one line `<hex>  <file>` whose first word counts (a mismatch fails, and so
+  does a file whose first word isn't a sha256; none published warns and goes on); extract only
+  the binary, never everything, to a path of its own: the `.tar.gz`'s top-level `vcharon`, or
+  the `.zip`'s entry named exactly `vcharon.exe` (no folder part), a file of at most 200 MB, streamed with `ZipFile.open` to
+  `vcharon.new.exe`; run the new binary's `--version` and require the release's version; then
+  replace. POSIX: `os.replace` over the running binary, which keeps running from its own inode.
+  Windows, where a running `.exe` can be renamed but not replaced: rename it to a unique
+  `vcharon.exe.old-<unix time>`, move the new one in, and rename the old one back if that
+  fails; each rename is tried a few times over about two seconds, since antivirus often holds a
+  new file for a moment. Any way out of the move, a Ctrl-C too, renames the old one back; if
+  even that fails, the error's fix names both paths, and the temp folder holding the new one is
+  kept. Every start of a Windows binary deletes the `.old-*` copies next to it that it can. Any
+  other failure leaves the old binary as it was; temp folders a killed run left are removed by
+  a later run once an hour old.
+- **Network**: https only, also after a redirect; `GITHUB_TOKEN` (or `GH_TOKEN`) is sent to
+  `api.github.com` only, and dropped on a redirect to another host; timeouts per socket
+  operation (15 s for the API, 120 s for a download). A binary whose OpenSSL can't find its
+  build machine's CA file uses the system's bundle.
+- **Exit codes**: 0 done, nothing newer, or "no"; 1 every failure, with the `update` error
+  code; 3 a usage error.
+- **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;
+  once the release is read `latest`, `tag`, `update_available`, `url`, `changed`, `confirmed`;
+  `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
+  `missing_asset`, `no_release`, `network`, `rate_limited`, `checksum_mismatch`,
+  `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …), `message` and `fix`;
+  another install kind's `command`; an install's `previous`, `installed`, `verified`.
+- `not_writable`'s fix runs the installer again: `install.sh` on Linux and macOS, `install.ps1`
+  on Windows. A new binary that won't run here (`smoke_failed`; on Linux most often a glibc
+  older than the build machine's) and a broken release point to pipx; only the failures a later
+  try can fix say to try again. `doctor` prints the install kind and a binary's path, so a user knows what
+  `--update` touches.
 
 ## Stable
 
@@ -1400,7 +1487,7 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 
 - **Verbs and flags**: the command line above, with each flag's meaning.
 - **Exit codes**: 0, 1, 2, 3, 4 and 130 ([Exit codes](#exit-codes)); the watcher's 0 (change),
-  10 (quiet), 11 (error), 12 (another watcher runs), 13 (closed) and 14 (updated, reserved).
+  10 (quiet), 11 (error), 12 (another watcher runs), 13 (closed) and 14 (updated).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
     every <n> s]`
@@ -1411,9 +1498,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
-  - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`; `ERROR another watcher is
-    running on this mailbox (<lock>)` with exit 12. The text after an `ERROR` line's colon is the
-    OS's message and may be translated: match on the prefix.
+  - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`; `ERROR
+    another watcher is running on this mailbox (<lock>)` with exit 12. The text after an
+    `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "leader", "leaders",
     "members", "member_info", "newest", "strays", "format", "limits"}`, `member_info` each
@@ -1425,11 +1512,12 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     `box_source`.
   - `read`: `{"channel", "folder", "synced", "members", "count", "entries", "notes"}`; each entry
     `{"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}`.
-  - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "box",
-    "box_source", "claimer_source", "dirs", "servers", "ok", "failed", "warnings", "checks"}`;
-    `dirs` `{"state", "logs", "joined", "channels"}`; each server `{"server", "python", "os",
-    "distro", "distro_id", "distro_version", "tested"}`; each check `{"level", "subject",
-    "text", "fix", "note"}`.
+  - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command",
+    "install", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
+    "warnings", "checks"}`; `install` `{"kind", "path"}`; `dirs` `{"state", "logs", "joined",
+    "channels"}`; each server `{"server", "python", "os", "distro", "distro_id",
+    "distro_version", "tested"}`; each check `{"level", "subject", "text", "fix", "note"}`.
+  - `--update --json`: the fields in [Self-update](#self-update).
 
   A field may be added in a minor version; none is removed or changes meaning without a
   CHANGELOG line.
@@ -1531,7 +1619,6 @@ Later:
   meet sshd's defaults (`MaxStartups 10:30:100`, `MaxSessions 10`). Inferred, not measured.
 - Old channels pile up: only `close` deletes. `list` showing each channel's age and size would
   make forgotten ones stand out.
-- Self-update (`vcharon --update`), and with it the watcher's `EXIT updated`.
 - Handing the leader role to another member: today the leader closes and the new one creates a
   new channel.
 - Sending only the helper's own modules to the server.

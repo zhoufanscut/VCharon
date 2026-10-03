@@ -214,14 +214,14 @@ class FilesTest(unittest.TestCase):
         module.QueryValueEx = lambda key, name: (uuid, 1)
         with mock.patch.object(platform, "os_name", return_value="windows"), \
                 mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch.dict(sys.modules, {"winreg": module}):
+            with mock.patch.object(platform, "winreg", module):
                 self.assertEqual(platform.machine_id(missing), hashed)
 
             def no_key(*args):
                 raise FileNotFoundError(2, "no such key")
 
             module.OpenKey = no_key
-            with mock.patch.dict(sys.modules, {"winreg": module}):
+            with mock.patch.object(platform, "winreg", module):
                 self.assertIsNone(platform.machine_id(missing))
 
     def test_ioreg_output(self):
@@ -259,12 +259,12 @@ class FilesTest(unittest.TestCase):
             return module
 
         guid = "4c4c4544-0042-3510-8051-b4c04f4d4d32"
-        with mock.patch.dict(sys.modules, {"winreg": fake(guid, 1)}):
+        with mock.patch.object(platform, "winreg", fake(guid, 1)):
             self.assertEqual(platform._machine_guid(), guid)
         self.assertEqual(opened, [(7, "SOFTWARE\\Microsoft\\Cryptography", 0, 1 | 256)])
-        with mock.patch.dict(sys.modules, {"winreg": fake(b"\x01\x02", 3)}):
+        with mock.patch.object(platform, "winreg", fake(b"\x01\x02", 3)):
             self.assertIsNone(platform._machine_guid())
-        with mock.patch.dict(sys.modules, {"winreg": fake(5, 1)}):
+        with mock.patch.object(platform, "winreg", fake(5, 1)):
             self.assertIsNone(platform._machine_guid())
 
     def test_no_machine_hint(self):

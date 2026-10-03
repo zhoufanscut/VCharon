@@ -10,7 +10,9 @@ local members). "format" is the newest channel format this vcharon reads; "serve
 for each server whose session opened and echoed: {"server", "python", "os", "distro", "distro_id",
 "distro_version", "tested"}, the distro fields from its /etc/os-release (PRETTY_NAME, ID,
 VERSION_ID; null each when missing) and "tested" true for Debian 13 or later.
-"command" is how this box runs vcharon (the fix lines' spelling); "box" this machine's part of
+"command" is how this box runs vcharon (the fix lines' spelling); "install" {"kind", "path"}:
+how it was installed ("binary", "pipx", "uv", "pip" or "source") and the file vcharon --update
+replaces (a binary) or the checkout (source), else null; "box" this machine's part of
 member names and "box_source" "config" ([vcharon] box) or "os" (the default), both null when
 the config can't be read; "claimer_source" what the id this machine claims member folders with
 comes from: "client-id file (from the machine id)" or "client-id file (random)"; before the
@@ -37,6 +39,7 @@ from . import (
     charter,
     config,
     fsops,
+    install,
     keys,
     platform,
     plugin,
@@ -50,7 +53,8 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("vcharon", "python", "config", "box", "ssh", "agent", "dirs", "machine")
+CLIENT_SUBJECTS = ("vcharon", "install", "python", "config", "box", "ssh", "agent", "dirs",
+                   "machine")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: headings carry the minute, so any gap can reorder
 # entries posted near a minute's end; from 30 s it will do so often.
@@ -140,6 +144,22 @@ def _vcharon(rep):
     """This vcharon's version, and how it's run here: the spelling of every fix line."""
     rep.check("ok", "vcharon", "%s, protocol %d, reads channel formats up to %d; runs as %s"
               % (VERSION, PROTOCOL, charter.FORMAT, platform.self_command()))
+
+
+def _install(rep):
+    """How this vcharon was installed, so a user knows what vcharon --update touches: a
+    binary's file, or the other tool that updates it. No network call. Returns --json's
+    "install"."""
+    inst = install.detect()
+    if inst.kind == "binary":
+        text = "a standalone binary, %s: vcharon --update replaces this file" % inst.path
+    elif inst.kind == "source":
+        text = ("a checkout, %s: vcharon --update prints the git commands that update it"
+                % inst.path)
+    else:
+        text = "with %s: vcharon --update prints the command that updates it" % inst.kind
+    rep.check("ok", "install", text)
+    return {"kind": inst.kind, "path": inst.path}
 
 
 def _python(rep):
@@ -511,6 +531,7 @@ def main(args, run):
     rep = Report(say, subjects)
     say("vcharon: doctor%s" % (" --server " + target if target is not None else ""))
     _vcharon(rep)
+    installed = _install(rep)
     _python(rep)
     _config(rep, cfg, cfg_err, not dests)
     _box(rep, cfg)
@@ -535,6 +556,7 @@ def main(args, run):
         print(json.dumps({"version": VERSION, "protocol": PROTOCOL, "format": charter.FORMAT,
                           "python": platform.python_version(), "executable": sys.executable,
                           "os": platform.os_name(), "command": platform.self_command(),
+                          "install": installed,
                           "box": cfg.box_name if cfg is not None else None,
                           "box_source": cfg.box_source if cfg is not None else None,
                           "claimer_source": claimer_source, "dirs": folders(),

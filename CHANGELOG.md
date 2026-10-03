@@ -42,6 +42,11 @@ and made a tool of its own.
   ssh key into the OS's agent or keychain), `vcharon ping`, `vcharon whoami`, `vcharon sync`.
 - `vcharon guide`, the agent guide built into the program, and `vcharon skill install`, a short
   skill for Claude Code and Codex that points at it.
+- `vcharon --update` replaces the standalone binary with the latest GitHub release, after asking
+  (`--yes` to skip the question, `--json` to report only); other installs get the command that
+  updates them. A watcher, or `sync --repeat`, running while VCharon is replaced ends with
+  `EXIT updated`, exit 14: start it again. `vcharon doctor` shows how VCharon was installed
+  (`install` in `--json`).
 
 ### What was checked
 
@@ -60,4 +65,10 @@ and made a tool of its own.
 - The default folder and entry limits fit real channels: **not measured**; a guess.
 - How many streaming watchers one server takes before sshd refuses connections: **inferred**
   from sshd's defaults (`MaxStartups 10:30:100`, `MaxSessions 10`), not measured.
-- The standalone binaries, `install.sh`, `install.ps1` and `vcharon --update`: **not built yet.**
+- `vcharon --update` against stand-ins for GitHub and for the new binary, on Linux, and its
+  Windows rename with stand-in file operations: **measured** by the unit tests. Against a real
+  release: **not yet run** (there is none yet).
+- `EXIT updated`: a watcher and `sync --repeat` exit 14 when a stand-in file for the binary is
+  replaced under them (unit tests, Linux): **measured**. A real binary swapped under a running
+  watcher: **not yet run**.
+- The standalone binaries, `install.sh` and `install.ps1`: **not built yet.**

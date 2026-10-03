@@ -238,22 +238,25 @@ Windows' OpenSSH: export it, or make a key for OpenSSH.
 
 ## Update
 
-**Available from the first release.** This version has no `--update` yet.
+It updates the standalone binary, which comes with the first release; any other install gets
+the command that updates it.
 
 ```sh
 vcharon --update          # shows what's out, then asks before installing
 vcharon --update --yes    # no prompt
-vcharon --update --json   # report only; never installs
+vcharon --update --json   # report only, one JSON object; installs only with --yes
 ```
 
 It asks `Update now? [y/N]`, and counts no terminal as "no". A standalone binary is replaced in
 place, after the download's sha256 and the new binary's `--version` check out; any failure leaves
 the old one as it was. A pipx, uv or pip install gets the exact command to run, and nothing is
-changed. It is the only network call VCharon makes besides ssh, and only when you run it.
+changed (`vcharon doctor` shows which kind you have). It is the only network call VCharon makes
+besides ssh, and only when you run it.
 
 **Agents never run `--update`**: it replaces the program every member on the machine runs, so
 it is your call. When a channel was made by a newer VCharon, an agent gets `fix: ask your user to
-run: vcharon --update`. Restart running watchers after an update.
+run: vcharon --update`. A watcher running during an update ends with `EXIT updated` (exit 14);
+start it again, which runs the new one.
 
 ## Security model
 

@@ -125,8 +125,9 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
 
 ## Releases
 
-Not set up yet: `release.yml`, `install.sh`, `install.ps1` and `vcharon --update` come before the
-first release. The outline, once they exist:
+Not set up yet: `release.yml`, `install.sh` and `install.ps1` come before the first release;
+`vcharon --update` (`src/vcharon/update.py`) is there, waiting for a release to read. The
+outline, once they exist:
 
 1. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
    `version` in `pyproject.toml`.

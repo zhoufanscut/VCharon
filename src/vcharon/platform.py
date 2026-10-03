@@ -21,6 +21,13 @@ import time
 from . import fsops
 from .proto import VCharonError
 
+if os.name == "nt":
+    # at start, not when the machine id is first read: a long-running command imports nothing
+    # after it starts (DESIGN, "Running watchers")
+    import winreg
+else:
+    winreg = None
+
 _MACHINE_ID = re.compile(r"\A[0-9a-f]{32}\Z")
 # macOS's IOPlatformUUID and Windows' MachineGuid: a UUID, in either case
 _UUID = re.compile(r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -171,6 +178,12 @@ def command_for(executable, folder, osn, which, venv=None):
     return _quoted(parts, osn)
 
 
+def quote_command(parts, osn=None):
+    """parts as one command line for this OS's shell (osn: another OS), as _quoted spells
+    them."""
+    return _quoted(parts, osn or os_name())
+
+
 def _quoted(parts, osn):
     if osn == "windows":
         parts = [part.replace("\\", "/") for part in parts]
@@ -311,8 +324,7 @@ def _ioreg_uuid():
 
 def _machine_guid():
     """Windows: MachineGuid under HKLM\\SOFTWARE\\Microsoft\\Cryptography; None if it isn't a
-    string."""
-    import winreg
+    string. Elsewhere winreg is None, and this raises."""
     # the 64-bit view, so a 32-bit Python reads the same value as a 64-bit one
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0,
                         winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:

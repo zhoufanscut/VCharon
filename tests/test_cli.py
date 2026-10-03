@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import cli, doctor, fsops, pathrules, platform, ssh, stage, state
+from vcharon import cli, doctor, fsops, install, pathrules, platform, ssh, stage, state
 from vcharon import run as engine
 from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.proto import VCharonError
@@ -1414,6 +1414,71 @@ class RepeatTest(FakeSshCase):
         self.assertEqual(self.inbox("b"), {"b.txt": b"b"})
         self.assert_locks_free("a", "b")
 
+    def code_file(self):
+        """A stand-in for the binary the watchdog compares, and the swap an update makes."""
+        code = os.path.join(self.tmp, "vcharon-binary")
+        with open(code, "wb") as f:
+            f.write(b"old")
+        patcher = mock.patch.object(install, "code_path", return_value=code)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        def swap():
+            with open(code + ".new", "wb") as f:
+                f.write(b"new!")
+            os.replace(code + ".new", code)
+
+        return swap
+
+    def test_updated_at_the_top_of_a_round(self):
+        # on its own, never relying on its watcher: before any other work of the round
+        swap = self.code_file()
+        code, lines, err, waits = self.repeat("a", "b", between=[lambda: None, swap])
+        self.assertEqual((code, err), (install.EXIT_UPDATED, ""))
+        self.assertEqual(lines, ["ROUND 0", "ROUND 0", "EXIT updated"])
+        self.assertEqual(len(waits.waits), 2)
+        self.assertIn("repeat: vcharon changed under it; exiting with 14", self.job_log("a"))
+        self.assertIn("ssh exited with code 0", self.job_log("a"))
+        self.assert_locks_free("a", "b")
+
+    def crash_in_round_two(self, swap):
+        """_run_one, raising in the second round, after the swap if there is one."""
+        real = cli._run_one
+        calls = []
+
+        def run_one(*args):
+            calls.append(1)
+            if len(calls) == 3:
+                if swap is not None:
+                    swap()
+                raise ValueError("bad marshal data (unknown type code)")
+            return real(*args)
+
+        return mock.patch.object(cli, "_run_one", run_one)
+
+    def test_an_unexpected_error_in_a_binary_after_a_swap(self):
+        swap = self.code_file()
+        with self.crash_in_round_two(swap), \
+                mock.patch.object(platform, "is_frozen", return_value=True):
+            code, lines, err, _ = self.repeat("a", "b", between=[lambda: None] * 3)
+        self.assertEqual((code, err), (install.EXIT_UPDATED, ""))
+        # not a round's ERROR line: the watcher would take it for one
+        self.assertEqual(lines, ["ROUND 0", "EXIT updated"])
+        self.assertIn("vcharon changed under this process (ValueError: bad marshal data (unknown "
+                      "type code)); exiting with 14", self.job_log("a"))
+        self.assert_locks_free("a", "b")
+
+    def test_an_unexpected_error_without_a_swap_is_a_rounds_error(self):
+        self.code_file()
+        with self.crash_in_round_two(None), \
+                mock.patch.object(platform, "is_frozen", return_value=True):
+            code, lines, err, _ = self.repeat("a", "b", between=[lambda: None] * 2)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(lines[0], "ROUND 0")
+        self.assertEqual(lines[1], "ERROR a: internal: ValueError: bad marshal data (unknown "
+                                   "type code)")
+        self.assertNotIn("EXIT updated", lines)
+
     def test_new_files_in_a_later_round(self):
         def more():
             write_tree(os.path.join(self.local, "b"), {"new.txt": b"new"})
@@ -1548,13 +1613,15 @@ class RepeatTest(FakeSshCase):
         self.write_record("mb", "windows", "debian")
         return ["sync", "mb", "--project", "p"]
 
-    def child(self, *argv):
-        """vcharon ARGV in a child with the real stdin thread, through the fake ssh."""
+    def child(self, *argv, before=""):
+        """vcharon ARGV in a child with the real stdin thread, through the fake ssh; before:
+        code it runs first."""
         code = ("import sys\n"
                 "sys.path.insert(0, %r)\n"
                 "from vcharon import cli, ssh\n"
                 "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
-                "sys.exit(cli.main(sys.argv[1:]))\n" % (VCHARON_DIR, FAKE_SSH))
+                "%s"
+                "sys.exit(cli.main(sys.argv[1:]))\n" % (VCHARON_DIR, FAKE_SSH, before))
         return subprocess.Popen([sys.executable, "-c", code] + list(argv),
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
@@ -1579,6 +1646,50 @@ class RepeatTest(FakeSshCase):
                     stream.close()
             self.assertEqual((child.returncode, err), (4, b""))
             self.assertEqual(out.replace(b"\r", b"").splitlines()[-1], b"ROUND 4")
+
+    def test_updated_in_a_child_with_no_imports_after_its_start(self):
+        # sync --repeat as a watcher starts it: rounds, then the binary is swapped; it exits
+        # 14 on its own, and its rounds needed no module that wasn't there at the start
+        swap = self.code_file()
+        code_path = install.code_path()
+        imported = os.path.join(self.tmp, "imported.json")
+        before = ("import atexit, json, os\n"
+                  "from vcharon import install\n"
+                  "install.code_path = lambda: %r\n"
+                  "start = []\n"
+                  "init = install.Watchdog.__init__\n"
+                  "def watched(self, *args):\n"
+                  "    init(self, *args)\n"
+                  "    start.append(set(sys.modules))\n"
+                  "install.Watchdog.__init__ = watched\n"
+                  "def dump():\n"
+                  "    with open(%r, 'w') as f:\n"
+                  "        json.dump(sorted(set(sys.modules) - start[0]), f)\n"
+                  "atexit.register(dump)\n" % (code_path, imported))
+        child = self.child(*self.channel() + ["--repeat", "1"], before=before)
+        try:
+            lines = [util.readline(child.stdout) for _ in range(3)]
+            swap()
+            # stdin stays open: its end would stop the child too. Its output is a few lines,
+            # so the pipes can't fill while it is waited for.
+            child.wait(60)
+            out = child.stdout.read()
+            err = child.stderr.read()
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            for stream in (child.stdin, child.stdout, child.stderr):
+                stream.close()
+        self.assertEqual((child.returncode, err), (14, b""))
+        lines = [line.rstrip(b"\r\n") for line in lines] + out.replace(b"\r", b"").splitlines()
+        self.assertEqual(lines[:3], [b"ROUND 0"] * 3)
+        self.assertEqual(lines[-1], b"EXIT updated")
+        with open(imported, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), [])
+        self.assertIn("repeat: vcharon changed under it; exiting with 14",
+                      self.job_log("mb.windows.up"))
+        self.assert_locks_free("mb.windows.up", "mb.windows.down")
 
     def test_end_of_stdin_in_a_child(self):
         # the real stdin thread: the child syncs rounds until its stdin ends, then says bye

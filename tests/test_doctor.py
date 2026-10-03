@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import bundle, channels, doctor, keys, platform, plugins, ssh, state
+from vcharon import bundle, channels, doctor, install, keys, platform, plugins, ssh, state
 
 from tests import util
 from tests.test_plugin import probe_module
@@ -144,16 +144,22 @@ USED = "member folders are claimed with the client-id file %s (%s)"
 
 class DoctorTest(DoctorCase):
     def test_everything_ok(self):
+        # a checkout, whatever this suite runs from (an sdist has no .git)
+        checkout = os.path.join(self.tmp, "VCharon")
+        self.patch(install, "detect", return_value=install.Install("source", checkout))
         lines = self.doctor(code=0)
         home = self.home
         self.assertEqual(lines[0], "vcharon: doctor")
-        self.assertEqual(self.subjects(lines), ["vcharon", "python", "config", "box", "ssh",
-                                                "agent", "dirs", "machine", "fake-dest", "push",
-                                                "pull"])
+        self.assertEqual(self.subjects(lines), ["vcharon", "install", "python", "config", "box",
+                                                "ssh", "agent", "dirs", "machine", "fake-dest",
+                                                "push", "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
         self.assertEqual(lines.pop(1), "  ok    vcharon    0.1.0, protocol 3, reads channel "
                          "formats up to 1; runs as %s" % platform.self_command())
+        # how it was installed: what vcharon --update touches
+        self.assertEqual(lines.pop(1), "  ok    install    a checkout, %s: vcharon --update "
+                         "prints the git commands that update it" % checkout)
         # the subjects are padded to the longest one, fake-dest
         self.assertEqual(lines[1], "  ok    python     %s (%s) on %s"
                          % (platform.python_version(), sys.executable, platform.os_name()))
@@ -194,15 +200,18 @@ class DoctorTest(DoctorCase):
         self.assertEqual(len(lines), 18)
 
     def test_json(self):
+        checkout = os.path.join(self.tmp, "VCharon")
+        self.patch(install, "detect", return_value=install.Install("source", checkout))
         prose = self.doctor(code=0)
         got, out, err = self.run_cli("doctor", "--json")
         self.assertEqual((got, err), (0, ""))
         [line] = out.splitlines()
         doc = json.loads(line)
         self.assertEqual(sorted(doc), ["box", "box_source", "checks", "claimer_source",
-                                       "command", "dirs", "executable", "failed", "format", "ok",
-                                       "os", "protocol", "python", "servers", "version",
-                                       "warnings"])
+                                       "command", "dirs", "executable", "failed", "format",
+                                       "install", "ok", "os", "protocol", "python", "servers",
+                                       "version", "warnings"])
+        self.assertEqual(doc["install"], {"kind": "source", "path": checkout})
         self.assertEqual(doc["format"], 1)
         # the folders vcharon writes, as the dirs line names them
         self.assertEqual(doc["dirs"], {
@@ -255,14 +264,35 @@ class DoctorTest(DoctorCase):
         self.assertFalse([p for p in read_tree(self.tmp) if ".vcharon-stage-" in p])
         self.assertFalse([p for p in read_tree(self.tmp) if ".vcharon-doctor-" in p])
 
+    def test_install_kind(self):
+        # what vcharon --update would touch, for each install kind; no network call
+        self.write_config("")
+        target = os.path.join(self.tmp, "bin", "vcharon")
+        for inst, text in (
+                (install.Install("binary", target), "a standalone binary, %s: vcharon --update "
+                 "replaces this file" % target),
+                (install.Install("pipx"), "with pipx: vcharon --update prints the command that "
+                 "updates it"),
+                (install.Install("uv"), "with uv: vcharon --update prints the command that "
+                 "updates it"),
+                (install.Install("pip"), "with pip: vcharon --update prints the command that "
+                 "updates it")):
+            with self.subTest(kind=inst.kind), \
+                    mock.patch.object(install, "detect", return_value=inst), \
+                    mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+                self.assertEqual(self.of(self.doctor(code=0), "install"), [("ok", text)])
+                _, out, _ = self.run_cli("doctor", "--json")
+                self.assertEqual(json.loads(out)["install"],
+                                 {"kind": inst.kind, "path": inst.path})
+
     def test_fix_and_note_lines_start_under_the_text(self):
         self.write_config("")
         os.environ["FAKE_SSH_ADD_L_RC"] = "2"
         lines = self.doctor(code=0)
         at = lines.index("  warn  agent    none: %s" % keys.no_agent_why())
         self.assertEqual(lines[at + 1], "                 fix: " + NO_AGENT_FIX)
-        self.assertEqual(lines[3], "  ok    config   %s: 0 jobs" % self.config)
-        self.assertEqual(lines[4], "                 note: no channels joined over ssh; to check "
+        self.assertEqual(lines[4], "  ok    config   %s: 0 jobs" % self.config)
+        self.assertEqual(lines[5], "                 note: no channels joined over ssh; to check "
                                    "a server: vcharon doctor --server ALIAS")
         self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  \(\d+\.\d s\)\Z")
 
@@ -527,8 +557,8 @@ class DoctorTest(DoctorCase):
 
     def test_one_destination(self):
         lines = self.doctor("--server", "fake-dest", code=0)
-        self.assertEqual(self.subjects(lines), ["vcharon", "python", "config", "box", "ssh",
-                                                "agent", "dirs", "machine", "fake-dest"])
+        self.assertEqual(self.subjects(lines), ["vcharon", "install", "python", "config", "box",
+                                                "ssh", "agent", "dirs", "machine", "fake-dest"])
 
     def test_bad_destination(self):
         got, out, err = self.run_cli("doctor", "--server=-x")
@@ -539,15 +569,15 @@ class DoctorTest(DoctorCase):
     def test_no_jobs(self):
         self.write_config("[vcharon]\n")
         lines = self.doctor(code=0)
-        self.assertEqual(self.subjects(lines), ["vcharon", "python", "config", "box", "ssh",
-                                                "agent", "dirs", "machine"])
+        self.assertEqual(self.subjects(lines), ["vcharon", "install", "python", "config", "box",
+                                                "ssh", "agent", "dirs", "machine"])
 
     def test_broken_config(self):
         self.write_config("[vcharon]\ncompress = maybe\n")
         lines = self.doctor(code=1)
         self.assertEqual(self.of(lines, "config"),
                          [("FAIL", "vcharon.ini [vcharon] compress: must be yes or no")])
-        self.assertEqual(self.subjects(lines), ["vcharon", "python", "config", "ssh",
+        self.assertEqual(self.subjects(lines), ["vcharon", "install", "python", "config", "ssh",
                                                 "agent", "dirs", "machine"])
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],

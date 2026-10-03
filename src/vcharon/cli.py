@@ -24,6 +24,7 @@ from . import (
     entries,
     fsops,
     guide,
+    install,
     keys,
     pathrules,
     platform,
@@ -42,8 +43,13 @@ from .log import HeldLog, Log
 from .mailbox import post as post_mod
 from .mailbox import read as read_mod
 from .mailbox import watch as watch_mod
+from .plugins import dir as dir_plugin  # noqa: F401  (loaded at start: see below)
 from .plugins import path as path_plugin
 from .proto import VCharonError
+
+# Every module of the package is imported above, the plugins too though plugin.py loads them by
+# name, and update.py alone is left for vcharon --update: a long-running command imports nothing
+# after its start (DESIGN, "Running watchers").
 
 # A dry run's listing shows this many paths, then "… and N more".
 LIST_MAX = 50
@@ -51,7 +57,7 @@ LIST_MAX = 50
 EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 3 usage or config,
   4 couldn't connect or start the helper, 130 Ctrl-C.
   watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher runs,
-  13 the channel is closed (14 is kept for "updated").
+  13 the channel is closed, 14 vcharon was updated (start it again).
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -92,8 +98,19 @@ def _parser():
                      formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
     parser.add_argument("--version", action="version", version=VERSION,
                         help="print the version and exit")
+    # --update is a flag, not a verb: the verbs are what agents run, and an agent never
+    # updates (DESIGN, "Self-update"). Its options have their own dests, so a verb's --json
+    # can't be taken for its.
+    parser.add_argument("--update", action="store_true", help="update this binary from "
+                        "GitHub releases, asking first; alone or with the three below")
+    parser.add_argument("--yes", dest="update_yes", action="store_true",
+                        help="with --update: install without asking")
+    parser.add_argument("--force", dest="update_force", action="store_true",
+                        help="with --update: install the latest even when it is this version "
+                        "or older")
+    parser.add_argument("--json", dest="update_json", action="store_true",
+                        help="with --update: print one JSON object; installs only with --yes")
     commands = parser.add_subparsers(dest="command", metavar="<command>")
-    commands.required = True
 
     def verb(name, text, example):
         one = commands.add_parser(name, help=text, description=text[0].upper() + text[1:] + ".",
@@ -283,20 +300,67 @@ def _utf8_console():
 
 def main(argv=None):
     _utf8_console()
+    if platform.is_frozen() and platform.os_name() == "windows":
+        # the copies earlier updates renamed the running binary to (DESIGN, "Self-update")
+        install.sweep_old()
     run = _Run()
     return _main(argv, run)
 
 
+# what may come with --update
+UPDATE_FLAGS = ("--update", "--yes", "--force", "--json")
+
+
 def _main(argv, run):
     def command():
+        words = sys.argv[1:] if argv is None else list(argv)
+        _update_alone(words)
+        parser = _parser()
         try:
-            args = _parser().parse_args(argv)
+            args = parser.parse_args(words)
         except SystemExit as e:
             # --help, --version
             return e.code if isinstance(e.code, int) else 0
+        _update_flags(args)
+        if args.update:
+            return _update(args, run)
+        if args.command is None:
+            parser.error("the following arguments are required: <command>")
         return COMMANDS[args.command](args, run)
 
     return _guarded(command, run)
+
+
+def _update_alone(words):
+    """--update's refusal of a verb or another flag, before the parse (whose refusal of a
+    verb's missing argument would hide it). Only --update before any verb counts: after one,
+    the verb's parser refuses it as unknown."""
+    lead = []
+    for word in words:
+        if not word.startswith("-"):
+            break
+        lead.append(word)
+    if "--update" not in lead or "-h" in lead or "--help" in lead:
+        return
+    others = [w for w in words if w not in UPDATE_FLAGS]
+    if others:
+        raise _usage("--update runs on its own, with only --yes, --force and --json: not with "
+                     "%s" % " ".join(others), "run vcharon --update by itself; then the rest")
+
+
+def _update_flags(args):
+    """--yes, --force and --json before a verb are --update's: without it, refused rather
+    than ignored."""
+    if args.update:
+        return
+    for flag, on in (("--yes", args.update_yes), ("--force", args.update_force),
+                     ("--json", args.update_json)):
+        if not on:
+            continue
+        if flag == "--json" and args.command is not None:
+            raise _usage("--json goes after the verb: vcharon %s ... --json" % args.command,
+                         "move --json after %s" % args.command)
+        raise _usage("%s goes only with --update" % flag, "leave out %s" % flag)
 
 
 def _guarded(fn, run):
@@ -320,6 +384,14 @@ def _guarded(fn, run):
         sys.stderr.write("vcharon: interrupted\n")
         return 130
     except Exception as e:  # noqa: BLE001
+        if run.watchdog is not None and run.watchdog.after_crash():
+            # a long-running command's binary was swapped under it: the error may be a read
+            # of the new file at the old offsets (DESIGN, "Running watchers"). Nothing that
+            # could import more: no traceback.
+            run.log_line("info", "vcharon changed under this process (%s: %s); exiting with %d"
+                         % (type(e).__name__, e, install.EXIT_UPDATED), create=True)
+            run.updated_line()
+            return install.EXIT_UPDATED
         run.log_line("error", traceback.format_exc(), create=True)
         run.show_error(VCharonError("internal", "%s: %s" % (type(e).__name__, e)),
                        logged=True)
@@ -533,6 +605,8 @@ def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
     its synced copy; the watcher's own exit codes."""
     watch_mod.utf8_output()
+    dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),
+                                                               line)))
     if args.max_errors is not None and not args.until_change:
         raise _usage("--max-errors needs --until-change", "add --until-change, or leave out "
                      "--max-errors")
@@ -541,7 +615,7 @@ def _watch(args, run):
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
-              "max_errors": args.max_errors or 10}
+              "max_errors": args.max_errors or 10, "updated": dog.changed}
     if record["ssh"] is None:
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
@@ -664,6 +738,116 @@ def _skill(args):
     return 0
 
 
+def _update(args, run):
+    """vcharon --update [--yes] [--force] [--json] (DESIGN, "Self-update"): the latest
+    release from GitHub, and this binary replaced with it once the user says yes. A pipx,
+    uv, pip or source install gets the command that updates it, and nothing changes. Exit 0
+    when it's done, there is nothing newer, or the answer is no; 1 on every failure.
+
+    --json prints one object on stdout, a failure's too: {"current", "install", "path"},
+    then, once the release is read, {"latest", "tag", "update_available", "url",
+    "changed", "confirmed"}; "ok"; a failure's {"error", "message", "fix"}; a refusal for
+    another install kind's "command"; an install's {"previous", "installed", "verified"}."""
+    # Only here, not at the top: no other command needs the network modules, and this one is
+    # short-lived; after its swap it imports nothing more.
+    from . import update as update_mod
+
+    as_json = args.update_json
+    inst = install.detect()
+    doc = {"current": VERSION, "install": inst.kind, "path": inst.path}
+
+    def fail(kind, message, fix):
+        fix = platform.runnable(fix)
+        if as_json:
+            _print_json(dict(doc, ok=False, error=kind, message=message, fix=fix))
+        raise VCharonError("update", message, hint=fix)
+
+    def guarded(fn):
+        try:
+            return fn()
+        except update_mod.UpdateError as e:
+            return fail(e.kind, e.message, e.fix)
+        except VCharonError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            # --json's one object, even for a bug; the traceback goes to the log
+            run.log_line("error", traceback.format_exc(), create=True)
+            return fail("failed", "%s: %s" % (type(e).__name__, e),
+                        "this is a bug in vcharon; see the log")
+
+    release = guarded(update_mod.latest_release)
+    available = update_mod.is_newer(release.tag, VERSION)
+    doc.update(latest=release.version, tag=release.tag, update_available=available,
+               url=release.url, changed=False, confirmed=False)
+    if not as_json:
+        _say("vcharon: update")
+        _say("  current  %s (%s%s)" % (VERSION, inst.kind,
+                                       ", %s" % inst.path if inst.path else ""))
+        _say("  latest   %s (%s)" % (release.version, release.url))
+    if not available and not args.update_force:
+        same = update_mod.compare(VERSION, release.version) == 0
+        if as_json:
+            return _print_json(dict(doc, ok=True))
+        # "ahead" when they differ: a build newer than the release isn't "the latest"
+        _say("  %s is the latest release" % VERSION if same
+             else "  %s is ahead of the latest release" % VERSION)
+        _say("OK")
+        return 0
+    if not inst.self_updatable:
+        doc["command"] = inst.command_for(release.tag)
+        fail("not_self_updatable", "this vcharon was installed with %s, so vcharon --update "
+             "can't replace it (only the standalone binary)" % inst.kind, doc["command"])
+    # everything that makes it impossible, before the question
+    guarded(lambda: update_mod.preflight(inst, release))
+    if not _confirm_update(release, args.update_yes, as_json, args.update_force, available):
+        if as_json:
+            return _print_json(dict(doc, ok=True))
+        return 0
+    doc["confirmed"] = True
+    result = guarded(lambda: update_mod.apply_update(
+        release, inst, on_step=None if as_json else lambda line: _say("  " + line)))
+    doc.update(changed=True, previous=VERSION, installed=result.version, path=result.path,
+               verified=result.verified)
+    if as_json:
+        return _print_json(dict(doc, ok=True))
+    _say("  updated %s -> %s: %s" % (VERSION, result.version, result.path))
+    if not result.verified:
+        _say("  note: the release has no checksum; the new binary passed its --version check")
+    _say("  note: running watchers end with EXIT updated (exit %d); start them again"
+         % install.EXIT_UPDATED)
+    _say("OK")
+    return 0
+
+
+def _confirm_update(release, yes, as_json, force=False, available=True):
+    """Whether to install: --yes is the one yes. --json and no terminal count as no (the
+    release is reported, nothing installed), so an agent can't install by accident; so do
+    Ctrl-C and Ctrl-D at the question. The only question vcharon asks besides vcharon key.
+    force, available: the line that says how keeps a --force given, and a release that isn't
+    newer (only --force gets here with one) is one to reinstall."""
+    if yes:
+        return True
+    if as_json or not _stdin_is_terminal():
+        if not as_json:
+            # a binary's spelling: only a binary gets here
+            command = "%s --update%s --yes" % (platform.self_command(),
+                                               " --force" if force else "")
+            if available:
+                _say("  %s is available; to install it: %s" % (release.version, command))
+            else:
+                _say("  %s can be reinstalled: %s" % (release.version, command))
+        return False
+    try:
+        answer = input("Update now? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+    if answer in ("y", "yes"):
+        return True
+    _say("  cancelled; nothing was changed")
+    return False
+
+
 class _Run:
     """What the error path needs to know about the run so far."""
 
@@ -678,6 +862,17 @@ class _Run:
         # where the error block goes: stderr, or with vcharon sync --repeat the round's lines,
         # which go to stdout
         self.out = None
+        # a long-running command's check that its code didn't change (install.Watchdog), and
+        # how it says EXIT updated; None for the others
+        self.watchdog = None
+        self.updated_line = None
+
+    def watch_code(self, say):
+        """Starts the watchdog of a long-running command (watch, sync --repeat); say prints
+        its EXIT updated line. Returns the watchdog."""
+        self.watchdog = install.Watchdog()
+        self.updated_line = lambda: say("EXIT updated")
+        return self.watchdog
 
     def log_line(self, level, msg, create=False):
         if self.log is None and create:
@@ -1002,6 +1197,8 @@ class _Conn:
         self.os = None
         # the error that broke it; the group's other jobs are then skipped
         self.broke = None
+        # sync --repeat's install.Watchdog
+        self.watchdog = None
 
 
 def session_key(job):
@@ -1207,13 +1404,21 @@ def _repeat(args, run, todo):
     every round; rounds until stdin ends (exit 0, after the round under way) or a round's
     error breaks the connection (exit with that round's code). Between rounds it waits
     SECONDS from the end of a round."""
+    dog = run.watchdog or run.watch_code(_say)
     ended = threading.Event()
     _watch_stdin(ended)
     conn = _Conn()
+    conn.watchdog = dog
     tally = _Tally()
     run.log = todo[0].real_log
     with contextlib.ExitStack() as stack:
         while True:
+            if dog.changed():
+                # before any other work: the code that would do it may be another now
+                run.log.info("repeat: vcharon changed under it; exiting with %d"
+                             % install.EXIT_UPDATED)
+                run.updated_line()
+                return install.EXIT_UPDATED
             if conn.session is not None:
                 conn.session.start_round()
             code, idle = _round(args, todo, conn, stack)
@@ -1306,7 +1511,11 @@ def _repeat_one(args, jr, conn, stack):
     except BrokenPipeError:
         # stdout's reader is gone: no job's error, the whole command's (_guarded)
         raise
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
+        if (not isinstance(e, VCharonError) and conn.watchdog is not None
+                and conn.watchdog.after_crash()):
+            # maybe a read of the swapped binary: _guarded's EXIT updated, not a round's error
+            raise
         if conn.session is not None and not _still_usable(conn.session, e):
             conn.broke = e
         jr.status = "failed"

@@ -66,9 +66,6 @@ class GuideDocTest(unittest.TestCase):
             self.assertIn("\n## %s\n" % guide.title(topic), doc)
 
 
-# commands the guide names that this vcharon doesn't parse, on purpose: --update is a later
-# version's, and the guide only says never to run it
-NOT_YET = {"vcharon --update"}
 _FENCE = re.compile(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", re.MULTILINE | re.DOTALL)
 _SPAN = re.compile(r"`([^`]+)`")
 # where a command in a code block ends: a comment, a heredoc, a pipe or a redirect
@@ -91,12 +88,12 @@ def guide_commands(text):
     for span in _SPAN.findall(prose):
         span = " ".join(span.split())
         # a command, or a fix line that may end in one; not a message that says "vcharon"
-        if not span.startswith(("vcharon ", "fix: ")) or span in NOT_YET:
+        if not span.startswith(("vcharon ", "fix: ")):
             continue
         if span.startswith("fix: ") and "ask your user" in span:
             continue
         words = span.split()
-        if len(words) == 2 and words[0] == "vcharon":
+        if len(words) == 2 and words[0] == "vcharon" and not words[1].startswith("-"):
             out.append((span, words[1:], True))
             continue
         out += [(span, argv, False) for argv in commands(span)]
@@ -143,8 +140,8 @@ class GuideCommandsParseTest(unittest.TestCase):
                     self.assertIn(argv[1], guide.TOPICS)
 
 
-# --flags the guide names that aren't vcharon's: git's, and a later version's
-FOREIGN_FLAGS = {"--output", "--update"}
+# --flags the guide names that aren't vcharon's: git's
+FOREIGN_FLAGS = {"--output"}
 _FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 
 

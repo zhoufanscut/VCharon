@@ -3,6 +3,7 @@ access."""
 
 from __future__ import annotations
 
+import codecs
 import ntpath
 import posixpath
 import re
@@ -11,6 +12,10 @@ import unicodedata
 from .proto import VCharonError, quote
 
 STAGE_PREFIX = ".vcharon-stage-"
+
+# The codec part_problem counts with, found now: Python imports a codec's module at its first
+# use, and a long-running command imports nothing after its start (DESIGN, "Running watchers").
+codecs.lookup("utf-16-le")
 
 # Python 3.13's ntpath._reserved_names; ported, since 3.11 and 3.12 don't have it.
 RESERVED = frozenset(

@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, charter, cli, entries, platform
+from vcharon import channel_cmd, charter, cli, entries, install, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
@@ -1729,6 +1729,53 @@ class StreamTest(WatchCase):
         for proc in self.procs:
             self.assertIsNotNone(proc.poll(), "a child still runs")
 
+    def test_a_real_streaming_watcher_imports_nothing_after_its_start(self):
+        # the watcher in a child, its sync child FAKE_CHILD: rounds with an entry and an
+        # error, then the child's exit 14 (DESIGN, "Running watchers")
+        imported = os.path.join(self.tmp, "imported.json")
+        acts = [["out", "ROUND 0"], self.entry("debian", 1, "hello"), ["out", "ROUND 0"],
+                ["out", "ERROR mb.windows.down: lost: the connection closed"],
+                ["out", "  fix: run it again"], ["out", "ROUND 1"], ["pause", 0.5],
+                ["out", "ROUND 0"], ["pause", 0.5], ["exit", 14]]
+        code = ("import json, sys\n"
+                "from vcharon import cli, install\n"
+                "from vcharon.mailbox import watch\n"
+                "watch.sync_argv = lambda sync_args, repeat=None: [sys.executable, '-c', %r, %r]\n"
+                "start = []\n"
+                "init = install.Watchdog.__init__\n"
+                "def watched(self, *args):\n"
+                "    init(self, *args)\n"
+                "    start.append(set(sys.modules))\n"
+                "install.Watchdog.__init__ = watched\n"
+                "code = cli.main(sys.argv[1:])\n"
+                "with open(%r, 'w') as f:\n"
+                "    json.dump(sorted(set(sys.modules) - start[0]), f)\n"
+                "sys.exit(code)\n" % (FAKE_CHILD, json.dumps(acts), imported))
+        child = subprocess.Popen([sys.executable, "-c", code, "watch", "mb", "--project", "p",
+                                  "--fresh"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+        try:
+            out, err = child.communicate(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+        lines = self.said(out.decode("utf-8").splitlines())
+        self.assertEqual(child.returncode, 14, (lines, err))
+        self.assertIn("to you: debian#1 — hello  (debian/RESULTS.md)", lines)
+        self.assertEqual(lines[-1], "EXIT updated")
+        with open(imported, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), [])
+
+    def test_a_child_that_exits_updated(self):
+        # vcharon sync --repeat saw vcharon replaced under it: no restart, EXIT updated
+        code, lines = self.watch([["out", "ROUND 0"], ["out", "EXIT updated"], ["exit", 14]],
+                                 [["out", "ROUND 0"]])
+        self.assertEqual((code, lines[-1]), (14, "EXIT updated"))
+        self.assertNotIn("ERROR", " ".join(lines))
+        self.assertEqual(len(self.spawned), 1)
+        self.assert_all_stopped()
+
     def test_a_member_left_out_by_the_pull(self):
         # the streaming sync prints no notes: the members its down left out reach the
         # watcher through the file the sync saves, a WARN each while it lasts
@@ -2467,6 +2514,8 @@ class CommandTest(WatchCase):
         calls = []
 
         def interrupted(*args, **kw):
+            # each gets the watchdog's check for its rounds (UpdatedTest)
+            self.assertIsInstance(kw.pop("updated").__self__, install.Watchdog)
             calls.append((args, kw))
             raise KeyboardInterrupt
 
@@ -2511,7 +2560,7 @@ class CommandTest(WatchCase):
         self.assertEqual(calls, [("mb.windows-b", ["mb", "--project", "p", "--role", "b"], 2)])
 
     def test_exit_codes(self):
-        for code in (0, 10, 11, 12, 13):
+        for code in (0, 10, 11, 12, 13, 14):
             with self.subTest(code=code), \
                     mock.patch.object(watch, "watch_dir", return_value=code):
                 self.assertEqual(self.cli()[0], code)
@@ -2559,6 +2608,149 @@ class CommandTest(WatchCase):
                          (0, [watching(self.tree, 1),
                               "to you: mac#1 — y  (mac/RESULTS.md)", "new mac/y",
                               "EXIT change"]), err)
+
+
+class UpdatedTest(WatchCase):
+    """EXIT updated (exit 14): vcharon's code changed under a running watcher (DESIGN,
+    "Running watchers"), seen at the top of a round, or in a binary after an unexpected
+    error. The streaming child's exit 14 is StreamTest's."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.local_record()
+        # the file whose identity the watchdog compares: a stand-in for the binary
+        self.code = os.path.join(self.tmp, "vcharon-binary")
+        with open(self.code, "wb") as f:
+            f.write(b"old")
+        patcher = mock.patch.object(install, "code_path", return_value=self.code)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def swap(self):
+        """The binary replaced as an update does: a new file moved over it."""
+        new = self.code + ".new"
+        with open(new, "wb") as f:
+            f.write(b"new!")
+        os.replace(new, self.code)
+
+    def watch_with(self, sleep=None, fail=None):
+        """vcharon watch mb through the command line, its rounds with sleep (no wait), and
+        fail, if given, raised by the watch itself."""
+        real = watch.watch_dir
+
+        def watch_dir(*args, **kw):
+            if fail is not None:
+                raise fail()
+            return real(*args, sleep=sleep, **kw)
+
+        with mock.patch.object(watch, "watch_dir", watch_dir):
+            return self.cli()
+
+    def test_at_the_top_of_a_round(self):
+        # the check comes before the round's work: what came meanwhile waits for the next
+        # watcher, which goes on from the saved snapshot
+        checks = iter([False, True])
+
+        def sleep(seconds):
+            write_tree(self.tree, {"windows/x": b"x"})
+
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
+                               updated=lambda: next(checks))
+        self.assertEqual(code, watch.EXIT_UPDATED)
+        self.assertEqual(self.said(), [watching(self.tree, 0), "new windows/x", "EXIT updated"])
+
+    def test_through_the_command_line(self):
+        rounds = []
+
+        def sleep(seconds):
+            rounds.append(seconds)
+            if len(rounds) == 3:
+                self.swap()
+
+        code, out, err = self.watch_with(sleep=sleep)
+        self.assertEqual((code, err), (14, ""))
+        self.assertEqual(self.said(out.splitlines()),
+                         [watching(self.tree, 0), "EXIT updated"])
+        self.assertEqual(len(rounds), 3)
+        self.assertEqual(install.EXIT_UPDATED, 14)
+
+    def test_a_real_watcher_imports_nothing_after_its_start(self):
+        # in a child, as an agent runs it: entries and files come, then the binary is swapped;
+        # every module the rounds needed was there at the start (DESIGN, "Running watchers")
+        imported = os.path.join(self.tmp, "imported.json")
+        code = ("import json, os, sys\n"
+                "from vcharon import cli, install\n"
+                "install.code_path = lambda: %r\n"
+                "start = []\n"
+                "init = install.Watchdog.__init__\n"
+                "def watched(self, *args):\n"
+                "    init(self, *args)\n"
+                "    start.append(set(sys.modules))\n"
+                "install.Watchdog.__init__ = watched\n"
+                "code = cli.main(sys.argv[1:])\n"
+                "with open(%r, 'w') as f:\n"
+                "    json.dump(sorted(set(sys.modules) - start[0]), f)\n"
+                "sys.exit(code)\n" % (self.code, imported))
+        child = subprocess.Popen([sys.executable, "-c", code, "watch", "mb", "--project", "q",
+                                  "--every", "1"], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+        try:
+            lines = [util.readline(child.stdout).decode("utf-8")]
+            self.post("mac", 1, "first", to="@debian")
+            write_tree(self.tree, {"mac/run.log": b"x", "mac/A.md": b"a", "mac/a.md": b"a"})
+            lines.append(util.readline(child.stdout).decode("utf-8"))
+            self.swap()
+            out, err = child.communicate(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+        lines = [line.rstrip("\r\n") for line in lines] + out.decode("utf-8").splitlines()
+        self.assertEqual(child.returncode, 14, err)
+        said = self.said(lines)
+        self.assertEqual((said[0], said[1], said[-1]),
+                         (watching(self.tree, 0), "to you: mac#1 — first  (mac/RESULTS.md)",
+                          "EXIT updated"))
+        with open(imported, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), [])
+
+    def test_gone_counts_as_changed(self):
+        dog = install.Watchdog()
+        self.assertFalse(dog.changed())
+        os.remove(self.code)
+        self.assertTrue(dog.changed())
+
+    def test_an_unexpected_error_in_a_binary_after_a_swap(self):
+        # a read of the new file at the old offsets can be any exception
+        def fail():
+            self.swap()
+            return ImportError("bad marshal data (unknown type code)")
+
+        with mock.patch.object(platform, "is_frozen", return_value=True):
+            code, out, err = self.watch_with(fail=fail)
+        self.assertEqual((code, err), (14, ""))
+        self.assertEqual(self.said(out.splitlines()), ["EXIT updated"])
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"),
+                  encoding="utf-8") as f:
+            self.assertIn("vcharon changed under this process (ImportError: bad marshal data "
+                          "(unknown type code)); exiting with 14", f.read())
+
+    def test_an_unexpected_error_without_a_swap_is_a_bug(self):
+        with mock.patch.object(platform, "is_frozen", return_value=True):
+            code, out, err = self.watch_with(fail=lambda: ImportError("no module named x"))
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith("ERROR internal: ImportError: no module named x\n"), err)
+
+    def test_only_a_binary_reads_its_code_from_its_file(self):
+        # a package's files are whole files either way: an error is the error
+        def fail():
+            self.swap()
+            return ImportError("no module named x")
+
+        with mock.patch.object(platform, "is_frozen", return_value=False):
+            code, out, err = self.watch_with(fail=fail)
+        self.assertEqual((code, out), (1, ""))
+        self.assertTrue(err.startswith("ERROR internal: "), err)
 
 
 class LooseTest(WatchCase):

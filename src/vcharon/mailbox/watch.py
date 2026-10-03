@@ -63,12 +63,16 @@ Lines; * marks the ones that count for --until-change:
                                    for a channel folder that's gone (a closed channel); a command
                                    in it is as this box runs vcharon
     ok again                       the first good round after a failed one
-    EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed
+    EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated
                                    the last line, when it exits on its own (exit 0, 10, 11,
-                                   13); EXIT closed right after the ERROR and fix (and log)
+                                   13, 14); EXIT closed right after the ERROR and fix (and log)
                                    lines of a
                                    channel that's gone, in every mode and on every start while
-                                   it stays gone: don't restart, run the fix line's leave
+                                   it stays gone: don't restart, run the fix line's leave;
+                                   EXIT updated when vcharon was replaced while it ran (an
+                                   update), seen at the top of a round, from the streaming
+                                   child's exit 14, or after an unexpected error in a binary
+                                   (cli.py): start it again, which runs the new one
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
@@ -102,7 +106,17 @@ import time
 
 # Imported here, not in the functions: a long-running watch has every module it needs loaded
 # before anything can change the files under it (DESIGN, "Running watchers").
-from .. import channel_cmd, charter, config, entries, fsops, pathrules, platform, plugin
+from .. import (
+    channel_cmd,
+    charter,
+    config,
+    entries,
+    fsops,
+    install,
+    pathrules,
+    platform,
+    plugin,
+)
 from ..lock import Lock
 from ..proto import VCharonError
 
@@ -140,6 +154,7 @@ FOLDS = sys.platform in ("win32", "darwin")
 BUSY = 2
 # exit codes of the watcher itself (vcharon guide watch)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
+EXIT_UPDATED = install.EXIT_UPDATED
 # the saved snapshot's format: 2 since channels, whose entries it keeps
 SNAPSHOT_VERSION = 2
 # the hex digits of a heading's sha256 kept for the edit check
@@ -678,6 +693,8 @@ class _Watch:
         # whether the last round's error was the channel gone (its fix is CHANNEL_GONE_HINT's):
         # the watch ends with EXIT closed
         self.closed = False
+        # whether the streaming child exited because vcharon was updated: EXIT updated
+        self.updated = False
         # In the failing streak: the keys (error_key) that counted as a change, saved with the
         # snapshot; the keys that never count in it (the start's own error); and the key of
         # the round before, for a TRANSPORT error's second round.
@@ -891,14 +908,16 @@ class _Watch:
 
 
 def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_errors, rounds,
-          error_seconds=None, start=None):
+          error_seconds=None, start=None, updated=None):
     """Runs rounds; returns the exit code. step() runs one round and returns (change lines,
     failed, saved): failed is None for a skipped (busy) round; saved is False if the snapshot
     couldn't be saved. The limits are checked between rounds, never during one. error_seconds
     (streaming): --until-change's EXIT error comes after that many seconds of failed
     rounds, by timer, in place of max_errors rounds. start: the timer's value the limits count
     from, if the caller took it (a streaming child's --max-minutes deadline counts from it
-    too)."""
+    too). updated(): whether vcharon's code changed since the start (install.Watchdog),
+    asked at the top of each round, before any other work: EXIT updated (DESIGN, "Running
+    watchers")."""
     start = timer() if start is None else start
     errors = 0
     # error_seconds: the time of the failed rounds in a row, each from the end of the round
@@ -910,8 +929,15 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     while rounds is None or done < rounds:
         if done or not at_once:
             sleep(every)
+        if updated is not None and updated():
+            w.say("EXIT updated")
+            return EXIT_UPDATED
         changes, failed, saved = step()
         done += 1
+        if w.updated:
+            # the streaming child saw it first: its round brought nothing
+            w.say("EXIT updated")
+            return EXIT_UPDATED
         if w.closed:
             # in every mode, before the rules below: a closed channel's rule is "don't
             # restart; leave", not a change's "restart, then read"; nor is it counted, so a
@@ -959,13 +985,13 @@ def _locked(w, state):
 
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
-              max_errors=10, folder_limits=None):
+              max_errors=10, folder_limits=None, updated=None):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
-    WARN line. Returns the exit code. Refused (VCharonError) unless root/me/ holds
-    MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT closed,
-    before any lock or snapshot."""
+    WARN line. updated: _loop's. Returns the exit code. Refused (VCharonError) unless
+    root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
+    closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
     try:
         os.scandir(root).close()
@@ -996,7 +1022,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
             return changes, None if w.told() else error is not None, saved
 
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
-                     max_errors, rounds)
+                     max_errors, rounds, updated=updated)
     finally:
         lk.release()
 
@@ -1156,9 +1182,10 @@ class Stream:
         before the round: during the wait before a start, or before its ROUND line, when the
         child is stopped. A child that exits after a ROUND line whose error breaks the
         connection, with nothing more on stdout, is started again without a round of its own:
-        the round said why, and what it says on stderr then is only its way out. Any other
-        exit (a round cut off, an exit before its first round, a crash after a round that
-        didn't break) is one round, with its error line from stdout or stderr."""
+        the round said why, and what it says on stderr then is only its way out. An exit with
+        EXIT_UPDATED is UPDATED: vcharon was replaced. Any other exit (a round cut off, an exit
+        before its first round, a crash after a round that didn't break) is one round, with
+        its error line from stdout or stderr."""
         pending = []
         while True:
             if self.proc is None:
@@ -1192,6 +1219,9 @@ class Stream:
                 err = self._err
                 code = self._reap()
                 self.exits += 1
+                if code == EXIT_UPDATED:
+                    # vcharon sync --repeat saw vcharon replaced under it
+                    return UPDATED
                 if not self._rounds:
                     # an exit before the first round: a config error, say, on stderr
                     return parse_failure(code, pending + err.since(0), self.job)
@@ -1280,6 +1310,8 @@ class Stream:
 # Stream._next_line's answers besides a line and None
 _LATE = object()
 _STUCK = object()
+# Stream.next_round's answer for a child that exited because vcharon was updated
+UPDATED = object()
 
 
 def mailbox_of(job):
@@ -1347,12 +1379,15 @@ def is_gone(fix):
 
 def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
-              max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT):
+              max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
+              updated=None):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
     membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
     <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
-    run(job, sync_args) every `every` seconds; the wake rules then count time by timer."""
+    run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
+    updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
+    way."""
     local, me, leader = mailbox_of(job)
     state = snapshot_path(local, me, job)
     # the members the pull left out for their size, as the sync saved them after its down:
@@ -1390,6 +1425,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
             if got is None:
                 # --max-minutes passed before the child's round: no round
                 return 0, None, True
+            if got is UPDATED:
+                w.updated = True
+                return [], None, True
             code, line, fix = got
             # a failed run may still have brought files, so the scan comes either way; a
             # failed run's error line is the one shown, not the scan's
@@ -1412,7 +1450,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
 
         # the client's first round runs at once, as it always did
         return _loop(w, every, sleep, step, timer, True, until_change, max_minutes,
-                     max_errors, rounds, error_seconds, start=start)
+                     max_errors, rounds, error_seconds, start=start, updated=updated)
     finally:
         # every way out: any EXIT, Ctrl-C, a crash; the lock even if the stop fails
         try:

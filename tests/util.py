@@ -47,6 +47,19 @@ def _can_symlink():
 CAN_SYMLINK = _can_symlink()
 
 
+def readline(stream, timeout=60):
+    """stream.readline() of a child's pipe, or an AssertionError after timeout seconds: a child
+    that hangs fails the test instead of hanging the suite (the caller then kills it, which
+    ends the read)."""
+    got = []
+    reader = threading.Thread(target=lambda: got.append(stream.readline()), daemon=True)
+    reader.start()
+    reader.join(timeout)
+    if not got:
+        raise AssertionError("no line from the child within %d s" % timeout)
+    return got[0]
+
+
 def package_source(name):
     """The source of one module of the package, as the bundle carries it."""
     with open(os.path.join(PACKAGE_DIR, name), "rb") as f:

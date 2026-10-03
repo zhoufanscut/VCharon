@@ -696,8 +696,9 @@ HINTS = {
 
 
 def parse(case, argv):
-    """argv (after `vcharon`) parses with the command line's own parser."""
-    case.assertIn(argv[0], platform.COMMANDS)
+    """argv (after `vcharon`) parses with the command line's own parser. --update isn't one of
+    runnable()'s commands (DESIGN, "Fix lines"), but it parses."""
+    case.assertIn(argv[0], platform.COMMANDS + ("--update",))
     # a command ends before any mark: none sticks to its last value
     case.assertNotRegex(argv[-1], r"[,;:.)]\Z")
     try:
