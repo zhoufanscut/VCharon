@@ -219,8 +219,8 @@ def resolve_to(to, tree, channel=None):
             members = members_in(tree)
             raise _refuse("--to %s: not a member of %s (members: %s)"
                           % (token, channel or "this channel", ", ".join(members) or "none"),
-                          "address members as @<name>, one of the names above; @all is the "
-                          "leader's")
+                          "address one of the members above, by name or as @<name>; @all is "
+                          "the leader's")
         out.append("@" + token)
     return out
 

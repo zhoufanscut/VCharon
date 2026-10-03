@@ -50,6 +50,27 @@ and made a tool of its own.
   `EXIT updated`, exit 14: start it again. `vcharon doctor` shows how VCharon was installed
   (`install` in `--json`).
 
+### Since 0.1.0rc2
+
+- **A remote member's `JOIN` reaches the leader with its folder**: `join` writes the `JOIN` (or
+  `REJOIN`) entry before its sync, which sends it with `MEMBER.md`. It was written after that
+  sync, so the leader saw the new folder at once but the `JOIN` only with the member's next sync
+  (6 to 52 s later across the two real runs, whenever its watcher started).
+- The guide's rules topic: no host names, IP addresses, ssh aliases, user names, home paths or
+  keys in an entry; every member reads it and it stays in the channel. Name your machine by its
+  box.
+- **ssh couldn't resolve the server's name**: the `fix:` line now also says to check that the
+  alias matches a `Host` line in `~/.ssh/config` exactly, case included (`Host DevBox` isn't
+  `devbox`); it said only "check the host, port, VPN".
+- **`doctor`**: the client-id file's row is labelled `claimer`, no longer a second `machine`
+  row; in `--json` that check's `subject` is `"claimer"` (the field names are unchanged).
+- `post --to <name>` refused for a non-member: its `fix:` line now says a member can be named
+  with or without the `@`.
+- The guide: `read` shows a sample of its output (one summary line per entry; `--full` adds the
+  header lines and bodies); a watcher's first start takes this machine's copy as seen, so for
+  a remote member an entry posted after the join's sync prints in the watcher's first round,
+  and one addressed to it wakes `--until-change`.
+
 ### Since 0.1.0rc1
 
 - The Linux binary is expected to be about 10 MB, down from 23.3 MB in 0.1.0rc1: libpython
@@ -122,7 +143,22 @@ and made a tool of its own.
     streaming within about 4 s. With 50 watchers the server held 50 helpers at about 24.5 MB
     each (1.2 GB) on a 4-CPU, 3.7 GB machine, load 0.79. The resets' cause is **inferred**:
     sshd's `MaxStartups` (the server's log wasn't read).
-  The fixes under "Since 0.1.0rc1" have **not yet run** in a real channel.
+  The fixes under "Since 0.1.0rc1" were checked in the second run, below.
+- **A second real channel, with the 0.1.0rc2 binaries** (measured by the leader, 2026-10-03; the
+  same four machines and roles as the first). Each member checked the fixes under "Since
+  0.1.0rc1", and they worked: seconds in the headings, with `read` in arrival order; a remote
+  member's `post` printed `sent to <server>` and the entry arrived with no separate sync (once it
+  printed `note: a sync … is running` instead, having met the watcher's round, and the entry
+  still arrived); a bare `--to` name worked, and a non-member was refused with the member list;
+  the guide's line on exit 10; `doctor`'s bundled-Python line. **Measured:**
+  - from the leader's post to a member's watcher line: 2 s on the macOS remote member, 3 s on the
+    Windows one, 6 s on the local member (its 10 s round);
+  - on Windows, the executable replaced in place in a folder the user had excluded from Defender
+    was not quarantined (as the Windows member reported);
+  - after the close all three watchers ended with `EXIT closed`, and each member ran `leave`
+    without asking its user about files (as the user reported).
+  The run found the late `JOIN` (15 to 38 s) and the other items under "Since 0.1.0rc2", which
+  have **not yet run** in a real channel.
 - A channel over real ssh: two remote members on one Linux box (Debian 13, Python 3.13), through
   its own sshd: `ping`, `create`, `join`, and a `watch --until-change` woken by the other
   member's `post` and `sync` (`to all:` then `EXIT change`, exit 0). **Measured**, once, by

@@ -41,6 +41,9 @@ Each rule has its reason after the colon.
   on the step; ask and wait, and never work around it: you can't do it safely yourself.
 - **A reboot ends a session.** `STEPS.md` and each `RESULTS.md` must let a fresh session pick up
   where the last one stopped, with no memory of it: what's done, what's next, what failed.
+- **No machine details in an entry.** Every member reads it, and it stays in the channel: never
+  put host names, IP addresses, ssh aliases, user names, home paths or keys in one. Name your
+  machine by its box (the first part of your member name).
 - **Times come from vcharon or `date`**, never from memory: a typed time is often wrong.
 - **Leave `TZ` alone in a session**: entry headings carry local time with no zone.
 - **Quote what you ran, and its result, as measured. Say what you didn't check**: the others

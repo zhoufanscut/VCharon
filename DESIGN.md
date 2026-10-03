@@ -284,7 +284,7 @@ The last line is one argument, and the only text that ever goes through the serv
 | host key unknown or changed | ssh exit 255, `Host key verification failed` | run `ssh <dest>` once in a terminal |
 | no usable key, or key refused | ssh exit 255, `Permission denied` | add your key to the server, or run `vcharon key <dest>` |
 | key accepted but locked by a passphrase | the `-v` probe of `doctor` and `key` (ControlMaster off) names a key file here, then ssh exits 255 with `Permission denied` | `vcharon key <dest>` |
-| network | exit 255 with `Connection refused`, `timed out`, `Could not resolve`, … | check the host, port, VPN |
+| network | exit 255 with `Connection refused`, `timed out`, `Could not resolve`, … | check the host, port, VPN; for `Could not resolve`, first that the alias matches a `Host` line in `~/.ssh/config` exactly (its patterns are case-sensitive, so `devbox` doesn't match `Host DevBox`) |
 | no Python on the server | exit 127 | install `python3`, or set `remote_python` |
 | `remote_python` isn't runnable | exit 126 | check `remote_python` |
 | Python too old | exit 90 | install 3.13 or later |
@@ -1001,10 +1001,11 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   own reading of format and limits must equal the listing's. (4) An existing folder: the
   claimer rules above; with no record and no `--rejoin`, `the name <name> is taken in C`. (5) The record, then `MEMBER.md` (a new member only), a remote
   member's section. A failure before the record releases a new claim. (6) A remote member's
-  rejoin first pulls its own folder from the server when this machine lost it (below). (7) The
-  sync, then a `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md`, then the entries already
-  addressed to the member or to all are printed, since the watcher's first start is a baseline
-  that prints nothing.
+  rejoin first pulls its own folder from the server when this machine lost it (below). (7) A
+  `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md`, then the sync, which sends it with
+  `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the member's next sync.
+  Then the entries already addressed to the member or to all are printed (the sync brought the
+  others' folders), since the watcher's first start is a baseline that prints nothing.
 - **The rejoin's pull** is decided from up's saved state, never from how the folder looks (a
   stray `.DS_Store` would pass for a tree): it pulls when up has no usable state, has sent
   nothing, or has sent `MEMBER.md` and `MEMBER.md` is missing here. It pulls into a temp folder
@@ -1218,7 +1219,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   changed, so a quiet watch doesn't touch the disk. A restart goes on from it (`watching <dir>,
   <n> files in other folders, since <time>`) and prints what came meanwhile; a saved error that
   holds is printed again without counting, so a blocked member isn't woken in a loop. The first
-  start, or `--fresh`, is a baseline that prints nothing already there. A failed save with
+  start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote
+  member, this machine's copy as of its last sync), none of it printed; what the first round
+  brings prints and counts as in any round. A failed save with
   `--until-change` ends the watch with `EXIT error`.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>)`; `join`, `leave` and `close` check the same lock.

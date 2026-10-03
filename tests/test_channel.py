@@ -258,13 +258,16 @@ class CreateJoinTest(ChannelCase):
         self.assertNotIn("  not yours", lines)
         self.assertNotIn("for someone else", out)
         self.assertEqual(self.record("game.mac-web")["leader"], "laptop-ui")
-        # the JOIN entry is in the own RESULTS.md, to the leader; the next run sends it
+        # the JOIN entry is in the own RESULTS.md, to the leader, and join's own sync sent it
+        # with MEMBER.md
         local = self.joined("game.mac-web")
         results = entries.parse_file(os.path.join(local, "mac-web", "RESULTS.md"))
         self.assertEqual([(e.id, e.title, e.to) for e in results],
                          [("mac-web#2", "JOIN", ("@laptop-ui",))])
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game", "mac-web"))),
-                         ["MEMBER.md"])
+                         ["MEMBER.md", "RESULTS.md"])
+        self.assertEqual(read_tree(os.path.join(self.root, "game", "mac-web"))["RESULTS.md"],
+                         read_tree(os.path.join(local, "mac-web"))["RESULTS.md"])
         code, out, err = self.run_cli("sync", "game")
         self.assertEqual(code, 0, err)
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game", "mac-web"))),
@@ -409,6 +412,19 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.server_tree(), before)
         self.assertFalse(os.path.exists(platform.client_id_path()))
 
+    def test_the_leader_gets_the_join_with_the_folder(self):
+        # no second sync by the member (no watcher, no post): the leader's next sync brings
+        # the JOIN with MEMBER.md
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.use_box("laptop")
+        self.assertEqual(self.run_cli("sync", "game", "--project", "ui")[0], 0)
+        copy = os.path.join(self.joined("game.laptop-ui"), "mac-web")
+        self.assertEqual(sorted(os.listdir(copy)), ["MEMBER.md", "RESULTS.md"])
+        self.assertEqual([(e.id, e.title, e.to) for e in
+                          entries.parse_file(os.path.join(copy, "RESULTS.md"))],
+                         [("mac-web#2", "JOIN", ("@laptop-ui",))])
+
     def test_rejoin_without_a_local_tree_pulls_the_own_folder(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
@@ -422,13 +438,19 @@ class CreateJoinTest(ChannelCase):
         shutil.rmtree(local)
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertIn("  pulled your folder from the server: 2 files", out)
-        # nothing at the server was replaced; the REJOIN took the next number
+        # nothing at the server was replaced; the REJOIN took the next number, and join's sync
+        # sent it: the one change at the server is RESULTS.md gaining it at its end
         results = entries.parse_file(os.path.join(own, "RESULTS.md"))
         self.assertEqual([e.id for e in results], ["mac-web#2", "mac-web#3",
                                                    "mac-web#4"])
         self.assertEqual([e.title for e in results], ["JOIN", "step done", "REJOIN"])
         self.assertEqual(entries.next_number(own, "mac-web"), 5)
-        self.assertEqual(read_tree(os.path.join(self.root, "game", "mac-web")), server_copy)
+        after = read_tree(os.path.join(self.root, "game", "mac-web"))
+        self.assertEqual({k: v for k, v in after.items() if k != "RESULTS.md"},
+                         {k: v for k, v in server_copy.items() if k != "RESULTS.md"})
+        self.assertTrue(after["RESULTS.md"].startswith(server_copy["RESULTS.md"]))
+        self.assertEqual([e.title for e in entries.parse(after["RESULTS.md"].decode())],
+                         ["JOIN", "step done", "REJOIN"])
 
     def test_join_refused_while_the_watcher_lock_is_held(self):
         self.lead()
@@ -1102,9 +1124,15 @@ class ReviewTest(ChannelCase):
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertIn("  pulled your folder from the server: 3 files added, 0 already here",
                       out)
-        # nothing at the server was pruned; the stray stays here (and is sent up)
+        # nothing at the server was pruned (RESULTS.md only gained the REJOIN at its end); the
+        # stray stays here (and is sent up)
         for name, data in self.srv_before.items():
-            self.assertEqual(read_tree(self.srv_own)[name], data)
+            got = read_tree(self.srv_own)[name]
+            if name == "RESULTS.md":
+                self.assertTrue(got.startswith(data))
+                self.assertEqual(entries.parse(got.decode())[-1].title, "REJOIN")
+            else:
+                self.assertEqual(got, data)
         self.assertEqual(read_tree(self.own)[".DS_Store"], b"x")
 
     def test_needs_pull_goes_by_ups_state(self):
@@ -1440,8 +1468,10 @@ class ReviewTest(ChannelCase):
     def test_a_failed_rejoin_keeps_the_folder(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
-        # the server folder holds only MEMBER.md: what release would take
+        # the server folder holds only MEMBER.md: what release would take (join sent its JOIN
+        # too; removed here, so the folder is releasable)
         srv = os.path.join(self.root, "game", "mac-web")
+        os.remove(os.path.join(srv, "RESULTS.md"))
         self.assertEqual(os.listdir(srv), ["MEMBER.md"])
         section = os.path.join(self.homes["mac"], "channels.d", "game.mac-web.ini")
         os.remove(section)

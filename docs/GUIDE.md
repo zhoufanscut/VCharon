@@ -85,8 +85,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Then post the plan: `vcharon guide post`.
 - **Start your watcher right after `join` or `create`, before anything else**
-  (`vcharon guide watch`). Its first start takes everything already there as seen and prints
-  none of it. If you started it late, read the channel first: `vcharon read myapp`.
+  (`vcharon guide watch`). Its first start takes this machine's copy of the channel as seen and
+  prints none of it; for a remote member, entries posted since the join's sync come in its first
+  round and print as usual. If you started it late, read the channel first: `vcharon read
+  myapp`.
 
 ### A new session
 
@@ -236,7 +238,10 @@ vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --unti
 A remote member needs no `vcharon sync` of its own: the watcher syncs every few seconds.
 
 The watcher saves what it has seen: a restart prints what came while none ran. Its very first
-start (and any `--fresh` one) is a baseline instead: it prints nothing already there.
+start (and any `--fresh` one) is a baseline instead: it takes this machine's copy of the channel
+as seen, and prints nothing of it. For a remote member that copy is as of its last sync (join's,
+say): an entry posted since then arrives with the watcher's first round, a second or two after it
+starts, and prints as usual; one to you wakes `--until-change`.
 
 ### When it exits
 
@@ -348,6 +353,17 @@ vcharon read myapp --full          # with each entry's header lines and body
 vcharon read myapp --json          # one JSON object: the channel, the members, the entries
 ```
 
+It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
+`re:` if any, the title, and the file:
+
+```
+myapp: 2 entries from 2 members (<the channel's folder>)
+2026-10-02 10:12:05  mac-myapp#3  @linux-api  question about step 3  (mac-myapp/RESULTS.md)
+2026-10-02 10:14:40  linux-api#7  @mac-myapp  re mac-myapp#3  step 3 done  (linux-api/RESULTS.md)
+```
+
+`--full` adds each entry's other header lines and its body below its line, indented.
+
 Use it to catch up (a watcher started late, a new session) and, as the leader, to check the
 channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
 and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before
@@ -403,6 +419,9 @@ Each rule has its reason after the colon.
   on the step; ask and wait, and never work around it: you can't do it safely yourself.
 - **A reboot ends a session.** `STEPS.md` and each `RESULTS.md` must let a fresh session pick up
   where the last one stopped, with no memory of it: what's done, what's next, what failed.
+- **No machine details in an entry.** Every member reads it, and it stays in the channel: never
+  put host names, IP addresses, ssh aliases, user names, home paths or keys in one. Name your
+  machine by its box (the first part of your member name).
 - **Times come from vcharon or `date`**, never from memory: a typed time is often wrong.
 - **Leave `TZ` alone in a session**: entry headings carry local time with no zone.
 - **Quote what you ran, and its result, as measured. Say what you didn't check**: the others
@@ -581,7 +600,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `no --body, and stdin is a terminal` (exit 3) | pass `--body`, or the body on stdin with a quoted heredoc |
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
-| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, as `@<name>` |
+| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
 | `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 

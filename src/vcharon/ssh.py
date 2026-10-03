@@ -117,8 +117,13 @@ def classify_exit(rc, tail, dest, settings, killed=None):
                            hint="add your key to the server, or run: vcharon key %s" % dest)
     elif rc == 255 and any(phrase in text for phrase in _NETWORK):
         phrase = next(phrase for phrase in _NETWORK if phrase in text)
-        err = VCharonError("connect", "ssh couldn't reach %s (%s)" % (dest, phrase),
-                           hint="check the host, port, VPN")
+        hint = "check the host, port, VPN"
+        if phrase == "Could not resolve":
+            # an alias typed in another case gets here: ssh_config's Host patterns are
+            # case-sensitive, so the name went to DNS
+            hint = ("check the name: an alias must match a Host line in ~/.ssh/config exactly, "
+                    "case included; else check the host and VPN")
+        err = VCharonError("connect", "ssh couldn't reach %s (%s)" % (dest, phrase), hint=hint)
     else:
         if rc is not None and rc < 0:
             what = "ssh was killed by signal %d" % -rc

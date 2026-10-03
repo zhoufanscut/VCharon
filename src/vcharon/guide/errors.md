@@ -73,7 +73,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `no --body, and stdin is a terminal` (exit 3) | pass `--body`, or the body on stdin with a quoted heredoc |
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
-| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, as `@<name>` |
+| `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
 | `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 

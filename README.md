@@ -337,9 +337,12 @@ the same user, and anyone who can log in as that user can read and write every c
 root. Use it with people and agents you trust. Separate accounts per person are not supported
 yet.
 
-Each streaming watcher holds one ssh connection to the server. With ten or more remote members
-on one server, sshd's defaults (`MaxStartups`, `MaxSessions`) may start refusing connections;
-this is inferred, not measured.
+Each remote member's watcher holds one ssh connection to the server, and one helper process there of
+about 25 MB: 50 watchers on one server took about 1.2 GB (measured on a 4-CPU, 3.7 GB Debian 13
+machine). Many watchers starting at the same moment can meet sshd's `MaxStartups` (default
+`10:30:100`): in that test, 10 starting at once had no reset, 20 had 3, 30 had 7 and 50 at least 16
+(`Connection reset by peer`); each retried and was streaming within about 4 s. That sshd's setting
+caused the resets is inferred; the server's log wasn't read.
 
 ## Uninstall
 

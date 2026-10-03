@@ -582,7 +582,8 @@ class ChannelTest(PostCase):
         self.assertEqual((code, out), (1, ""))
         self.assertEqual(err.splitlines()[:2], [
             "ERROR channel: --to mac-x: not a member of mb (members: debian, windows)",
-            "  fix: address members as @<name>, one of the names above; @all is the leader's"])
+            "  fix: address one of the members above, by name or as @<name>; @all is the "
+            "leader's"])
         self.assertFalse(os.path.exists(self.file))
         # all without its @ is no one's name here either
         code, out, err = self.post("--to", "all")

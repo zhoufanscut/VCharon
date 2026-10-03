@@ -887,6 +887,11 @@ def _join(args, cfg, name, log, say):
         if rejoin:
             # the same checkout may run another agent now: its name isn't tied to one
             _update_agent(own, name, args.fields, say)
+    # before the sync, which then sends it with MEMBER.md: the leader sees the JOIN when the
+    # folder appears, not at this member's next sync
+    entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
+                 ["@" + leader], body="%s %s %s." % (name, "rejoined" if rejoin else "joined",
+                                                     channel))
     code = 0
     if server.ssh is not None:
         code = _run_section(args, section, full=True)
@@ -897,9 +902,6 @@ def _join(args, cfg, name, log, say):
             say(platform.runnable("vcharon: the sync failed; you are in %s: run vcharon sync %s "
                                   "--full %s again" % (channel, channel,
                                                        name_flags(channel, name))))
-    entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
-                 ["@" + leader], body="%s %s %s." % (name, "rejoined" if rejoin else "joined",
-                                                     channel))
     # 7. the member's first watcher start is a baseline and never prints these
     tree = os.path.dirname(own)
     _print_entries(tree, name, leader, channel, say)

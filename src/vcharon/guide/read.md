@@ -20,6 +20,17 @@ vcharon read myapp --full          # with each entry's header lines and body
 vcharon read myapp --json          # one JSON object: the channel, the members, the entries
 ```
 
+It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
+`re:` if any, the title, and the file:
+
+```
+myapp: 2 entries from 2 members (<the channel's folder>)
+2026-10-02 10:12:05  mac-myapp#3  @linux-api  question about step 3  (mac-myapp/RESULTS.md)
+2026-10-02 10:14:40  linux-api#7  @mac-myapp  re mac-myapp#3  step 3 done  (linux-api/RESULTS.md)
+```
+
+`--full` adds each entry's other header lines and its body below its line, indented.
+
 Use it to catch up (a watcher started late, a new session) and, as the leader, to check the
 channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
 and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before

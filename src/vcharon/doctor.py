@@ -57,7 +57,7 @@ ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("vcharon", "install", "bundle", "python", "config", "box", "ssh", "agent",
-                   "dirs", "machine")
+                   "dirs", "machine", "claimer")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
 # reorder entries posted near a minute's end; from 30 s it will do so often.
@@ -318,9 +318,9 @@ def _machine(rep):
     try:
         cid, origin = platform.client_id(make=False)
     except VCharonError as e:
-        rep.check("FAIL", "machine", e.message, e.hint)
+        rep.check("FAIL", "claimer", e.message, e.hint)
         return None
-    rep.check("ok", "machine", "member folders are claimed with the client-id file %s (%s%s)"
+    rep.check("ok", "claimer", "member folders are claimed with the client-id file %s (%s%s)"
               % (path, "" if cid else "made at the first join, ", origin))
     return "client-id file (%s)" % origin
 

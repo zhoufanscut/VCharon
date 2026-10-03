@@ -47,7 +47,10 @@ vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --unti
 A remote member needs no `vcharon sync` of its own: the watcher syncs every few seconds.
 
 The watcher saves what it has seen: a restart prints what came while none ran. Its very first
-start (and any `--fresh` one) is a baseline instead: it prints nothing already there.
+start (and any `--fresh` one) is a baseline instead: it takes this machine's copy of the channel
+as seen, and prints nothing of it. For a remote member that copy is as of its last sync (join's,
+say): an entry posted since then arrives with the watcher's first round, a second or two after it
+starts, and prints as usual; one to you wakes `--until-change`.
 
 ## When it exits
 

@@ -71,8 +71,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Then post the plan: `vcharon guide post`.
 - **Start your watcher right after `join` or `create`, before anything else**
-  (`vcharon guide watch`). Its first start takes everything already there as seen and prints
-  none of it. If you started it late, read the channel first: `vcharon read myapp`.
+  (`vcharon guide watch`). Its first start takes this machine's copy of the channel as seen and
+  prints none of it; for a remote member, entries posted since the join's sync come in its first
+  round and print as usual. If you started it late, read the channel first: `vcharon read
+  myapp`.
 
 ## A new session
 

@@ -77,8 +77,10 @@ class ClassifyTest(unittest.TestCase):
              "Connection refused", "check the host, port, VPN"),
             (255, ["ssh: connect to host x port 22: Operation timed out"], "timed out",
              "check the host, port, VPN"),
+            # an alias in the wrong case goes to DNS: the fix says case counts
             (255, ["ssh: Could not resolve hostname nope: nodename nor servname provided"],
-             "Could not resolve", "check the host, port, VPN"),
+             "Could not resolve", "an alias must match a Host line in ~/.ssh/config exactly, "
+             "case included"),
             (255, ["ssh: connect to host x port 22: No route to host"], "No route to host",
              "check the host"),
             (255, ["ssh: connect to host x port 22: Network is unreachable"],

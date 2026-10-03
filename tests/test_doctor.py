@@ -151,7 +151,7 @@ class DoctorTest(DoctorCase):
         home = self.home
         self.assertEqual(lines[0], "vcharon: doctor")
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine",
+                                                "box", "ssh", "agent", "dirs", "machine", "claimer",
                                                 "fake-dest", "push", "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
@@ -178,7 +178,7 @@ class DoctorTest(DoctorCase):
                             os.path.join(self.vcharon_home, "logs"),
                             os.path.join(self.vcharon_home, "joined"), channels.root_path()))
         self.assertEqual(lines[6], "  ok    machine    %s" % TEST_MACHINE_ID)
-        self.assertEqual(lines.pop(7), "  ok    machine    " + USED % (
+        self.assertEqual(lines.pop(7), "  ok    claimer    " + USED % (
             os.path.join(self.vcharon_home, "state", "client-id"),
             "made at the first join, from the machine id"))
         self.assertEqual(lines[7], "  ok    fake-dest  logs in")
@@ -408,8 +408,9 @@ class DoctorTest(DoctorCase):
         for argv in ((), ("--server", "fake-dest")):
             with self.subTest(argv=argv):
                 lines = self.doctor(*argv, code=0)
-                self.assertEqual(self.of(lines, "machine"), [
-                    ("ok", TEST_MACHINE_ID),
+                # two subjects: the id, then the client-id file claims come from
+                self.assertEqual(self.of(lines, "machine"), [("ok", TEST_MACHINE_ID)])
+                self.assertEqual(self.of(lines, "claimer"), [
                     ("ok", USED % (platform.client_id_path(),
                                    "made at the first join, from the machine id"))])
         os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
@@ -443,7 +444,8 @@ class DoctorTest(DoctorCase):
                         claim = ("FAIL", "couldn't read this machine's id (%s), so no client id "
                                  "is made" % ("ioreg's IOPlatformUUID" if osn == "darwin"
                                               else "the registry's MachineGuid"))
-                    self.assertEqual(self.of(lines, "machine"), [("warn", text), claim])
+                    self.assertEqual(self.of(lines, "machine"), [("warn", text)])
+                    self.assertEqual(self.of(lines, "claimer"), [claim])
                     at = [i for i, line in enumerate(lines) if line.startswith("  warn  machine")]
                     self.assertEqual(len(at), 1, lines)
                     self.assertEqual(lines[at[0] + 1].strip(), "fix: " + fix)
@@ -470,11 +472,11 @@ class DoctorTest(DoctorCase):
         self.assertFalse(os.path.exists(path))
         _cid, origin = platform.client_id()
         self.assertEqual(origin, "random")
-        self.assertEqual(self.of(self.doctor(code=0), "machine")[1],
+        self.assertEqual(self.of(self.doctor(code=0), "claimer")[0],
                          ("ok", USED % (path, "random")))
         with open(path, "w") as f:
             f.write("not an id\n")
-        self.assertEqual(self.of(self.doctor(code=1), "machine")[1],
+        self.assertEqual(self.of(self.doctor(code=1), "claimer")[0],
                          ("FAIL", "%s isn't a client id (32 hex digits)" % path))
         doc = json.loads(self.run_cli("doctor", "--json")[1])
         self.assertIsNone(doc["claimer_source"])
@@ -599,7 +601,7 @@ class DoctorTest(DoctorCase):
     def test_one_destination(self):
         lines = self.doctor("--server", "fake-dest", code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine",
+                                                "box", "ssh", "agent", "dirs", "machine", "claimer",
                                                 "fake-dest"])
 
     def test_bad_destination(self):
@@ -612,7 +614,8 @@ class DoctorTest(DoctorCase):
         self.write_config("[vcharon]\n")
         lines = self.doctor(code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine"])
+                                                "box", "ssh", "agent", "dirs", "machine",
+                                                "claimer"])
 
     def test_broken_config(self):
         self.write_config("[vcharon]\ncompress = maybe\n")
@@ -620,7 +623,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "config"),
                          [("FAIL", "vcharon.ini [vcharon] compress: must be yes or no")])
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "ssh", "agent", "dirs", "machine"])
+                                                "ssh", "agent", "dirs", "machine", "claimer"])
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
