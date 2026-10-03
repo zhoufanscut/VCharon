@@ -1,4 +1,5 @@
-"""vcharon key: unlock a passphrase key into the OS's own agent or keychain (DESIGN §6.5); client.
+"""vcharon key: unlock a passphrase key into the OS's own agent or keychain (DESIGN, "Keys without
+prompts"); client.
 
 vcharon never reads, stores or logs a passphrase: ssh-add asks for it on the terminal. It never
 writes in ~/.ssh either: on macOS it prints the config lines to add.
@@ -23,8 +24,8 @@ APPLE_SSH = "/usr/bin/ssh"
 
 
 def terminal():
-    """True when stdin and stdout are a terminal: only then may vcharon key prompt (launch
-    rules, DESIGN §13). Tests patch it."""
+    """True when stdin and stdout are a terminal: only then may vcharon key prompt (DESIGN,
+    "Launch rules"). Tests patch it."""
     try:
         return bool(sys.stdin and sys.stdin.isatty() and sys.stdout and sys.stdout.isatty())
     except (AttributeError, ValueError, OSError):

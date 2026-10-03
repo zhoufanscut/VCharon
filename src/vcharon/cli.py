@@ -1,5 +1,5 @@
-"""The command line (DESIGN §13): its verbs, their output and exit codes, and the sync engine's
-runner behind vcharon sync."""
+"""The command line (DESIGN, "Command line"): its verbs, their output and exit codes, and the sync
+engine's runner behind vcharon sync."""
 
 from __future__ import annotations
 
@@ -269,7 +269,7 @@ def _parser():
 
 
 def _utf8_console():
-    """Launch rules (DESIGN §13): on Windows, stdout and stderr write UTF-8. A stream that a
+    """(DESIGN, "Launch rules"): on Windows, stdout and stderr write UTF-8. A stream that a
     test or another tool swapped in may not have reconfigure(). Elsewhere Python writes UTF-8
     already."""
     if platform.os_name() != "windows":
@@ -778,8 +778,8 @@ def _ping(args, run):
 
 
 def _key(args, run):
-    """vcharon key (DESIGN §6.5): the terminal first, then the arguments and the config, then
-    keys.unlock."""
+    """vcharon key (DESIGN, "Keys without prompts"): the terminal first, then the arguments and the
+    config, then keys.unlock."""
     if not keys.terminal():
         raise keys.needs_terminal()
     if args.dest is None and args.key_file is None:
@@ -952,7 +952,7 @@ def side_text(job, side, role):
 
 
 def _jobs_named(cfg, name):
-    """The jobs a name runs: a job, or a mailbox section's two (DESIGN §12)."""
+    """The jobs a name runs: a job, or a mailbox section's two (DESIGN, "Channel sections")."""
     jobs = cfg.named(name)
     skip = cfg.skipped_for(name) if jobs is None else None
     if skip is not None:
@@ -1024,7 +1024,7 @@ def _groups(todo):
 
 def _named_once(names):
     """A usage error if a job is named twice. Case is ignored: job names are unique that way
-    (DESIGN §12)."""
+    (DESIGN, "Channel sections")."""
     seen = {}
     for name in names:
         other = seen.get(name.casefold())
@@ -1296,7 +1296,7 @@ def _repeat_one(args, jr, conn, stack):
             jr.log.info("not run this round: %s" % e.message)
         else:
             jr.status = "failed"
-            # its path names the job (DESIGN §13)
+            # its path names the job (DESIGN, "Command line")
             jr.errors.job_name = None
             jr.errors.show_error(e)
         return False
@@ -1546,7 +1546,7 @@ def _run_one(args, jr, conn, stack):
     bound = []
     session = _session(conn, stack, jr)
     machine = conn.machine
-    # Every job has a remote end, and its state is tied to that server (DESIGN §7.3), which
+    # Every job has a remote end, and its state is tied to that server (DESIGN, "hello"), which
     # must be Linux.
     state.need_linux({"os": conn.os}, job.ssh, state.LINUX_HINT % job.ssh)
     if not machine:
@@ -1565,7 +1565,7 @@ def _run_one(args, jr, conn, stack):
         if job.sink.end == "remote":
             binding["machine"] = machine
         # So the devbox alias pointed at another server, or a moved root, can't make
-        # prune delete on the wrong machine (DESIGN §11.2).
+        # prune delete on the wrong machine (DESIGN, "State file").
         if saved is not None and binding != saved.sink:
             raise VCharonError("state_mismatch", "the state of %s was saved for another "
                                "target: %s, now %s"
@@ -1628,8 +1628,8 @@ def _same_state(saved, new):
 
 
 def _save_after_failure(name, fingerprint, eng, binding, log):
-    """Saves what a commit that failed partway wrote (DESIGN §9.2). A failure here is only
-    logged: it never replaces the run's own error."""
+    """Saves what a commit that failed partway wrote (DESIGN, "The path source"). A failure here is
+    only logged: it never replaces the run's own error."""
     try:
         state.save(name, state.State(fingerprint, eng.plan.identity, binding, eng.state_after,
                                      state.now()))

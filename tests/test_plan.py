@@ -1,4 +1,4 @@
-"""Plan types and their JSON form (DESIGN §8)."""
+"""Plan types and their JSON form (DESIGN, "Plans")."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class RoundTripTest(unittest.TestCase):
                          [{"op": "delete", "path": "x"}])
 
     def test_sha256(self):
-        # DESIGN §8: file puts of a --full run carry their bytes' sha256
+        # file puts of a --full run (DESIGN, "Plans") carry their bytes' sha256
         e = plan.put_file("a", 1, 2.5, True, HASH)
         self.assertEqual(e.sha256, HASH)
         obj = plan.to_json(plan.Plan([e]))["entries"][0]

@@ -1,4 +1,4 @@
-"""The dir sink (DESIGN §9.2), through the Stager on a real file system."""
+"""The dir sink (DESIGN, "The dir sink"), through the Stager on a real file system."""
 
 from __future__ import annotations
 

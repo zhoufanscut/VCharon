@@ -1,4 +1,4 @@
-"""vcharon: move files between the two ends of an ssh connection."""
+"""vcharon: file-based channels for AI agents, on one machine or across machines over plain ssh."""
 
 VERSION = "0.1.0"
 # Both ends run the same bundled code, so this changes only when the frames or messages do.

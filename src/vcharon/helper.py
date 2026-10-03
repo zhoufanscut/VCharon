@@ -13,9 +13,10 @@ import traceback
 from . import PROTOCOL, VERSION, channels, plan, platform, plugin, proto, stage
 from .proto import VCharonError
 
-# A busy helper sends a tick at most this often, so it never looks idle (DESIGN §6.3).
+# A busy helper sends a tick at most this often, so it never looks idle (DESIGN, "Threads, timeouts,
+# shutdown").
 TICK_EVERY = 10
-# echo's upload limit (DESIGN §7.4)
+# echo's upload limit (DESIGN, "Calls")
 ECHO_MAX = 16 << 20
 
 # Handlers return this to end the run.
@@ -107,7 +108,7 @@ class HelperConn:
 
 class Helper:
     """What a handler gets: the connection, stdin, ways to reply and report, and the run's
-    one source and one sink (DESIGN §7.4)."""
+    one source and one sink (DESIGN, "Calls")."""
 
     def __init__(self, conn, stdin):
         self.conn = conn
@@ -158,9 +159,9 @@ class Helper:
 
 
 def hello():
-    """DESIGN §7.3. VCHARON_TEST_OS stands in for the OS's name in it, as VCHARON_TEST_MACHINE_ID
-    does for the id: tests on a Mac or Windows run their helper there, and the client takes
-    only a Linux one. VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
+    """The hello message (DESIGN, "hello"). VCHARON_TEST_OS stands in for the OS's name in it, as
+    VCHARON_TEST_MACHINE_ID does for the id: tests on a Mac or Windows run their helper there, and
+    the client takes only a Linux one. VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
     VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests.
     VCHARON_TEST_OS_RELEASE names the file read in place of /etc/os-release (tests)."""
     offset = os.environ.get("VCHARON_TEST_UTC_OFFSET")
@@ -278,7 +279,7 @@ def source_send(h, call_id, args):
     entries = h.plan.entries
     seen = set()
     for i in args["indexes"]:
-        # Only planned file puts can move (DESIGN §7.4).
+        # Only planned file puts can move (DESIGN, "Calls").
         if not 0 <= i < len(entries) or entries[i].op != "put" or entries[i].kind != "file":
             raise VCharonError("protocol", "entry %d isn't a file put of the plan" % i)
         if i in seen:
@@ -416,7 +417,8 @@ def serve(h):
             if e.code == "lost":
                 raise
             h.err(call_id, e)
-            # After a protocol error the two sides may be out of step (DESIGN §7.2).
+            # After a protocol error the two sides may be out of step (DESIGN, "Messages and file
+            # streams").
             if e.code == "protocol":
                 return 3
         except Exception as e:  # noqa: BLE001

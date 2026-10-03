@@ -1,6 +1,6 @@
 """vcharon guide and its topics, docs/GUIDE.md made from them, the commands the guide names,
-vcharon skill install, the trust line of join and create, and no build history in the
-sources."""
+vcharon skill install, the trust line of join and create, no build history in the sources, and
+the code's references to sections of DESIGN.md and README.md."""
 
 from __future__ import annotations
 
@@ -207,13 +207,13 @@ class SkillInstallTest(FakeSshCase):
     def test_it_overwrites_only_its_own(self):
         self.assertEqual(self.run_cli("skill", "install", "--claude")[0], 0)
         # an older copy it wrote: replaced
-        with open(self.claude, "w", encoding="utf-8") as f:
+        with open(self.claude, "w", encoding="utf-8", newline="") as f:
             f.write("---\nname: vcharon\n---\n%s\nold text\n" % skill.MARKER)
         code, out, _err = self.run_cli("skill", "install", "--claude")
         self.assertEqual((code, out.splitlines()[1]), (0, "  updated " + self.claude))
         self.assertEqual(self.read(self.claude), skill.text())
         # someone's own skill of that name: refused, and nothing written anywhere
-        with open(self.claude, "w", encoding="utf-8") as f:
+        with open(self.claude, "w", encoding="utf-8", newline="") as f:
             f.write("---\nname: vcharon\n---\nmy own notes\n")
         code, out, err = self.run_cli("skill", "install")
         self.assertEqual((code, out), (1, "vcharon: skill install\n"))
@@ -306,6 +306,159 @@ class NoHistoryTest(unittest.TestCase):
                         for m in HISTORY.finditer(line):
                             if (rel, m.group(0)) not in ALLOWED:
                                 found.append("%s:%d: %s" % (rel, n, line.strip()))
+        self.assertEqual(found, [])
+
+
+# A reference to a section of DESIGN.md or README.md, as the code, the tests and the guide write
+# them: the document's name (DESIGN or README, with or without .md), a comma, then one quoted
+# section name or several, inside parentheses. A comment's or a docstring's line break may fall
+# inside it, and in a Python string the quotes may be escaped. Never right after a quote or a
+# word character, so a tuple of file names isn't taken for one.
+_DOC_REF = re.compile(r'(?<!["\w])(DESIGN|README)(?:\.md)?,\s*((?:\\?"[^"\\]+\\?"(?:,\s*)?)+)')
+_REF_NAME = re.compile(r'\\?"([^"\\]+)\\?"')
+# the same in prose (AGENTS.md, CHANGELOG.md): DESIGN.md's "Name", DESIGN.md lists under "Name"
+_PROSE_REF = re.compile(r"""(?<!["\w])(DESIGN|README)\.md(?:'s| lists under)\s+"([^"]+)\"""")
+PROSE = ("AGENTS.md", "CHANGELOG.md")
+# a line break in a comment or a docstring, with the next line's indent and comment mark
+_BREAK = re.compile(r"\n[ \t]*(?:#[ \t]*)?")
+# the section sign: references go by name, so a section's number can't go stale
+_NUMBERED = re.compile("\u00a7 ?[0-9]")
+DOCS = {"DESIGN": "DESIGN.md", "README": "README.md"}
+# where references are looked for
+REFERRING = ("src", "tests", "docs", "README.md", "DESIGN.md", "AGENTS.md", "CHANGELOG.md")
+# the Markdown files whose links to headings (#anchor, or FILE.md#anchor) must resolve
+LINKING = ("README.md", "DESIGN.md", "AGENTS.md", "CHANGELOG.md", "docs/GUIDE.md")
+_LINK = re.compile(r"\]\(([\w./-]*?)#([^)\s]+)\)")
+
+
+def headings(path):
+    """The heading texts of a Markdown file, in order, its code blocks left out."""
+    found, fenced = [], False
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+            elif not fenced and line.startswith("#"):
+                found.append(line.lstrip("#").strip())
+    return found
+
+
+def anchors(path):
+    """The anchors GitHub gives a Markdown file's headings: lowercased, every character that
+    isn't a letter, a digit, a space, "-" or "_" dropped, spaces made "-"; a repeated one gets
+    -1, -2, … after it."""
+    out, seen = set(), {}
+    for heading in headings(path):
+        anchor = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        n = seen.get(anchor, 0)
+        seen[anchor] = n + 1
+        out.add(anchor if n == 0 else "%s-%d" % (anchor, n))
+    return out
+
+
+def _flatten(text):
+    """text with each of _BREAK's line breaks made one space, and a function from an offset in
+    that text to the line number in text."""
+    parts, marks, pos, size = [], [], 0, 0
+    for m in _BREAK.finditer(text):
+        parts += [text[pos:m.start()], " "]
+        marks += [(size, pos), (size + m.start() - pos, m.start())]
+        size += m.start() - pos + 1
+        pos = m.end()
+    parts.append(text[pos:])
+    marks.append((size, pos))
+
+    def line(offset):
+        start, at = max(mark for mark in marks if mark[0] <= offset)
+        return text.count("\n", 0, at + offset - start) + 1
+
+    return "".join(parts), line
+
+
+def doc_refs(text, prose=False):
+    """(document, section name, line number) for each reference in text; with prose, also the
+    prose form (_PROSE_REF)."""
+    flat, line = _flatten(text)
+    out = [(m.group(1), " ".join(name.split()), line(m.start()))
+           for m in _DOC_REF.finditer(flat) for name in _REF_NAME.findall(m.group(2))]
+    if prose:
+        out += [(m.group(1), " ".join(m.group(2).split()), line(m.start()))
+                for m in _PROSE_REF.finditer(flat)]
+    return sorted(out, key=lambda ref: ref[2])
+
+
+def referring_files():
+    """(path relative to the repo with /, absolute path) of each text file that may refer."""
+    out = []
+    for top in REFERRING:
+        path = os.path.join(REPO, top)
+        if os.path.isfile(path):
+            out.append((top, path))
+        elif os.path.isdir(path):
+            for d, dirs, names in os.walk(path):
+                dirs[:] = sorted(x for x in dirs if x != "__pycache__")
+                for name in sorted(names):
+                    if name.endswith((".py", ".md")):
+                        full = os.path.join(d, name)
+                        out.append((os.path.relpath(full, REPO).replace(os.sep, "/"), full))
+    return out
+
+
+class DocReferenceTest(unittest.TestCase):
+    def test_every_reference_names_a_heading(self):
+        have = {doc: set(headings(os.path.join(REPO, name))) for doc, name in DOCS.items()}
+        found, missing = set(), []
+        for rel, path in referring_files():
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            for doc, name, n in doc_refs(text, prose=rel in PROSE):
+                found.add((doc, name))
+                if name not in have[doc]:
+                    missing.append("%s:%d: %s, %r" % (rel, n, DOCS[doc], name))
+        self.assertEqual(missing, [])
+        # the ones the guide and the fix lines point at: the scan must keep finding them
+        self.assertLessEqual({("DESIGN", "Stable"), ("DESIGN", "Which membership"),
+                              ("DESIGN", "Fix lines"), ("DESIGN", "Config"),
+                              ("DESIGN", "Rules for the code"), ("README", "Keys")}, found)
+
+    def test_every_link_to_a_heading_resolves(self):
+        have = {}
+        missing, links = [], 0
+        for rel in LINKING:
+            with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+                lines = f.read().split("\n")
+            for n, line in enumerate(lines, 1):
+                for target, anchor in _LINK.findall(line):
+                    links += 1
+                    path = os.path.normpath(os.path.join(os.path.dirname(rel), target or
+                                                         os.path.basename(rel)))
+                    if path not in have:
+                        have[path] = anchors(os.path.join(REPO, path))
+                    if anchor not in have[path]:
+                        missing.append("%s:%d: %s#%s" % (rel, n, path, anchor))
+        self.assertEqual(missing, [])
+        self.assertGreater(links, 20)
+
+    def test_the_parse(self):
+        design = "DES" + "IGN"
+        text = ('x (%s, "Which\n    # membership") and (README.md, \\"Keys\\"),\n(%s, "A", '
+                '"B"); ("README.md", "%s.md") %s.md\'s "C"' % (design, design, design, design))
+        self.assertEqual(doc_refs(text), [("DESIGN", "Which membership", 1),
+                                          ("README", "Keys", 2), ("DESIGN", "A", 3),
+                                          ("DESIGN", "B", 3)])
+        self.assertEqual(doc_refs(text, prose=True)[-1], ("DESIGN", "C", 3))
+        self.assertEqual(anchors(os.path.join(REPO, "DESIGN.md")) >= {
+            "which-membership", "create-join-leave-close", "threads-timeouts-shutdown"}, True)
+
+    def test_no_section_numbers(self):
+        found = []
+        for rel, path in referring_files():
+            if rel == "CHANGELOG.md":
+                continue
+            with open(path, encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    if _NUMBERED.search(line):
+                        found.append("%s:%d: %s" % (rel, n, line.strip()))
         self.assertEqual(found, [])
 
 

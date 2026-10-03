@@ -79,7 +79,7 @@ def _windows_dir(var, default):
 
 
 def config_path():
-    """DESIGN §11.1."""
+    """(DESIGN, "Where files live")."""
     base = _vcharon_home()
     if base:
         return _path().join(base, "vcharon.ini")
@@ -279,7 +279,7 @@ def is_wow64():
 
 
 def default_ssh_path():
-    """DESIGN §6.1: Windows' own OpenSSH, never Git for Windows' ssh."""
+    """Windows' own OpenSSH (DESIGN, "The ssh command"), never Git for Windows' ssh."""
     if os_name() == "windows":
         root = os.environ.get("SystemRoot") or "C:\\Windows"
         # Windows redirects System32 for 32-bit processes; Sysnative is the real one.
@@ -289,7 +289,7 @@ def default_ssh_path():
 
 
 def caps():
-    """Client capabilities for plugins (DESIGN §13)."""
+    """Client capabilities for plugins (DESIGN, "Plugin interface")."""
     osn = os_name()
     if osn == "windows":
         desktop = True

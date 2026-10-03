@@ -1,4 +1,4 @@
-"""Plugin options, the Ctx, the base classes and the registry (DESIGN §9), on both ends."""
+"""Plugin options, the Ctx, the base classes and the registry (DESIGN, "Plugins"), on both ends."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from . import fsops, pathrules, platform, plugins, stage
 from .proto import VCharonError, quote
 
 ENDS = ("local", "remote")
-# the levels of a doctor check (DESIGN §13)
+# the levels of a doctor check (DESIGN, "Command line")
 LEVELS = ("ok", "warn", "FAIL")
 
 _BOOLS = {"yes": True, "true": True, "1": True, "no": False, "false": False, "0": False}
@@ -46,7 +46,7 @@ def _no_tick():
 
 
 class Ctx:
-    """What a plugin object knows about its end (DESIGN §9.1)."""
+    """What a plugin object knows about its end (DESIGN, "Plugin interface")."""
 
     def __init__(self, end, log=None, tick=None, home=None, osn=None, caps=None):
         # end: "local" or "remote"; the rest default to this machine
@@ -75,9 +75,9 @@ class Ctx:
 
     def resolve(self, path, where):
         """path with ~ expanded, as an absolute path, by the rules of the end this plugin runs on
-        (DESIGN §9.1): that end's path module, and that end's home. A relative path is relative
-        to the home on the remote end; on the local end it's refused, since a hotkey run's
-        current directory is unpredictable. The process's current directory is never used."""
+        (DESIGN, "Plugin interface"): that end's path module, and that end's home. A relative path
+        is relative to the home on the remote end; on the local end it's refused, since a hotkey
+        run's current directory is unpredictable. The process's current directory is never used."""
         mod = ntpath if self.os == "windows" else posixpath
         seps = "/\\" if self.os == "windows" else "/"
         if path == "~":
@@ -122,7 +122,7 @@ class Source(Plugin):
     def plan(self, state, full=False):
         """The plan.Plan of what to send. state: what the last successful run saved, {} if
         nothing, or None when the caller keeps no state (a one-off pull). full: plan every path,
-        each file with its sha256 (DESIGN §10.5)."""
+        each file with its sha256 (DESIGN, "Full syncs")."""
         raise NotImplementedError
 
     def open(self, index):
@@ -317,8 +317,9 @@ def make(end, name, role, raw, ctx):
 
 
 def doctor(end, name, role, raw, ctx):
-    """vcharon doctor's checks of one side on its own end (DESIGN §9.1, §13): make()'s checks,
-    which raise, then the NEEDS commands, then the plugin's own doctor()."""
+    """vcharon doctor's checks of one side on its own end (DESIGN, "Plugin interface", "Command
+    line"): make()'s checks, which raise, then the NEEDS commands, then the plugin's own
+    doctor()."""
     if ctx.end != end:
         raise VCharonError("internal", "a %s plugin with a %s Ctx" % (end, ctx.end))
     module, options = _checked(end, name, role, raw)

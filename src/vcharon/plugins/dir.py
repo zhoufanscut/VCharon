@@ -1,4 +1,4 @@
-"""The dir sink: apply a plan under a directory (DESIGN §9.2), on either end."""
+"""The dir sink: apply a plan under a directory (DESIGN, "The dir sink"), on either end."""
 
 from __future__ import annotations
 

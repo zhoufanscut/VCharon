@@ -1,4 +1,5 @@
-"""Staging and commit (DESIGN §10): the only way anything is written inside a root; both ends."""
+"""Staging and commit (DESIGN, "Applying a plan"): the only way anything is written inside a root;
+both ends."""
 
 from __future__ import annotations
 
@@ -19,8 +20,8 @@ from .proto import VCharonError
 
 @dataclasses.dataclass
 class Checked:
-    """sink.check's result (DESIGN §7.4). have: the indexes of the file puts whose bytes the
-    target already holds (DESIGN §10.5), sorted."""
+    """sink.check's result (DESIGN, "Calls"). have: the indexes of the file puts whose bytes the
+    target already holds (DESIGN, "Full syncs"), sorted."""
 
     root: str
     notes: list
@@ -40,7 +41,7 @@ class Done:
     deletes_done: list = dataclasses.field(default_factory=list)
 
 
-# The JSON forms of DESIGN §7.4, for both ends.
+# The JSON forms of the calls (DESIGN, "Calls"), for both ends.
 
 def checked_to_json(c):
     return {"root": c.root, "notes": list(c.notes), "deletes": c.deletes, "have": list(c.have)}
@@ -265,8 +266,8 @@ class Stager:
         entries, parts = self._entries, self._parts
         folded = [self._fold(p) for p in parts]
         deletes = {f: i for i, f in enumerate(folded) if entries[i].op == "delete"}
-        # DESIGN §10.5: hashed file puts whose target may already hold their bytes. A put whose
-        # path, or a parent of it, the plan deletes first is a new file.
+        # Hashed file puts (DESIGN, "Full syncs") whose target may already hold their bytes. A put
+        # whose path, or a parent of it, the plan deletes first is a new file.
         candidates = {i for i in self._files if entries[i].sha256 is not None
                       and not any(folded[i][:k] in deletes for k in range(1, len(folded[i]) + 1))}
         hashed = [0, 0]         # files, bytes
@@ -540,8 +541,8 @@ class Stager:
         self._staged.update(indexes)
 
     def _finish(self, index, fd):
-        """Gives the staged file of index its mtime and permission bits (DESIGN §10.4), and
-        closes fd, whatever happens."""
+        """Gives the staged file of index its mtime and permission bits (DESIGN, "What is copied"),
+        and closes fd, whatever happens."""
         e = self._entries[index]
         mtime_ns = round(e.mtime * 1e9)
         if WINDOWS:
@@ -620,7 +621,8 @@ class Stager:
         self._log(note)
 
     def _clean_stale(self):
-        # Stage dirs of runs that died: ones you own whose lock nobody holds (DESIGN §10.3).
+        # Stage dirs of runs that died: ones you own whose lock nobody holds (DESIGN, "Staging and
+        # commit").
         root = self._root
         try:
             names = root.listdir()
@@ -791,7 +793,8 @@ class Stager:
                     done.deleted += 1
                 except FileNotFoundError:
                     pass
-            # through with it: a state saved after a later failure must not list it (DESIGN §9.2)
+            # through with it: a state saved after a later failure must not list it (DESIGN, "The
+            # path source")
             done.deletes_done.append(e.path)
             self._tick()
         self._drop_cache()
@@ -821,8 +824,9 @@ class Stager:
             name = p[-1]
             ident = self._have.get(i)
             if ident is not None:
-                # DESIGN §10.5: the target holds the bytes already. It gets the plan's mtime
-                # and execute bits, through the handle, if it's still the file the check hashed.
+                # The target holds the bytes already (DESIGN, "Full syncs"). It gets the plan's
+                # mtime and execute bits, through the handle, if it's still the file the check
+                # hashed.
                 parent.touch(name, round(e.mtime * 1e9), e.executable, ident)
                 self._respell(parent, i, name)
                 done.written.append(e.path)
@@ -852,7 +856,8 @@ class Stager:
     def _respell(self, parent, i, name):
         old = self._old_spelling.get(i)
         if old is not None:
-            # DESIGN §10.2: the replaced file kept its old spelling; make it the plan's.
+            # The replaced file kept its old spelling (DESIGN, "Files already at the target"); make
+            # it the plan's.
             try:
                 parent.rename(old, name)
             except FileNotFoundError:

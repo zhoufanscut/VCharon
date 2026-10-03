@@ -15,8 +15,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OLD = "f" + "erry"
 WORD = re.compile(re.escape(OLD).encode("ascii"), re.IGNORECASE)
 # path (with /, from ROOT) -> how many hits it may have (its name counts as one): exactly that
-# many, so a new hit in an allowed file fails too, and so does an entry left over
-ALLOWED: dict[str, int] = {}
+# many, so a new hit in an allowed file fails too, and so does an entry left over.
+# CHANGELOG.md: the one line that says where VCharon came from.
+ALLOWED: dict[str, int] = {"CHANGELOG.md": 1}
 # never checked: the local plan; never walked (git leaves them out by .gitignore): what git,
 # the venv, a build and other tools make
 SKIP_FILES = {"PLAN.md"}

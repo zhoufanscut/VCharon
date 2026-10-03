@@ -94,7 +94,7 @@ def _listed(names):
 def twin(path):
     """("refuse", line), ("note", line) or None, for path's name and its folder's name
     against the other names next to them, as macOS or Windows compare names (vcharon's
-    pathrules.fold): a client there would refuse the tree (DESIGN §10.1 collisions)."""
+    pathrules.fold): a client there would refuse the tree (DESIGN, "Path rules" collisions)."""
     fold = pathrules.fold
     folder, name = os.path.split(os.path.abspath(path))
     there, others, on = _twins_in(folder, name, fold)
@@ -114,9 +114,10 @@ def twin(path):
     shown = sorted([dname + "/"] + [o + "/" for o in others])
     valid = [o for o in others if pathrules.writer_problem(o) is None]
     if pathrules.writer_problem(dname) is None and not valid:
-        # debian/ next to Debian/: the post makes no new twin, so it goes on. This tool can't
-        # tell where the tree's top is: at the top clients leave the stray out (DESIGN §12),
-        # below it the twin blocks those clients. The note says both; the twin should go.
+        # debian/ next to Debian/: the post makes no new twin, so it goes on. This tool can't tell
+        # where the tree's top is: at the top clients leave the stray out (DESIGN, "Channel
+        # sections"), below it the twin blocks those clients. The note says both; the twin should
+        # go.
         return "note", ("%s are one folder on %s: remove or rename %s (at the top of the tree "
                         "clients leave it out; below it, %s clients get nothing until one is "
                         "removed)" % (_listed(shown), on, _listed([o + "/" for o in others]),

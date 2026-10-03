@@ -114,7 +114,7 @@ def root_text():
 
 def root_path():
     """The root on this machine, absolute. A relative value is relative to the home, as every
-    remote path is (DESIGN §16), never to the current directory."""
+    remote path is (DESIGN, "Rules for the code"), never to the current directory."""
     path = os.path.expanduser(root_text())
     if not os.path.isabs(path):
         path = os.path.join(platform.home(), path)
@@ -122,7 +122,7 @@ def root_path():
 
 
 def _check_names(channel, name):
-    # The client checked them; the server never trusts that (DESIGN §10.1).
+    # The client checked them; the server never trusts that (DESIGN, "Path rules").
     problem = channel_problem(channel)
     if problem:
         raise refused("%s: %s" % (pathrules.show(channel), problem), "pick another channel name")
@@ -132,8 +132,8 @@ def _check_names(channel, name):
 
 
 def _open_root(root):
-    """A handle on the root, which may itself be a symlink (resolved once, DESIGN §10.1); None
-    if it's missing."""
+    """A handle on the root, which may itself be a symlink (resolved once: DESIGN, "Path rules");
+    None if it's missing."""
     resolved = fsops.resolve_root(root)
     try:
         return _DIR.open_root(resolved, list=True)
@@ -393,7 +393,8 @@ def remove(root, channel, name, tick=_no_tick):
     """Closes a channel for its leader name: refused unless <channel>/<name>/CHANNEL.md exists
     and is the only CHANNEL.md, and every entry at the channel's top is a member's folder.
     Then one rename to .vcharon-closed-<channel>-<stamp>, so every member's next run sees the
-    channel gone at once, and the §10.1 walk deletes that. Returns {"closed", "deleted"}."""
+    channel gone at once, and the no-link walk deletes that (DESIGN, "Create, join, leave,
+    close"). Returns {"closed", "deleted"}."""
     _check_names(channel, name)
     top = _open_root(root)
     if top is None:

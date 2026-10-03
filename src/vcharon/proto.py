@@ -1,4 +1,4 @@
-"""Frames, messages and file streams: the wire protocol of DESIGN §7, on both ends."""
+"""Frames, messages and file streams: the wire protocol (DESIGN, "Wire protocol"), on both ends."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import struct
 import traceback
 
-# Error code -> vcharon's exit code (DESIGN §7.5).
+# Error code -> vcharon's exit code (DESIGN, "Error codes").
 EXIT = {"config": 3, "bad_options": 3, "missing_capability": 3, "state_mismatch": 3,
         "busy": 2, "connect": 4, "timeout": 1, "lost": 1, "protocol": 1, "not_found": 1,
         "unsafe_path": 1, "unsafe_dir": 1, "collision": 1, "kind_change": 1,
@@ -72,7 +72,7 @@ def quote(obj, limit=200):
     return text
 
 
-# Frames (DESIGN §7.1): kind (1 byte), length (4 bytes, big-endian), payload.
+# Frames (DESIGN, "Frames"): kind (1 byte), length (4 bytes, big-endian), payload.
 J = 0x4A
 D = 0x44
 E = 0x45
@@ -192,8 +192,8 @@ def is_id(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-# File streams (DESIGN §7.2). A conn has send_json, send_data, send_file_end and next_frame;
-# helper.HelperConn and ssh.Session both do.
+# File streams (DESIGN, "Messages and file streams"). A conn has send_json, send_data, send_file_end
+# and next_frame; helper.HelperConn and ssh.Session both do.
 
 def send_stream(conn, files):
     """Sends one file stream. files: an iterable of (index, opener); opener() returns a binary

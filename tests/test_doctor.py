@@ -1,6 +1,7 @@
 """vcharon doctor, through fake ssh and fake ssh-add.
 
-Doctor reports each failure class of DESIGN §6.4 (RowTest, one case per row).
+Doctor reports each failure class of (DESIGN, "Failures before the helper runs"): RowTest, one
+case per row.
 """
 
 from __future__ import annotations
@@ -91,8 +92,9 @@ class DoctorCase(FakeSshCase):
                           FAKE_SSH_ADD_ARGV_LOG=os.path.join(self.tmp, "adds.log"))
         self.terminal = self.patch(keys, "terminal", return_value=False)
         self.input = self.patch(builtins, "input", side_effect=AssertionError("no prompt"))
-        # This machine's own OS: with Ctx.resolve following the end's rules (DESIGN §9.1), a
-        # client that pretended to be Linux while its jobs use C:\... paths can't be resolved.
+        # This machine's own OS: with Ctx.resolve following the end's rules (DESIGN, "Plugin
+        # interface"), a client that pretended to be Linux while its jobs use C:\... paths can't be
+        # resolved.
         self.os_name(platform.os_name())
 
     def patch(self, obj, name, **kw):
@@ -699,8 +701,8 @@ class DistroTest(DoctorCase):
 
 
 class RowTest(DoctorCase):
-    """Item 1: one case per row of DESIGN §6.4, each a FAIL on the fake-dest line with its
-    message and fix, exit 1, and the destination's later checks skipped."""
+    """Item 1: one case per row of (DESIGN, "Failures before the helper runs"), each a FAIL on the
+    fake-dest line with its message and fix, exit 1, and the destination's later checks skipped."""
 
     def failed(self, message, fix, *argv):
         lines = self.doctor(*argv, code=1)

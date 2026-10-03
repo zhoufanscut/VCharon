@@ -1,4 +1,4 @@
-"""The path source: a file or a directory tree (DESIGN §9.2), on either end."""
+"""The path source: a file or a directory tree (DESIGN, "The path source"), on either end."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ OPTIONS = {"path": Option(str, required=True), "keep_name": Option(bool, default
            "exclude": Option(list, default=[]),
            "symlinks": Option(choice("error", "skip"), default="error"),
            "prune": Option(bool, default=False), "allow_empty": Option(bool, default=False),
-           # set by a mailbox section's down job only (DESIGN §12)
+           # set by a mailbox section's down job only (DESIGN, "Channel sections")
            "mailbox_me": Option(str, default=None),
            # a channel section's folder limits: with mailbox_me, of each other member's
            # folder, which is left out while it's over them; without, of the whole source,
@@ -142,7 +142,7 @@ def _sent_of(state):
     for path, value in sent.items():
         if not isinstance(path, str) or not path:
             raise _malformed("sent has the path %s" % quote(path))
-        # With prune it becomes a delete, so it must be a plan path (DESIGN §8).
+        # With prune it becomes a delete, so it must be a plan path (DESIGN, "Plans").
         try:
             pathrules.split(path)
         except VCharonError as e:
@@ -191,7 +191,7 @@ def _partners(walked, puts, deletes):
 
 
 def _value(e):
-    """How sent records a put (DESIGN §9.2)."""
+    """How sent records a put (DESIGN, "The path source")."""
     if e.kind == "dir":
         return "d"
     return [e.size, e.mtime, e.executable]
@@ -254,9 +254,9 @@ class Source(plugin.Source):
     # --- plan ---
 
     def plan(self, state, full=False):
-        """state None (a one-off pull): everything, and no state back. A dict: only what
-        changed since that state, and the new one (DESIGN §9.2). full: everything, each file
-        with its sha256 (DESIGN §10.5)."""
+        """state None (a one-off pull): everything, and no state back. A dict: only what changed
+        since that state, and the new one (DESIGN, "The path source"). full: everything, each file
+        with its sha256 (DESIGN, "Full syncs")."""
         if self._planned:
             raise VCharonError("internal", "plan() runs once per source")
         self._planned = True
@@ -358,10 +358,10 @@ class Source(plugin.Source):
         return self._walk(root, prefix, abs_path, entries, full)
 
     def _top_left_out(self, name, is_dir):
-        """A mailbox's down plans, at the top of the tree, only the folders of the other
-        writers: a directory whose name is a valid writer's name, not <me>'s (DESIGN §12).
-        Valid names are lowercase, so <me>'s folder in another case is left out too, and no
-        two planned names can fold together on a client."""
+        """A mailbox's down plans, at the top of the tree, only the folders of the other writers: a
+        directory whose name is a valid writer's name, not <me>'s (DESIGN, "Channel sections").
+        Valid names are lowercase, so <me>'s folder in another case is left out too, and no two
+        planned names can fold together on a client."""
         return not is_dir or name == self._me or pathrules.writer_problem(name) is not None
 
     def _excluded(self, parts):
@@ -496,7 +496,7 @@ class Source(plugin.Source):
             for d, items, here in stack:
                 if d is not root:
                     d.close()
-        # Nothing is ever skipped silently (DESIGN §9.2); name problems come first.
+        # Nothing is ever skipped silently (DESIGN, "The path source"); name problems come first.
         if bad_names:
             raise pathrules.refusal("unsafe_path", bad_names, NAME_HINT)
         if links:
@@ -575,7 +575,7 @@ class Source(plugin.Source):
         is also dropped when its fold matches a pattern's fold: it may be a stale spelling of
         an excluded file, which its delete would remove on a sink that folds names. (A path
         the walk found stays: the walk's rule already let it in.) keep_name's own directory
-        (top) is never matched. These are never deleted (DESIGN §9.2)."""
+        (top) is never matched. These are never deleted (DESIGN, "The path source")."""
         if not (self._singles or self._wholes or self._me is not None):
             return dict(sent)
         # parts -> excluded, by each rule; sent paths share their ancestors

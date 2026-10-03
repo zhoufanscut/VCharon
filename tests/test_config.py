@@ -389,7 +389,7 @@ class MailboxTest(MailboxCase):
                 cfg = self.load_channel(text, file=file)
                 for name, job in cfg.jobs.items():
                     # down too: <me> reaches down's sides only through its mailbox_me
-                    # option, so the fingerprint adds the writer's name (DESIGN §11.2)
+                    # option, so the fingerprint adds the writer's name (DESIGN, "State file")
                     self.assertNotEqual(state.fingerprint(job), prints[name[name.rindex("."):]],
                                         name)
                 if file != "ch.windows.ini":

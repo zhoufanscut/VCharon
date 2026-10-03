@@ -101,12 +101,12 @@ import threading
 import time
 
 # Imported here, not in the functions: a long-running watch has every module it needs loaded
-# before anything can change the files under it (DESIGN, running watchers).
+# before anything can change the files under it (DESIGN, "Running watchers").
 from .. import channel_cmd, charter, config, entries, fsops, pathrules, platform, plugin
 from ..lock import Lock
 from ..proto import VCharonError
 
-# vcharon's stage dirs, in any case (DESIGN §10.3)
+# vcharon's stage dirs, in any case (DESIGN, "Staging and commit")
 STAGE_PREFIX = ".vcharon-stage-"
 # how the sync's fix and log lines start, among its ERROR line's own (cli.py's show_error)
 FIX = "  fix: "
@@ -136,7 +136,7 @@ STOP_WAIT = 10
 _ROUND = re.compile(r"\AROUND (\d+)\Z")
 # Windows and macOS clients ignore case in names, so Windows/ there is the own folder.
 FOLDS = sys.platform in ("win32", "darwin")
-# vcharon's exit code for busy: another run of the job holds its lock (DESIGN §11.3)
+# vcharon's exit code for busy: another run of the job holds its lock (DESIGN, "Lock")
 BUSY = 2
 # exit codes of the watcher itself (vcharon guide watch)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
@@ -228,13 +228,13 @@ def _twins(rel, names, fold):
 
 
 def warnings(root, me):
-    """Server mode's checks of the tree (DESIGN §12), as the texts of WARN lines: every
-    name at the top that isn't a writer's folder, which clients leave out; and in a writer's
-    folder, <me>'s too, every two names that fold together on macOS or Windows and every name
-    such a client can't hold, which make that client refuse the whole run, and every symlink
-    or special file, which fails every client's run. Stage dirs and symlinks are never
-    entered. An error on the root raises OSError, as scan's does; below it, an entry that
-    vanishes is left out."""
+    """Server mode's checks of the tree (DESIGN, "The watcher in a channel"), as the texts of WARN
+    lines: every name at the top that isn't a writer's folder, which clients leave out; and in a
+    writer's folder, <me>'s too, every two names that fold together on macOS or Windows and every
+    name such a client can't hold, which make that client refuse the whole run, and every symlink or
+    special file, which fails every client's run. Stage dirs and symlinks are never entered. An
+    error on the root raises OSError, as scan's does; below it, an entry that vanishes is left
+    out."""
     out = []
     with os.scandir(root) as it:
         top = sorted(it, key=lambda e: e.name)
@@ -274,14 +274,14 @@ def warnings(root, me):
             if is_dir:
                 stack.append((path, entry.path))
             elif not is_file:
-                # the path source refuses them below the top (DESIGN §9.2)
+                # the path source refuses them below the top (DESIGN, "The path source")
                 out.append("%s is a %s: every client gets nothing until it's removed"
                            % (path, "symlink" if is_link else "special file"))
             try:
                 entry.name.encode("utf-8")
             except UnicodeEncodeError:
-                # the path source refuses it (DESIGN §9.2); shown with \xNN escapes, so the
-                # line itself prints anywhere
+                # the path source refuses it (DESIGN, "The path source"); shown with \xNN escapes,
+                # so the line itself prints anywhere
                 out.append("%s isn't valid UTF-8: every client gets nothing until it's renamed"
                            % os.fsencode(path).decode("utf-8", "backslashreplace"))
                 continue
@@ -624,7 +624,7 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
 
 def take_lock(path):
     """The held lock on <snapshot>.lock, or None if another watcher holds it. vcharon's own
-    lock: the OS drops it when the process dies (DESIGN §11.3)."""
+    lock: the OS drops it when the process dies (DESIGN, "Lock")."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lk = Lock.open(path + ".lock")
     try:
@@ -1003,7 +1003,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
 
 def sync_argv(sync_args, repeat=None):
     """The child's argv: vcharon sync <sync_args>, started as this vcharon is (self_argv),
-    never through PATH (DESIGN §13); with repeat, --repeat <repeat>. sync_args: the
+    never through PATH (DESIGN, "Launch rules"); with repeat, --repeat <repeat>. sync_args: the
     channel, and the --project and --role that find this membership."""
     argv = platform.self_argv() + ["sync"] + list(sync_args)
     if repeat is not None:

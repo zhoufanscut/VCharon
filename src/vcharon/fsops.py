@@ -31,7 +31,8 @@ DEVICE_HINT = "pick a root with no mount points under it"
 # swaps that hint (cli.SOURCE_HINTS)
 TOO_LONG_HINT = "rename it at the source, or pick a shorter root"
 
-# Sharing-violation retries on Windows (DESIGN §10.3): virus scanners briefly hold new files.
+# Sharing-violation retries on Windows (DESIGN, "Staging and commit"): virus scanners briefly hold
+# new files.
 RETRIES = 3
 RETRY_DELAY = 0.2
 
@@ -44,8 +45,9 @@ def kind(st):
     if stat.S_ISLNK(st.st_mode):
         return LINK
     if stat.S_ISDIR(st.st_mode):
-        # A name-surrogate reparse point (junction, directory symlink) is a link, as in
-        # DESIGN §9.2. Others, such as OneDrive cloud placeholders, are real directories.
+        # A name-surrogate reparse point (junction, directory symlink) is a link, as in the path
+        # source (DESIGN, "The path source"). Others, such as OneDrive cloud placeholders, are real
+        # directories.
         if (getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
                 and getattr(st, "st_reparse_tag", 0) & NAME_SURROGATE):
             return LINK
@@ -266,13 +268,13 @@ def _same_file(st, ident):
 
 
 def _touch_fd(fd, rel, mtime_ns, executable, ident):
-    """Gives the file open at fd the plan's mtime and execute bits (DESIGN §10.5), if it's
+    """Gives the file open at fd the plan's mtime and execute bits (DESIGN, "Full syncs"), if it's
     still the file the check hashed (_same_file)."""
     st = os.fstat(fd)
     if not _same_file(st, ident):
         raise _changed_at_target(rel)
-    # DESIGN §10.4, as for a replaced file: True adds x wherever there is r, False clears it,
-    # None keeps it
+    # As for a replaced file (DESIGN, "What is copied"): True adds x wherever there is r, False
+    # clears it, None keeps it
     mode = st.st_mode & 0o777
     if executable is True:
         mode |= (mode & 0o444) >> 2
@@ -346,8 +348,8 @@ _NEW_FILE_FLAGS = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLO
 _SEARCH = getattr(os, "O_PATH", 0) or getattr(os, "O_SEARCH", 0)
 _SEARCH_FLAGS = ((_SEARCH | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
                   | getattr(os, "O_CLOEXEC", 0)) if _SEARCH else _DIR_FLAGS)
-# A source's file (DESIGN §9.2): a link isn't followed, and a FIFO or a device can't block the
-# open; O_NOCTTY keeps a terminal device from becoming the helper's controlling terminal.
+# A source's file (DESIGN, "The path source"): a link isn't followed, and a FIFO or a device can't
+# block the open; O_NOCTTY keeps a terminal device from becoming the helper's controlling terminal.
 _READ_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
                | getattr(os, "O_NOINHERIT", 0) | getattr(os, "O_NOCTTY", 0))
@@ -459,7 +461,7 @@ class FdDir(_Dir):
 class PathDir(_Dir):
     """A directory handle by path: Windows, which has no dir_fd, and POSIX in tests. Before
     every change it checks again that each directory from the root down is still a directory
-    (DESIGN §10.3: this narrows the race on Windows, but can't close it)."""
+    (DESIGN, "Staging and commit": this narrows the race on Windows, but can't close it)."""
 
     def __init__(self, path, rel, st, root_dev, root_name, chain):
         _Dir.__init__(self, rel, st, root_dev, root_name)
@@ -522,8 +524,8 @@ class PathDir(_Dir):
                      (lambda name: os.lstat(self.join(name))) if WINDOWS else None)
 
     def open_read(self, name):
-        """A binary reader for the regular file name (DESIGN §9.2: on Windows, lstat first
-        that it isn't a reparse point, then fstat the opened file). OSError propagates."""
+        """A binary reader for the regular file name (DESIGN, "The path source": on Windows, lstat
+        first that it isn't a reparse point, then fstat the opened file). OSError propagates."""
         self.recheck()
         path = self.join(name)
         rel = self.rel + (name,)
@@ -694,7 +696,7 @@ def remove_tree(parent, name, tick):
     return _walk(parent, name, tick, True)
 
 
-# --- other programs (DESIGN §16) ---
+# --- other programs (DESIGN, "Rules for the code") ---
 
 # What fsops.run gives back: the exit code (None when the timeout killed the program), and
 # stdout and stderr as bytes.
@@ -782,5 +784,5 @@ def run(argv, timeout, new_session=False, env=None):
 def run_terminal(argv):
     """Runs argv on this terminal: stdin, stdout and stderr stay the terminal's, so a person
     can type into it; returns its exit code. No timeout. Only vcharon key uses it, for ssh-add,
-    which asks for the passphrase itself: vcharon never sees it (DESIGN §16)."""
+    which asks for the passphrase itself: vcharon never sees it (DESIGN, "Rules for the code")."""
     return subprocess.call(list(argv))

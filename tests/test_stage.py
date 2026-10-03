@@ -1,4 +1,5 @@
-"""The Stager: check, stage, commit and abort against a real file system (DESIGN §10)."""
+"""The Stager: check, stage, commit and abort against a real file system (DESIGN, "Applying a
+plan")."""
 
 from __future__ import annotations
 
@@ -244,8 +245,8 @@ class StagerCases:
             self.skipTest("this file system tells case apart")
         nfc = unicodedata.normalize("NFC", "café.txt")
         nfd = unicodedata.normalize("NFD", nfc)
-        # The NFC put onto the file held as NFD needs a file system that folds the two as one
-        # name, as APFS does. NTFS folds case only (DESIGN §10.1): there only the case part runs.
+        # The NFC put onto the file held as NFD needs a file system that folds the two as one name,
+        # as APFS does. NTFS folds case only (DESIGN, "Path rules"): there only the case part runs.
         open(self.path(nfd), "wb").close()
         try:
             folds_nfd = os.path.exists(self.path(nfc))
@@ -696,7 +697,7 @@ class StagerCases:
         self.assertEqual(os.stat(self.path("top.txt")).st_gid, root_gid)
         self.assertEqual(done.notes, [])
 
-    # 19: have, the files the target already holds (DESIGN §10.5)
+    # 19: have, the files the target already holds (DESIGN, "Full syncs")
 
     def count_reads(self):
         """Counts the handles' open_read calls for the rest of the test."""
@@ -980,7 +981,7 @@ class StagerCases:
             self.assertEqual(stat.S_IMODE(st.st_mode), 0o640)
         self.assertEqual(read_tree(self.root), {"x": b"AAAA"})
 
-    # the deletes a commit got through (DESIGN §9.2: state_after drops them)
+    # the deletes a commit got through (DESIGN, "The path source": state_after drops them)
 
     def test_deletes_done(self):
         write_tree(self.root, {"t/a/1": b"1", "full/x": b"x", "f.txt": b"f", "e/": None,
@@ -1032,7 +1033,8 @@ class StagerCases:
         self.assert_mtime("x.sh")
 
     def test_have_spelling(self):
-        # DESIGN §10.2 and §10.5: a have file still takes the plan's spelling
+        # a have file still takes the plan's spelling (DESIGN, "Files already at the target",
+        # "Full syncs")
         probe = os.path.join(self.tmp, "Probe")
         open(probe, "wb").close()
         if not os.path.exists(os.path.join(self.tmp, "pROBE")):
@@ -1079,7 +1081,7 @@ class PathStagerTest(StagerCases, unittest.TestCase):
 
 
 class JsonFormTest(unittest.TestCase):
-    """sink.check's and sink.commit's results on the wire (DESIGN §7.4)."""
+    """sink.check's and sink.commit's results on the wire (DESIGN, "Calls")."""
 
     def test_round_trips(self):
         c = stage.Checked(root="/r", notes=["kept a: it isn't empty"], deletes=3)

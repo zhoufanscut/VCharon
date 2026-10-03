@@ -1,4 +1,4 @@
-"""Exclusive file locks for jobs and stage dirs (DESIGN §11.3), on both ends."""
+"""Exclusive file locks for jobs and stage dirs (DESIGN, "Lock"), on both ends."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ else:
 
 class Lock:
     """An exclusive lock on one file, taken without waiting; the OS drops it when the process
-    dies (DESIGN §11.3)."""
+    dies (DESIGN, "Lock")."""
 
     def __init__(self, fd):
         self.fd = fd

@@ -18,7 +18,8 @@ from . import FLOOR, PROTOCOL, VERSION, bundle, fsops, platform, proto
 from .log import LEVELS
 from .proto import VCharonError
 
-# The reader thread stops reading while this many bytes wait in the queue (DESIGN §6.3).
+# The reader thread stops reading while this many bytes wait in the queue (DESIGN, "Threads,
+# timeouts, shutdown").
 QUEUE_BYTES = 16 << 20
 # Writes to ssh go in pieces this big, so the idle clock sees progress on a slow link.
 WRITE_CHUNK = 256 << 10
@@ -52,8 +53,8 @@ def ssh_prefix(settings):
 
 
 def ssh_add_prefix(settings):
-    """[<ssh-add>]: the one next to ssh_path, never one found on PATH (launch rules, DESIGN
-    §13). Tests replace it with [python, fake_ssh_add.py]."""
+    """[<ssh-add>]: the one next to ssh_path, never one found on PATH (DESIGN,
+    "Launch rules"). Tests replace it with [python, fake_ssh_add.py]."""
     path = settings.ssh_path
     mod = ntpath if platform.os_name() == "windows" else posixpath
     folder, name = mod.split(path)
@@ -61,7 +62,7 @@ def ssh_add_prefix(settings):
 
 
 def ssh_command(settings, dest, probe=False):
-    """The argument list of DESIGN §6.1. Never a shell string."""
+    """The argument list of (DESIGN, "The ssh command"). Never a shell string."""
     argv = ssh_prefix(settings) + [
         "-T", "-e", "none",
         "-o", "BatchMode=yes",
@@ -80,7 +81,8 @@ _OLD_PYTHON = re.compile(r"the server's Python is ([0-9]+\.[0-9]+);")
 
 
 def classify_exit(rc, tail, dest, settings, killed=None):
-    """Why ssh ended before the ready marker (DESIGN §6.4). Always `connect`."""
+    """Why ssh ended before the ready marker (DESIGN, "Failures before the helper runs"). Always
+    `connect`."""
     text = "\n".join(tail)
     if killed:
         seconds = {"handshake": settings.handshake_timeout, "idle": settings.idle_timeout,
@@ -136,7 +138,8 @@ def classify_exit(rc, tail, dest, settings, killed=None):
 START_HINT = "install the OpenSSH client, or set ssh_path in vcharon.ini"
 
 
-# --- the -v probe of vcharon doctor and vcharon key (DESIGN §6.4, §6.5) ---
+# --- the -v probe of vcharon doctor and vcharon key (DESIGN, "Failures before the helper runs",
+# "Keys without prompts") ---
 
 def probe_command(settings, dest):
     """A probe's ssh command with -v: BatchMode on, ControlMaster off, and the bootstrap line
@@ -147,9 +150,9 @@ def probe_command(settings, dest):
     return argv[:at] + ["-v"] + argv[at:]
 
 
-# rc: ssh's exit code, None when the timeout killed it; lines: its stderr, one string per
-# line; accepted: an AcceptedKey for each "Server accepts key" line, in order; error: the
-# VCharonError a session would raise for this exit (DESIGN §6.4), None when rc is 0.
+# rc: ssh's exit code, None when the timeout killed it; lines: its stderr, one string per line;
+# accepted: an AcceptedKey for each "Server accepts key" line, in order; error: the VCharonError a
+# session would raise for this exit (DESIGN, "Failures before the helper runs"), None when rc is 0.
 Probe = collections.namedtuple("Probe", "rc lines accepted error")
 
 # ident: the key file, or the agent's comment for the key, exactly as ssh printed it;
@@ -368,14 +371,14 @@ class _Stdout:
 
 
 class Session:
-    """One ssh connection with vcharon's helper at the other end (DESIGN §6)."""
+    """One ssh connection with vcharon's helper at the other end (DESIGN, "Session")."""
 
     def __init__(self, settings, dest, log, probe=False, floor=FLOOR, extra_modules=None):
         self.settings = settings
         self.dest = dest
         self.log = log
         # where the helper's relayed lines go: the job the helper works for now, which the
-        # controller sets for each later job on a shared connection (DESIGN §13)
+        # controller sets for each later job on a shared connection (DESIGN, "Logs")
         self.helper_log = log
         self.probe = probe
         self.floor = floor

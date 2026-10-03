@@ -1,4 +1,4 @@
-"""Read and check vcharon.ini (DESIGN §12)."""
+"""Read and check vcharon.ini (DESIGN, "Config")."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ class Settings:
 
 @dataclasses.dataclass
 class Mailbox:
-    """A mailbox section's own values (DESIGN §12), on each job it expands into. Every
-    one is a channel section, [<channel>.<me>] in channels.d/."""
+    """A mailbox section's own values (DESIGN, "Channel sections"), on each job it expands into.
+    Every one is a channel section, [<channel>.<me>] in channels.d/."""
 
     section: str
     me: str
@@ -52,8 +52,8 @@ class Mailbox:
 
 @dataclasses.dataclass
 class Job:
-    """One of a channel section's two jobs (DESIGN §12). Its plugins and options are checked
-    when it runs."""
+    """One of a channel section's two jobs (DESIGN, "Channel sections"). Its plugins and options are
+    checked when it runs."""
 
     name: str
     ssh: str
@@ -149,7 +149,7 @@ _DIGITS = re.compile(r"\A[0-9]+\Z")
 _JOB_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 # the [vcharon] settings a channel section may override
 JOB_SETTINGS = ("idle_timeout", "run_timeout", "compress", "remote_python")
-# A mailbox section [S] becomes the jobs S.up and S.down (DESIGN §12).
+# A mailbox section [S] becomes the jobs S.up and S.down (DESIGN, "Channel sections").
 MAILBOX_KEYS = ("mailbox.me", "mailbox.leader", "mailbox.local", "mailbox.remote")
 MAILBOX_JOBS = (".up", ".down")
 # the channel's folder limits (charter), as join writes them from the record; a section
@@ -205,15 +205,15 @@ def load():
 
 
 def _parse(raw, name, source, hint):
-    """A ConfigParser of one file's bytes, with vcharon's rules (DESIGN §12); config errors name
-    the file as name."""
+    """A ConfigParser of one file's bytes, with vcharon's rules (DESIGN, "Config"); config errors
+    name the file as name."""
     try:
         # Windows Notepad may add a BOM.
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as e:
         raise VCharonError("config", "%s isn't valid UTF-8 (byte %d)" % (name, e.start), hint=hint)
-    # No interpolation and no inline comments, so "path = D:\Games #2" keeps its "#2". No
-    # section can be named "\n", so none acts as [DEFAULT].
+    # No interpolation and no inline comments, so "ssh_path = C:\Tools #2\ssh.exe" keeps its
+    # "#2". No section can be named "\n", so none acts as [DEFAULT].
     parser = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=None,
                                        comment_prefixes=("#", ";"), default_section="\n")
     try:
@@ -416,7 +416,7 @@ def _setting(settings, key, value, where, hint):
     overrides come through here too, so they get exactly the same checks."""
     if key == "ssh_path":
         path = os.path.expanduser(value)
-        # Launch rules (DESIGN §13): never rely on PATH or the current directory.
+        # Launch rules (DESIGN, "Launch rules"): never rely on PATH or the current directory.
         if not os.path.isabs(path):
             raise VCharonError("config", "%s: must be an absolute path" % where, hint=hint)
         settings.ssh_path = path
@@ -598,7 +598,7 @@ def _read_channel_file(path, where, section, hint, settings):
 
 
 def _read_mailbox(parser, section, name, hint, base):
-    """A channel section (DESIGN §12): its two jobs, up then down. Up pushes the
+    """A channel section (DESIGN, "Channel sections"): its two jobs, up then down. Up pushes the
     writer's own folder; down pulls the rest of the tree, less the writer's own folder."""
     def refuse(key, what):
         where = "%s [%s]" % (name, section) + (" " + key if key else "")
@@ -642,7 +642,7 @@ def _read_mailbox(parser, section, name, hint, base):
     if problem:
         refuse(None, problem)
     local = values["mailbox.local"]
-    # DESIGN §9.1: a hotkey run's current directory is unpredictable.
+    # A command's current directory is unpredictable (DESIGN, "Plugin interface").
     if not (local.startswith("~") or os.path.isabs(local)):
         refuse("mailbox.local", "a local path must be absolute or start with ~")
     remote = values["mailbox.remote"]
@@ -675,8 +675,9 @@ def _read_mailbox(parser, section, name, hint, base):
              # would make a closed channel again
              Side("remote", "dir", {"path": posixpath.join(remote, me), "create": "no"}),
              settings, "local:path", "remote:dir", box)
-    # mailbox_me: down plans only the other writers' folders at the top of the tree, and
-    # leaves out everything else there, <me>/ in any case included (DESIGN §9.2, §12)
+    # mailbox_me: down plans only the other writers' folders at the top of the tree, and leaves out
+    # everything else there, <me>/ in any case included (DESIGN, "The path source", "Channel
+    # sections")
     down = Job(section + ".down", values["ssh"],
                Side("remote", "path", dict({"path": remote, "mailbox_me": me, "prune": "yes",
                                             "allow_empty": "yes"}, **sizes)),

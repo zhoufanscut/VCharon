@@ -1,4 +1,4 @@
-"""The pure path rules, every receiver OS's set on this OS (DESIGN §10.1)."""
+"""The pure path rules, every receiver OS's set on this OS (DESIGN, "Path rules")."""
 
 from __future__ import annotations
 

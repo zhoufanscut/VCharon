@@ -36,7 +36,7 @@ MIB = 1 << 20
 # A run blocked on a FIFO gets a writer after this many seconds.
 FIFO_DELAY = 5.0
 
-# the round trips of a run, before bye (DESIGN §4)
+# the round trips of a run, before bye (DESIGN, "How a sync works")
 CALLS = {"push": ["sink.check", "sink.receive", "sink.commit"],
          "pull": ["source.plan", "source.send"]}
 
@@ -701,7 +701,7 @@ class RunTest(FakeSshCase):
             eng.session.close()
         self.assertEqual(fd_count(), before)
 
-    # runs that keep state (DESIGN §9.2, §10.5)
+    # runs that keep state (DESIGN, "The path source", "Full syncs")
 
     def job_sides(self, direction, src, dst, **options):
         """A job's sides: path, without keep_name, onto dir."""

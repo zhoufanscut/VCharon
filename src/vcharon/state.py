@@ -1,4 +1,4 @@
-"""State files and job locks (DESIGN §11.2, §11.3); client."""
+"""State files and job locks (DESIGN, "State file", "Lock"); client."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ SCHEMA = 1
 # the keys of a state file, in the order it's written
 KEYS = ("schema", "job", "fingerprint", "identity", "sink", "source", "saved")
 _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
-# for a server with no machine id, which no job's state can be tied to (DESIGN §7.3)
+# for a server with no machine id, which no job's state can be tied to (DESIGN, "hello")
 NO_MACHINE_HINT = "give the server one (systemd-machine-id-setup, as root)"
 # for a remote end that isn't Linux, with its alias
 LINUX_HINT = "point %s at a Linux server"
@@ -42,7 +42,7 @@ def need_linux(hello, where, hint):
 
 @dataclasses.dataclass
 class State:
-    """One job's state file, less its schema and job name (DESIGN §11.2)."""
+    """One job's state file, less its schema and job name (DESIGN, "State file")."""
 
     fingerprint: str
     identity: dict | None
@@ -84,9 +84,9 @@ def config_changed(job):
 
 
 def fingerprint(job):
-    """What ties a state to its config (DESIGN §11.2): a config.Job's ssh, from, to, from.path
-    and to.path, as written; null for a missing path. Other options (exclude, prune, create)
-    can change without a reset. A mailbox job's list also ends with its writer name, which
+    """What ties a state to its config (DESIGN, "State file"): a config.Job's ssh, from, to,
+    from.path and to.path, as written; null for a missing path. Other options (exclude, prune,
+    create) can change without a reset. A mailbox job's list also ends with its writer name, which
     reaches down only through its exclude: renaming the writer refuses both states."""
     raw = [job.ssh, job.from_text, job.to_text, job.source.options.get("path"),
            job.sink.options.get("path")]
@@ -226,7 +226,7 @@ def remove(name):
 
 
 def lock(name):
-    """The job's lock (DESIGN §11.3), held; the caller releases it. busy if another run holds
+    """The job's lock (DESIGN, "Lock"), held; the caller releases it. busy if another run holds
     it; the OS drops it when the process dies."""
     folder = platform.state_dir()
     p = os.path.join(folder, name + ".lock")

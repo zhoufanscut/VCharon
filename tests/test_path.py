@@ -1,4 +1,5 @@
-"""The path source (DESIGN §9.2): plans, refusals, and open() after the source changed."""
+"""The path source (DESIGN, "The path source"): plans, refusals, and open() after the source
+changed."""
 
 from __future__ import annotations
 
@@ -315,7 +316,7 @@ class PathCases:
 
     def test_a_root_that_cant_be_listed(self):
         # open but not listable (Windows can do that): the root's own hint, never LIST_HINT,
-        # which a mailbox job swaps for a writer's folder (DESIGN §12)
+        # which a mailbox job swaps for a writer's folder (DESIGN, "Channel sections")
         write_tree(self.src, {"f": b"f"})
         handles = (fsops.FdDir, fsops.PathDir)
         real = {cls: cls.scan for cls in handles}
@@ -507,7 +508,7 @@ class PathCases:
         self.assertEqual(cm.exception.hint, "check its permissions at the source")
 
 
-    # --- a state: only what changed (DESIGN §9.2) ---
+    # --- a state: only what changed (DESIGN, "The path source") ---
 
     def planned(self, state, full=False, path=None, **options):
         src = self.source(path, **options)
@@ -975,7 +976,7 @@ class PathCases:
                  {"sent": {"a": [1, 10 ** 400, None]}}, {"sent": {"a": [1, 2, 1]}},
                  {"sent": {"a": [1, 2, 0]}}, {"sent": {"a": [1, 2, "yes"]}},
                  {"sent": {"b": good, "a": {"size": 1}}},
-                 # not a plan path (DESIGN §8): with prune it would be a delete
+                 # not a plan path (DESIGN, "Plans"): with prune it would be a delete
                  {"sent": {"../x": good}}, {"sent": {"a/../../x": "d"}}, {"sent": {"a//b": good}},
                  {"sent": {"/a": good}}, {"sent": {"a/./b": good}}, {"sent": {"a/": "d"}},
                  {"sent": {".": "d"}}, {"sent": {"a\x00b": good}}, {"sent": {"a\udcffb": good}},

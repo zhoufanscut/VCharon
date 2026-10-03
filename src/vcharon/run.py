@@ -1,4 +1,5 @@
-"""The engine: steps 5-8 of DESIGN §4, one piece of code for either direction; client."""
+"""The engine: steps 5-8 of (DESIGN, "How a sync works"), one piece of code for either direction;
+client."""
 
 from __future__ import annotations
 
@@ -26,8 +27,8 @@ def _files(p):
 
 
 class Engine:
-    """Steps 5-8 of DESIGN §4, for either direction: plan, check, transfer, commit. The side
-    on the remote end is a proxy; the other one runs here."""
+    """Steps 5-8 of (DESIGN, "How a sync works"), for either direction: plan, check, transfer,
+    commit. The side on the remote end is a proxy; the other one runs here."""
 
     def __init__(self, session, source, sink, log, after_check=None, after_plan=None):
         # session: an open ssh.Session. after_plan(plan) runs right after the plan, before the
@@ -45,7 +46,7 @@ class Engine:
         # filled in as the run goes
         self.plan = self.checked = self.done = None
         # after a commit that failed partway in a run that keeps state: what the source wants
-        # saved (DESIGN §9.2), or None
+        # saved (DESIGN, "The path source"), or None
         self.state_after = None
 
     def _make(self, side, role):
@@ -54,15 +55,15 @@ class Engine:
             # Its warnings go to this job's log, not the session's (a sync of up and down).
             return cls(self.session, side.plugin, side.options, self.log)
         log, prefix = self.log, role + ": "
-        # No tick: local work never counts as idle (DESIGN §6.3).
+        # No tick: local work never counts as idle (DESIGN, "Threads, timeouts, shutdown").
         ctx = plugin.Ctx("local", log=lambda msg: log.info("%s%s" % (prefix, msg)))
         return plugin.make("local", side.plugin, role, side.options, ctx)
 
     def run(self, dry_run=False, state=None, full=False):
         """Returns the commit's stage.Done, or None for a dry run. state: the source's saved
         state ({} if none), or None when the caller keeps no state (a one-off pull). full: the
-        source plans everything, with hashes, and the sink skips what it holds (DESIGN
-        §10.5)."""
+        source plans everything, with hashes, and the sink skips what it holds (DESIGN,
+        "Full syncs")."""
         local = role = None
         try:
             source = self._make(self.source_side, "source")
@@ -89,7 +90,7 @@ class Engine:
         if self.after_plan is not None:
             self.after_plan(p)
         self.checked = checked = sink.check(p)
-        # The sink may skip only what the plan hashed (DESIGN §10.5).
+        # The sink may skip only what the plan hashed (DESIGN, "Full syncs").
         for i in checked.have:
             e = p.entries[i] if 0 <= i < len(p.entries) else None
             if e is None or e.op != "put" or e.kind != "file" or e.sha256 is None:
@@ -183,6 +184,6 @@ class Engine:
 
 def written_files(p, done):
     """How many file puts the commit wrote: what done.written holds, less the plan's
-    directories (DESIGN §13: "put 12 files, 2 dirs" gives "OK 12 written")."""
+    directories (DESIGN, "Output": "put 12 files, 2 dirs" gives "OK 12 written")."""
     dirs = {e.path for e in p.entries if e.op == "put" and e.kind == "dir"}
     return sum(1 for path in done.written if path not in dirs)

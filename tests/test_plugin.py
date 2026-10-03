@@ -1,4 +1,4 @@
-"""Plugin options, the registry and the Ctx (DESIGN §9.1)."""
+"""Plugin options, the registry and the Ctx (DESIGN, "Plugin interface")."""
 
 from __future__ import annotations
 
@@ -285,15 +285,15 @@ class CtxTest(unittest.TestCase):
     def test_resolve_backslash(self):
         # ~\x is ~ and then x on a Windows end, whichever way the home reads, and the end's own
         # separator joins; on any other end \ is part of a name, so the text stays one name
-        # under that end's home. Every OS runs this (DESIGN §15).
+        # under that end's home. Every OS runs this (DESIGN, "Tests").
         windows = plugin.Ctx("remote", home="C:\\Users\\me", osn="windows")
         self.assertEqual(windows.resolve("~\\x", "to.path"), "C:\\Users\\me\\x")
         linux = plugin.Ctx("remote", home="/home/me", osn="linux")
         self.assertEqual(linux.resolve("~\\x", "to.path"), "/home/me/~\\x")
 
     def test_resolve_by_the_end_s_rules(self):
-        # The end's join, isabs and ~user on any host (DESIGN §9.1, §15); each of these fails if
-        # resolve used this host's instead.
+        # The end's join, isabs and ~user on any host (DESIGN, "Plugin interface", "Tests"); each of
+        # these fails if resolve used this host's instead.
         win = plugin.Ctx("remote", home="C:\\Users\\me", osn="windows")
         self.assertEqual(win.resolve("~/x/y", "to.path"), "C:\\Users\\me\\x\\y")
         self.assertEqual(win.resolve("~/", "to.path"), "C:\\Users\\me\\")

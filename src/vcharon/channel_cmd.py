@@ -85,8 +85,8 @@ def clean_project(text):
 
 def member_name(cfg, project=None, role=None, cwd=None):
     """<box>-<project>[-<role>]: join and create build a member's name, nothing else does. An
-    exception to "never rely on the current directory" (DESIGN §13), on purpose: the name says
-    where the agent works."""
+    exception to "never rely on the current directory" (DESIGN, "Launch rules"), on purpose: the
+    name says where the agent works."""
     return member_parts(cfg, project, role, cwd)[0]
 
 
@@ -206,7 +206,7 @@ def find(cfg, channel, project, role):
 def membership(cfg, channel, project=None, role=None):
     """The record of the membership a command means, from the channel, the project
     (--project, else the current directory's) and the role (--role; none means the role-less
-    membership): the three steps of DESIGN, "Which membership". Refused, with a fix line, when
+    membership): the three steps of (DESIGN, "Which membership"). Refused, with a fix line, when
     there is none or the role is missing."""
     check_channel(channel)
     check_role(role)
@@ -1282,7 +1282,8 @@ def _remove_membership(cfg, record, section, say):
 
 
 def _remove_tree(path):
-    """§10.1's walk: bottom-up, links removed, never entered."""
+    """The no-link walk (DESIGN, "Create, join, leave, close"): bottom-up, links removed,
+    never entered."""
     parent, name = os.path.split(os.path.abspath(path))
     cls = fsops.PathDir if fsops.WINDOWS else fsops.FdDir
     try:

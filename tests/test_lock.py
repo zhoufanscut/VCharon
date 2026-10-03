@@ -1,4 +1,4 @@
-"""Exclusive file locks (DESIGN §11.3)."""
+"""Exclusive file locks (DESIGN, "Lock")."""
 
 from __future__ import annotations
 

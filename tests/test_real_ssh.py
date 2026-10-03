@@ -19,8 +19,9 @@ from vcharon import cli, platform
 from tests.util import read_tree, use_test_jobs, write_tree
 
 DEST = os.environ.get("VCHARON_TEST_SSH")
-# Windows has no execute bit: os.chmod(0o755) there leaves st_mode at 0o666, and the path
-# source leaves exec out (DESIGN §9.2, §10.4). The execute-bit assertions below need POSIX.
+# Windows has no execute bit: os.chmod(0o755) there leaves st_mode at 0o666, and the path source
+# leaves exec out (DESIGN, "The path source", "What is copied"). The execute-bit assertions below
+# need POSIX.
 POSIX = os.name == "posix"
 
 

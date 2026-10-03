@@ -1,4 +1,5 @@
-"""The pure path rules of DESIGN §8 and §10.1, for each receiving OS; no file-system access."""
+"""The pure path rules (DESIGN, "Plans", "Path rules") for each receiving OS; no file-system
+access."""
 
 from __future__ import annotations
 
@@ -24,8 +25,8 @@ _OS_NAMES = {"linux": "Linux", "darwin": "macOS", "windows": "Windows"}
 # At most this many problems go into an error's detail (and so into the log).
 MAX_LISTED = 100
 
-# A mailbox writer's name, and so its folder's name on every client (DESIGN §12): lowercase
-# only, so two writers' folders can't fold together on a Windows or macOS client.
+# A mailbox writer's name, and so its folder's name on every client (DESIGN, "Member names"):
+# lowercase only, so two writers' folders can't fold together on a Windows or macOS client.
 WRITER = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,31}\Z")
 
 UNSAFE_HINT = "rename or exclude these paths at the source"
@@ -60,7 +61,8 @@ def _split_problem(path):
 
 
 def split(path):
-    """The parts of a plan path, after the text rules of §8; otherwise unsafe_path."""
+    """The parts of a plan path, after the text rules of (DESIGN, "Plans");
+    otherwise unsafe_path."""
     parts, problem = _split_problem(path)
     if problem:
         raise VCharonError("unsafe_path", "%s: %s" % (show(path), problem), UNSAFE_HINT)
@@ -94,7 +96,8 @@ def part_problem(part, osn):
 
 def writer_problem(name):
     """Why name can't be a mailbox writer's name, the name of its folder at the top of the
-    tree (DESIGN §12), or None. A Windows client can't hold a folder with a reserved name."""
+    tree (DESIGN, "Member names"), or None. A Windows client can't hold a folder with a reserved
+    name."""
     if not WRITER.match(name):
         return ("a writer's name has only lowercase letters, digits, '-' and '_', starts with "
                 "a letter or digit, and is at most 32 characters long")
@@ -212,17 +215,17 @@ def _check_collisions(plan, all_parts, osn):
 
 
 def is_absolute(path, osn):
-    """DESIGN §9.1: absolute by osn's rules. On Windows that takes a drive or a share: /srv/x,
-    \\x and C:x depend on the current directory, which vcharon never uses, although Python before
-    3.13 calls the first two absolute."""
+    """Absolute (DESIGN, "Plugin interface") by osn's rules. On Windows that takes a drive or a
+    share: /srv/x, \\x and C:x depend on the current directory, which vcharon never uses, although
+    Python before 3.13 calls the first two absolute."""
     if osn == "windows":
         return ntpath.isabs(path) and bool(ntpath.splitdrive(path)[0])
     return posixpath.isabs(path)
 
 
 def win_long_path(root, parts=()):
-    """DESIGN §10.1: every absolute path vcharon hands to Windows starts with \\\\?\\ (\\\\?\\UNC\\
-    for a share). parts have passed the Windows rules and are joined as they are."""
+    """Every absolute path (DESIGN, "Path rules") vcharon hands to Windows starts with \\\\?\\
+    (\\\\?\\UNC\\ for a share). parts have passed the Windows rules and are joined as they are."""
     if root.startswith("\\\\?\\"):
         path = root
     else:

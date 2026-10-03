@@ -1,4 +1,4 @@
-"""Plan types, their JSON form and their structure checks (DESIGN §8), on both ends."""
+"""Plan types, their JSON form and their structure checks (DESIGN, "Plans"), on both ends."""
 
 from __future__ import annotations
 

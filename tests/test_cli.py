@@ -581,7 +581,7 @@ class JobTest(FakeSshCase):
         self.ok("push")
 
     def test_8_busy_in_another_process(self):
-        # the lock is the OS's: a second vcharon process sees it (DESIGN §11.3)
+        # the lock is the OS's: a second vcharon process sees it (DESIGN, "Lock")
         self.lock_is_free()
         child = hold_in_child(os.path.join(self.vcharon_home, "state", "push.lock"))
         try:
@@ -2056,10 +2056,10 @@ class MailboxTest(FakeSshCase):
             "debian"] * 6 + ["mac"] * 2)
 
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
-    def test_a_down_state_from_an_older_version(self):
-        # An older down planned the own folder and every top-level name: its sent may hold
-        # windows, Windows/ and top-level files. It runs without a reset (exclude
-        # semantics, DESIGN §9.2): those paths leave sent, and nothing is deleted here.
+    def test_a_down_state_holding_names_down_leaves_out(self):
+        # A saved down state whose sent holds names down never plans (the own folder, Windows/,
+        # top-level files) runs without a reset: as with exclude (DESIGN, "The path source"),
+        # those paths leave sent, and nothing is deleted here.
         write_tree(self.own, {"RESULTS.md": b"results"})
         self.ok(*SYNC)
         write_tree(self.local, {"Windows/": None, "notes.md": b"n", "README": b"r"})

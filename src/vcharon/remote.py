@@ -1,4 +1,4 @@
-"""The proxies for a source or sink in the helper (DESIGN §4); client."""
+"""The proxies for a source or sink in the helper (DESIGN, "How a sync works"); client."""
 
 from __future__ import annotations
 

@@ -297,9 +297,10 @@ Two ways, both described in Claude Code's tools reference; the limits below are 
   Windows only with Git Bash): use the background command then.
 - Stop either with `TaskStop` and the task's ID.
 
-Checked on Linux, 2026-10-03: a background `vcharon watch C --until-change` started with
-Claude Code's Bash `run_in_background` woke the session about 10 s after a post, with
-`to all:` then `EXIT change`. Monitor not yet checked; macOS and Windows not yet checked.
+Checked on Linux, 2026-10-03, with a local (`--local`) member: a background `vcharon watch C
+--until-change` started with Claude Code's Bash `run_in_background` woke the session within one
+10 s round of the leader's post, with `to all:` then `EXIT change`, exit 0. A remote
+(`--server`) member, Monitor, macOS and Windows not yet checked.
 
 ### Codex
 

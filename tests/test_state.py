@@ -1,4 +1,4 @@
-"""State files, the fingerprint and the job lock (DESIGN §11.2, §11.3)."""
+"""State files, the fingerprint and the job lock (DESIGN, "State file", "Lock")."""
 
 from __future__ import annotations
 

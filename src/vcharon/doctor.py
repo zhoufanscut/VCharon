@@ -1,5 +1,5 @@
-"""vcharon doctor: checks of this machine, each server and each channel section's jobs, one
-line each (DESIGN §13); client. It only reads, apart from a temp file in the state and log
+"""vcharon doctor: checks of this machine, each server and each channel section's jobs, one line
+each (DESIGN, "Command line"); client. It only reads, apart from a temp file in the state and log
 dirs, and its log. It never prompts.
 
 --json prints one object instead: {"version", "protocol", "format", "python", "executable",
@@ -327,7 +327,7 @@ def _login(rep, d, agent, log):
         rep.check("ok", dest, text, note=note)
         return True, False
     if ssh.denied(probe) and kind == "file":
-        # DESIGN §6.4's third row
+        # the third row of (DESIGN, "Failures before the helper runs")
         rep.check("FAIL", dest, "ssh can't use your key %s: the server accepts it, but it's "
                   "locked by a passphrase" % ssh.shown(key.ident), "vcharon key %s" % dest)
         return False, True
@@ -461,9 +461,9 @@ def _job(rep, job, session, hello, log):
 
 
 def _made_by_the_run(job, level, message, fix):
-    """A channel section's own folder on the client may not exist before its first run: the
-    run makes it while up has sent nothing (DESIGN §12). The server's tree is never made by a
-    run: its absence is a closed channel."""
+    """A channel section's own folder on the client may not exist before its first run: the run
+    makes it while up has sent nothing (DESIGN, "Channel sections"). The server's tree is never made
+    by a run: its absence is a closed channel."""
     if not (level == "FAIL" and message.startswith("from.path ")
             and message.endswith(" doesn't exist")) or job.source.end == "remote":
         return level, message, fix
@@ -523,7 +523,7 @@ def main(args, run):
     for d in dests:
         # a locked key's FAIL line says to run vcharon key: the doctor never prompts
         logged_in, _ = _login(rep, d, agent, log)
-        # ControlMaster off, as in the probe (DESIGN §6.1)
+        # ControlMaster off, as in the probe (DESIGN, "The ssh command")
         with ssh.Session(d.settings, d.dest, log, probe=True) as session:
             hello = _server(rep, d, session) if logged_in else None
             if hello is not None:
