@@ -5,8 +5,8 @@
 # wrong .sha256, which must fail and install nothing; then with the right one, which must
 # install the archive's binary, and that binary must print VERSION; then once more over that
 # install, which must replace the binary in place and leave nothing else in its folder. On
-# Windows the right-checksum install also runs under Windows PowerShell 5.1 (powershell.exe),
-# what `irm | iex` runs in by default, besides pwsh 7.
+# Windows a second replace runs under Windows PowerShell 5.1 (powershell.exe), what
+# `irm | iex` runs in by default, besides pwsh 7.
 #
 #   sh tests/install_check.sh ASSETS_DIR ASSET VERSION WORK_DIR
 #
@@ -128,29 +128,38 @@ check_version() {
 }
 check_version
 
-# the old binary's bytes are a marker, so only a binary the installer put there in its place
-# prints the version; afterwards the folder holds the binary alone: no vcharon.exe.old-* (the
-# renamed old one, deleted since it isn't running), no work folder, no staged file
+# a run over the install just made. The old binary's bytes are a marker, so only a binary the
+# installer put there in its place prints the version. A file beside the install folder must
+# survive, or the earlier install was wiped and this was a fresh install, not a replace.
+# Afterwards the folder holds the binary alone: no vcharon.exe.old-* (the renamed old one,
+# deleted since it isn't running), no work folder, no staged file.
+KEPT="$(dirname "$(dirname "${INSTALLED}")")/.kept"
+replace_run() {
+  printf 'the old binary\n' > "${INSTALLED}"
+  : > "${KEPT}"
+  KEEP=1
+  run_installer || fail "the installer failed to replace an installed binary$1"
+  KEEP=""
+  [ -e "${KEPT}" ] || fail "the earlier install was wiped before the replace run$1"
+  check_version
+  LEFT="$(ls -A "$(dirname "${INSTALLED}")")"
+  [ "${LEFT}" = "$(basename "${INSTALLED}")" ] \
+    || fail "the install folder holds more than the binary after a replace$1: ${LEFT}"
+}
+
 echo ""
 echo "\$ the installer, over that install"
-printf 'the old binary\n' > "${INSTALLED}"
-KEEP=1
-run_installer || fail "the installer failed to replace an installed binary"
-KEEP=""
-check_version
-LEFT="$(ls -A "$(dirname "${INSTALLED}")")"
-[ "${LEFT}" = "$(basename "${INSTALLED}")" ] \
-  || fail "the install folder holds more than the binary after a replace: ${LEFT}"
+replace_run ""
 
+# Windows PowerShell 5.1, a replace as well, so its replace block runs too
 if [ -n "${WINDOWS}" ]; then
   echo ""
-  echo "\$ the installer, under Windows PowerShell 5.1"
+  echo "\$ the installer, under Windows PowerShell 5.1, over that install"
   command -v powershell.exe > /dev/null 2>&1 || fail "no powershell.exe on this runner"
   PS=powershell.exe
-  run_installer || fail "the installer failed under Windows PowerShell 5.1"
+  replace_run " under Windows PowerShell 5.1"
   PS=pwsh
   grep -q "Checking the checksum" "${WORK}/install.out" || fail "the checksum wasn't checked"
-  check_version
 fi
 
 echo ""

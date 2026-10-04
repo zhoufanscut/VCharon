@@ -35,7 +35,9 @@ dev = ["ruff>=0.16.10,<0.17"]
 # this version's collect_data_files and collect_submodules, and the one-file bootloader's
 # behaviour under a running watcher was measured with it (DESIGN, "Running watchers").
 # hooks-contrib too: its hooks decide what goes into the binary, and PyInstaller asks only for
-# a floor (>=2026.7).
+# a floor (>=2026.7); 2026.8 is the version the dev venv builds with. The release build
+# installs build-requirements.txt, which locks both at these versions, with hashes, and their
+# dependencies too.
 build = ["pyinstaller==6.22.3", "pyinstaller-hooks-contrib==2026.8"]
 
 [project.scripts]
@@ -65,6 +67,7 @@ include = [
   "LICENSE",
   "pyproject.toml",
   "vcharon.spec",
+  "build-requirements.txt",
   "install.sh",
   "install.ps1",
 ]

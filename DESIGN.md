@@ -1772,15 +1772,22 @@ maintainer asks before tagging.
   the version, and after which the folder must hold the binary alone (on Windows: no
   `vcharon.exe.old-*` left). On Windows the real-checksum install runs once more under Windows
   PowerShell 5.1 (`powershell.exe`), what `irm | iex` runs in by default, whose branches (TLS
-  1.2) pwsh never takes. `install.ps1` also adds its folder to the user's PATH, so on Windows the
-  check runs only where `CI` is set.
-- **The build's inputs are fixed**, so a release is built from what was checked, not from what
-  was newest that day: the actions at commit SHAs (a tag can be moved; the publish job holds a
-  write token), with the version in a comment, which Dependabot bumps weekly as pull requests
-  (`.github/dependabot.yml`); pip and the `build` extra (PyInstaller and its hooks package) at
-  exact versions. The build installs only the `build` extra: it runs no lint. PyInstaller's
-  own dependencies still float, without hashes: a hash lock per OS can't be made and checked on
-  one machine.
+  1.2) pwsh never takes; it is a replace too, over the pwsh install. The replace runs leave a
+  file outside the install folder, which must still be there: proof the earlier install was
+  kept, not wiped for a fresh one. Not run by any check: `install.ps1`'s 60 s download timeout
+  and the 5.1 `WebException` branch of its HTTP status reader. `install.ps1` also adds its
+  folder to the user's PATH, so on Windows the check runs only where `CI` is set.
+- **The build's inputs are pinned**, so a release is built from what was checked, not from what
+  was newest that day. The actions are at commit SHAs (a tag can be moved; the publish job holds
+  a write token), with the version in a comment, which Dependabot bumps weekly as pull requests
+  (`.github/dependabot.yml`). Every Python package the build installs is in
+  `build-requirements.txt` at an exact version, with the sha256 of each file PyPI has for that
+  release: PyInstaller and its dependencies, the per-OS ones under `sys_platform` markers, pip,
+  and hatchling with `editables`. The build installs it with `--require-hashes`, then the
+  package with `--no-deps --no-build-isolation`, so nothing comes from the index unpinned. One
+  lock serves all three runners: hashes cover every file of a release, so each OS's pip finds
+  its own wheel. The `build` extra pins PyInstaller and its hooks package to the same versions
+  (`tests/test_build_lock.py`), so a hand build matches. No ruff: the release runs no lint.
 - **One job publishes**, after all three builds: it takes their assets, checks there are exactly
   the nine and that each checksum holds, and runs `gh release create`. A version with a
   pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
