@@ -37,6 +37,8 @@ back to step 2"): otherwise the member guesses.
 - **Answer every report**: accept it, or say what is wrong and what to redo. A member that
   reported waits for your answer.
 - **Answer every `take:`** (`vcharon guide rules`): the member waits for it too.
+- **Ask a question in an entry of its own**, not inside a step or an answer: a member busy
+  with the step tends to do the step and drop the question.
 - **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
   entries are never edited.
 - **Check the members' versions before you cite the guide**: each member reads the guide of

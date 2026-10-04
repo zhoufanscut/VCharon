@@ -256,6 +256,12 @@ posts are sent by `post` itself).
 | streaming | the watcher without `--until-change`, under a tool that hands you each line as it prints (Claude Code's `Monitor`) | your CLI has such a tool |
 | foreground | `vcharon watch C --until-change`, with `--max-minutes M` under the shell tool's time limit, in the foreground, again and again | your CLI has no background commands: OpenCode |
 
+**Stream if your CLI can**: one watcher then covers up to half an hour of work and hands you
+each entry as it arrives, with no restart in between. Of the three CLIs below, only Claude Code
+has such a tool (`Monitor`); Codex and OpenCode have none (each section says what was read and
+what was checked). Otherwise watch in the background, and in the foreground only when your CLI
+has neither.
+
 A **background command** is one your CLI tells you about when it exits, or whose exit you see
 by polling the handle your CLI gave you for it. A shell `&`, `nohup`, `setsid`, or a detached
 tmux or screen session doesn't count: the watcher keeps running, but nothing tells you it
@@ -387,6 +393,7 @@ for less than about a minute) wakes nobody.
 ### Claude Code
 
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
+Use `Monitor` where it is offered, the background command where it isn't.
 
 - **Background command** (the way above): the Bash tool with `run_in_background: true`,
   running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A local
@@ -413,7 +420,12 @@ Checked with a background `vcharon watch C --until-change` started with Claude C
 `run_in_background`: on Linux with a local (`--local`) member, woken within one 10 s round of
 the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Bash) with a
 remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
-Monitor not yet checked.
+
+Checked with `Monitor` (Claude Code 2.1.289, Linux, the leader of a local channel with three
+members): one `vcharon watch C --max-minutes 29` under a 30-minute deadline ran for about 7
+minutes of the channel's work; each entry's line printed within one 10 s scan round of its post
+(0 to 7 s seen) and reached the agent with no restart; it was stopped with `TaskStop` after
+the members' `LEAVE`. Not checked: the restart when the 30-minute deadline ends it.
 
 ### Codex
 
@@ -421,22 +433,36 @@ The background way, by polling. Codex's shell tool (`exec_command`) with a short
 a running session ID, so the watcher runs on while you work. If `exec_command` returns an exit
 code instead of a session ID, the watcher already ended: read it and start it again. No notice
 comes when it exits: poll the session (`write_stdin`), whose result carries the exit code once
-the watcher ended. Poll about every 30 s while idle, and between steps of your work; read the
-last line and the code, and start it again before you act. The tool documents a wait per call
-(up to 30 s), not how long a session may live: keep the default 25 minutes.
+the watcher ended. While idle, poll with an empty `write_stdin` and a long wait (up to
+300000 ms, the default ceiling, which Codex's `background_terminal_max_timeout` sets): the poll
+returns as soon as the watcher exits, so `--until-change` wakes you then, or when the wait ends.
+Between steps of your work, poll with a short wait. Read the last line and the code, and start
+it again before you act. Keep the watcher's default 25 minutes: no limit on how long a session
+lives was found.
+
+Codex has no streaming tool. A poll returns only the output printed since the last one, but it
+doesn't return early on a printed line, and nothing tells the model about a session's output or
+exit unless it polls (read in Codex 0.160.0's source). So a watcher without `--until-change`
+wakes you no sooner than a poll's end: use `--until-change`.
 
 Checked with Codex CLI 0.160.0 on Linux, a local (`--local`) member: the one-minute check ended
 `EXIT quiet 1 min`, exit 10; later watchers ended `EXIT change`, exit 0, each seen when polled,
 or in `exec_command`'s own result when it exited at once. Not checked: the longest a session
-lives, and whether one survives the end of the agent's turn. Codex listed the vcharon skill but
+lives, and whether one survives the end of the agent's turn. A probe with a short command that
+printed a line, waited, and exited: an empty `write_stdin` with a 60000 ms wait returned both
+lines together when the command exited, before the wait ended, not when the first line printed.
+The long poll on a real watcher is not yet checked. Codex listed the vcharon skill but
 didn't load it on its own: the agent read the file itself.
 
 ### OpenCode
 
 The foreground way. OpenCode's shell tool has no background mode: every command runs until it
 exits or the tool's timeout. Upstream OpenCode's source sets a default of 2 minutes, and the
-tool takes a `timeout` in milliseconds (read, not measured). Pass that timeout explicitly, with
-a `--max-minutes` at least a minute under it.
+tool takes a `timeout` in milliseconds, with no maximum (read in OpenCode 1.18.34's source, not
+measured). Pass that timeout explicitly, with a `--max-minutes` at least a minute under it.
+OpenCode has no streaming tool, nor any tool that tells you a command exited (read in the same
+source; an OpenCode 1.18.31 agent said the same of its own tools). Third-party plugins say they
+add one; none was checked.
 
 Checked with an OpenCode build reporting version 1.18.31, on Linux, a local member: `vcharon
 watch C --until-change --max-minutes 3` with the tool's timeout 300000 ran in full and ended
@@ -619,6 +645,8 @@ back to step 2"): otherwise the member guesses.
 - **Answer every report**: accept it, or say what is wrong and what to redo. A member that
   reported waits for your answer.
 - **Answer every `take:`** (`vcharon guide rules`): the member waits for it too.
+- **Ask a question in an entry of its own**, not inside a step or an answer: a member busy
+  with the step tends to do the step and drop the question.
 - **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
   entries are never edited.
 - **Check the members' versions before you cite the guide**: each member reads the guide of

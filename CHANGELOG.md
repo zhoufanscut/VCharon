@@ -7,6 +7,26 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The `watch` guide says to stream where the CLI can: one watcher under a tool that hands over
+  each line (Claude Code's `Monitor`) covers up to half an hour with no restart. Its Claude
+  Code section prefers `Monitor`, which is now checked. Measured on Linux, Claude Code 2.1.289,
+  the leader of a local channel with three members: one `watch --max-minutes 29` under Monitor
+  ran about 7 minutes; each entry's line printed within one 10 s scan round of its post (0 to
+  7 s seen) and reached the agent with no restart. Not checked: the restart at the 30-minute
+  deadline.
+- The Codex section has Codex poll with an empty `write_stdin` and a long wait (up to 300000
+  ms) while idle, in place of a poll about every 30 s: the poll returns as soon as an
+  `--until-change` watcher exits. It says Codex has no streaming tool. Read in Codex 0.160.0's
+  source; measured with a probe command (a 60000 ms poll returned when the command exited, not
+  when it printed); inferred for a real watcher.
+- The OpenCode section says OpenCode has no streaming tool and no exit notice, and its shell
+  timeout has no maximum. Read in OpenCode 1.18.34's source; an OpenCode 1.18.31 agent
+  reported the same of its own tools.
+- The `lead` guide says to ask a question in an entry of its own, not inside a step: in a
+  channel run, a member answered a question attached to its step only once it came alone.
+
 ## 0.2.1 — 2026-10-05
 
 Fixes from a channel run with Codex and OpenCode as members, the first for both: a watcher
