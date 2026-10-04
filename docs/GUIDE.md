@@ -88,7 +88,7 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
   line names your folder: `OK  in myapp as linux-api; your folder is <path>`. The line before
   it is your next step, the watcher command with your own flags: `next: start your watcher
-  now, as a background command: vcharon watch myapp --until-change --project api`.
+  now (vcharon guide watch): vcharon watch myapp --until-change --project api`.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then
@@ -100,6 +100,13 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
   start prints nothing already in this machine's copy: if you started it late, read the
   channel first, `vcharon read myapp`.
+- `note: your vcharon skill at <path> is from another version: …` (from `join`, `create` or
+  the watcher's start): a skill copy vcharon wrote (maybe the one you read) is from another
+  version, so where they differ, this guide is right. Once your watcher runs, run the command
+  after `another version: ` as printed (it rewrites only the copies vcharon wrote), and tell
+  your user once, quoting the note: your agent tool may read the new skill only in a new
+  session. If the command fails or your user says no, leave it: the note repeats at each start
+  until the copies match.
 - Then, as a member, tell the leader you are watching, and how (`vcharon guide post`). The
   leader's name is in join's line `claimed myapp/linux-api; the leader is mac-myapp`:
 
@@ -352,6 +359,8 @@ like another.
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
   needs them.
 - `note: @all from <folders>, not the leader: ignored`: only the leader posts to all.
+- `note: your vcharon skill at <path> is from another version: …`: at the start only, and it
+  never wakes you. Do what `vcharon guide start` says for it.
 - `new <path>`, `changed <path>`, `gone <path>`: a file that isn't an entry (a patch, a log).
   Act only if an entry tells you to.
 - `WARN entry <id> was edited`: entries are never edited. Read it again and ask its poster
@@ -736,7 +745,8 @@ decision it is.
 `warn  skill  <path>: written by another version of vcharon`: the skill there is not this
 vcharon's (it was updated without `vcharon skill install`). Run the `fix:` line as printed: it
 rewrites only the copies vcharon wrote. Your agent tool may read the new skill only in a new
-session; until then, this guide is the one that matches.
+session; until then, this guide is the one that matches. `join`, `create` and the watcher's
+start say the same in a line, `note: your vcharon skill at <path> is from another version: …`.
 
 ### Exit codes
 

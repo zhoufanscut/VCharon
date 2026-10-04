@@ -1081,15 +1081,28 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two files
   only the first in path order is printed, the copy `read` and the watcher keep.
 - **The next step.** A `join` or `create` that succeeded prints, just before its `OK` line
-  (which stays the last), `  next: start your watcher now, as a background command: vcharon
-  watch C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post):
-  vcharon post C --steps --to @all --title '…' <flags>, with the body on stdin`. The flags are
-  the record's (`--project`, and `--role` when it has one), so the commands work from any
-  folder; spelled as this machine runs vcharon. The watcher line is a command to run as
-  printed; the plan line is a template (a placeholder title, and the trailing words make it
-  refuse to parse), since a plan posted as printed would reach everyone and can't be taken
-  back. Why: an agent that skips the guide still sees what to run next. A join whose sync
-  failed prints neither: its sync is the next step.
+  (which stays the last), `  next: start your watcher now (vcharon guide watch): vcharon watch
+  C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post): vcharon
+  post C --steps --to @all --title '…' <flags>, with the body on stdin`. The flags are the
+  record's (`--project`, and `--role` when it has one), so the commands work from any folder;
+  spelled as this machine runs vcharon. The watcher line is a command to run as printed, and it
+  names the topic rather than a way to run it: a background command is right only where the
+  agent's CLI reports its exit, and the topic says what to do otherwise. The plan line is a
+  template (a placeholder title, and the trailing words make it refuse to parse), since a plan
+  posted as printed would reach everyone and can't be taken back. Why: an agent that skips the
+  guide still sees what to run next. A join whose sync failed prints neither: its sync is the
+  next step.
+- **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
+  your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
+  skill copy that `vcharon skill install` wrote (its marker line) holds another text than this
+  version's SKILL.md; `--codex` for that copy, both flags and `skills at <path> and <path> are`
+  for both. The check is doctor's `skill` row (`skill.installed()`); the command is spelled as
+  this machine runs vcharon. A copy without the marker is the user's own and gets no note, and
+  a copy that can't be read, or a check that fails, gives no note and changes nothing else: the
+  exit code stays the command's. On stdout, with the rest of the output, which already names
+  this machine's folders (the `OK` line's). Why: an agent reads the skill before the guide,
+  and an update made by an older updater, or any change to SKILL.md, leaves the copies as they
+  were until `vcharon skill install` or a later `--update`.
 - **The rejoin's pull** is decided from up's saved state, never from how the folder looks (a
   stray `.DS_Store` would pass for a tree): it pulls when up has no usable state, has sent
   nothing, or has sent `MEMBER.md` and `MEMBER.md` is missing here. It pulls into a temp folder
@@ -1312,6 +1325,13 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   and so, likely, does PowerShell's `>` on a native program, which pipes (inferred, not run);
   cmd's and Git Bash's `>` hand over the file itself and are caught (inferred). An error raised
   before the tree is known (the config, the membership) still goes to a redirected stderr.
+- **The stale-skill note.** After that check, before the lock and the `watching` line, a
+  watcher prints `note: your vcharon skill at <path> is from another version: vcharon skill
+  install --claude` once, as join's note ([Create, join, leave, close](#create-join-leave-close),
+  "The stale-skill note"), with the time in front like every line. It is printed before the
+  first round, so it never counts as a change, and it comes after the output check, so its home
+  paths never reach a channel file. Why once at the start: a watcher restarts often, and two
+  small reads per start cost little, while a check each round would read them for nothing.
 - **Remote members stream.** One long-lived child, `vcharon sync C --repeat <every>` (default
   every 2 s, 1 to 300), keeps one ssh connection; each `ROUND <code>` line ends one round. When
   the child exits it is started again after 2, 4, 8, 16, 30, 30… s, back to 2 after a good
@@ -1927,7 +1947,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`
   - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
     <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
-    `note: duplicate entry <id> in <path>: the one in <file> stands`
+    `note: duplicate entry <id> in <path>: the one in <file> stands`, `note: your vcharon
+    skill at <path> is from another version: <fix>` (`skills at <path> and <path> are` for
+    two; at start only)
   - `new <path>`, `changed <path>`, `gone <path>`
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`

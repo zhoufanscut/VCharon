@@ -738,6 +738,12 @@ def _watch(args, run):
             hint = fix % "that file"
         raise _usage("the watcher's output goes to %s, a file in the channel: every member "
                      "gets that file" % shown, hint)
+    # once, at the start, as a status line: it never counts as a change, and it comes after
+    # the check above, so the home paths in it stay out of the channel. Before the watchdog's
+    # start: reading the skill's text may import modules
+    note = skill.stale_note()
+    if note is not None:
+        watch_mod.say("%s %s" % (watch_mod.stamp(time.time()), pathrules.printable(note)))
     if tree is not None:
         channel_cmd.refresh_version(os.path.join(tree, record["name"]), record["name"])
     dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),

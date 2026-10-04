@@ -27,6 +27,11 @@ MARKER = ("<!-- written by vcharon skill install, which replaces this file: "
 FIX = "vcharon skill install %s"
 # agent -> the folder under the home that holds its user skills
 AGENTS = (("claude", (".claude", "skills")), ("codex", (".agents", "skills")))
+# the note join, create and a watcher's start print for copies of another version: an
+# agent reads the skill before the guide, and an update by an older updater, or any change to
+# SKILL.md, leaves the copies as they were (DESIGN, "Create, join, leave, close")
+STALE = "note: your vcharon skill at %s is from another version: "
+STALE_MANY = "note: your vcharon skills at %s are from another version: "
 
 
 def text():
@@ -76,6 +81,21 @@ def installed():
         if MARKER in old.splitlines():
             found.append((agent, target, old == text()))
     return found
+
+
+def stale_note():
+    """The note line for the copies vcharon wrote that aren't this version's text (installed()),
+    with the fix for exactly those agents, as this box runs vcharon; None when there is none.
+    Never raises: a skill that can't be read must not stop the command that asks."""
+    try:
+        stale = [(agent, target) for agent, target, current in installed() if not current]
+    except Exception:  # noqa: BLE001
+        return None
+    if not stale:
+        return None
+    # runnable() on the fix alone: the note's own words hold "vcharon skill" too
+    head = (STALE if len(stale) == 1 else STALE_MANY) % " and ".join(t for _, t in stale)
+    return head + platform.runnable(FIX % " ".join("--" + a for a, _ in stale))
 
 
 def install(agents, say):

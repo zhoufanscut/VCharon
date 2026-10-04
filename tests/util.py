@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, config, doctor, platform, run, ssh, stage
+from vcharon import charter, cli, config, doctor, platform, run, skill, ssh, stage
 from vcharon.log import Log
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -223,6 +223,30 @@ class FakeSshCase(unittest.TestCase):
                 return f.read()
         except FileNotFoundError:
             return ""
+
+
+def skill_home(case):
+    """Points HOME (USERPROFILE on Windows) at a new folder for case's test, where skill.path
+    puts the agents' skill copies; its path."""
+    home = tempfile.mkdtemp(prefix="vcharon-test-home-")
+    case.addCleanup(shutil.rmtree, home, True)
+    patcher = mock.patch.dict(os.environ, HOME=home, USERPROFILE=home)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    return home
+
+
+def write_skill(agent, text=None):
+    """agent's skill copy under HOME: this version's text, or text; its path."""
+    target = skill.path(agent)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="") as f:
+        f.write(skill.text() if text is None else text)
+    return target
+
+
+# what an older vcharon wrote: the marker, another text
+OLD_SKILL = "---\nname: vcharon\n---\n%s\nold text\n" % skill.MARKER
 
 
 def record_format(limits=None):

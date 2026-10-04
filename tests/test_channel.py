@@ -20,7 +20,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import channel_cmd, channels, cli, config, entries, platform, state
+from vcharon import channel_cmd, channels, cli, config, entries, platform, skill, state
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -280,7 +280,7 @@ class CreateJoinTest(ChannelCase):
         # the next steps, with the flags that find the membership from any folder, then the OK
         # line, still the last
         self.assertEqual(out.splitlines()[-3:], [
-            platform.runnable("  next: start your watcher now, as a background command: "
+            platform.runnable("  next: start your watcher now (vcharon guide watch): "
                               "vcharon watch game --until-change --project ui"),
             platform.runnable("  then post the plan (vcharon guide post): vcharon post game "
                               "--steps --to @all --title '…' --project ui, with the body on "
@@ -375,7 +375,7 @@ class CreateJoinTest(ChannelCase):
         own = os.path.join(self.root, "game", "linux-x-b")
         # the watcher is next (a member posts no plan); the OK line stays the last
         self.assertEqual(out.splitlines()[-2:], [
-            platform.runnable("  next: start your watcher now, as a background command: "
+            platform.runnable("  next: start your watcher now (vcharon guide watch): "
                               "vcharon watch game --until-change --project x --role b"),
             "OK  in game as linux-x-b; your folder is %s" % own])
         self.assertEqual(sorted(os.listdir(own)), ["MEMBER.md", "RESULTS.md"])
@@ -789,6 +789,100 @@ def _script(argv):
             "from vcharon import cli, ssh\n"
             "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
             "sys.exit(cli.main(%r))\n" % (VCHARON_DIR, FAKE_SSH, list(argv)))
+
+
+class StaleSkillTest(ChannelCase):
+    """join and create note a skill copy vcharon wrote that isn't this version's (DESIGN,
+    "Create, join, leave, close"): on stdout, just before the next: line; never a refusal."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        util.skill_home(self)
+
+    def note(self, *agents):
+        targets = " and ".join(skill.path(a) for a in agents)
+        head = ("note: your vcharon skill at %s is from another version: " if len(agents) == 1
+                else "note: your vcharon skills at %s are from another version: ")
+        return "  " + head % targets + platform.runnable(
+            "vcharon skill install %s" % " ".join("--" + a for a in agents))
+
+    def join(self, project="x"):
+        """A local join's stdout, which must exit 0 with nothing on stderr."""
+        code, out, err = self.channel("join", "game", "--local", "--project", project)
+        self.assertEqual((code, err), (0, ""), out)
+        return out.splitlines()
+
+    def test_create_notes_a_stale_copy(self):
+        util.write_skill("claude", util.OLD_SKILL)
+        util.write_skill("codex")
+        self.use_box("laptop")
+        code, out, err = self.channel("create", "game", "--local", "--project", "ui")
+        self.assertEqual((code, err), (0, ""), out)
+        lines = out.splitlines()
+        self.assertEqual(lines[-4], self.note("claude"))
+        self.assertTrue(lines[-3].startswith(platform.runnable("  next: ")), lines)
+        self.assertEqual([l for l in lines if "skill" in l], [self.note("claude")])
+
+    def test_join_notes_the_stale_copies(self):
+        self.lead(where=("--local",))
+        util.write_skill("codex", util.OLD_SKILL)
+        lines = self.join("x")
+        self.assertEqual(lines[-3], self.note("codex"))
+        self.assertTrue(lines[-2].startswith(platform.runnable("  next: ")), lines)
+        util.write_skill("claude", util.OLD_SKILL)
+        lines = self.join("y")
+        self.assertEqual(lines[-3], self.note("claude", "codex"))
+        self.assertEqual(len([l for l in lines if "skill" in l]), 1, lines)
+
+    def test_no_note(self):
+        self.lead(where=("--local",))
+        projects = iter("abcdefg")
+
+        def quiet():
+            lines = self.join(next(projects))
+            self.assertEqual([l for l in lines if "skill" in l], [])
+            self.assertTrue(lines[-2].startswith(platform.runnable("  next: ")), lines)
+
+        # none installed
+        quiet()
+        # this version's copies
+        util.write_skill("claude")
+        util.write_skill("codex")
+        quiet()
+        # the user's own file of that name, without the marker
+        util.write_skill("claude", "---\nname: vcharon\n---\nmy own notes\n")
+        quiet()
+        # a folder where the file goes
+        os.remove(skill.path("codex"))
+        os.mkdir(skill.path("codex"))
+        quiet()
+        # a check that fails outright: no note, and the join still works
+        with mock.patch.object(skill, "installed", side_effect=OSError("broken")):
+            quiet()
+        with mock.patch.object(skill, "text", side_effect=OSError("no SKILL.md")):
+            util.write_skill("claude", util.OLD_SKILL)
+            quiet()
+
+    @unittest.skipIf(os.name == "nt", "Windows names can't hold a control character")
+    def test_a_control_character_in_the_path_is_escaped(self):
+        self.lead(where=("--local",))
+        home = os.path.join(self.tmp, "a\x1bb")
+        os.mkdir(home)
+        os.environ.update(HOME=home, USERPROFILE=home)
+        target = util.write_skill("claude", util.OLD_SKILL)
+        lines = self.join()
+        self.assertEqual(lines[-3], self.note("claude").replace(target, target.replace(
+            "\x1b", "\\x1b")))
+
+    @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0,
+                         "needs a file this user can't read")
+    def test_an_unreadable_copy(self):
+        self.lead(where=("--local",))
+        target = util.write_skill("claude", util.OLD_SKILL)
+        os.chmod(target, 0)
+        self.addCleanup(os.chmod, target, 0o600)
+        lines = self.join()
+        self.assertEqual([l for l in lines if "skill" in l], [])
 
 
 class ConcurrencyTest(ChannelCase):

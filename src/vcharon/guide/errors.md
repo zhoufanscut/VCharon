@@ -28,7 +28,8 @@ decision it is.
 `warn  skill  <path>: written by another version of vcharon`: the skill there is not this
 vcharon's (it was updated without `vcharon skill install`). Run the `fix:` line as printed: it
 rewrites only the copies vcharon wrote. Your agent tool may read the new skill only in a new
-session; until then, this guide is the one that matches.
+session; until then, this guide is the one that matches. `join`, `create` and the watcher's
+start say the same in a line, `note: your vcharon skill at <path> is from another version: …`.
 
 ## Exit codes
 

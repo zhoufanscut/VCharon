@@ -115,6 +115,8 @@ like another.
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
   needs them.
 - `note: @all from <folders>, not the leader: ignored`: only the leader posts to all.
+- `note: your vcharon skill at <path> is from another version: …`: at the start only, and it
+  never wakes you. Do what `vcharon guide start` says for it.
 - `new <path>`, `changed <path>`, `gone <path>`: a file that isn't an entry (a patch, a log).
   Act only if an entry tells you to.
 - `WARN entry <id> was edited`: entries are never edited. Read it again and ask its poster

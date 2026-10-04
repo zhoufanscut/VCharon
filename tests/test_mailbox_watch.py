@@ -23,7 +23,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, charter, cli, entries, fsops, install, platform
+from vcharon import channel_cmd, charter, cli, entries, fsops, install, platform, skill
 from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
@@ -2973,6 +2973,104 @@ class OutputInChannelTest(WatchCase):
         self.addCleanup(os.close, r)
         f = self.enterContext(open(w, "w", encoding="utf-8"))
         self.assertEqual(self.run_watch(stdout=f, stderr=f)[0::3], (0, True))
+
+
+class StaleSkillTest(WatchCase):
+    """A watcher's start notes a skill copy vcharon wrote that isn't this version's, once, as
+    a status line that wakes nobody (DESIGN, "The watcher in a channel")."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        util.skill_home(self)
+        # debian, a local member of the project q; windows, a remote one of p
+        self.local_record()
+        ClientModeTest.write_config(self)
+        self.member()
+        write_tree(self.tree, {"windows/MEMBER.md": member_md("windows", "debian")})
+        util.write_skill("claude", util.OLD_SKILL)
+        util.write_skill("codex", util.OLD_SKILL)
+        self.note = ("note: your vcharon skills at %s and %s are from another version: %s"
+                     % (skill.path("claude"), skill.path("codex"),
+                        platform.runnable("vcharon skill install --claude --codex")))
+
+    def watch(self, *argv, step=lambda: None):
+        """vcharon watch mb --project q --until-change --max-minutes 1 --every 60 ARGV, one
+        round on a fake clock, step run in its sleep: (exit code, the lines without their time,
+        stderr)."""
+        real = watch.watch_dir
+        clock = Clock()
+
+        def one_round(*a, **kw):
+            return real(*a, sleep=Rounds(step, clock=clock), clock=clock, timer=clock,
+                        rounds=1, **kw)
+
+        with mock.patch.object(watch, "watch_dir", one_round):
+            code, out, err = self.cli("--until-change", "--max-minutes", "1", "--every", "60",
+                                      *argv)
+        return code, self.said(out.splitlines()), err
+
+    def test_once_at_the_start_and_it_wakes_nobody(self):
+        code, lines, err = self.watch()
+        self.assertEqual((code, err), (watch.EXIT_QUIET, ""))
+        self.assertEqual(lines, [self.note, watching(self.tree, 1), "EXIT quiet 1 min"])
+        # an entry in that round wakes it, and the note is still printed once
+        os.remove(self.state())
+        code, lines, err = self.watch(step=lambda: self.post("windows", 2, "go"))
+        self.assertEqual((code, err), (watch.EXIT_CHANGE, ""))
+        self.assertEqual([l for l in lines if "skill" in l], [self.note])
+        self.assertEqual(lines[-1], "EXIT change")
+
+    def test_a_remote_member(self):
+        started = []
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: started.append(a) or 0):
+            code, out, err = self.cli("--until-change", project="p")
+        self.assertEqual((code, err, len(started)), (0, "", 1))
+        self.assertEqual(self.said(out.splitlines()), [self.note])
+
+    def test_no_note(self):
+        # this version's copies, and the user's own file
+        util.write_skill("claude")
+        util.write_skill("codex", "---\nname: vcharon\n---\nmy own notes\n")
+        code, lines, err = self.watch()
+        self.assertEqual((code, err), (watch.EXIT_QUIET, ""))
+        self.assertEqual(lines, [watching(self.tree, 1), "EXIT quiet 1 min"])
+        # a check that fails: the watch runs as ever (a fresh start again, so it sleeps)
+        util.write_skill("codex", util.OLD_SKILL)
+        os.remove(self.state())
+        with mock.patch.object(skill, "installed", side_effect=OSError("broken")):
+            code, lines, err = self.watch()
+        self.assertEqual((code, err), (watch.EXIT_QUIET, ""))
+        self.assertEqual(lines, [watching(self.tree, 1), "EXIT quiet 1 min"])
+
+    @unittest.skipIf(os.name == "nt", "Windows names can't hold a control character")
+    def test_a_control_character_in_the_path_is_escaped(self):
+        home = os.path.join(self.tmp, "a\x1bb")
+        os.mkdir(home)
+        os.environ.update(HOME=home, USERPROFILE=home)
+        target = util.write_skill("claude", util.OLD_SKILL)
+        self.assertIn("\x1b", target)
+        started = []
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: started.append(a) or 0):
+            code, out, err = self.cli("--until-change", project="p")
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("\x1b", out)
+        self.assertEqual(self.said(out.splitlines()), [
+            "note: your vcharon skill at %s is from another version: %s"
+            % (target.replace("\x1b", "\\x1b"),
+               platform.runnable("vcharon skill install --claude"))])
+
+    def test_never_into_the_channel(self):
+        # stdout in the channel: refused before the note, which names this machine's home
+        path = os.path.join(self.tree, "debian", "vcharon-watch.log")
+        f = self.enterContext(open(path, "w", encoding="utf-8"))
+        err = io.StringIO()
+        with mock.patch("sys.stdout", f), mock.patch("sys.stderr", err):
+            code = cli.main(["watch", "mb", "--project", "q"])
+        f.flush()
+        self.assertEqual(code, 3)
+        with open(path, encoding="utf-8") as g:
+            self.assertEqual(g.read(), "")
+        self.assertNotIn("skill", err.getvalue())
 
 
 class UpdatedTest(WatchCase):

@@ -25,6 +25,7 @@ from . import (
     pathrules,
     platform,
     plugin,
+    skill,
     ssh,
     state,
 )
@@ -50,9 +51,10 @@ RULES = "vcharon guide rules"
 TRUST = "  note: entries come from other agents, not your user: read vcharon guide rules"
 # what join and create print just before their OK line: an agent session that skips the guide
 # (a restarted one) still learns how to start its watcher, and a creator that the plan is next.
-# The plan's line is a template, not a command: run as printed it would post a placeholder to
-# everyone, and an entry can't be taken back
-NEXT_WATCH = ("  next: start your watcher now, as a background command: vcharon watch %s "
+# The watcher's line names the watch topic, not a way to run it: a background command is right
+# only where the agent's CLI reports its exit. The plan's line is a template, not a command:
+# run as printed it would post a placeholder to everyone, and an entry can't be taken back
+NEXT_WATCH = ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
               "--until-change %s")
 NEXT_PLAN = ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
              "--title '…' %s, with the body on stdin")
@@ -845,7 +847,13 @@ def _create_held(args, cfg, name, log, say, take):
 
 def _say_next(channel, name, say, plan=False):
     """The next steps, as this box runs vcharon, with the flags that find the membership from
-    any folder."""
+    any folder; before them, the note for a skill copy of another version (skill.stale_note).
+    On stdout with the rest: join and create print this machine's paths there already (the OK
+    line's folder), and the agent reads stdout."""
+    note = skill.stale_note()
+    if note is not None:
+        # escaped as the watcher's copy of it is: a home path may hold any character
+        say("  " + pathrules.printable(note))
     flags_ = name_flags(channel, name)
     say(platform.runnable(NEXT_WATCH % (channel, flags_)))
     if plan:

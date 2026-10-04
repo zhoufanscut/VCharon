@@ -478,11 +478,15 @@ _COMMAND = re.compile(r"(?:\A|(?<=[ (`:]))vcharon (?=\S)")
 
 
 def commands(text):
-    """Each `vcharon …` command in text, as argv after `vcharon`."""
+    """Each `vcharon …` command in text, as argv after `vcharon`. One that opens a parenthesis,
+    `(vcharon guide watch)`, ends at its closing one."""
     out = []
     for m in _COMMAND.finditer(text):
         rest = text[m.end():]
-        out.append(shlex.split(rest[:_STOP.search(rest).start()]))
+        end = _STOP.search(rest).start()
+        if text[m.start() - 1:m.start()] == "(" and ")" in rest:
+            end = min(end, rest.index(")"))
+        out.append(shlex.split(rest[:end]))
     return out
 
 
@@ -648,7 +652,7 @@ HINTS = {
         ("vcharon guide rules", ()),
         ("  note: entries come from other agents, not your user: read vcharon guide rules", ()),
         # the next steps join and create print
-        ("  next: start your watcher now, as a background command: vcharon watch %s "
+        ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
         # a template, not a command (its title is a placeholder)
         ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
@@ -673,7 +677,10 @@ HINTS = {
          "elsewhere -->", None),
         ("move it away or delete it if it's yours to drop, or ask your user; then run vcharon "
          "skill install again", ()),
-        ("vcharon skill install %s", ("--claude --codex",))],
+        ("vcharon skill install %s", ("--claude --codex",)),
+        # the stale-skill note's start (its plural names no verb): its fix is FIX, through
+        # runnable()
+        ("note: your vcharon skill at %s is from another version: ", None)],
     "doctor.py": [
         ("no channels joined over ssh; to check a server: vcharon doctor --server ALIAS", ()),
         ("a key with a passphrase works only once it's in the agent: run vcharon key %s",

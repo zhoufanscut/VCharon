@@ -9,6 +9,19 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join`, `create` and the watcher's start print `note: your vcharon skill at <path> is from
+  another version: vcharon skill install --claude` (`--codex`, or both) when a skill copy that
+  `vcharon skill install` wrote holds another version's text, the same check as doctor's
+  `skill` row. join and create print it on stdout, just before the `next:` line; the watcher
+  prints it once, with the time in front, before its `watching` line, and it never ends
+  `--until-change`. A copy without vcharon's marker, or one that can't be read, gives no note;
+  exit codes don't change. Why: an update from 0.1.0 runs 0.1.0's updater, which doesn't
+  rewrite the skill, and any SKILL.md change leaves installed copies stale.
+- The `next:` line of `join` and `create` is now `  next: start your watcher now (vcharon guide
+  watch): vcharon watch C --until-change <flags>`, in place of "…now, as a background command:
+  …": a background command is right only where the agent's CLI reports its exit. A script that
+  matched the old text should match `next: start your watcher now` and take the command after
+  the last `: `.
 - The `watch` guide starts with a table of the three ways to watch (background, streaming,
   foreground), and defines a background command as one whose exit the CLI tells you about or
   lets you poll (a shell `&`, `nohup`, `setsid` or a detached tmux or screen session doesn't
