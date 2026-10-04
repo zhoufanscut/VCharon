@@ -1310,10 +1310,13 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     @all from <folders>, not the leader: ignored`;
   - `WARN entry <id> was edited` (a heading seen before with another text in the same file,
     once), `WARN entry <id> in <folder>/: not its folder's`;
-  - `note: duplicate entry <id> in <path>: the one in <file> stands`: an ID already seen in
-    another file of its folder is skipped, as `read` skips it, with this note once per file and
-    run; it wakes nobody. Why not "edited": comparing the two files' headings would warn again
-    on every change to either file;
+  - `note: duplicate entry <id> in <path>: the one in <file> stands`: of an ID in two files of
+    its folder, the copy first in path order stands, the one `read` orders; the other is
+    skipped, with this note once per file and run; it wakes nobody. Why not "edited": comparing
+    the two files' headings would warn again on every change to either file. A copy in a file
+    that sorts before the one seen first, or a copy left when that file is gone, takes over, and
+    its heading is compared with the one told: a retitled copy warns that it was edited, since
+    it is what `read` now shows;
   - `new | changed | gone <path>` for files that aren't `.md` files in a member's folder: a
     patch or log is announced by an entry, and only entries wake;
   - `WARN <text>` / `WARN cleared: <text>` for problems in the tree: a local member's watcher

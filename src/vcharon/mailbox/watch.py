@@ -47,8 +47,9 @@ Lines; * marks the ones that count for --until-change:
     WARN entry <id> in <folder>/: not its folder's
                                    an ID whose name isn't its folder's
     note: duplicate entry <id> in <path>: the one in <file> stands
-                                   an ID already seen in another file of its folder: skipped,
-                                   once per file, as read skips it
+                                   an ID in two files of its folder: the one first in path
+                                   order stands, as in read, and the other is skipped; once
+                                   per file
     <n> other entries (<folders>)  new entries addressed to others, without an ID, in the
                                    wrong folder, or a member's MEMBER.md (its #1, addressed to
                                    the leader, wakes nobody); one line a round; `1 other entry
@@ -443,10 +444,12 @@ class Told:
         return len(self.entries) + len(self.edited)
 
 
-def read_entries(root, paths, marks, me, leader, baseline=False):
+def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
-    member's is ignored, since any member can write anything into its own folder."""
+    member's is ignored, since any member can write anything into its own folder. present:
+    every file in the tree now (None: all those the marks name); an ID's head in a file gone
+    from it gives way to the next copy seen."""
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -474,15 +477,25 @@ def read_entries(root, paths, marks, me, leader, baseline=False):
                 continue
             known = marks.heads.get(e.id)
             if known is not None and known[0] is not None and known[0] != path:
-                # one ID in two files: the first file seen with it stands, as in read; the
-                # other's heading is never compared with it, else every change to either file
-                # would warn again that it was edited
-                if (e.id, path) not in marks.dups:
-                    marks.dups.add((e.id, path))
+                # one ID in two files: the first in path order stands, the copy read orders;
+                # the other's heading is never compared with it, else every change to either
+                # file would warn again that it was edited
+                stays = present is None or known[0] in present
+                if stays and known[0] < path:
+                    if (e.id, path) not in marks.dups:
+                        marks.dups.add((e.id, path))
+                        if not baseline:
+                            told.duplicates.append("note: duplicate entry %s in %s: the one in "
+                                                   "%s stands" % (e.id, path, known[0]))
+                    continue
+                # this copy takes the head: it sorts first, or the head's file is gone; below,
+                # a heading other than the one told so far warns that it was edited
+                marks.dups.discard((e.id, path))
+                if stays and (e.id, known[0]) not in marks.dups:
+                    marks.dups.add((e.id, known[0]))
                     if not baseline:
                         told.duplicates.append("note: duplicate entry %s in %s: the one in %s "
-                                               "stands" % (e.id, path, known[0]))
-                continue
+                                               "stands" % (e.id, known[0], path))
             if e.id in ids:
                 # the same ID twice in one file: the first one stands
                 continue
@@ -841,7 +854,7 @@ class _Watch:
         """Reads the entry files among paths into the marks; returns the round's Told. A file
         that couldn't be read leaves files, so the next round reads it again."""
         told = read_entries(self.root, [p for p in paths if is_entry_file(p)], self.marks,
-                            self.me, self.leader, baseline)
+                            self.me, self.leader, baseline, files)
         for path in told.unread:
             files.pop(path, None)
         return told

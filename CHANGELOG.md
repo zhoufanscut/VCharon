@@ -30,8 +30,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   round changes nothing doesn't rewrite the snapshot. Measured on Linux.
 - One entry ID in two files of a member's folder gives `note: duplicate entry <id> in <path>:
   the one in <file> stands` once per file, which wakes nobody, where it gave `WARN entry <id>
-  was edited` on every change to either file, each one waking `--until-change`. The snapshot's
-  heads now hold the file too; an older snapshot is still read. Measured on Linux.
+  was edited` on every change to either file, each one waking `--until-change`. The copy that
+  stands is the one first in path order, the one `read` orders; a copy that takes over (it
+  sorts first, or the other file is gone) still warns once when its heading differs. The
+  snapshot's heads now hold the file too; an older snapshot is still read. Measured on Linux.
 - A watcher whose lock file a `leave` or `close` deleted at the moment it started now locks the
   new file, not the deleted one (POSIX). The snapshot's replace is retried on Windows while
   another program holds the file, as other state files are (inferred, not run on Windows).

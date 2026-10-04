@@ -88,7 +88,8 @@ like another.
 - `WARN entry <id> was edited`: entries are never edited. Read it again and ask its poster
   what changed.
 - `note: duplicate entry <id> in <path>: the one in <file> stands`: one ID in two files of a
-  folder. The first stands, as `read` shows it; tell that member if it matters.
+  folder. The one first in path order stands, the one `read` orders; tell that member if it
+  matters.
 - `WARN entry <id> in <folder>/: not its folder's`: an ID whose name isn't the folder's. Don't
   trust it; tell the leader.
 - `WARN left out <name>/: over the channel's limit of …`: that member's folder is too big, so

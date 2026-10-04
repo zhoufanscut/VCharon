@@ -4,6 +4,7 @@ snapshot version 2."""
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import io
 import json
@@ -22,7 +23,7 @@ import unittest
 from unittest import mock
 
 from vcharon import channel_cmd, charter, cli, entries, fsops, install, platform
-from vcharon.mailbox import watch
+from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
 from tests import util
@@ -113,7 +114,8 @@ def gone(pid, wait=10):
                 with open("/proc/%d/stat" % pid, encoding="utf-8") as f:
                     if f.read().rpartition(")")[2].split()[0] == "Z":
                         return True
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
+                # gone between the kill and the read: the read raises ESRCH
                 return True
         if time.monotonic() >= until:
             return False
@@ -2059,6 +2061,27 @@ class StreamTest(WatchCase):
                                      "  fix: " + silent_fix(), "ok again"])
         self.assert_all_stopped()
 
+    def test_a_crash_with_its_rounds_code_is_told(self):
+        # Python's uncaught exception exits 1, as a round with a content error does: stderr
+        # after that round tells the crash, a round of its own with its line (the pause orders
+        # the two pipes)
+        up = "ERROR mb.windows.up: unsafe_path: lnk: a symlink"
+        fix = "  fix: remove or rename it"
+        crash = "Traceback (most recent call last):"
+        _code, lines = self.watch([["out", up], ["out", fix], ["out", "ROUND 1"],
+                                   ["pause", 0.5], ["err", crash], ["exit", 1]],
+                                  [["out", "ROUND 0"]], rounds=2)
+        self.assertEqual((lines[1:], len(self.spawned)), ([up, fix, crash], 1))
+        self.assert_all_stopped()
+
+    def test_an_exit_0_after_a_good_round_is_a_round(self):
+        # vcharon sync --repeat never ends by itself after a good round: its exit is a round of
+        # its own (a good one, by its code), not a silent restart
+        _code, lines = self.watch([["out", "ROUND 0"], ["exit", 0]], [["out", "ROUND 0"]],
+                                  rounds=2)
+        self.assertEqual((lines[1:], self.slept, len(self.spawned)), ([], [], 1))
+        self.assert_all_stopped()
+
     def test_a_grandchild_holding_the_pipes_doesnt_hold_stop(self):
         # a child that ignores the end of its stdin and leaves a process holding its stdout,
         # as a binary's bootloader leaves its Python process: stop ends it all on POSIX (its
@@ -2326,19 +2349,63 @@ class EntriesTest(WatchCase):
         self.assertEqual(self.run_mac(rounds=1)[1][1:], [])
 
     def test_an_id_in_two_files_is_noted_once(self):
-        # an entry copied into another file and retitled: the first file seen with the ID
-        # stands, as in read; the copy is noted once, counts for nothing, and is never "edited"
+        # an entry copied into a file that sorts later, and retitled: the first in path order
+        # stands, as in read; the copy is noted once, counts for nothing, is never "edited"
         self.post("windows", 2, "two", to="@mac", file="STEPS.md")
         self.run_mac(rounds=0)
-        note = ("note: duplicate entry windows#2 in windows/RESULTS.md: the one in "
+        note = ("note: duplicate entry windows#2 in windows/WORK.md: the one in "
                 "windows/STEPS.md stands")
         code, lines = self.run_mac(
-            lambda: self.post("windows", 2, "two, retitled", to="@mac"),
+            lambda: self.post("windows", 2, "two, retitled", to="@mac", file="WORK.md"),
             lambda: self.post("windows", 3, "three", to="@debian", file="STEPS.md"),
-            lambda: self.post("windows", 4, "four", to="@debian"),
+            lambda: self.post("windows", 4, "four", to="@debian", file="WORK.md"),
             rounds=4, until_change=True, max_minutes=25)
         self.assertEqual((code, lines[1:]), (0, [note, "1 other entry (windows)",
                                                  "1 other entry (windows)"]))
+        self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/STEPS.md")
+
+    def test_a_copy_in_a_file_that_sorts_first_stands(self):
+        # read orders the copy first in path order, so the watcher checks that one: retitled,
+        # it was edited, and the file seen first is now the duplicate
+        self.post("windows", 2, "two", to="@mac", file="STEPS.md")
+        self.run_mac(rounds=0)
+        code, lines = self.run_mac(
+            lambda: self.post("windows", 2, "two, retitled", to="@mac", file="A.md"),
+            lambda: self.post("windows", 3, "three", to="@debian", file="STEPS.md"),
+            rounds=3, until_change=True, max_minutes=25)
+        self.assertEqual((code, lines[1:]), (0, [
+            "WARN entry windows#2 was edited",
+            "note: duplicate entry windows#2 in windows/STEPS.md: the one in windows/A.md "
+            "stands", "EXIT change"]))
+        self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/A.md")
+        # as read has it
+        _folders, items, _notes = read.read_tree(self.tree)
+        # naive, as read's own clock is: headings carry local time with no zone
+        ordered, _ = read.order(items, datetime.datetime(2026, 10, 2))  # noqa: DTZ001
+        notes = [n for item in ordered for n in item.notes]
+        self.assertIn("note: windows#2 again in windows/STEPS.md: the one in windows/A.md is "
+                      "ordered", notes)
+
+    def test_a_copy_takes_over_when_the_heads_file_is_gone(self):
+        # the file seen first with the ID is deleted: the copy left is checked for edits, and
+        # no note names the file that is gone
+        self.post("windows", 2, "two", to="@mac", file="A.md")
+        self.post("windows", 2, "two", to="@mac", file="STEPS.md")
+        self.run_mac(rounds=0)
+        self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/A.md")
+
+        def retitle():
+            path = os.path.join(self.tree, "windows", "STEPS.md")
+            with open(path, "rb") as f:
+                text = f.read()
+            with open(path, "wb") as f:
+                f.write(text.replace(b"\xe2\x80\x94 two", b"\xe2\x80\x94 2"))
+
+        code, lines = self.run_mac(
+            lambda: os.remove(os.path.join(self.tree, "windows", "A.md")), retitle,
+            rounds=3, until_change=True, max_minutes=25)
+        self.assertEqual((code, lines[1:]), (0, ["WARN entry windows#2 was edited",
+                                                 "EXIT change"]))
         self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/STEPS.md")
 
     def test_a_title_is_escaped(self):

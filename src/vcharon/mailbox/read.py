@@ -25,8 +25,8 @@ naming it; of the entries that are free to go, the earliest second goes first, t
 smallest (name, number), the number compared as a number (#9 before #10). Across minutes the
 time wins, even against re:. So clocks a few seconds apart can't put an answer before its
 question, nor one member's #8 before its #7. Only a placed entry is ordered by number and re::
-its ID's name is its folder's, and it's the first with that ID in path order (the watcher's
-rule). Every entry is listed.
+its ID's name is its folder's, and it's the first with that ID in path order (the watcher
+checks the same copy). Every entry is listed.
 
 Notes: a folder or file it can't read (the rest is still shown); for a local member, another
 member's folder over the channel's limits (MB or files), left out until it is back under; for
