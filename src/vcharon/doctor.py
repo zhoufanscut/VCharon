@@ -47,6 +47,7 @@ from . import (
     keys,
     platform,
     plugin,
+    skill,
     ssh,
     state,
 )
@@ -57,8 +58,8 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("vcharon", "install", "path", "bundle", "python", "config", "box", "ssh",
-                   "agent", "dirs", "machine", "claimer")
+CLIENT_SUBJECTS = ("vcharon", "install", "path", "skill", "bundle", "python", "config", "box",
+                   "ssh", "agent", "dirs", "machine", "claimer")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
 # reorder entries posted near a minute's end; from 30 s it will do so often.
@@ -214,6 +215,23 @@ def path_check(rep, kind, which=shutil.which):
               % (shown, " (and on PATH: %s)" % rest if rest else "",
                  "checkout" if checkout else "one", platform.self_command()),
               CHECKOUT_HINT if checkout else FIRST_HINT)
+
+
+def skill_check(rep):
+    """The skill copies vcharon skill install wrote (told by its marker line) against this
+    version's text: an update replaces the program, never them, and an agent reads the skill
+    before the guide. No line when none is installed; a file without the marker is the
+    user's own, and not vcharon's to judge."""
+    found = skill.installed()
+    if not found:
+        return
+    stale = [(agent, target) for agent, target, current in found if not current]
+    if not stale:
+        rep.check("ok", "skill", "%s: this version's" % ", ".join(t for _, t, _ in found))
+        return
+    rep.check("warn", "skill", "%s: written by another version of vcharon"
+              % ", ".join(t for _, t in stale),
+              skill.FIX % " ".join("--" + a for a, _ in stale))
 
 
 def _bundle(rep):
@@ -614,6 +632,7 @@ def main(args, run):
     _vcharon(rep)
     installed = _install(rep)
     path_check(rep, installed["kind"])
+    skill_check(rep)
     helper_bundle = _bundle(rep)
     _python(rep)
     _config(rep, cfg, cfg_err, not dests)

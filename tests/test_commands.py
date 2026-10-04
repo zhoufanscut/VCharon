@@ -658,7 +658,8 @@ HINTS = {
         ("<!-- written by vcharon skill install, which replaces this file: keep your own edits "
          "elsewhere -->", None),
         ("move it away or delete it if it's yours to drop, or ask your user; then run vcharon "
-         "skill install again", ())],
+         "skill install again", ()),
+        ("vcharon skill install %s", ("--claude --codex",))],
     "doctor.py": [
         ("no channels joined over ssh; to check a server: vcharon doctor --server ALIAS", ()),
         ("a key with a passphrase works only once it's in the agent: run vcharon key %s",

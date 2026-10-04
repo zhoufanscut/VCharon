@@ -982,7 +982,10 @@ def _locked(w, state):
     except OSError as e:
         raise fsops.error(e, state + ".lock")
     if lk is None:
-        w.say("ERROR another watcher is running on this mailbox (%s.lock)" % state)
+        # create, join, leave and close hold this lock while they run (DESIGN, "Create, join,
+        # leave, close"). The older text stays the line's start: the exit-12 line is matched on it
+        w.say("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
+              "leave or close of this member" % state)
     return lk
 
 
@@ -1045,8 +1048,8 @@ def parse_failure(code, lines, job):
     line that starts with ERROR, else the first that isn't blank; the fix is the text of that
     ERROR line's "  fix: " line, with its "  log: " path after it, since a fix can point
     at lines the watcher doesn't show (ssh's other messages); a log with no fix gives one
-    that names the log; else None. Both are None for code 0. One parser for a sync's
-    stderr and a streamed round's lines."""
+    that names the log; else None. No line at all: the exit code, with silent_fix's logs.
+    Both are None for code 0. One parser for a sync's stderr and a streamed round's lines."""
     if code == 0:
         return 0, None, None
     for i, line in enumerate(lines):
@@ -1067,7 +1070,17 @@ def parse_failure(code, lines, job):
     for line in lines:
         if line.strip():
             return code, line.strip(), None
-    return code, "ERROR vcharon sync of %s exited with %d" % (job, code), None
+    return code, "ERROR vcharon sync of %s exited with %d" % (job, code), silent_fix(job)
+
+
+def silent_fix(job):
+    """The fix for a sync child that exited without a word (killed from outside: on Windows a
+    process ended that way exits 1): the logs it and its jobs write, which hold what it did
+    up to then."""
+    logs = platform.log_dir()
+    return ("look at %s, %s and %s; if it happens again, tell your user"
+            % tuple(os.path.join(logs, name) for name in
+                    [job + suffix + ".log" for suffix in config.MAILBOX_JOBS] + ["vcharon.log"]))
 
 
 def run_sync(job, sync_args):

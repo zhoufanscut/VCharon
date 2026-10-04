@@ -99,9 +99,9 @@ gets it back from the server. Then start your watcher again, and catch up with `
 myapp`.
 
 - If `join` says `a live session holds <your name>` and you passed no new `--role`, that is
-  your earlier watcher, still running: never take a `--role` for it (that would make you a
-  second member). Run `vcharon read myapp`, and wait for that watcher's exit, or ask your user
-  to stop it; then join again.
+  your earlier watcher, or another vcharon command of yours still running: never take a
+  `--role` for it (that would make you a second member). Run `vcharon read myapp`, and wait
+  for that watcher's exit or the command's end, or ask your user to stop it; then join again.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):

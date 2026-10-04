@@ -26,7 +26,9 @@ The order of the swap is the point:
      one back. Every later start deletes the .old-* copies it can (install.sweep_old).
 
 After the swap the running process imports nothing more: a one-file binary reads its code from
-its own file by path, which is the new one now (DESIGN, "Running watchers")."""
+its own file by path, which is the new one now (DESIGN, "Running watchers"). So the skill copies
+vcharon wrote are rewritten by the new binary, run as a child (refresh_skills): this process is
+the old version, and its skill text is the old one."""
 
 from __future__ import annotations
 
@@ -708,6 +710,30 @@ def child_env():
 def smoke_argv(binary):
     """How the downloaded binary is run for its --version (the tests run a Python script)."""
     return [binary, "--version"]
+
+
+def skill_argv(binary, agents):
+    """How the installed binary is run to rewrite agents' skill copies (the tests run a Python
+    script)."""
+    return [binary, "skill", "install"] + ["--" + agent for agent in agents]
+
+
+def refresh_skills(binary, agents):
+    """Runs the installed binary's vcharon skill install for agents, the ones whose copy carries
+    vcharon's marker (found before the swap), as the --version check runs it: this process is
+    the old version and would write the old text. None when it worked, else why not. Never
+    raises: the update is done either way, and the fix is to run that command by hand."""
+    try:
+        ran = fsops.run(skill_argv(binary, agents), SMOKE_TIMEOUT, env=child_env())
+    except OSError as e:
+        return "it wouldn't run: %s" % e
+    if ran.rc is None:
+        return "it didn't finish within %d s" % SMOKE_TIMEOUT
+    if ran.rc != 0:
+        detail = (ran.err.decode("utf-8", "replace") or ran.out.decode("utf-8", "replace")
+                  ).strip().splitlines()
+        return "it exited %d: %s" % (ran.rc, detail[0] if detail else "no output")
+    return None
 
 
 def _smoke_test(binary, expected):

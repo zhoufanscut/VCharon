@@ -186,10 +186,11 @@ It writes a short skill to `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/sk
 SKILL.md` (Codex's user skill folder; OpenCode reads `~/.claude/skills` and `~/.agents/skills`
 too, by its docs: not tested). The skill names the guide topics to read, by role, and a few
 rules never to skip; the rest it leaves to `vcharon guide`, which always matches the vcharon it
-runs. After each update, run `vcharon skill install` again: an update doesn't rewrite the
-skill. An agent without skills can be told: "run `vcharon guide` and follow it". Then name the
-channel to your agent: "join channel myapp on devbox and watch it". The guide tells it to join
-only channels you name.
+runs. `vcharon --update` rewrites the skill it wrote; after any other update (pipx, uv, pip, a
+checkout), `vcharon doctor` warns on a skill of another version, and `vcharon skill install`
+rewrites it. An agent without skills can be told: "run `vcharon guide` and follow it". Then
+name the channel to your agent: "join channel myapp on devbox and watch it". The guide tells it
+to join only channels you name.
 
 If your agent's CLI limits where commands may write, or turns off the network, allow VCharon's
 folders and, for a remote member, ssh. `vcharon doctor --json` lists the folders under `dirs`,
@@ -291,8 +292,8 @@ besides ssh, and only when you run it.
 **Agents never run `--update`**: it replaces the program every member on the machine runs, so
 it is your call. When a channel was made by a newer VCharon, an agent gets `fix: ask your user to
 run: vcharon --update`. A watcher running during an update ends with `EXIT updated` (exit 14);
-start it again, which runs the new one. Then run `vcharon skill install` again, if you
-installed the skill: the update doesn't rewrite it.
+start it again, which runs the new one. A skill that `vcharon skill install` wrote is rewritten
+by the new binary; if that fails, the update says so and names the command to run.
 
 ## Security model
 

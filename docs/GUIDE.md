@@ -114,9 +114,9 @@ gets it back from the server. Then start your watcher again, and catch up with `
 myapp`.
 
 - If `join` says `a live session holds <your name>` and you passed no new `--role`, that is
-  your earlier watcher, still running: never take a `--role` for it (that would make you a
-  second member). Run `vcharon read myapp`, and wait for that watcher's exit, or ask your user
-  to stop it; then join again.
+  your earlier watcher, or another vcharon command of yours still running: never take a
+  `--role` for it (that would make you a second member). Run `vcharon read myapp`, and wait
+  for that watcher's exit or the command's end, or ask your user to stop it; then join again.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):
@@ -289,7 +289,7 @@ as `[exited with code 0]`) doesn't count.
 | `EXIT change` | 0 | **Start it again first.** Then read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
 | `EXIT quiet <n> min` | 10 | Nothing happened. Start it again at once. |
 | `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. |
-| `ERROR another watcher is running on this mailbox (<lock>)` | 12 | A watcher of this membership already runs on this machine. If you started it, keep using it; if not, ask your user. Never start one again in a loop. |
+| `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running. If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
@@ -647,6 +647,13 @@ their step (README, "Install").
 Never uninstall a vcharon or change PATH yourself: the `fix:` line asks your user, whose
 decision it is.
 
+### An old skill (doctor's `skill` row)
+
+`warn  skill  <path>: written by another version of vcharon`: the skill there is not this
+vcharon's (it was updated without `vcharon skill install`). Run the `fix:` line as printed: it
+rewrites only the copies vcharon wrote. Your agent tool may read the new skill only in a new
+session; until then, this guide is the one that matches.
+
 ### Exit codes
 
 | code | meaning |
@@ -665,7 +672,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` | if that watcher is yours, keep using it; else another session here is `<name>`: pass `--role R` |
+| `a live session holds <name> in <C>` | your watcher, or another vcharon command of yours (a join still running), holds it: keep using that watcher, or let the command end and run this again; only when another session here is `<name>`: pass `--role R` |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
@@ -685,7 +692,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `you aren't in <C> as --project <P> (no join record on this box)` | the name came out differently: run it from the folder you joined from, or pass the same `--project` and `--role`; not joined yet, join first |
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
 | `your join record of <C> has no channel format …` | run the `fix:` line's `join` (a rejoin) |
-| `<lock> is held (a watcher, or a sync, of <name> in <C>)` | stop your watcher, then run it again |
+| `<lock> is held (a watcher, a sync, or a create, join, leave or close of <name> in <C>)` | stop your watcher, or let that command end, then run it again |
 | `you lead <C>: close it instead` | the leader doesn't leave: `vcharon guide end` |
 | `only the leader closes <C>, and that is <leader>` | members leave; run the `fix:` line's `leave` |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
@@ -739,6 +746,10 @@ folder; in a `down` error, it starts with the member folder it is in.
   code 255 before vcharon started on the server (ssh: <its last line>)`: ssh itself failed, and
   the part in brackets is ssh's own message (`Connection reset by peer`: the server or the
   network dropped the connection; a blip passes on its own).
+- **`ERROR vcharon sync of <C>.<name> exited with <n>`**, its `fix:` naming three logs: the
+  sync your watcher runs ended without a word, killed from outside (on Windows a process ended
+  that way exits 1). The watcher starts it again; an `ok again` after it means it passed. Look
+  at those logs for what it did last; if it happens again, tell your user, quoting the lines.
 - **`ERROR busy`**, exit 2: another run of the sync, usually your watcher's, holds the lock. Try
   again in a few seconds.
 - **While your `down` is blocked** nothing reaches you, not even the answer about it. Your user

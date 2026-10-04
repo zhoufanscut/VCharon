@@ -377,6 +377,63 @@ def held(path):
         lk.release()
 
 
+def hold_watcher(snapshot, refusal):
+    """The watcher's lock on <snapshot>.lock, taken without waiting and held until the caller
+    releases it; refusal() is raised when a watcher (or a create, join, leave or close) holds it.
+    Held, not checked once: a watcher started during the command would sync alongside it, and
+    the two runs' job locks make one of them fail busy (DESIGN, "Create, join, leave,
+    close"). The watcher started meanwhile exits 12 instead."""
+    # here, not at the top: the watch module imports this one
+    from .mailbox import watch
+    try:
+        lk = watch.take_lock(snapshot)
+    except OSError as e:
+        raise fsops.error(e, snapshot + ".lock")
+    if lk is None:
+        raise refusal()
+    return lk
+
+
+def drop_held(lk, path):
+    """Deletes the lock file path, whose lock lk this process holds, and releases it; True if
+    the file went. Best effort, never raising: the command is done either way. POSIX deletes it
+    while still holding it, so no one takes it in between; Windows can't delete an open file,
+    so it releases first, and a watcher opening it at that instant keeps it."""
+    removed = False
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+            removed = True
+        lk.release()
+    else:
+        lk.release()
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+            removed = True
+    return removed
+
+
+def _held_to_the_end(run, channel, name):
+    """run(take)'s result, where take(snapshot, refusal) takes the watcher's lock (hold_watcher)
+    and holds it until run returns, on every way out. When run fails and no record of name is
+    left (none written, or undone), the lock file goes too (whoever made it: no watcher uses an
+    unheld lock of a member with no record), so a refused create or join leaves nothing behind."""
+    taken = []
+
+    def take(snapshot, refusal):
+        taken.append((hold_watcher(snapshot, refusal), snapshot + ".lock"))
+
+    try:
+        return run(take)
+    except BaseException:
+        if taken and not os.path.lexists(record_path(channel, name)):
+            drop_held(*taken.pop())
+        raise
+    finally:
+        for lk, _path in taken:
+            lk.release()
+
+
 def _job_locks(section):
     return [os.path.join(platform.state_dir(), section + suffix + ".lock")
             for suffix in config.MAILBOX_JOBS]
@@ -384,16 +441,28 @@ def _job_locks(section):
 
 def _check_locks(record, section, channel):
     """leave's and close's: refused while this box's watcher of the membership, or a run of
-    one of its jobs, holds its lock."""
+    one of its jobs, holds its lock. Returns (the watcher's lock, now held by this process,
+    the snapshot path it guards): released only at the end of the command. The job locks are
+    only checked: the command's own sync takes them."""
     if record["ssh"] is None:
-        paths = [watcher_snapshot(record, section, record["name"], record["remote"]) + ".lock"]
+        snapshot = watcher_snapshot(record, section, record["name"], record["remote"])
     else:
-        paths = [watcher_snapshot(record, section, record["name"]) + ".lock"]
-        paths += _job_locks(section)
-    for path in paths:
-        if held(path):
-            raise channels.refused("%s is held (a watcher, or a sync, of %s in %s)"
-                                   % (path, record["name"], channel), "stop the watcher first")
+        snapshot = watcher_snapshot(record, section, record["name"])
+
+    def refusal(path):
+        return channels.refused("%s is held (a watcher, a sync, or a create, join, leave or "
+                                "close of %s in %s)" % (path, record["name"], channel),
+                                "stop the watcher first, or wait for that command to end")
+
+    lk = hold_watcher(snapshot, lambda: refusal(snapshot + ".lock"))
+    try:
+        for path in _job_locks(section) if record["ssh"] is not None else ():
+            if held(path):
+                raise refusal(path)
+    except BaseException:
+        lk.release()
+        raise
+    return lk, snapshot
 
 
 # --- the server: over ssh, or this machine ---
@@ -663,6 +732,13 @@ def create_limits(args):
 
 
 def _create(args, cfg, name, log, say):
+    # the watcher's lock, taken once the claim is made, is held through the sync to the end, as
+    # join holds it
+    return _held_to_the_end(lambda take: _create_held(args, cfg, name, log, say, take),
+                            args.channel, name)
+
+
+def _create_held(args, cfg, name, log, say, take):
     channel = args.channel
     section = "%s.%s" % (channel, name)
     info = {"format": charter.FORMAT, "limits": create_limits(args)}
@@ -677,6 +753,11 @@ def _create(args, cfg, name, log, say):
         got = server.claim(channel, name, True)
         made = []
         try:
+            if server.ssh is None:
+                take(watcher_snapshot(None, section, name, os.path.join(server.root, channel)),
+                     lambda: _live_session(name, channel))
+            else:
+                take(watcher_snapshot(None, section, name), lambda: _live_session(name, channel))
             own, _remote_text, _ = _write_member(cfg, server, channel, name, name, section,
                                                 made, got, args.ident, args.fields, info,
                                                 create=True)
@@ -799,6 +880,13 @@ def _undo(made):
 
 
 def _join(args, cfg, name, log, say):
+    # the watcher's lock, once taken (step 2), is held to the very end: through the sync and
+    # every early return or failure
+    return _held_to_the_end(lambda take: _join_held(args, cfg, name, log, say, take),
+                            args.channel, name)
+
+
+def _join_held(args, cfg, name, log, say, take):
     channel = args.channel
     section = "%s.%s" % (channel, name)
     record = read_record(channel, name)
@@ -828,14 +916,11 @@ def _join(args, cfg, name, log, say):
         info = {"format": found.get("format"), "limits": charter.check(channel, found)}
         # 2. a live session already is <name>
         if server.ssh is None:
-            lock = watcher_snapshot(None, section, name,
-                                    os.path.join(server.root, channel)) + ".lock"
+            snapshot = watcher_snapshot(None, section, name,
+                                        os.path.join(server.root, channel))
         else:
-            lock = watcher_snapshot(None, section, name) + ".lock"
-        if held(lock):
-            raise channels.refused("a live session holds %s in %s" % (name, channel),
-                                   "if that watcher is yours, keep using it; else pass --role R "
-                                   "to join as another member")
+            snapshot = watcher_snapshot(None, section, name)
+        take(snapshot, lambda: _live_session(name, channel))
         _another_server(record, server, channel)
         # 3. one mkdir
         got = server.claim(channel, name, False)
@@ -918,6 +1003,14 @@ def _join(args, cfg, name, log, say):
         _say_next(channel, name, say)
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
+
+
+def _live_session(name, channel):
+    """The refusal of a create or join while the member's watcher lock is held: its watcher, or
+    another create, join, leave or close of it, runs on this machine."""
+    return channels.refused("a live session holds %s in %s" % (name, channel),
+                            "if that watcher or command is yours, keep using it or let it end; "
+                            "else pass --role R to be another member")
 
 
 def _release_quietly(server, channel, name, log):
@@ -1185,8 +1278,18 @@ def _leave(args, cfg, record, log, say, close):
     if not close and leads:
         raise channels.refused("you lead %s: close it instead" % channel,
                                "vcharon close %s %s" % (channel, name_flags(channel, name, record)))
-    # before anything on the server changes: a held lock can't leave a half-closed channel
-    _check_locks(record, section, channel)
+    # before anything on the server changes: a held lock can't leave a half-closed channel.
+    # The watcher's lock stays held to the end, so no watcher starts during the command; the
+    # removal releases it just before it deletes the lock file
+    watcher, snapshot = _check_locks(record, section, channel)
+    with watcher:
+        return _leave_held(args, cfg, record, log, say, close, watcher, snapshot)
+
+
+def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
+    channel = args.channel
+    name = record["name"]
+    section = "%s.%s" % (channel, name)
     job = cfg.named(section)
     settings = job[0].settings if job else cfg.settings
     with contextlib.ExitStack() as stack:
@@ -1236,7 +1339,7 @@ def _leave(args, cfg, record, log, say, close):
                     "vcharon: the sync failed, so nothing was removed: run vcharon leave %s %s "
                     "again once vcharon sync %s %s works" % (channel, flags_, channel, flags_)))
                 return code
-    _remove_membership(cfg, record, section, say)
+    _remove_membership(cfg, record, section, say, (watcher, snapshot))
     if gone:
         # what an agent would otherwise ask its user about: there is nothing more to delete for
         # this membership; another one of the channel on this box is that one's to leave
@@ -1276,14 +1379,18 @@ def _own_of(cfg, record, section):
     return plugin.Ctx("local").resolve(jobs[0].mailbox.own_folder, "mailbox.local")
 
 
-def _remove_membership(cfg, record, section, say):
+def _remove_membership(cfg, record, section, say, watcher):
     """leave's and close's removal on this box: a remote member's local tree (only when its
     mailbox.local is exactly the computed joined/ path), its jobs' state, log and lock files;
-    the watcher snapshot and its lock (a server member's keyed by the channel folder, as the
-    local member's watch), the own folder's post lock, the record, and a remote member's section
-    file last. Locks only when no one holds them. A server member's folder stays on the server
-    (leave) or went with the channel (close). One `removed <path>` line each."""
+    the watcher snapshot (a server member's keyed by the channel folder, as the local member's
+    watch), the own folder's post lock, the record, a remote member's section file, and the
+    watcher's lock last. Locks only when no one holds them. A server member's folder stays on
+    the server (leave) or went with the channel (close). One `removed <path>` line each.
+    watcher: (the watcher's lock this process holds, the snapshot path), from _check_locks.
+    The lock is released only once the record is gone, so a watcher starting then finds no
+    membership, and its file is deleted as drop_held does it."""
     name = record["name"]
+    lk, snapshot = watcher
 
     def drop(path, lock=False):
         if lock and held(path):
@@ -1311,16 +1418,14 @@ def _remove_membership(cfg, record, section, say):
                 drop(path)
             drop(os.path.join(platform.state_dir(), job + ".lock"), lock=True)
         drop(charter.left_out_path(section))
-        snapshot = watcher_snapshot(record, section, name)
-    else:
-        snapshot = watcher_snapshot(record, section, name, record["remote"])
     drop(snapshot)
-    drop(snapshot + ".lock", lock=True)
     if post_lock is not None:
         drop(post_lock, lock=True)
     drop(record_path(record["channel"], name))
     if record["ssh"] is not None:
         drop(section_path(cfg, section))
+    if drop_held(lk, snapshot + ".lock"):
+        say("  removed %s.lock" % snapshot)
 
 
 def _remove_tree(path):

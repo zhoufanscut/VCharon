@@ -57,9 +57,9 @@ LIST_MAX = 50
 
 EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 3 usage or config,
   4 couldn't connect or start the helper, 130 Ctrl-C.
-  watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher runs,
-  13 the channel is closed, 14 vcharon was updated (start it again), 15 a binary's
-  bootloader process was killed.
+  watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher (or a create,
+  join, leave or close of the member) runs, 13 the channel is closed,
+  14 vcharon was updated (start it again), 15 a binary's bootloader process was killed.
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -798,7 +798,9 @@ def _update(args, run):
     --json prints one object on stdout, a failure's too: {"current", "install", "path"},
     then, once the release is read, {"latest", "tag", "update_available", "url",
     "changed", "confirmed"}; "ok"; a failure's {"error", "message", "fix"}; a refusal for
-    another install kind's "command"; an install's {"previous", "installed", "verified"}."""
+    another install kind's "command"; an install's {"previous", "installed", "verified",
+    "skills"}, "skills" being {"paths", "ok", "fix"}: the skill copies the new binary was run
+    for, whether that worked, and the command to run when it didn't."""
     # Only here, not at the top: no other command needs the network modules, and this one is
     # short-lived; after its swap it imports nothing more.
     from . import update as update_mod
@@ -857,15 +859,30 @@ def _update(args, run):
             return _print_json(dict(doc, ok=True))
         return 0
     doc["confirmed"] = True
+    # before the swap: what skill.installed reads (this build's skill text among it) is this
+    # build's, and after the swap nothing is read or imported from it
+    skills = [(agent, target) for agent, target, _ in skill.installed()]
     result = guarded(lambda: update_mod.apply_update(
         release, inst, on_step=None if as_json else lambda line: _say("  " + line)))
     doc.update(changed=True, previous=VERSION, installed=result.version, path=result.path,
                verified=result.verified)
+    # the skill copies vcharon wrote, rewritten by the new binary: an agent reads the skill
+    # first, and an old one may name what the new version changed
+    why = update_mod.refresh_skills(result.path, [a for a, _ in skills]) if skills else None
+    skill_fix = None
+    if why:
+        skill_fix = platform.runnable(skill.FIX % " ".join("--" + a for a, _ in skills))
+    doc["skills"] = {"paths": [t for _, t in skills], "ok": why is None, "fix": skill_fix}
     if as_json:
         return _print_json(dict(doc, ok=True))
     _say("  updated %s -> %s: %s" % (VERSION, result.version, result.path))
     if not result.verified:
         _say("  note: the release has no checksum; the new binary passed its --version check")
+    if why:
+        _say("  note: the skill wasn't rewritten for %s (%s); run: %s"
+             % (result.version, why, skill_fix))
+    elif skills:
+        _say("  skill rewritten by %s: %s" % (result.version, ", ".join(t for _, t in skills)))
     _say("  note: running watchers end with EXIT updated (exit %d); start them again"
          % install.EXIT_UPDATED)
     _say("OK")

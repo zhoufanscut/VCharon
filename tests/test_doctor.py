@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import bundle, channels, doctor, install, keys, platform, ssh, state
+from vcharon import bundle, channels, doctor, install, keys, platform, skill, ssh, state
 
 from tests import util
 from tests.util import (
@@ -830,6 +830,61 @@ class PathTest(DoctorCase):
         PATH_CHECK(rep, "binary", which=lambda name: binary)
         self.assertEqual((rep.checks[0]["level"], rep.checks[0]["text"]),
                          ("warn", "another vcharon on PATH, after this one: %s" % other))
+
+
+class SkillTest(DoctorCase):
+    """The skill copies vcharon skill install wrote: an update never rewrites them."""
+
+    def setUp(self):
+        DoctorCase.setUp(self)
+        self.write_config("[vcharon]\n")
+        self.user = os.path.join(self.tmp, "user")
+        os.mkdir(self.user)
+        patcher = mock.patch.dict(os.environ, HOME=self.user, USERPROFILE=self.user)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write(self, agent, text):
+        target = skill.path(agent)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        return target
+
+    def rows(self):
+        rep = doctor.Report([].append, doctor.CLIENT_SUBJECTS)
+        doctor.skill_check(rep)
+        return [(c["level"], c["text"], c["fix"]) for c in rep.checks]
+
+    def test_none_installed_is_quiet(self):
+        self.assertEqual(self.rows(), [])
+        self.assertEqual(self.of(self.doctor(code=0), "skill"), [])
+        # the user's own skill of that name (no marker): theirs, not judged
+        self.write("claude", "---\nname: vcharon\n---\nmy own notes\n")
+        self.assertEqual(self.rows(), [])
+
+    def test_this_versions_copies(self):
+        self.assertEqual(self.run_cli("skill", "install")[0], 0)
+        self.assertEqual(self.rows(), [("ok", "%s, %s: this version's" % (
+            skill.path("claude"), skill.path("codex")), None)])
+
+    def test_an_older_copy_warns(self):
+        self.assertEqual(self.run_cli("skill", "install")[0], 0)
+        # what an older vcharon wrote: the marker, another text
+        older = self.write("codex", "---\nname: vcharon\n---\n%s\nold text\n" % skill.MARKER)
+        fix = platform.runnable("vcharon skill install --codex")
+        self.assertEqual(self.rows(), [
+            ("warn", "%s: written by another version of vcharon" % older, fix)])
+        # a warning: doctor still exits 0, the row after path
+        lines = self.doctor(code=0)
+        self.assertEqual(self.of(lines, "skill"),
+                         [("warn", "%s: written by another version of vcharon" % older)])
+        self.assertIn(" " * 4 + "fix: " + fix, "\n".join(lines))
+        subjects = self.subjects(lines)
+        self.assertEqual(subjects[subjects.index("skill") - 1:][:2], ["install", "skill"])
+        # the fix, run: this version's again
+        self.assertEqual(self.run_cli("skill", "install", "--codex")[0], 0)
+        self.assertEqual([r[0] for r in self.rows()], ["ok"])
 
 
 class ClockTest(DoctorCase):

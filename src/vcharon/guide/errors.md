@@ -23,6 +23,13 @@ their step (README, "Install").
 Never uninstall a vcharon or change PATH yourself: the `fix:` line asks your user, whose
 decision it is.
 
+## An old skill (doctor's `skill` row)
+
+`warn  skill  <path>: written by another version of vcharon`: the skill there is not this
+vcharon's (it was updated without `vcharon skill install`). Run the `fix:` line as printed: it
+rewrites only the copies vcharon wrote. Your agent tool may read the new skill only in a new
+session; until then, this guide is the one that matches.
+
 ## Exit codes
 
 | code | meaning |
@@ -41,7 +48,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` | if that watcher is yours, keep using it; else another session here is `<name>`: pass `--role R` |
+| `a live session holds <name> in <C>` | your watcher, or another vcharon command of yours (a join still running), holds it: keep using that watcher, or let the command end and run this again; only when another session here is `<name>`: pass `--role R` |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
@@ -61,7 +68,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `you aren't in <C> as --project <P> (no join record on this box)` | the name came out differently: run it from the folder you joined from, or pass the same `--project` and `--role`; not joined yet, join first |
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
 | `your join record of <C> has no channel format …` | run the `fix:` line's `join` (a rejoin) |
-| `<lock> is held (a watcher, or a sync, of <name> in <C>)` | stop your watcher, then run it again |
+| `<lock> is held (a watcher, a sync, or a create, join, leave or close of <name> in <C>)` | stop your watcher, or let that command end, then run it again |
 | `you lead <C>: close it instead` | the leader doesn't leave: `vcharon guide end` |
 | `only the leader closes <C>, and that is <leader>` | members leave; run the `fix:` line's `leave` |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
@@ -115,6 +122,10 @@ folder; in a `down` error, it starts with the member folder it is in.
   code 255 before vcharon started on the server (ssh: <its last line>)`: ssh itself failed, and
   the part in brackets is ssh's own message (`Connection reset by peer`: the server or the
   network dropped the connection; a blip passes on its own).
+- **`ERROR vcharon sync of <C>.<name> exited with <n>`**, its `fix:` naming three logs: the
+  sync your watcher runs ended without a word, killed from outside (on Windows a process ended
+  that way exits 1). The watcher starts it again; an `ok again` after it means it passed. Look
+  at those logs for what it did last; if it happens again, tell your user, quoting the lines.
 - **`ERROR busy`**, exit 2: another run of the sync, usually your watcher's, holds the lock. Try
   again in a few seconds.
 - **While your `down` is blocked** nothing reaches you, not even the answer about it. Your user

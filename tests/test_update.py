@@ -36,7 +36,7 @@ import zipfile
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, install, platform, update
+from vcharon import charter, cli, install, platform, skill, update
 from vcharon.mailbox import watch
 
 from tests import pack
@@ -1354,7 +1354,7 @@ class OrphanTest(unittest.TestCase):
             with mock.patch.object(watch.subprocess, "run", run):
                 watch.run_sync("mb.debian", ["mb"])
             self.assertEqual(ran[0]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
-            # the downloaded binary's --version
+            # the downloaded binary's --version, and its skill install after the swap
             env = update.child_env()
             self.assertEqual(env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
             self.assertFalse([k for k in env if k.startswith(("_PYI_", "_MEIPASS"))])
@@ -1367,15 +1367,17 @@ class OrphanTest(unittest.TestCase):
                     with open(os.path.join(dirpath, name), encoding="utf-8") as f:
                         text = f.read()
                     rel = os.path.relpath(os.path.join(dirpath, name), root)
-                    starts += ["%s:%s" % (rel.replace(os.sep, "/"), m.group(1))
-                               for m in re.finditer(r"\b(sync_argv|smoke_argv|self_argv)\(",
-                                                    text)]
+                    starts += ["%s:%s" % (rel.replace(os.sep, "/"), m.group(1)) for m in
+                               re.finditer(r"\b(sync_argv|smoke_argv|skill_argv|self_argv)\(",
+                                           text)]
         self.assertEqual(sorted(starts), sorted([
             # each name's def and its docstring mentions count too
             "platform.py:self_argv", "platform.py:self_argv",
             "mailbox/watch.py:sync_argv", "mailbox/watch.py:self_argv",
             "mailbox/watch.py:sync_argv", "mailbox/watch.py:sync_argv",
-            "update.py:smoke_argv", "update.py:smoke_argv"]))
+            "update.py:smoke_argv", "update.py:smoke_argv",
+            # the installed binary's skill install, with the same environment
+            "update.py:skill_argv", "update.py:skill_argv"]))
 
 
 class WatchdogTest(unittest.TestCase):
@@ -1648,13 +1650,66 @@ class UpdateFlagTest(FakeSshCase):
         code, doc, err = self.run_json("--update", "--yes", "--json")
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(sorted(doc), sorted(self.BASE_KEYS + ("installed", "previous",
-                                                               "verified")))
+                                                               "skills", "verified")))
         self.assertEqual({k: doc[k] for k in ("confirmed", "changed", "installed", "previous",
                                               "verified", "path")},
                          {"confirmed": True, "changed": True, "installed": "9.9.9",
                           "previous": vcharon.VERSION, "verified": True, "path": self.target})
+        # no skill installed (the sandbox's home): nothing to rewrite
+        self.assertEqual(doc["skills"], {"paths": [], "ok": True, "fix": None})
         self.assertEqual(read(self.target), fake_binary())
         self.assertEqual(self.listing(), ["vcharon"])
+
+    def skill_release(self, rc=0, err=""):
+        """A user home with vcharon's skill copy for Claude Code (an older text) and the user's
+        own file where Codex looks; the release's stand-in binary logs each other run's
+        arguments, prints err and exits rc."""
+        user = os.path.join(self.tmp, "user")
+        patcher = mock.patch.dict(os.environ, HOME=user, USERPROFILE=user)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for agent, text in (("claude", "%s\nolder text\n" % skill.MARKER),
+                            ("codex", "my own notes\n")):
+            os.makedirs(os.path.dirname(skill.path(agent)))
+            with open(skill.path(agent), "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        self.ran = os.path.join(self.tmp, "ran.json")
+        binary = ("import json, sys\nif sys.argv[1:] == ['--version']:\n"
+                  "    print('9.9.9')\n    sys.exit(0)\n"
+                  "open(%r, 'w').write(json.dumps(sys.argv[1:]))\n"
+                  "sys.stderr.write(%r)\nsys.exit(%d)\n" % (self.ran, err, rc)).encode()
+        tarball = make_tarball(os.path.join(self.tmp, "skill.tar.gz"), binary)
+        self.serve(Net({update.API_LATEST: json.dumps(release_json()), DOWNLOAD: read(tarball),
+                        SUMS: "%s  %s\n" % (sha256(tarball), TARBALL)}))
+        real = update.skill_argv
+        self.patch(update, "skill_argv",
+                   new=lambda binary, agents: [sys.executable] + real(binary, agents))
+
+    def test_the_new_binary_rewrites_vcharons_skill_copies(self):
+        self.skill_release()
+        code, out, err = self.run_cli("--update", "--yes")
+        self.assertEqual((code, err), (0, ""))
+        # the installed binary, for vcharon's copy alone: the user's own file isn't named
+        with open(self.ran, encoding="utf-8") as f:
+            self.assertEqual(json.loads(f.read()), ["skill", "install", "--claude"])
+        self.assertIn("  skill rewritten by 9.9.9: %s" % skill.path("claude"), out.splitlines())
+        code, doc, err = self.run_json("--update", "--yes", "--force", "--json")
+        self.assertEqual((code, doc["skills"]),
+                         (0, {"paths": [skill.path("claude")], "ok": True, "fix": None}))
+
+    def test_a_failed_rewrite_is_a_note(self):
+        self.skill_release(rc=1, err="ERROR refused: no\n")
+        code, out, err = self.run_cli("--update", "--yes")
+        # the update is done: exit 0, with the command to run
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(read(self.target)[:6], b"import")
+        fix = platform.runnable("vcharon skill install --claude")
+        self.assertIn("  note: the skill wasn't rewritten for 9.9.9 (it exited 1: ERROR refused: "
+                      "no); run: %s" % fix, out.splitlines())
+        self.assertEqual(out.splitlines()[-1], "OK")
+        code, doc, err = self.run_json("--update", "--yes", "--force", "--json")
+        self.assertEqual((code, doc["ok"], doc["skills"]),
+                         (0, True, {"paths": [skill.path("claude")], "ok": False, "fix": fix}))
 
     def test_force_reinstalls_the_same_version_and_still_asks(self):
         version = vcharon.VERSION

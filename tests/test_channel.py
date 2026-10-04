@@ -29,6 +29,9 @@ from tests.test_lock import hold_in_child, stop_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
+# a watcher's exit-12 line: another watcher, or a create, join, leave or close, holds its lock
+WATCHER_LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, "
+                  "join, leave or close of this member")
 
 
 def hold(case, path):
@@ -440,6 +443,8 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
                          "ERROR channel: the name mac-web is taken in game")
         self.assertFalse(os.path.exists(os.path.join(self.homes["mac2"], "state", "channels")))
+        # nor the watcher's lock file the join took and held
+        self.assertEqual([p for p in read_tree(self.homes["mac2"]) if p.endswith(".lock")], [])
         self.ok("join", "game", "--server", "fake-dest", "--role", "b")
         # this box has the record: a rejoin, which takes the folder back
         self.use_box("mac")
@@ -555,6 +560,90 @@ class CreateJoinTest(ChannelCase):
         hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web",
                                                 os.path.join(self.root, "game")) + ".lock")
         self.assertEqual(self.refused("join", "game", "--local"), refused)
+
+    def test_a_watcher_started_during_the_join_exits_12(self):
+        # the join holds the watcher's lock to its end: a watcher started after the join's
+        # check exits 12, so its sync can't take the job lock the join's own sync needs
+        self.lead()
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        real = channel_cmd._run_section
+        started, job_locks = [], []
+
+        def watcher_sync(job, sync_args):
+            # what a watcher that got its lock runs: a sync, which holds the job's lock
+            job_locks.append(state.lock(job + ".up"))
+            self.addCleanup(job_locks[-1].release)
+            return 0, None, None
+
+        def sync(args, section, full):
+            lines = []
+            started.append(watch.watch_job(section, ["game", "--project", "web"], 2,
+                                           out=lines.append, sleep=lambda s: None,
+                                           run=watcher_sync, rounds=1))
+            started.append([line[len("2026-10-01 09:05:46 "):] for line in lines])
+            return real(args, section, full)
+
+        with mock.patch.object(channel_cmd, "_run_section", sync):
+            code, out, err = self.channel("join", "game", "--server", "fake-dest")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("busy", out + err)
+        self.assertIn("OK  in game as mac-web", out)
+        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        self.assertEqual(job_locks, [])
+        # released when the join returned: the member's watcher starts now
+        lk = watch.take_lock(snapshot)
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_a_refused_join_releases_the_watcher_lock(self):
+        self.lead()
+        # a refusal after the lock was taken
+        no = channels.refused("refused for the test", "nothing")
+        with mock.patch.object(channel_cmd, "_another_server", side_effect=no):
+            self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
+                             "ERROR channel: refused for the test")
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        # no record was written: the lock file it took goes too
+        self.assertFalse(os.path.exists(snapshot + ".lock"))
+        lk = watch.take_lock(snapshot)
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_a_watcher_started_during_the_create_exits_12(self):
+        # create holds the watcher's lock from its claim to its end, through its sync
+        self.use_box("laptop")
+        snapshot = channel_cmd.watcher_snapshot(None, "game.laptop-ui", "laptop-ui")
+        real = channel_cmd._run_section
+        started = []
+
+        def sync(args, section, full):
+            lines = []
+            started.append(watch.watch_job(section, ["game", "--project", "ui"], 2,
+                                           out=lines.append, sleep=lambda s: None,
+                                           run=lambda job, sync_args: (0, None, None),
+                                           rounds=1))
+            started.append([line[len("2026-10-01 09:05:46 "):] for line in lines])
+            return real(args, section, full)
+
+        with mock.patch.object(channel_cmd, "_run_section", sync):
+            out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
+        self.assertIn("OK  created game", out)
+        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        lk = watch.take_lock(snapshot)
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_create_refused_while_the_watcher_lock_is_held(self):
+        self.use_box("laptop")
+        lock = channel_cmd.watcher_snapshot(None, "game.laptop-ui", "laptop-ui") + ".lock"
+        child = hold(self, lock)
+        self.assertEqual(
+            self.refused("create", "game", "--server", "fake-dest", "--project", "ui"),
+            "ERROR channel: a live session holds laptop-ui in game")
+        # the claim is released; the holder's lock file stays
+        self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
+        release(child)
+        self.assertTrue(os.path.exists(lock))
 
     def test_the_server_lock_name_is_the_watchers(self):
         # ~/…, ./… and the absolute form give one lock name (main's abspath(expanduser))
@@ -900,7 +989,7 @@ class LeaveCloseTest(ChannelCase):
         # the watcher lock held: refused before anything on the server changes
         child = hold(self, lock)
         self.assertEqual(self.refusal("close", "game", "--project", "ui")[1],
-                         "stop the watcher first")
+                         "stop the watcher first, or wait for that command to end")
         release(child)
         # another server than the record's
         os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE
@@ -921,6 +1010,69 @@ class LeaveCloseTest(ChannelCase):
                           "ask the user, and remove it first"))
         os.remove(os.path.join(self.root, "game", "notes.md"))
         self.assertEqual(self.everything(), before)
+
+    def test_a_watcher_started_during_the_leave_exits_12(self):
+        # leave holds the watcher's lock to its end, through its sync; the lock file goes last
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        real = channel_cmd._run_section
+        started = []
+
+        def sync(args, section, full):
+            lines = []
+            started.append(watch.watch_job(section, ["game", "--project", "web"], 2,
+                                           out=lines.append, sleep=lambda s: None,
+                                           run=lambda job, sync_args: (0, None, None),
+                                           rounds=1))
+            started.append([line[len("2026-10-01 09:05:46 "):] for line in lines])
+            return real(args, section, full)
+
+        with mock.patch.object(channel_cmd, "_run_section", sync):
+            out = self.ok("leave", "game")
+        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        self.assertEqual(out.splitlines()[-2:], ["  removed %s.lock" % snapshot, "OK  left game"])
+        self.assertFalse(os.path.exists(snapshot + ".lock"))
+
+    def test_a_lock_file_that_wont_go_doesnt_fail_the_leave(self):
+        # on Windows a watcher opening the lock file at that instant makes its delete fail
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        real = os.unlink
+
+        def unlink(path, *a, **kw):
+            if path == snapshot + ".lock":
+                raise PermissionError(13, "in use", path)
+            return real(path, *a, **kw)
+
+        with mock.patch.object(os, "unlink", unlink):
+            out = self.ok("leave", "game")
+        self.assertEqual(out.splitlines()[-1], "OK  left game")
+        self.assertNotIn("  removed %s.lock" % snapshot, out.splitlines())
+        self.assertTrue(os.path.exists(snapshot + ".lock"))
+
+    def test_a_failed_leave_releases_the_watcher_lock(self):
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
+            code, _out, _err = self.channel("leave", "game")
+        self.assertEqual(code, 4)
+        lk = watch.take_lock(snapshot)
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_close_holds_the_watcher_lock(self):
+        self.use_box("laptop")
+        snapshot = channel_cmd.watcher_snapshot(None, "game.laptop-ui", "laptop-ui")
+        real = channel_cmd._need_machine
+        tries = []
+
+        def need_machine(server):
+            # mid-close: a watcher's start finds the lock held
+            tries.append(watch.take_lock(snapshot))
+            return real(server)
+
+        with mock.patch.object(channel_cmd, "_need_machine", need_machine):
+            out = self.ok("close", "game", "--project", "ui")
+        self.assertEqual(tries, [None])
+        self.assertIn("  removed %s.lock" % snapshot, out.splitlines())
+        self.assertFalse(os.path.exists(snapshot + ".lock"))
 
     def test_leave_after_the_channel_is_gone(self):
         # a post running in the own folder: its lock isn't taken from under it (a leave posts

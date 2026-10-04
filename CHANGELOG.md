@@ -9,6 +9,32 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `create`, `join`, `leave` and `close` hold the member's watcher lock until they return, where
+  join, leave and close used to check it once and create didn't look: a watcher started meanwhile
+  exits 12 instead of syncing alongside them. Measured on Linux before the change: seven such
+  overlaps, the watcher's round skipped as busy, and once a join's own sync failed with `ERROR
+  busy` (exit 2). Tests now start a watcher during a create, a join and a leave and see it exit
+  12 (and the join's sync pass), and check that the lock is held during a close. The exit-12
+  line gains `, or a create, join, leave or close of this member` after `(<lock>)`. To adapt:
+  match the line on its start, `ERROR another watcher is running on this mailbox (`, which is
+  unchanged; the guide's watch table says what to do when your own command was running.
+  `leave`'s and `close`'s refusal now reads `<lock> is held (a watcher, a sync, or a create,
+  join, leave or close of <name> in <C>)`, with the fix `stop the watcher first, or wait for
+  that command to end`. A refused create or join leaves no lock file behind. `leave` and `close`
+  now remove the watcher's lock file last, after the record and section, and a lock file that
+  won't go no longer fails them. Not run on Windows (inferred: there the lock is released
+  before its file is deleted).
+- The watcher's `ERROR vcharon sync of <C>.<name> exited with <n>` (the sync child ended
+  without printing anything, such as when killed from outside) now has a `fix:` line naming
+  that membership's up and down logs and `vcharon.log`; the guide's errors topic says what to
+  do. When it wakes an agent is unchanged.
+- `vcharon doctor` has a `skill` row when a skill copy `vcharon skill install` wrote is there:
+  `ok` when it is this version's text, `warn` when it differs, with the fix `vcharon skill
+  install --claude|--codex` for the stale ones. No copy (or only the user's own file) prints no
+  row. `vcharon --update`, after a successful swap, runs the new binary's `skill install` for
+  the copies vcharon wrote (the old process would write the old text); a failure there is a
+  `note:` with the command, and the update still exits 0. `--update --json` has a new
+  `skills` field (`{"paths", "ok", "fix"}`) after an install.
 - The guide has a new topic, `vcharon guide lead` (running a channel: the plan, new steps and
   their order, answering every report, versions, the end). The skill that `vcharon skill
   install` writes now lists the topics to read before acting, by role, and the rules never to
@@ -19,8 +45,7 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   the machine-details rule first and naming URLs, paths in others' entries, measured versus
   read numbers; in `watch`, which lines are status lines, and a long `--max-minutes` for
   interactive Claude Code; in `errors`, doctor's `path` row. `guide`'s unknown-topic fix line
-  lists `lead`. `vcharon --update` doesn't rewrite the skill: after updating, run `vcharon
-  skill install` again.
+  lists `lead`.
 - `vcharon doctor` has a `path` row when another vcharon is on PATH: a warning when it comes
   after this one; when a typed `vcharon` runs the other one (or this one isn't on PATH), a
   failure (exit 1) for a binary, pipx, uv or pip install, a warning for a checkout. Its fix

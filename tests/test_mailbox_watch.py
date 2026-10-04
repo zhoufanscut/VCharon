@@ -33,6 +33,17 @@ SYNC = ["mb", "--project", "p"]
 # 2026-10-01 09:05:46 on this machine's clock, whatever its zone
 T0 = time.mktime((2026, 10, 1, 9, 5, 46, 0, 0, -1))
 STAMP = re.compile(r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
+# exit 12's line: a watcher, or a create, join, leave or close of the member, holds the lock
+LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
+          "leave or close of this member")
+
+
+def silent_fix(job="mb.windows"):
+    """The fix of a sync child that exited with no line: its jobs' logs and vcharon.log."""
+    logs = platform.log_dir()
+    return "look at %s, %s and %s; if it happens again, tell your user" % (
+        os.path.join(logs, job + ".up.log"), os.path.join(logs, job + ".down.log"),
+        os.path.join(logs, "vcharon.log"))
 
 
 def watching(tree, n, tail=""):
@@ -504,8 +515,7 @@ class LockTest(WatchCase):
 
         watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=Rounds(second),
                         rounds=1)
-        self.assertEqual(seen, [12, ["ERROR another watcher is running on this mailbox (%s.lock)"
-                                     % self.state()], 0, 0])
+        self.assertEqual(seen, [12, [LOCKED % self.state()], 0, 0])
         # the lock goes with the first watcher
         self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
                                          rounds=0), 0)
@@ -525,8 +535,7 @@ class LockTest(WatchCase):
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
         self.assertEqual(codes[0], 12)
         self.assertEqual(self.said(codes[1].splitlines()),
-                         ["ERROR another watcher is running on this mailbox (%s.lock)"
-                          % self.state()])
+                         [LOCKED % self.state()])
 
 
 class KeyTest(WatchCase):
@@ -546,8 +555,7 @@ class KeyTest(WatchCase):
             seen.append(self.said(lines))
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
-        self.assertEqual(seen, [12, ["ERROR another watcher is running on this mailbox (%s.lock)"
-                                     % self.state()]])
+        self.assertEqual(seen, [12, [LOCKED % self.state()]])
 
     @unittest.skipUnless(os.name == "posix", "normcase folds case on Windows")
     def test_a_plain_path_keeps_its_name(self):
@@ -1699,7 +1707,8 @@ class StreamTest(WatchCase):
         # after a round whose error broke the connection isn't: the round said why; an exit
         # after a good round is (a crash)
         self.assertEqual(lines[1:], ["ERROR config: no such file", connect, "ok again",
-                                     "ERROR vcharon sync of mb.windows exited with 1", "ok again"])
+                                     "ERROR vcharon sync of mb.windows exited with 1",
+                                     "  fix: " + silent_fix(), "ok again"])
         self.assertEqual(self.slept, [2, 4, 8, 16, 30, 30, 2])
         self.assertEqual(len(self.spawned), 8)
         self.assert_all_stopped()
@@ -1865,7 +1874,8 @@ class StreamTest(WatchCase):
             [["err", "note: skipped channels.d/x.ini"], ["pause", 0.5], ["out", "ROUND 0"],
              ["exit", 1]],
             [["out", "ROUND 0"]], rounds=3)
-        self.assertEqual(lines[1:], ["ERROR vcharon sync of mb.windows exited with 1", "ok again"])
+        self.assertEqual(lines[1:], ["ERROR vcharon sync of mb.windows exited with 1",
+                                     "  fix: " + silent_fix(), "ok again"])
 
     def test_a_crash_after_a_good_round_is_a_round(self):
         _code, lines = self.watch(
@@ -1912,7 +1922,8 @@ class StreamTest(WatchCase):
                 # the connection's last words come between the ERROR line and its fix
                 (4, lines, (4, "ERROR mb.windows.up: connect: no", "check\nl")),
                 (0, lines, (0, None, None)),
-                (2, [], (2, "ERROR vcharon sync of mb.windows exited with 2", None)),
+                # nothing said (killed from outside): the logs to look at
+                (2, [], (2, "ERROR vcharon sync of mb.windows exited with 2", silent_fix())),
                 (1, ["", "ERROR lost: gone", "  fix: run again"],
                  (1, "ERROR lost: gone", "run again")),
                 # the first ERROR's block holds no fix: its log, never a later line's fix

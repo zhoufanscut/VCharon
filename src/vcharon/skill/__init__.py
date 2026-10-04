@@ -22,6 +22,9 @@ from ..proto import VCharonError
 NAME = "vcharon"
 MARKER = ("<!-- written by vcharon skill install, which replaces this file: "
           "keep your own edits elsewhere -->")
+# the fix for copies of an older version (doctor, --update): the agents' flags, so a user's own
+# file of another agent doesn't refuse the run
+FIX = "vcharon skill install %s"
 # agent -> the folder under the home that holds its user skills
 AGENTS = (("claude", (".claude", "skills")), ("codex", (".agents", "skills")))
 
@@ -54,6 +57,25 @@ def _ours(target):
                            % target, hint="move it away or delete it if it's yours to drop, "
                            "or ask your user; then run vcharon skill install again")
     return "same" if old == text() else "ours"
+
+
+def installed():
+    """[(agent, path, current)] for each copy vcharon wrote, told by MARKER: current is True when
+    it is this version's text. A missing file, a link, a folder, one that can't be read and one
+    without the marker (the user's own) are left out: nothing of vcharon's to refresh there."""
+    found = []
+    for agent, _parts in AGENTS:
+        target = path(agent)
+        if os.path.islink(target) or not os.path.isfile(target):
+            continue
+        try:
+            with open(target, encoding="utf-8", errors="replace", newline="") as f:
+                old = f.read()
+        except OSError:
+            continue
+        if MARKER in old.splitlines():
+            found.append((agent, target, old == text()))
+    return found
 
 
 def install(agents, say):
