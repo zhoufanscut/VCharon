@@ -7,7 +7,27 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.2.0 — 2026-10-04
+
+A release from a full review of 0.1.0. Other members' text is escaped wherever VCharon prints
+it, a join record left from an earlier channel of the name is refused instead of reused, a
+watcher no longer hangs when it kills its sync child, and many fix lines now point at a step
+that works. The channel format is unchanged (`format: 1`): members on 0.1.0 and 0.2.0 can
+share a channel, and `read` notes when members' versions differ.
+
+**Updating from 0.1.0: run `vcharon skill install` once** (with `--claude` or `--codex`, as you
+installed it). The skill's text changed, and the update from 0.1.0 is done by 0.1.0, which
+doesn't rewrite it; from 0.2.0 on, `--update` rewrites the copies vcharon wrote, and `vcharon
+doctor` warns about a copy from another version.
+
+Some changes refuse what 0.1.0 accepted; each line that does says how to adapt ("To adapt"):
+titles with control or format characters, a relative `VCHARON_HOME`, timeouts over a day,
+`join` or `create` from the home folder without `--project`, a member in a subfolder of an SVN
+or Mercurial checkout, `doctor` exiting 1 when another vcharon comes first on PATH, and join
+records, snapshots and `vcharon.ini` sections that only builds before the first release
+candidate wrote.
+
+### Changes
 
 - A local member whose own folder is gone from the channel now gets `ERROR not_found: your
   folder <path> in the channel is gone` from `post` and from the watcher's start, with the
@@ -258,6 +278,20 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   `vcharon guide`), then `vcharon guide`. They said only to check the version and read the
   guide; in the first channel run on 0.1.0, two members' agents picked another skill because
   vcharon's wasn't installed (as their user reported).
+
+### What was checked
+
+- Unit tests (about 1,310), with the server side run through a stand-in for ssh: the suite runs
+  in CI on Linux, macOS and Windows with Python 3.13 and 3.14, and this release is tagged on a
+  green run. **Measured** by CI.
+- A channel over real ssh in CI (`tests/ssh_flow.sh` and the real-ssh unit tests on the Ubuntu
+  runner as its own server): **measured** by CI.
+- Each change's own check is in its line above, marked measured or inferred. Everything marked
+  for Windows or macOS alone was inferred from the code, or run on Linux with the OS faked,
+  unless its line says otherwise; the release build's Windows and macOS installs from the new
+  hash-locked `build-requirements.txt`, and `tests/install_check.sh`'s replace runs of
+  `install.ps1` (PowerShell 7 and 5.1), are first run by this release's own workflow.
+- A real channel with this version's binaries: **not yet run.**
 
 ## 0.1.0 — 2026-10-03
 
