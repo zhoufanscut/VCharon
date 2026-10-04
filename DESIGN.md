@@ -1926,7 +1926,10 @@ maintainer asks before tagging.
   That test checks the lock's shape only; whether it resolves on each OS (every dependency
   pinned, every hash right, a wheel for each runner) is proven only by a release build, at a tag.
 - **One job publishes**, after all three builds: it takes their assets, checks there are exactly
-  the nine and that each checksum holds, and runs `gh release create`. A version with a
+  the nine and that each checksum holds, and runs `gh release create`. The release notes are
+  the version's CHANGELOG entry without its heading, then a line pointing at the README's install
+  section and the full CHANGELOG: the notes say what changed and what was checked, and the
+  entry is already written and checked by the tag test above. A version with a
   pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
   a GitHub pre-release: `releases/latest` leaves those out, so `--update` and the installers never
   offer a release candidate.

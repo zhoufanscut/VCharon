@@ -9,6 +9,8 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A release's notes on GitHub are now its CHANGELOG entry and a line pointing at the install
+  steps and the full CHANGELOG, written by the release workflow; 0.2.0's said only where to look.
 - `join`, `create` and the watcher's start print `note: your vcharon skill at <path> is from
   another version: vcharon skill install --claude` (`--codex`, or both) when a skill copy that
   `vcharon skill install` wrote holds another version's text, the same check as doctor's
