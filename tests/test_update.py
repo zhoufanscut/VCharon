@@ -36,7 +36,7 @@ import zipfile
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, install, platform, skill, update
+from vcharon import charter, cli, fsops, install, platform, skill, update
 from vcharon.mailbox import watch
 
 from tests import pack
@@ -1397,11 +1397,11 @@ class OrphanTest(unittest.TestCase):
             # a --no-stream round's sync
             ran = []
 
-            def run(argv, **kw):
-                ran.append(kw["env"])
-                return types.SimpleNamespace(returncode=0, stderr=b"")
+            def run(argv, timeout, new_session=False, env=None):
+                ran.append(env)
+                return fsops.Ran(0, b"", b"")
 
-            with mock.patch.object(watch.subprocess, "run", run):
+            with mock.patch.object(watch.fsops, "run", run):
                 watch.run_sync("mb.debian", ["mb"])
             self.assertEqual(ran[0]["PYINSTALLER_RESET_ENVIRONMENT"], "1")
             # the downloaded binary's --version, and its skill install after the swap

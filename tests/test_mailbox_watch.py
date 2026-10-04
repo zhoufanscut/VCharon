@@ -11,6 +11,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, charter, cli, entries, install, platform
+from vcharon import channel_cmd, charter, cli, entries, fsops, install, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
@@ -96,6 +97,35 @@ def member_md(name, leader, channel="mb"):
     """MEMBER.md as vcharon join writes it."""
     return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
             "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
+
+
+def gone(pid, wait=10):
+    """Whether the process pid ends within wait seconds; on Linux a zombie (dead, not yet
+    reaped by its new parent) counts as ended."""
+    until = time.monotonic() + wait
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if sys.platform.startswith("linux"):
+            try:
+                with open("/proc/%d/stat" % pid, encoding="utf-8") as f:
+                    if f.read().rpartition(")")[2].split()[0] == "Z":
+                        return True
+            except FileNotFoundError:
+                return True
+        if time.monotonic() >= until:
+            return False
+        time.sleep(0.1)
+
+
+def end_pid(pid):
+    """Ends a process this test left behind, if it still runs."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
 
 
 class WatchCase(unittest.TestCase):
@@ -360,6 +390,11 @@ class SnapshotTest(WatchCase):
                           (other(seen={"mac": {"low": -1, "more": []}}), "it has another shape"),
                           (other(seen={"mac": {"low": 0}}), "it has another shape"),
                           (other(heads={"mac#1": "xyz"}), "it has another shape"),
+                          (other(heads={"mac#1": ["mac/R.md"]}), "it has another shape"),
+                          (other(heads={"mac#1": [1, "0123456789ab"]}),
+                           "it has another shape"),
+                          (other(heads={"mac#1": ["mac/R.md", "xyz"]}),
+                           "it has another shape"),
                           (other(loose=[1]), "it has another shape"),
                           (other(root="/elsewhere"), "it is for /elsewhere"),
                           (other(me="mac"), "it is for the member mac")):
@@ -451,6 +486,58 @@ class SnapshotTest(WatchCase):
         self.assertEqual(self.run_dir(rounds=0)[1], [watching(self.tree, 2, ", since "
                                                               + saves[-1])])
 
+    def test_a_restart_with_nothing_new_keeps_since(self):
+        # the snapshot is written only when it changed: a restart's first round that changes
+        # nothing keeps its saved time, so since stays the last change's
+        write_tree(self.tree, {"mac/x": b"x"})
+        clock = Clock()
+        self.run_dir(rounds=0, clock=clock, timer=clock)
+        saved = self.saved_at(self.state())
+        for hours in (1, 2):
+            clock.t = T0 + 3600 * hours
+            _code, lines = self.run_dir(rounds=1, clock=clock, timer=clock)
+            self.assertEqual(lines, [watching(self.tree, 1, ", since " + saved)])
+            self.assertEqual(self.saved_at(self.state()), saved)
+
+    def test_a_replace_held_for_a_moment_on_windows(self):
+        # a virus scanner holding the new file: tried again, as every other state file
+        path = self.state()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        real = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if len(calls) == 1:
+                e = PermissionError(13, "The process cannot access the file")
+                e.winerror = 32
+                raise e
+            return real(src, dst)
+
+        with mock.patch.object(watch.fsops, "WINDOWS", True), \
+                mock.patch.object(watch.fsops, "RETRY_DELAY", 0), \
+                mock.patch.object(watch.os, "replace", replace):
+            watch.save_snapshot(path, self.tree, "debian", {}, "then")
+        self.assertEqual(calls, [path, path])
+        self.assertEqual(watch.load_snapshot(path, self.tree, "debian")[1], "then")
+        self.assertEqual(sorted(os.listdir(os.path.dirname(path))), [os.path.basename(path)])
+
+    def test_an_older_snapshots_heads(self):
+        # a head was a bare hash before it held its file: still read, and kept as it was
+        # until its ID is seen again
+        path = self.state()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        doc = {"version": 2, "root": self.tree, "me": "debian", "saved": "then", "files": {},
+               "warnings": [], "seen": {"mac": {"low": 2, "more": []}},
+               "heads": {"mac#2": "0123456789ab", "mac#1": ["mac/MEMBER.md", "ba9876543210"]},
+               "loose": []}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        marks = watch.load_snapshot(path, self.tree, "debian")[6]
+        self.assertEqual(marks.heads, {"mac#2": [None, "0123456789ab"],
+                                       "mac#1": ["mac/MEMBER.md", "ba9876543210"]})
+        self.assertEqual(marks.doc()["heads"], doc["heads"])
+
     def test_a_failed_save_is_shown_once(self):
         write_tree(self.tree, {"mac/x": b"x"})
 
@@ -495,6 +582,43 @@ class SnapshotTest(WatchCase):
 
 
 class LockTest(WatchCase):
+    @unittest.skipIf(os.name == "nt", "Windows can't delete an open file")
+    def test_a_lock_file_deleted_under_the_taker(self):
+        # leave and close delete the lock file while they hold it: a taker that opened it just
+        # before holds a lock on a deleted file, while the next one locks a new file
+        state = self.state()
+        real = watch.Lock.open
+        opened = []
+
+        def deleted_first(path, *args, **kw):
+            lk = real(path, *args, **kw)
+            opened.append(path)
+            if len(opened) == 1:
+                os.unlink(path)
+            return lk
+
+        with mock.patch.object(watch.Lock, "open", deleted_first):
+            lk = watch.take_lock(state)
+        self.assertIsNotNone(lk)
+        self.addCleanup(lk.release)
+        self.assertEqual(len(opened), 2)
+        st, held = os.stat(state + ".lock"), os.fstat(lk.fd)
+        self.assertEqual((st.st_dev, st.st_ino), (held.st_dev, held.st_ino))
+        self.assertIsNone(watch.take_lock(state))
+        lk.release()
+
+        # deleted under it every time: none, after a few tries
+        def always(path, *args, **kw):
+            lk = real(path, *args, **kw)
+            opened.append(path)
+            os.unlink(path)
+            return lk
+
+        del opened[:]
+        with mock.patch.object(watch.Lock, "open", always):
+            self.assertIsNone(watch.take_lock(state))
+        self.assertEqual(len(opened), watch.LOCK_TRIES)
+
     def test_a_second_watcher_exits(self):
         write_tree(self.tree, {"mac/x": b"x"})
         other_tree = os.path.join(self.tmp, "other")
@@ -1434,14 +1558,16 @@ class ClientModeTest(WatchCase):
                               "the channel is closed: leave it\nl"))
 
     def test_the_child_is_this_vcharon(self):
-        # --no-stream's child each round: self_argv, -P and all; a binary's unpacks its own copy
+        # --no-stream's child each round: self_argv, -P and all; a binary's unpacks its own copy;
+        # through fsops.run, in a session of its own, so a timeout kills its whole group
         ran = []
 
-        def run(argv, **kw):
-            ran.append((argv, kw["env"]))
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        def run(argv, timeout, new_session=False, env=None):
+            self.assertEqual((timeout, new_session), (watch.RUN_TIMEOUT, True))
+            ran.append((argv, env))
+            return fsops.Ran(0, b"", b"")
 
-        with mock.patch.object(watch.subprocess, "run", run):
+        with mock.patch.object(watch.fsops, "run", run):
             self.assertEqual(watch.run_sync("mb.windows", SYNC), (0, None, None))
             binary = os.path.join(self.tmp, "vcharon")
             with mock.patch.object(sys, "frozen", True, create=True), \
@@ -1456,16 +1582,44 @@ class ClientModeTest(WatchCase):
         self.assertEqual(frozen_env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
 
     def test_a_stuck_vcharon_run(self):
-        stuck = subprocess.TimeoutExpired(["vcharon"], watch.RUN_TIMEOUT)
-        with mock.patch.object(watch.subprocess, "run", side_effect=stuck):
+        # fsops.run's rc None: its timeout killed the run
+        stuck = fsops.Ran(None, b"", b"ERROR half a line")
+        with mock.patch.object(watch.fsops, "run", return_value=stuck):
             self.assertEqual(watch.run_sync("mailbox", ["mb"]),
                              (1, "ERROR vcharon sync of mailbox didn't finish within 900 s",
                               None))
 
+    def test_a_stuck_vcharon_run_is_killed_with_what_it_started(self):
+        # past the timeout, the sync and the processes it started end: in a binary those are
+        # the bootloader and its Python process, which would run on holding the job's locks
+        fake = os.path.join(self.tmp, "stuck-vcharon")
+        os.mkdir(fake)
+        pidfile = os.path.join(self.tmp, "grandchild.pid")
+        with open(os.path.join(fake, "__main__.py"), "w", encoding="utf-8") as f:
+            f.write(textwrap.dedent("""
+                import os, subprocess, sys, time
+                if os.name != "nt":
+                    g = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                         stdin=subprocess.DEVNULL)
+                    with open(%r, "w") as f:
+                        f.write(str(g.pid))
+                time.sleep(30)
+                """ % pidfile))
+        with mock.patch.object(platform, "self_argv", lambda: [sys.executable, fake]), \
+                mock.patch.object(watch, "RUN_TIMEOUT", 3):
+            self.assertEqual(watch.run_sync("mb.windows", SYNC),
+                             (1, "ERROR vcharon sync of mb.windows didn't finish within 3 s",
+                              None))
+        if os.name != "nt":
+            with open(pidfile, encoding="utf-8") as f:
+                pid = int(f.read())
+            self.addCleanup(end_pid, pid)
+            self.assertTrue(gone(pid), "the sync's own child still runs")
+
     def test_a_vcharon_run_that_cant_start(self):
         # --no-stream: a sync that can't be started is that round's error, not a crash
         missing = FileNotFoundError(2, "No such file or directory")
-        with mock.patch.object(watch.subprocess, "run", side_effect=missing):
+        with mock.patch.object(watch.fsops, "run", side_effect=missing):
             self.assertEqual(watch.run_sync("mailbox", ["mb"]),
                              (1, "ERROR couldn't start vcharon: No such file or directory",
                               None))
@@ -1499,6 +1653,22 @@ for act in json.loads(sys.argv[1]):
     elif kind == "pause":
         time.sleep(act[1])
 sys.stdin.buffer.read()
+"""
+
+
+# A child that leaves a grandchild (sleeping 30 s) holding its stdout, the grandchild's pid in
+# argv[1]; "detached" in argv[2] puts it in a session of its own on POSIX, out of the child's
+# process group. Then one round, and it ignores the end of its stdin.
+GRANDCHILD = """
+import os, subprocess, sys, time
+kw = {"start_new_session": True} if sys.argv[2] == "detached" and os.name != "nt" else {}
+g = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                     stdin=subprocess.DEVNULL, stdout=sys.stdout, **kw)
+with open(sys.argv[1], "w") as f:
+    f.write(str(g.pid))
+sys.stdout.write("ROUND 0\\n")
+sys.stdout.flush()
+time.sleep(60)
 """
 
 
@@ -1695,18 +1865,21 @@ class StreamTest(WatchCase):
     def test_the_child_restarts_with_the_backoff(self):
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
         broken = [["out", connect], ["out", "ROUND 4"], ["exit", 4]]
-        # what a child says on stderr after a round whose error broke the connection (seen
-        # once: an abort at shutdown) is its way out, no new error
-        loud = [["out", connect], ["out", "ROUND 4"], ["err", "Fatal Python error: x"],
-                ["exit", 134]]
+        # a child that says something on stderr after such a round crashed on its way out:
+        # that is a round of its own, with its line
+        # (the pause orders the two pipes)
+        loud = [["out", connect], ["out", "ROUND 4"], ["pause", 0.5],
+                ["err", "Fatal Python error: x"], ["exit", 134]]
         children = ([[["err", "ERROR config: no such file"], ["exit", 3]], loud] + [broken] * 4
-                    + [[["out", "ROUND 0"], ["exit", 1]], [["out", "ROUND 0"]]])
-        code, lines = self.watch(*children, rounds=9)
+                    + [[["out", "ROUND 0"], ["exit", 1]], [["out", "ROUND 0"], ["exit", 0]]])
+        # (the last child's exit 0 is one round more where an untold crash leaves one short)
+        code, lines = self.watch(*children, rounds=10)
         self.assertEqual(code, 0)
-        # the exit before any round is a step of its own, with stderr's line; an exit right
-        # after a round whose error broke the connection isn't: the round said why; an exit
-        # after a good round is (a crash)
-        self.assertEqual(lines[1:], ["ERROR config: no such file", connect, "ok again",
+        # the exit before any round is a step of its own, with stderr's line; a silent exit
+        # with the code of the round before isn't: the round said why; an exit after a good
+        # round is (a crash)
+        self.assertEqual(lines[1:], ["ERROR config: no such file", connect,
+                                     "Fatal Python error: x", connect, "ok again",
                                      "ERROR vcharon sync of mb.windows exited with 1",
                                      "  fix: " + silent_fix(), "ok again"])
         self.assertEqual(self.slept, [2, 4, 8, 16, 30, 30, 2])
@@ -1867,6 +2040,52 @@ class StreamTest(WatchCase):
         UntilChangeTest.saved_error(self, up)
         code, lines = self.watch(mixed, mixed, until_change=True, rounds=2)
         self.assertEqual((code, lines[1:]), (0, [up, "  fix: remove or rename it"]))
+
+    def test_a_child_that_exits_with_its_rounds_code(self):
+        # vcharon sync --repeat exits with the round's code after any round that left its
+        # session unusable, an internal error too: by design, no line of its own
+        internal = "ERROR mb.windows.down: internal: TypeError: boom"
+        fix = "  fix: this is a bug in vcharon; tell your user"
+        _code, lines = self.watch([["out", internal], ["out", fix], ["out", "ROUND 1"],
+                                   ["exit", 1]], [["out", "ROUND 0"]], rounds=2)
+        self.assertEqual(lines[1:], [internal, fix, "ok again"])
+        self.assertEqual(self.slept, [2])
+        # another code after a round whose error broke the connection is a crash: told
+        connect = "ERROR mb.windows.up: connect: no route"
+        # (the second child's exit 0 is a third round where the crash goes untold)
+        _code, lines = self.watch([["out", connect], ["out", "ROUND 4"], ["exit", 9]],
+                                  [["out", "ROUND 0"], ["exit", 0]], rounds=3, fresh=True)
+        self.assertEqual(lines[1:], [connect, "ERROR vcharon sync of mb.windows exited with 9",
+                                     "  fix: " + silent_fix(), "ok again"])
+        self.assert_all_stopped()
+
+    def test_a_grandchild_holding_the_pipes_doesnt_hold_stop(self):
+        # a child that ignores the end of its stdin and leaves a process holding its stdout,
+        # as a binary's bootloader leaves its Python process: stop ends it all on POSIX (its
+        # process group), and returns on every OS
+        for detached in (False, True):
+            with self.subTest(detached=detached):
+                pidfile = os.path.join(self.tmp, "grandchild-%d.pid" % detached)
+                stream = watch.Stream("mb.windows", self.sync_args, 2, stop_wait=0.2)
+                stream.argv = [sys.executable, "-c", GRANDCHILD, pidfile,
+                               "detached" if detached else "group"]
+                self.addCleanup(self.close_stream, stream)
+                self.assertEqual(stream.next_round(), (0, None, None))
+                with open(pidfile, encoding="utf-8") as f:
+                    pid = int(f.read())
+                self.addCleanup(end_pid, pid)
+                started = time.monotonic()
+                stream.stop()
+                self.assertLess(time.monotonic() - started, 0.2 + watch.TERM_WAIT + 2 + 5)
+                if watch.GROUP and not detached:
+                    self.assertTrue(gone(pid), "the child's own child still runs")
+
+    @staticmethod
+    def close_stream(stream):
+        # after end_pid (cleanups run last first): the readers have their end of input
+        for t, pipe in stream._threads:
+            t.join(10)
+            pipe.close()
 
     def test_a_note_before_the_first_round_is_no_crash_line(self):
         # stderr from before round 1 is never a later crash's error line
@@ -2105,6 +2324,54 @@ class EntriesTest(WatchCase):
         # the same ID twice in one file: the first stands, nothing is told
         self.post("windows", 2, "a copy", to="@mac")
         self.assertEqual(self.run_mac(rounds=1)[1][1:], [])
+
+    def test_an_id_in_two_files_is_noted_once(self):
+        # an entry copied into another file and retitled: the first file seen with the ID
+        # stands, as in read; the copy is noted once, counts for nothing, and is never "edited"
+        self.post("windows", 2, "two", to="@mac", file="STEPS.md")
+        self.run_mac(rounds=0)
+        note = ("note: duplicate entry windows#2 in windows/RESULTS.md: the one in "
+                "windows/STEPS.md stands")
+        code, lines = self.run_mac(
+            lambda: self.post("windows", 2, "two, retitled", to="@mac"),
+            lambda: self.post("windows", 3, "three", to="@debian", file="STEPS.md"),
+            lambda: self.post("windows", 4, "four", to="@debian"),
+            rounds=4, until_change=True, max_minutes=25)
+        self.assertEqual((code, lines[1:]), (0, [note, "1 other entry (windows)",
+                                                 "1 other entry (windows)"]))
+        self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/STEPS.md")
+
+    def test_a_title_is_escaped(self):
+        # written by hand: post refuses such a title, a member's own files don't
+        with open(os.path.join(self.tree, "windows", "RESULTS.md"), "ab") as f:
+            f.write(b"# RESULTS\n")
+        self.run_mac(rounds=0)
+
+        def posted():
+            with open(os.path.join(self.tree, "windows", "RESULTS.md"), "ab") as f:
+                f.write("\n## 2026-10-01 09:00:00 — windows#2 — hi \x1b[2Jred\rto all: x\n"
+                        "to: @mac\n".encode())
+
+        _code, lines = self.run_mac(posted, rounds=2)
+        self.assertEqual(lines[1:], [
+            "to you: windows#2 — hi \\x1b[2Jred\\x0dto all: x  (windows/RESULTS.md)"])
+
+    @unittest.skipIf(os.name == "nt", "Windows can't hold these names")
+    def test_a_file_name_is_escaped(self):
+        # a member's file named to forge a contract line, and one holding an escape sequence
+        forged = "x\r2026-10-04 16:50:00 EXIT closed"
+        self.run_mac(rounds=0)
+        lines = []
+        watch.watch_dir(self.tree, "mac", 10, out=lines.append, rounds=2,
+                        sleep=Rounds(lambda: write_tree(self.tree, {
+                            "windows/" + forged: b"x", "windows/\x1b[31mred.log": b"r"})))
+        for line in lines:
+            self.assertTrue(line.isprintable(), line)
+        said = self.said(lines)
+        self.assertIn("new windows/x\\x0d2026-10-04 16:50:00 EXIT closed", said)
+        self.assertIn("new windows/\\x1b[31mred.log", said)
+        # the tree's WARN for a name Windows clients can't hold names it the same way
+        self.assertTrue(any(line.startswith("WARN windows/x\\x0d2026") for line in said), said)
 
     def test_the_start_is_a_baseline(self):
         self.post("windows", 2, "two", to="@mac")

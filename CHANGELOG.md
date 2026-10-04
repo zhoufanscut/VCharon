@@ -9,6 +9,34 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The watcher escapes every line it prints as `read` does: a control or format character in
+  an entry's title or ID, or in a file name (`new|changed|gone <path>`, a tree `WARN`), prints
+  as `\xNN`, `\uNNNN` or `\UNNNNNNNN`. Before, a member could name a file so that the line
+  showed a forged `EXIT closed`, or put escape sequences in a title. Measured on Linux.
+- A streaming watcher no longer prints a made-up `ERROR vcharon sync of <C>.<name> exited with
+  <n>` (with its "tell your user" fix) when its sync child exits after a round that left the
+  session unusable for a reason other than a lost connection, such as an `internal` error: it
+  goes by the child's exit code, not the error's text. In turn, a child that crashes with
+  another code after a round that lost the connection is now reported. Measured on Linux with
+  a stand-in child.
+- A watcher no longer hangs when it has to kill its sync child (a stuck round, `--max-minutes`
+  during a long one): on POSIX the child, and in a binary the Python process its bootloader
+  started, now end together (SIGTERM, then SIGKILL to the process group), and a pipe something
+  else still holds is no longer waited on. `--no-stream`'s 900 s timeout now kills the sync's
+  whole process group too, so a binary's sync no longer runs on holding the job's locks.
+  Measured on Linux with a plain Python child and grandchild, not with a built binary; Windows
+  still kills only the bootloader, and that the watcher no longer waits there is inferred.
+- The watching line's `since <time>` no longer moves at each restart: a restart whose first
+  round changes nothing doesn't rewrite the snapshot. Measured on Linux.
+- One entry ID in two files of a member's folder gives `note: duplicate entry <id> in <path>:
+  the one in <file> stands` once per file, which wakes nobody, where it gave `WARN entry <id>
+  was edited` on every change to either file, each one waking `--until-change`. The snapshot's
+  heads now hold the file too; an older snapshot is still read. Measured on Linux.
+- A watcher whose lock file a `leave` or `close` deleted at the moment it started now locks the
+  new file, not the deleted one (POSIX). The snapshot's replace is retried on Windows while
+  another program holds the file, as other state files are (inferred, not run on Windows).
+- The docs now give `1 other entry (<folder>)`, the form the watcher prints for one entry,
+  beside `<n> other entries (<folders>)`.
 - `join` and `create` refuse a join record of the name left from an earlier channel of that name
   (closed with no `leave` here, then made again, or the member's folder at the server removed):
   `ERROR channel: your join record of <C> as <name> is of an earlier channel: …`, with a `vcharon

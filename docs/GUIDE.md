@@ -306,17 +306,22 @@ OS's message, and it is translated on some systems.
 Every line starts with the time it was printed. Some lines are about entries (`to you:`, `to
 all:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok again`,
 `WARN`, `note:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
-text, since no entry holds it. `ok again` means the last `ERROR` is over.
+text, since no entry holds it. `ok again` means the last `ERROR` is over. A control character
+in a title or file name prints escaped (`\x1b`, `\x0d`), so no member can make a line look
+like another.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
-- `<n> other entries (<folders>)`: entries addressed to others, or a new member's `MEMBER.md`
-  (its `JOIN` is what tells you). Read them only if your work needs them.
+- `<n> other entries (<folders>)`, or `1 other entry (<folder>)`: entries addressed to others,
+  or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
+  needs them.
 - `note: @all from <folders>, not the leader: ignored`: only the leader posts to all.
 - `new <path>`, `changed <path>`, `gone <path>`: a file that isn't an entry (a patch, a log).
   Act only if an entry tells you to.
 - `WARN entry <id> was edited`: entries are never edited. Read it again and ask its poster
   what changed.
+- `note: duplicate entry <id> in <path>: the one in <file> stands`: one ID in two files of a
+  folder. The first stands, as `read` shows it; tell that member if it matters.
 - `WARN entry <id> in <folder>/: not its folder's`: an ID whose name isn't the folder's. Don't
   trust it; tell the leader.
 - `WARN left out <name>/: over the channel's limit of …`: that member's folder is too big, so

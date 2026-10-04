@@ -16,7 +16,8 @@ comparison of this box's copy of the channel with the round before (watch_job). 
 default: one long-lived child, `vcharon sync C --repeat <every>`, keeps one
 ssh connection and prints `ROUND <code>` after each round; each ROUND line is one round here.
 When the child exits it is started again after 2, 4, 8, 16, 30, 30… s (back to 2 after a round
-that worked); every way out of the watch closes its stdin, waits up to 10 s, then kills it.
+that worked); every way out of the watch closes its stdin, waits up to 10 s, then ends it
+(Stream.stop).
 Streaming, the wake rules count time: an error of RETRY_KEYS counts once it has held 60 s in a
 row, and --until-change's EXIT error comes after --max-errors × 30 s of failing that woke
 nobody. --no-stream runs `vcharon sync C` each round, every 30 s by default, with the rules in
@@ -25,7 +26,9 @@ rounds.
 Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
 it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
 addressed to <me>, or to @all from the leader (the section's mailbox.leader; in server mode
-the record's, else MEMBER.md's). Every line starts with the local time, `YYYY-mm-dd HH:MM:SS `.
+the record's, else MEMBER.md's). Every line starts with the local time, `YYYY-mm-dd HH:MM:SS `,
+and goes through pathrules.printable: titles, IDs and file names come from other members, and
+a control character in one could forge a line or drive the terminal.
 Lines; * marks the ones that count for --until-change:
 
     watching <dir>, <n> files in other folders
@@ -39,12 +42,17 @@ Lines; * marks the ones that count for --until-change:
   * to you: <id> — <title>  (<path>)
   * to all: <id> — <title>  (<path>)
                                    a new entry, in the entries' own time order
-  * WARN entry <id> was edited     a heading seen before with another text; once
+  * WARN entry <id> was edited     a heading seen before with another text, in the same file;
+                                   once
     WARN entry <id> in <folder>/: not its folder's
                                    an ID whose name isn't its folder's
+    note: duplicate entry <id> in <path>: the one in <file> stands
+                                   an ID already seen in another file of its folder: skipped,
+                                   once per file, as read skips it
     <n> other entries (<folders>)  new entries addressed to others, without an ID, in the
                                    wrong folder, or a member's MEMBER.md (its #1, addressed to
-                                   the leader, wakes nobody); one line a round
+                                   the leader, wakes nobody); one line a round; `1 other entry
+                                   (<folder>)` for one
     note: @all from <folders>, not the leader: ignored
                                    one line a round
     new | changed | gone <path>    a file that isn't a .md file in a member's folder
@@ -82,8 +90,8 @@ restart prints what came while no watcher ran; a round that changed nothing in i
 time aside) doesn't write it again, so its saved time, the watching line's `since`, is
 that of the last round that changed it. Per member folder it holds the entry numbers
 seen (every number up to "low", and those in "more": a member's #8 can arrive before its #7),
-each ID's heading hash for the edit check, and the hashes of the entries that have no ID of
-their folder ("loose"), so each is told once. It holds the warnings shown too: a restart
+each ID's file and heading hash for the edit check, and the hashes of the entries that have no
+ID of their folder ("loose"), so each is told once. It holds the warnings shown too: a restart
 prints them again right after the watching line, and only a new one counts. It holds the ERROR
 line shown and its fix line, and the keys of the errors that counted in the failing streak: a
 restart whose first round fails with the saved text prints it again without counting it, so a
@@ -100,6 +108,7 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -370,13 +379,18 @@ def _hex(text):
 
 class Marks:
     """The entries told so far: per member folder, the numbers of its own IDs
-    seen, every one up to low plus those in more; each ID's heading hash, for the edit check;
-    and the hashes of the entries without an ID of their folder (loose), each told once."""
+    seen, every one up to low plus those in more; each ID's [file, heading hash], for the edit
+    check (the file None for a head from an older snapshot, which kept the hash only: the
+    first file seen with the ID then takes it); the hashes of the entries without an ID of their
+    folder (loose), each told once; and the (ID, file) pairs noted as duplicates, kept for this
+    run only."""
 
     def __init__(self, seen=None, heads=None, loose=()):
         self.seen = {f: [s["low"], set(s["more"])] for f, s in (seen or {}).items()}
-        self.heads = dict(heads or {})
+        self.heads = {i: list(h) if isinstance(h, list) else [None, h]
+                      for i, h in (heads or {}).items()}
         self.loose = set(loose)
+        self.dups = set()
 
     def has(self, folder, n):
         s = self.seen.get(folder)
@@ -394,7 +408,10 @@ class Marks:
     def doc(self):
         return {"seen": {f: {"low": s[0], "more": sorted(s[1])}
                          for f, s in sorted(self.seen.items())},
-                "heads": dict(sorted(self.heads.items())), "loose": sorted(self.loose)}
+                # a head whose file isn't known yet stays a bare hash, as it came
+                "heads": {i: h if h[0] is not None else h[1]
+                          for i, h in sorted(self.heads.items())},
+                "loose": sorted(self.loose)}
 
 
 class Told:
@@ -405,13 +422,14 @@ class Told:
         self.entries = []     # (time, path, line number, line)
         self.edited = []      # the WARN lines for edited entries: they count, once
         self.misplaced = []   # the WARN lines for IDs in another member's folder
+        self.duplicates = []  # the notes for an ID already seen in another file
         self.others = []      # the folders of the entries addressed elsewhere
         self.all_from = []    # the folders whose @all was ignored
         self.unread = []      # the entry files that couldn't be read: tried again next round
 
     def lines(self):
         out = [line for _, _, _, line in sorted(self.entries, key=lambda e: e[:3])]
-        out += self.edited + self.misplaced
+        out += self.edited + self.misplaced + self.duplicates
         if self.others:
             n = len(self.others)
             out.append("%d other %s (%s)" % (n, "entry" if n == 1 else "entries",
@@ -454,17 +472,28 @@ def read_entries(root, paths, marks, me, leader, baseline=False):
                     told.misplaced.append("WARN entry %s in %s/: not its folder's"
                                           % (e.id, folder))
                 continue
+            known = marks.heads.get(e.id)
+            if known is not None and known[0] is not None and known[0] != path:
+                # one ID in two files: the first file seen with it stands, as in read; the
+                # other's heading is never compared with it, else every change to either file
+                # would warn again that it was edited
+                if (e.id, path) not in marks.dups:
+                    marks.dups.add((e.id, path))
+                    if not baseline:
+                        told.duplicates.append("note: duplicate entry %s in %s: the one in %s "
+                                               "stands" % (e.id, path, known[0]))
+                continue
             if e.id in ids:
-                # the same ID twice in this round's files: the first one stands
+                # the same ID twice in one file: the first one stands
                 continue
             ids.add(e.id)
             if marks.has(folder, e.number):
-                if marks.heads.get(e.id, head) != head and not baseline:
+                if known is not None and known[1] != head and not baseline:
                     told.edited.append("WARN entry %s was edited" % e.id)
-                marks.heads[e.id] = head
+                marks.heads[e.id] = [path, head]
                 continue
             marks.add(folder, e.number)
-            marks.heads[e.id] = head
+            marks.heads[e.id] = [path, head]
             if baseline:
                 continue
             where = "%s — %s  (%s)" % (e.id, e.title, path)
@@ -575,8 +604,15 @@ def _marks_shape(doc):
                 and s["low"] >= 0 and isinstance(s["more"], list)
                 and all(_int(n) and n > s["low"] for n in s["more"])):
             return False
-    return (all(isinstance(h, str) and _HEX.match(h) for h in heads.values())
+    return (all(_head_shape(h) for h in heads.values())
             and all(_HEX.match(h) for h in loose))
+
+
+def _head_shape(h):
+    # [file, hash]; an older snapshot's bare hash is taken too (Marks)
+    if isinstance(h, list) and len(h) == 2 and isinstance(h[0], str):
+        h = h[1]
+    return isinstance(h, str) and _HEX.match(h) is not None
 
 
 def _snapshot_shape(doc):
@@ -629,7 +665,12 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
             f.write(json.dumps(doc).encode("ascii"))
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        if fsops.WINDOWS:
+            # a virus scanner may hold the new file open for a moment, as for every other
+            # state file; unretried, --until-change would end with EXIT error
+            fsops.retry_in_use(os.replace, tmp, path)
+        else:
+            os.replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -638,20 +679,47 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
         raise
 
 
+# how many times take_lock opens the lock file again after it was deleted under it
+LOCK_TRIES = 3
+
+
 def take_lock(path):
     """The held lock on <snapshot>.lock, or None if another watcher holds it. vcharon's own
-    lock: the OS drops it when the process dies (DESIGN, "Lock")."""
+    lock: the OS drops it when the process dies (DESIGN, "Lock"). On POSIX, the lock is held on
+    the file the path names once it is taken: leave and close delete the file while they hold
+    it (channel_cmd.drop_held), so one opened just before that would be a lock on a deleted
+    file, while the next taker locks a new one. Such a lock is let go and the file opened
+    again; still not the path's file after LOCK_TRIES opens, None."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    lk = Lock.open(path + ".lock")
+    name = path + ".lock"
+    for _ in range(LOCK_TRIES):
+        lk = Lock.open(name)
+        try:
+            held = lk.try_acquire()
+            if held and not _same_file(lk.fd, name):
+                lk.release()
+                continue
+        except BaseException:
+            lk.release()
+            raise
+        if not held:
+            lk.release()
+            return None
+        return lk
+    return None
+
+
+def _same_file(fd, path):
+    """Whether the open fd is the file path names now. Windows can't delete an open file, so
+    there it always is."""
+    if fsops.WINDOWS:
+        return True
     try:
-        held = lk.try_acquire()
-    except BaseException:
-        lk.release()
-        raise
-    if not held:
-        lk.release()
-        return None
-    return lk
+        st = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    held = os.fstat(fd)
+    return (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino)
 
 
 class _Watch:
@@ -710,7 +778,9 @@ class _Watch:
         self._written = None
 
     def say(self, line):
-        self.out("%s %s" % (stamp(self.clock()), line))
+        # every line, not only the fields from the tree: a name or title can reach a line by
+        # many ways (an entry line, a file line, a WARN, a sync's error)
+        self.out("%s %s" % (stamp(self.clock()), pathrules.printable(line)))
 
     def start(self, fresh=False):
         """The first snapshot: the saved one, or a scan. True if it came from the saved one,
@@ -731,10 +801,13 @@ class _Watch:
                 # its key, if it woke the agent, doesn't again; a saved network blip's second
                 # round in a row still does
                 self.counted = set(counted)
+                # what is on disk now, as save() would build it, so a first round that changes
+                # nothing doesn't write it again: its saved time stays the watching line's since
+                self.warns = set(warns)
+                self._written = self._doc()
                 self.say("watching %s, %d files in other folders, since %s%s"
                          % (self.root, len(files), saved, self.suffix))
                 # shown again, as a reminder; the first round clears what's gone
-                self.warns = set(warns)
                 for text in sorted(self.warns):
                     self.say("WARN %s" % text)
                 return True
@@ -879,9 +952,7 @@ class _Watch:
         that changed it: what it holds is still true for every round since."""
         if self.state is None or self.snap is None:
             return True
-        same = json.dumps(snapshot_doc(self.root, self.me, self.snap, None, self.warns,
-                                       self.error, self.counted, self.marks, self.fix),
-                          sort_keys=True)
+        same = self._doc()
         if same == self._written and self.save_error is None:
             return True
         saved = stamp(self.clock()) if scanned or self.saved_at is None else self.saved_at
@@ -898,6 +969,12 @@ class _Watch:
         self.saved_at = saved
         self._written = same
         return True
+
+    def _doc(self):
+        """The snapshot as save would write it, its saved time aside, as compared text."""
+        return json.dumps(snapshot_doc(self.root, self.me, self.snap, None, self.warns,
+                                       self.error, self.counted, self.marks, self.fix),
+                          sort_keys=True)
 
     def _error(self, e):
         """(the ERROR line, the fix's text or None) of an error on the scan: the fix for
@@ -1087,24 +1164,112 @@ def silent_fix(job):
 
 def run_sync(job, sync_args):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
-    stderr (parse_failure). All but the code are None on success."""
+    stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
+    session of its own: past RUN_TIMEOUT its whole process group is killed, and in a binary
+    that is the bootloader and the Python process it starts, which would otherwise run on
+    holding the job's locks, so every later round would be busy (DESIGN, "Running
+    watchers")."""
     try:
-        ran = subprocess.run(sync_argv(sync_args), stdin=subprocess.DEVNULL,
-                             capture_output=True, timeout=RUN_TIMEOUT,
-                             env=platform.child_env(), check=False)
-    except subprocess.TimeoutExpired:
-        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
+        ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True,
+                        env=platform.child_env())
     except OSError as e:
         return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
-    return parse_failure(ran.returncode, ran.stderr.decode("utf-8", "replace").splitlines(),
-                         job)
+    if ran.rc is None:
+        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
+    return parse_failure(ran.rc, ran.err.decode("utf-8", "replace").splitlines(), job)
+
+
+# POSIX: the streaming child gets a session of its own, so Stream can end its whole process
+# group (_end)
+GROUP = os.name != "nt"
+# how long a child that didn't end after its stdin closed gets after SIGTERM, before the kill
+TERM_WAIT = 3
 
 
 def _spawn(argv, env):
     """The streaming child: stdin, stdout and stderr as pipes, bytes (decoded by the
-    readers)."""
+    readers); on POSIX the leader of a new session (_end). Not fsops.run, the one way vcharon
+    runs other programs elsewhere: the child's rounds are read line by line while it runs,
+    and fsops.run gives a program's output only once it has ended (DESIGN, "Rules for the
+    code")."""
+    extra = {"start_new_session": True} if GROUP else {}
     return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, env=env)
+                            stderr=subprocess.PIPE, env=env, **extra)
+
+
+def _end(proc, term_wait=TERM_WAIT):
+    """Ends a child that didn't end on its own, and waits for it. In a binary the child is
+    the bootloader, and a kill of it alone leaves the Python process it started running,
+    holding the pipes and the job's locks (DESIGN, "Running watchers"). So on POSIX: SIGTERM
+    first, which the bootloader passes on, so both end the usual way and the unpack folder
+    goes; then, after it ended or term_wait passed, SIGKILL to what is left of the process
+    group, when the child leads one (_spawn's session). The group is killed before the child
+    is reaped: until then its pid, the group's id, can't go to another process. Windows:
+    TerminateProcess ends the bootloader alone, and its Python process ends by its own rules
+    (the end of its stdin, after its round under way; the orphan check at its next round);
+    _close doesn't wait for it."""
+    if GROUP:
+        leads = _leads_group(proc)
+        # os.kill, not proc.terminate, which reaps a child that has just exited
+        if proc.returncode is None:
+            try:
+                os.kill(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+        _exited(proc, term_wait)
+        if leads:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            proc.wait()
+            return
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    proc.wait()
+
+
+def _leads_group(proc):
+    """Whether the running child leads its own process group: a child started without a
+    session of its own (a test's) shares this process's group."""
+    try:
+        return proc.returncode is None and os.getpgid(proc.pid) == proc.pid
+    except OSError:
+        return False
+
+
+def _exited(proc, timeout):
+    """Waits up to timeout seconds for the child to exit, without reaping it."""
+    until = time.monotonic() + timeout
+    while proc.returncode is None:
+        try:
+            if os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT):
+                return
+        except ChildProcessError:
+            return
+        if time.monotonic() >= until:
+            return
+        time.sleep(0.05)
+
+
+def _lines_of(stream):
+    """stream's lines, as bytes with their line end, read from its file descriptor: a thread
+    blocked in a buffered reader holds that reader's lock, so closing it would wait for the
+    thread, and the interpreter can abort at exit."""
+    fd = stream.fileno()
+    rest = b""
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        rest += chunk
+        *done, rest = rest.split(b"\n")
+        for line in done:
+            yield line + b"\n"
+    if rest:
+        yield rest
 
 
 class _ErrTail:
@@ -1119,11 +1284,6 @@ class _ErrTail:
         """The lines after the first mark of them (as many as are kept)."""
         n = self.count - mark
         return list(self.lines)[-n:] if n > 0 else []
-
-
-# the sync's codes for the errors that break its connection (cli.py's _still_usable): after
-# a round that ended with one, vcharon sync --repeat exits by design
-_BROKE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*: )?(connect|timeout|lost|protocol): ")
 
 
 class Stream:
@@ -1151,10 +1311,10 @@ class Stream:
         self._err_mark = 0
         # the mark of the round before the last, None before the second round
         self._prev_mark = None
-        # the current child's ROUND lines, and whether its last one ended with an error that
-        # breaks the connection, after which it exits by design
+        # the current child's ROUND lines, and the code of its last one: a child that exits
+        # with it, saying nothing more, exited by design (next_round)
         self._rounds = 0
-        self._broke = False
+        self._last_code = None
 
     def _start(self):
         # vcharon's own prints in UTF-8, on Windows too (the gbk lesson); a binary's child
@@ -1167,18 +1327,19 @@ class Stream:
         self._err_mark = 0
         self._prev_mark = None
         self._rounds = 0
-        self._broke = False
-        self._threads = [threading.Thread(target=self._read_out, args=(proc.stdout, self._lines),
-                                          name="watch-stdout", daemon=True),
-                         threading.Thread(target=self._read_err, args=(proc.stderr, self._err),
-                                          name="watch-stderr", daemon=True)]
-        for t in self._threads:
+        self._last_code = None
+        # each reader with the pipe it reads: _close leaves a pipe open while its reader runs
+        self._threads = [(threading.Thread(target=self._read_out, args=(proc.stdout, self._lines),
+                                           name="watch-stdout", daemon=True), proc.stdout),
+                         (threading.Thread(target=self._read_err, args=(proc.stderr, self._err),
+                                           name="watch-stderr", daemon=True), proc.stderr)]
+        for t, _ in self._threads:
             t.start()
 
     @staticmethod
     def _read_out(stream, lines):
         try:
-            for raw in iter(stream.readline, b""):
+            for raw in _lines_of(stream):
                 lines.put(raw.decode("utf-8", "replace").rstrip("\r\n"))
         except (OSError, ValueError):
             pass
@@ -1188,7 +1349,7 @@ class Stream:
     @staticmethod
     def _read_err(stream, tail):
         try:
-            for raw in iter(stream.readline, b""):
+            for raw in _lines_of(stream):
                 tail.lines.append(raw.decode("utf-8", "replace").rstrip("\r\n"))
                 tail.count += 1
         except (OSError, ValueError):
@@ -1198,12 +1359,13 @@ class Stream:
         """(code, error line, fix) of the child's next round, as run_sync gives them, after
         starting the child if none runs; None when deadline (by timer, --max-minutes) passes
         before the round: during the wait before a start, or before its ROUND line, when the
-        child is stopped. A child that exits after a ROUND line whose error breaks the
-        connection, with nothing more on stdout, is started again without a round of its own:
-        the round said why, and what it says on stderr then is only its way out. An exit with
-        EXIT_UPDATED is UPDATED: vcharon was replaced. Any other exit (a round cut off, an exit
-        before its first round, a crash after a round that didn't break) is one round, with
-        its error line from stdout or stderr."""
+        child is stopped. A child that exits with the code of its last ROUND line, a failed
+        one, saying nothing more on stdout or stderr, is started again without a round of its
+        own: vcharon sync --repeat exits so after a round that left its session unusable, and
+        the round said why. Its own rule decides, not the error's text (DESIGN, "Repeated
+        syncs"). An exit with EXIT_UPDATED is UPDATED: vcharon was replaced. Any other exit (a
+        round cut off, an exit before its first round, a crash after a round) is one round,
+        with its error line from stdout or stderr."""
         pending = []
         while True:
             if self.proc is None:
@@ -1243,7 +1405,8 @@ class Stream:
                 if not self._rounds:
                     # an exit before the first round: a config error, say, on stderr
                     return parse_failure(code, pending + err.since(0), self.job)
-                if pending or not self._broke:
+                if (pending or err.since(self._err_mark) or not code
+                        or code != self._last_code):
                     # stderr and stdout are two pipes: lines written after the last ROUND may
                     # have been read before it was, so with none after its mark, those after
                     # the round before's; never what came before the first round (a note on
@@ -1262,8 +1425,7 @@ class Stream:
             self._rounds += 1
             self._err_mark = self._err.count
             got = parse_failure(code, pending, self.job)
-            # any of the round's jobs: up's content error can come before down's lost
-            self._broke = any(_BROKE.match(p) for p in pending)
+            self._last_code = code
             if code == 0:
                 self.exits = 0
             return got
@@ -1290,26 +1452,37 @@ class Stream:
             code = proc.wait(self.stop_wait)
         except subprocess.TimeoutExpired:
             # stdout ended but the child didn't: a leftover holds nothing we need
-            proc.kill()
-            code = proc.wait()
+            _end(proc)
+            code = proc.returncode
         self._close(proc)
         return code
 
     def _close(self, proc):
-        for t in self._threads:
+        """Closes the child's pipes, once their readers are done. A pipe whose reader still
+        runs after the wait stays open, left to the reader (a daemon thread): something the
+        child left behind holds its other end, and closing it under the reader could read a
+        file that reuses its descriptor next."""
+        for t, _ in self._threads:
             t.join(2)
-        for stream in (proc.stdin, proc.stdout, proc.stderr):
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except OSError:
+            pass
+        for t, stream in self._threads:
+            if stream is None or t.is_alive():
+                continue
             try:
-                if stream is not None:
-                    stream.close()
+                stream.close()
             except OSError:
                 pass
 
     def stop(self):
         """Ends the child, on every way out of the watch: its stdin closed, so it ends after
         its round under way, then up to stop_wait seconds, then a kill (whose round's held
-        log lines are lost; vcharon's session lines are in the job's log already). A watcher
-        that is killed closes the pipe the same way; the child then ends at its next wait."""
+        log lines are lost; vcharon's session lines are in the job's log already), of its whole
+        process group on POSIX (_end). A watcher that is killed closes the pipe the same way;
+        the child then ends at its next wait."""
         proc, self.proc = self.proc, None
         if proc is None:
             return
@@ -1320,8 +1493,7 @@ class Stream:
         try:
             proc.wait(self.stop_wait)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+            _end(proc)
         self._close(proc)
 
 

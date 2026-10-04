@@ -147,9 +147,12 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
 - End of stdin ends it after the round under way, with exit 0. stdin's end is read from the raw
   file descriptor by a thread: a thread blocked in Python's buffered reader holds its lock and
   makes the interpreter abort at exit.
-- A round whose error breaks the connection (`connect`, `protocol`, `timeout`, `lost`) ends it
-  with that round's code; it never reconnects by itself. Any other failed round is followed by
-  the next one on the same connection.
+- A round that leaves its session unusable ends it with that round's code: an error that breaks
+  the connection (`connect`, `protocol`, `timeout`, `lost`), or any other that does (an
+  `internal` error inside the session). It never reconnects by itself. Any other failed round is
+  followed by the next one on the same connection. The watcher tells this exit by its code, the
+  last `ROUND`'s, with nothing more on stdout or stderr, not by the error's text: a list of codes
+  there would drift from the child's own rule.
 - Quiet on disk: a job's state is written only when it changed, and a round with nothing to do
   logs nothing; the log gets one line every 10 minutes (`repeat: <n> rounds since <time>,
   nothing to do in <m>`). Else a quiet watch would fsync two files and grow the log every two
@@ -1289,20 +1292,28 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   every 2 s, 1 to 300), keeps one ssh connection; each `ROUND <code>` line ends one round. When
   the child exits it is started again after 2, 4, 8, 16, 30, 30… s, back to 2 after a good
   round; a round that doesn't come within 900 s plus `--every` stops it. Every way out of the
-  watch closes the child's stdin, waits up to 10 s, then kills it. The child gets
-  `PYTHONIOENCODING=utf-8` and its output is read as UTF-8: a Windows code page would garble
-  `—`. `--no-stream` runs one sync per round instead (every 30 s by default).
+  watch closes the child's stdin, waits up to 10 s, then ends it, its whole process group on
+  POSIX ([Running watchers](#running-watchers)). The child gets `PYTHONIOENCODING=utf-8` and its
+  output is read as UTF-8: a Windows code page would garble `—`. `--no-stream` runs one sync per
+  round instead (every 30 s by default), through `fsops.run` in a session of its own, so its
+  900 s timeout kills the sync's whole process group.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
   own folder (in any case, on macOS and Windows), never stage files. It prints, each line
-  starting with the local time `YYYY-mm-dd HH:MM:SS`:
+  starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
+  (`pathrules.printable`), since titles, IDs and file names come from other members and a
+  control character in one could forge a line such as `EXIT closed`:
   - `to you: <id> — <title>  (<path>)` for an entry whose `to:` holds `@<me>` (even with
     `@all`), and `to all: …` for `@all` from the leader (the record's leader, never "whoever holds
     `CHANNEL.md`"); in the entries' own time order;
-  - at most one line a round each: `<n> other entries (<folders>)` (addressed elsewhere, no ID,
-    an ID not its folder's, or a `MEMBER.md` #1), `note: @all from <folders>, not the leader:
-    ignored`;
-  - `WARN entry <id> was edited` (a heading seen before with another text, once), `WARN entry
-    <id> in <folder>/: not its folder's`;
+  - at most one line a round each: `<n> other entries (<folders>)`, `1 other entry (<folder>)`
+    for one (addressed elsewhere, no ID, an ID not its folder's, or a `MEMBER.md` #1), `note:
+    @all from <folders>, not the leader: ignored`;
+  - `WARN entry <id> was edited` (a heading seen before with another text in the same file,
+    once), `WARN entry <id> in <folder>/: not its folder's`;
+  - `note: duplicate entry <id> in <path>: the one in <file> stands`: an ID already seen in
+    another file of its folder is skipped, as `read` skips it, with this note once per file and
+    run; it wakes nobody. Why not "edited": comparing the two files' headings would warn again
+    on every change to either file;
   - `new | changed | gone <path>` for files that aren't `.md` files in a member's folder: a
     patch or log is announced by an entry, and only entries wake;
   - `WARN <text>` / `WARN cleared: <text>` for problems in the tree: a local member's watcher
@@ -1331,11 +1342,15 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 - **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by
   the channel folder's normalized real path: the files seen, the entry numbers seen per member
   (every number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's
-  heading hash for the edit check, hashes of entries without an ID of their folder, the warnings
+  file and heading hash for the edit check (`[<path>, <hash>]`; an older snapshot's bare hash
+  is still read, its file taken from the next one seen), hashes of entries without an ID of
+  their folder, the warnings
   shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's lines
   are printed, so a crash may print a change twice but never loses one; written only when it
-  changed, so a quiet watch doesn't touch the disk. A restart goes on from it (`watching <dir>,
-  <n> files in other folders, since <time>`) and prints what came meanwhile; a saved error that
+  changed, so a quiet watch doesn't touch the disk, and a restart's first round that changes
+  nothing doesn't either. A restart goes on from it (`watching <dir>, <n> files in other
+  folders, since <time>`, the time of the last round that changed it) and prints what came
+  meanwhile; a saved error that
   holds is printed again without counting, so a blocked member isn't woken in a loop. The first
   start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote
   member, this machine's copy as of its last sync), none of it printed; what the first round
@@ -1352,7 +1367,10 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   inferred) gives `ERROR vcharon sync of <C>.<name> exited with <n>` and a `fix:` naming the
   logs that hold what it did up to then: `<C>.<name>.up.log`, `<C>.<name>.down.log` and
   `vcharon.log` in the logs folder, full paths; if it happens again, tell the user. When it
-  wakes an agent is as for any error.
+  wakes an agent is as for any error. A silent exit with the code of a failed round just before
+  it is the child's own exit after an unusable session ([Repeated syncs](#repeated-syncs)), so
+  a kill from outside that happens to give that code goes untold; the next start says whether
+  the problem holds.
 
 ### Reading a channel
 
@@ -1645,6 +1663,19 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   child printed `EXIT orphaned` and exited 1.9 s after the SIGKILL (rounds every 2 s), and a
   new watcher then started. The unpack folder (about 20 MB) still stays: only the bootloader
   removes it.
+- **Ending a sync child.** The other way round, a watcher ending its sync child must not kill
+  only the bootloader. On POSIX the streaming child runs in a session of its own; a child that
+  hasn't ended 10 s after its stdin closed gets SIGTERM, which the bootloader passes on to its
+  Python process, so both end the usual way and the unpack folder goes; after 3 s, whatever is
+  left of its process group gets SIGKILL, sent before the child is reaped, so the group's id
+  can't belong to another process yet. `--no-stream`'s sync runs through `fsops.run` in a new
+  session, whose timeout kills the whole group. Why: the Python process holds the pipes, so the
+  watcher would wait on it with no end (no `EXIT` line, `--max-minutes` unable to fire, the
+  lock held), and it holds the job's locks, so every later round would be busy. A pipe whose
+  reader still runs after the child ended is left open, never closed under the reader. Windows
+  has no tree kill here: `TerminateProcess` ends the bootloader alone, and its Python process
+  ends by its own rules (its stdin's end, the orphan check); the watcher no longer waits for it
+  (inferred, not run on Windows).
 
 ### Self-update
 
@@ -1869,8 +1900,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`
-  - `<n> other entries (<folders>)`, `note: @all from <folders>, not the leader: ignored`,
-    `note: ignoring the saved snapshot <path>: <why>`
+  - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
+    <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
+    `note: duplicate entry <id> in <path>: the one in <file> stands`
   - `new <path>`, `changed <path>`, `gone <path>`
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`
@@ -1984,9 +2016,12 @@ which and how to adapt. A channel format change is always a minor version at lea
   the only shell text.
 - Run other programs only through `fsops.run`: an argument list, never `shell=True`, stdin an
   empty pipe closed at once (not the null device), output captured, a timeout. Data goes in
-  arguments or environment variables, never into script text. The one exception is `vcharon
-  key`'s `ssh-add`, which runs on your terminal (`fsops.run_terminal`) so it can ask for the
-  passphrase.
+  arguments or environment variables, never into script text. The exceptions: `vcharon key`'s
+  `ssh-add`, which runs on your terminal (`fsops.run_terminal`) so it can ask for the
+  passphrase; the session's own ssh; and the streaming watcher's `vcharon sync --repeat` child
+  (`watch._spawn`), whose rounds are read line by line while it runs, which `fsops.run` (output
+  only once the program ends) can't give. It still gets a pipe as stdin, an argument list, a
+  new session on POSIX and a bounded end ([Running watchers](#running-watchers)).
 - In the helper, read stdin only through `sys.stdin.buffer` and write frames only to the private
   protocol fd. Never use `__file__` in a module that runs on the server; list plugins statically.
 - Resolve relative remote paths against `ctx.home`, never the process's current folder.
