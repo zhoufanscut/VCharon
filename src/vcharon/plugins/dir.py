@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .. import plugin
+from .. import fsops, plugin
 from ..plan import Plan
 from ..plugin import Option
 from ..proto import VCharonError
@@ -16,6 +16,8 @@ NEEDS = ()
 CAPS = ()
 OPTIONS = {"path": Option(str, required=True), "create": Option(bool, default=False),
            "max_deletes": Option(int, default=500)}
+# the doctor's own copy, so a test can run its Windows row on any OS
+WINDOWS = fsops.WINDOWS
 
 
 class Sink(plugin.StagerSink):
@@ -27,20 +29,26 @@ class Sink(plugin.StagerSink):
 
     def doctor(self):
         """vcharon doctor: the Stager's own root checks on an empty plan (symlinks on the way,
-        the owner rule, create), then that the root is writable. Only reads: an empty plan
-        never creates the root or a stage dir."""
+        the owner rule, create), then that the root is writable (not on Windows). Only reads:
+        an empty plan never creates the root or a stage dir."""
         try:
             checked = self.check(Plan([]))
         except VCharonError as e:
             return [("FAIL", e.message, e.hint)]
-        return [root_check(checked.root, "to.path %s: a directory you can write" % checked.root,
-                           "to.path %s doesn't exist yet; the first run creates it"
-                           % checked.root)]
+        root = checked.root
+        ok_text = ("to.path %s: a directory (write access isn't checked on Windows)" % root
+                   if WINDOWS else "to.path %s: a directory you can write" % root)
+        return [root_check(root, ok_text,
+                           "to.path %s doesn't exist yet; the first run creates it" % root)]
 
 
 def root_check(root, ok_text, missing_text):
     """The doctor check of a checked root: writable, or missing (so create is on) under an
-    ancestor the first run can create it in."""
+    ancestor the first run can create it in. On Windows os.access ignores ACLs, so it could
+    pass a root the run then can't write in, and a real write would break the rule that doctor
+    only reads: there the access isn't checked, and ok_text says so."""
+    if WINDOWS:
+        return ("ok", ok_text if os.path.isdir(root) else missing_text, None)
     if os.path.isdir(root):
         if os.access(root, os.W_OK | os.X_OK):
             return ("ok", ok_text, None)

@@ -196,7 +196,7 @@ class RegistryTest(PluginCase):
         source = plugin.make("remote", "path", "source", {"path": "x"}, ctx)
         self.assertEqual(type(source).__module__, "vcharon.plugins.path")
         self.assertIs(source.ctx, ctx)
-        self.assertEqual(source.options, {"path": "x", "keep_name": False, "exclude": [],
+        self.assertEqual(source.options, {"path": "x", "keep_name": False,
                                           "symlinks": "error", "prune": False,
                                           "allow_empty": False, "mailbox_me": None,
                                       "max_bytes": None, "max_files": None})

@@ -327,7 +327,7 @@ class MailboxTest(MailboxCase):
         with self.assertRaises(VCharonError) as cm:
             plugin.check_side("remote", "path", "source", {"path": "x", "nope": "1"})
         self.assertEqual(cm.exception.hint, "the path plugin's options are: path, keep_name, "
-                                            "exclude, symlinks, prune, allow_empty")
+                                            "prune, allow_empty")
 
     def test_no_from_or_to(self):
         for line in ("from = local:path", "to = remote:dir", "from.path = ~/x", "to.create = yes",
@@ -444,7 +444,7 @@ class MailboxTest(MailboxCase):
                                     self.load_channel(MAILBOX).jobs["ch.windows.down"]
                                     .source.options)
         self.assertEqual(options["mailbox_me"], "windows")
-        self.assertEqual(options["exclude"], [])
+        self.assertEqual(options["symlinks"], "error")
         # the helper checks it again: the options came over the wire
         from vcharon.proto import VCharonError
         for raw, message in (({"mailbox_me": "Windows"}, "from.mailbox_me: a writer's name "

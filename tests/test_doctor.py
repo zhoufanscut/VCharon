@@ -60,6 +60,9 @@ PATH_CHECK = doctor.path_check
 NO_AGENT_FIX = (keys.ADMIN_HINT if platform.os_name() == "windows"
                 else 'only a key without a passphrase works without an agent; start one: %s'
                      % keys.START_AGENT)
+# the dir sink's row: on Windows it doesn't check write access (DESIGN, "The dir sink")
+WRITABLE = ("a directory (write access isn't checked on Windows)" if os.name == "nt"
+            else "a directory you can write")
 LAST_OK = r"\AOK  nothing failed  \(\d+\.\d s\)\Z"
 # a test job's state_mismatch hint (a channel section's names its sync commands)
 RESET = "check the target; then reset the job's state, and sync it with --full"
@@ -196,12 +199,11 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines[11:17], [
             "  ok    push       state: none yet; the first run sends everything",
             "  ok    push       from.path %s: a directory" % self.src,
-            "  ok    push       to.path %s: a directory you can write"
-            % os.path.realpath(os.path.join(home, "inbox")),
+            "  ok    push       to.path %s: %s"
+            % (os.path.realpath(os.path.join(home, "inbox")), WRITABLE),
             "  ok    pull       state: none yet; the first run sends everything",
             "  ok    pull       from.path %s: a directory" % os.path.join(home, "outbox"),
-            "  ok    pull       to.path %s: a directory you can write"
-            % os.path.realpath(self.dst)])
+            "  ok    pull       to.path %s: %s" % (os.path.realpath(self.dst), WRITABLE)])
         self.assertRegex(lines[17], LAST_OK)
         self.assertEqual(len(lines), 18)
 
@@ -1009,8 +1011,8 @@ class RowTest(DoctorCase):
         self.assertEqual(lines[at + 1], "                   fix: " + platform.runnable(fix))
         # no session, no echo, no remote side of the jobs
         self.assertFalse(any("echo" in text for level, text in dest), lines)
-        self.assertNotIn(("ok", "to.path %s: a directory you can write"
-                          % os.path.join(self.home, "inbox")), self.of(lines, "push"))
+        self.assertNotIn(("ok", "to.path %s: %s" % (os.path.join(self.home, "inbox"), WRITABLE)),
+                         self.of(lines, "push"))
         self.assertNotIn(("ok", "from.path %s: a directory" % os.path.join(self.home, "outbox")),
                          self.of(lines, "pull"))
         # the local sides are still checked

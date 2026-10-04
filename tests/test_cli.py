@@ -488,8 +488,8 @@ class JobTest(FakeSshCase):
         self.assertFalse(os.path.exists(self.argv_file))
         self.assertEqual(out, [])
         # the other options can change
-        self.write_config(PUSH.format(src=self.src) + "from.exclude = *.log\nto.create = yes\n"
-                          "idle_timeout = 60\n")
+        self.write_config(PUSH.format(src=self.src) + "from.allow_empty = yes\n"
+                          "to.create = yes\nidle_timeout = 60\n")
         self.assertEqual(self.ok("push")[1], "  nothing to do")
 
     def test_pull_from_another_server(self):
@@ -616,22 +616,17 @@ class JobTest(FakeSshCase):
         self.assertRegex(lines[-1], OK_LINE % (0, 1))
         self.assertEqual(read_tree(back), {"sub/": None, "sub/mine.txt": b"m"})
 
-    # prune keeps excluded files and refuses an emptied source (test_path pins these in the
-    # plugin: test_prune, test_excluded_paths_are_never_deleted); here, through the CLI
+    # prune refuses an emptied source (test_path pins this in the plugin: test_prune,
+    # test_empty_source); here, through the CLI
 
     def test_prune_pull(self):
         back = os.path.join(self.local, "back")
         os.makedirs(back)
         outbox = os.path.join(self.home, "outbox")
-        write_tree(outbox, {"x.log": b"x", "keep.txt": b"k", "sub/y.txt": b"y"})
+        write_tree(outbox, {"keep.txt": b"k", "sub/y.txt": b"y"})
         self.write_config(PULL.format(dst=back))
         self.ok("pull")
-        everything = {"x.log": b"x", "keep.txt": b"k", "sub/": None, "sub/y.txt": b"y"}
-        self.assertEqual(read_tree(back), everything)
-        # excluded now, and gone at the server: dropped from sent, never deleted
-        self.write_config(PULL.format(dst=back) + "from.exclude = *.log\n")
-        os.remove(os.path.join(outbox, "x.log"))
-        self.assertEqual(self.ok("pull")[1], "  nothing to do")
+        everything = {"keep.txt": b"k", "sub/": None, "sub/y.txt": b"y"}
         self.assertEqual(read_tree(back), everything)
         # the server's outbox emptied, as an unmounted disk looks: refused
         shutil.rmtree(outbox)
@@ -644,12 +639,12 @@ class JobTest(FakeSshCase):
                                    "set from.allow_empty = yes"])
         self.assertEqual(read_tree(back), everything)
         self.assertEqual(self.state_bytes("pull"), before)
-        # with allow_empty the sent files go, and the excluded one stays
-        self.write_config(PULL.format(dst=back) + "from.exclude = *.log\nfrom.allow_empty = yes\n")
+        # with allow_empty the sent files go
+        self.write_config(PULL.format(dst=back) + "from.allow_empty = yes\n")
         lines = self.ok("pull")
         self.assertEqual(lines[1:3], ["  put     0 files, 0 dirs (0 B)", "  delete  3"])
         self.assertRegex(lines[3], OK_LINE % (0, 3))
-        self.assertEqual(read_tree(back), {"x.log": b"x"})
+        self.assertEqual(read_tree(back), {})
         self.assertEqual(self.saved("pull")["source"], {"sent": {}})
 
     # a run's ways out: the lock is released, and the state file never says more than is true
@@ -2073,7 +2068,7 @@ class MailboxTest(FakeSshCase):
             os.symlink("STEPS.md", os.path.join(self.server, "debian", "lnk"))
             code, _out, err = self.run_jobs("pull")
             self.assertIn("ERROR unsafe_path: debian/lnk: a symlink\n  fix: "
-                          "remove them, or skip them with symlinks = skip\n", err)
+                          "remove them at the source\n", err)
 
     def test_top_level_files_and_reserved_names_are_left_out(self):
         write_tree(self.server, {"notes.md": b"n", "README": b"r", "con/x.md": b"x",
@@ -2098,8 +2093,8 @@ class MailboxTest(FakeSshCase):
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
     def test_a_down_state_holding_names_down_leaves_out(self):
         # A saved down state whose sent holds names down never plans (the own folder, Windows/,
-        # top-level files) runs without a reset: as with exclude (DESIGN, "The path source"),
-        # those paths leave sent, and nothing is deleted here.
+        # top-level files) runs without a reset: those paths leave sent, and nothing is
+        # deleted here (DESIGN, "The path source").
         write_tree(self.own, {"RESULTS.md": b"results"})
         self.ok(*SYNC)
         write_tree(self.local, {"Windows/": None, "notes.md": b"n", "README": b"r"})

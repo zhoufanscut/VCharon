@@ -526,6 +526,10 @@ class Sink(plugin.Sink):
 Each may define `doctor(self)`, which only reads. Each object gets `self.ctx`: `end`, `os`,
 `caps`, `home`, `fs`, `log()`, `tick()` and `resolve(path, where)`.
 
+- A doctor check that can't be made by reading says so in its row instead of guessing: on
+  Windows `os.access` ignores ACLs, so it is never the proof that a path can be read or written.
+  A file is opened to show it can be read; write access isn't checked there.
+
 - A plugin does all its work on its own end and never calls the other end.
 - A sink writes only through `stage.Stager` ([Applying a plan](#applying-a-plan)), which
   enforces "only inside the root, only planned deletes".
@@ -548,14 +552,15 @@ Source, either end. Options:
 |---|---|---|
 | `path` | required | a file or a folder |
 | `keep_name` | no | put a folder's entries under its own name |
-| `exclude` | – | fnmatch patterns, relative to the source folder; without `/` a pattern matches any one path part, with `/` the whole path. A matched folder is left out with everything in it |
-| `symlinks` | `error` | `error` fails the plan with `unsafe_path`; `skip` leaves them out with a note. Never followed. Sockets, devices and FIFOs, and on Windows junctions and other name-surrogate reparse points, count as symlinks |
 | `prune` | no | also delete what earlier runs sent and the source no longer has |
 | `allow_empty` | no | with `prune`, allow an empty source folder although earlier runs sent files |
 | `mailbox_me` | – | a channel section's down only: plan only other members' folders at the top ([Channel sections](#channel-sections)) |
 | `max_bytes`, `max_files` | – | a channel section's only: the folder limits ([Limits](#limits)) |
 
-- `path` itself is resolved once (a symlink there is followed); nothing below it ever is.
+- `path` itself is resolved once (a symlink there is followed); nothing below it ever is. A
+  symlink below it fails the plan with `unsafe_path`; sockets, devices and FIFOs, and on Windows
+  junctions and other name-surrogate reparse points, count as symlinks. There is no option to
+  skip them or to exclude paths: no channel section could set one.
 - The order is depth-first, names sorted by code point, each folder right before what it holds.
 - It walks through directory handles, as the sink does: on POSIX each folder is entered with
   `O_NOFOLLOW` through its parent's fd, on Windows the parents are checked again before each
@@ -587,8 +592,8 @@ State, and what a run sends:
 
 - A sent path gone from the source becomes a delete without `tree`. Files others added at the
   target are never deleted.
-- A path that matches `exclude`, or that `mailbox_me` leaves out at the top, is never deleted
-  and drops out of `sent`.
+- A path under a name that `mailbox_me` leaves out at the top is never deleted and drops out of
+  `sent`.
 - A kind change (folder to file or back) is a delete plus a put; if the target folder still
   holds files VCharon didn't send, the plan fails with `kind_change`.
 - An empty source with a non-empty `sent` fails with `empty_source` unless `allow_empty`: an
@@ -606,6 +611,11 @@ Sink, either end.
 | `path` | required | the root |
 | `create` | no | create the root (and its parents) if missing; else a missing root is `not_found` |
 | `max_deletes` | 500 | refuse a plan whose deletes would remove more files and folders than this (0: no limit) |
+
+- `doctor` runs the root checks on an empty plan, then checks with `os.access` that the root (or
+  the folder that would hold it) is writable. On Windows it says `a directory (write access isn't
+  checked on Windows)`: `os.access` ignores ACLs there, and a test write would break "only
+  reads".
 
 ## Applying a plan
 
@@ -839,7 +849,7 @@ Why one file each: agents joining at once never edit one shared file.
   in it is gone: vcharon leave C --project P [--role R]`, never "create it".
 - Down plans, at the top of the tree, only folders whose name is a valid member name other than
   `<me>`; everything else there (`<me>/` in any case, a file, a symlink, `Mac/`, `con/`) is left
-  out as `exclude` leaves it out, never deleted, and named in down's log. Valid names are
+  out (dropped from `sent`, never deleted) and named in down's log. Valid names are
   lowercase ASCII, so no two planned top-level names fold together on any client. Below the top,
   a case twin in one member's folder still refuses macOS and Windows clients with `collision`:
   dropping one of the two would decide for the writer which file a client gets.
@@ -849,8 +859,8 @@ Why one file each: agents joining at once never edit one shared file.
   the server's copy.
 - A channel job's `fix:` for a name its source can't send or list says what a member can do
   (`remove or rename it in your own folder (<me>/)` for up; `the writer of each folder named
-  above removes or renames it; your up still runs` for down), in place of the general hints
-  about `exclude` and `symlinks`, which a channel section doesn't have.
+  above removes or renames it; your up still runs` for down), in place of the general hints,
+  which speak to the owner of the whole source.
 - The fingerprint includes `mailbox.me`: down's paths don't hold the member's name, so without
   it a renamed member would keep a state that isn't its own.
 

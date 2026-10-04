@@ -25,7 +25,7 @@ from tests.util import fd_count, unblock_fifo, write_tree
 POSIX = os.name != "nt"
 WINDOWS = os.name == "nt"
 MTIME = 1790000000.25
-LINKS_HINT = "remove them, or skip them with symlinks = skip"
+LINKS_HINT = "remove them at the source"
 
 
 def paths(p):
@@ -186,48 +186,6 @@ class PathCases:
                          {"end": "local", "path": self.at("a"), "kind": "file"})
         self.assertEqual(self.source().plan({}).identity["kind"], "dir")
 
-    # --- exclude ---
-
-    def test_exclude(self):
-        write_tree(self.src, {".git/config": b"g", "a/.git/x": b"g", "a/b.pyc": b"p",
-                              "a/b.py": b"p", "c.pyc/inside.txt": b"x", "docs/a.md": b"m",
-                              "docs/sub/b.md": b"m", "docs/keep.txt": b"k", "x/docs/c.md": b"m"})
-        p = self.plan(exclude=".git, *.pyc,,docs/*.md")
-        self.assertEqual(paths(p), ["a", "a/b.py", "docs", "docs/keep.txt", "docs/sub", "x",
-                                    "x/docs", "x/docs/c.md"])
-        self.assertEqual(p.notes, [])
-        # without keep_name's prefix
-        p = self.plan(keep_name="yes", exclude="src,docs/*.md,.git,*.pyc")
-        self.assertEqual(paths(p), ["src", "src/a", "src/a/b.py", "src/docs", "src/docs/keep.txt",
-                                    "src/docs/sub", "src/x", "src/x/docs", "src/x/docs/c.md"])
-
-    def test_excluded_dirs_are_never_entered(self):
-        write_tree(self.src, {"skip/deep/f": b"f", "keep/g": b"g"})
-        entered = []
-        cls = fsops.PathDir if self.impl == "path" else fsops.FdDir
-        real = cls.enter
-
-        def enter(d, name, owner_rule=True):
-            entered.append(name)
-            return real(d, name, owner_rule)
-
-        with mock.patch.object(cls, "enter", enter):
-            self.assertEqual(paths(self.plan(exclude="skip")), ["keep", "keep/g"])
-        self.assertEqual(entered, ["keep"])
-
-    def test_bad_exclude_patterns(self):
-        for bad in ("/x", "x/", "a,/b", "docs/", "docs\\*.md", "a,\\b"):
-            with self.subTest(bad=bad):
-                with self.assertRaises(VCharonError) as cm:
-                    plugin.check_side("local", "path", "source", {"path": "/p", "exclude": bad})
-                self.assertEqual(cm.exception.code, "bad_options")
-                self.assertTrue(cm.exception.message.startswith("from.exclude: "))
-        # fnmatch would read \ as / on Windows only
-        with self.assertRaises(VCharonError) as cm:
-            plugin.check_side("local", "path", "source", {"path": "/p", "exclude": "docs\\*.md"})
-        self.assertEqual(cm.exception.message, "from.exclude: docs\\*.md: use / in patterns, "
-                                               "not \\")
-
     # --- symlinks and special files ---
 
     @unittest.skipUnless(POSIX, "needs symlinks and FIFOs")
@@ -243,12 +201,6 @@ class PathCases:
         self.assertEqual(e.hint, LINKS_HINT)
         e = self.refused("unsafe_path", keep_name="yes")
         self.assertEqual(e.message, "src/a/ld: a symlink (and 2 more; see the log)")
-        p = self.plan(symlinks="skip")
-        self.assertEqual(paths(p), ["a", "a/f.txt", "z.txt"])
-        self.assertEqual(p.notes, ["skipped 3 symlinks or special files"])
-        os.remove(self.at("lf"))
-        os.remove(self.at("fifo"))
-        self.assertEqual(self.plan(symlinks="skip").notes, ["skipped 1 symlink or special file"])
 
     @unittest.skipUnless(POSIX, "needs symlinks")
     def test_link_to_a_directory_is_never_entered(self):
@@ -263,9 +215,8 @@ class PathCases:
             return real(d, name, owner_rule)
 
         with mock.patch.object(cls, "enter", enter):
-            self.assertEqual(paths(self.plan(symlinks="skip")), ["real", "real/f"])
             self.refused("unsafe_path")
-        self.assertEqual(entered, ["real", "real"])
+        self.assertEqual(entered, ["real"])
 
     def test_stage_dirs_are_left_out(self):
         write_tree(self.src, {".vcharon-stage-x/0": b"s", "d/.VCHARON-STAGE-y/lock": b"",
@@ -310,8 +261,8 @@ class PathCases:
         e = self.refused("permission")
         self.assertEqual(e.message, "can't list %s: %s" % (self.at("locked"),
                                                            os.strerror(errno.EACCES)))
-        self.assertEqual(e.hint, "fix its permissions, or exclude it")
-        self.assertEqual(paths(self.plan(exclude="locked")), ["ok", "ok/f"])
+        self.assertEqual(e.hint, "fix its permissions at the source")
+        self.assertNotEqual(e.hint, path_plugin.ROOT_LIST_HINT)
 
     def test_a_root_that_cant_be_listed(self):
         # open but not listable (Windows can do that): the root's own hint, never LIST_HINT,
@@ -369,10 +320,8 @@ class PathCases:
     def test_fifo_at_the_top(self):
         fifo = os.path.join(self.tmp, "fifo")
         os.mkfifo(fifo)
-        for symlinks in ("error", "skip"):
-            with self.subTest(symlinks=symlinks):
-                e = self.refused("unsafe_path", fifo, symlinks=symlinks)
-                self.assertEqual(e.message, "%s is neither a file nor a directory" % fifo)
+        e = self.refused("unsafe_path", fifo)
+        self.assertEqual(e.message, "%s is neither a file nor a directory" % fifo)
 
     @unittest.skipUnless(os.path.isdir("/dev/fd"), "needs /dev/fd")
     def test_failed_plan_closes_its_handles(self):
@@ -789,55 +738,15 @@ class PathCases:
         self.assertEqual(paths(p), ["a", "b", "b/y"])
         self.assertEqual(p.state["sent"]["a/x"], state["sent"]["a/x"])
 
-    def test_excluded_paths_are_never_deleted(self):
-        write_tree(self.src, {"x.log": b"l", "build/o.bin": b"o", "build/sub/p.bin": b"p",
-                              "keep.txt": b"k"})
-        state = self.state_of()
-        self.assertEqual(len(state["sent"]), 6)
-        # still there, and gone: excluded either way
-        for gone in (False, True):
-            with self.subTest(gone=gone):
-                if gone:
-                    os.remove(self.at("x.log"))
-                    shutil.rmtree(self.at("build"))
-                _src, p = self.planned(state, prune="yes", exclude="*.log,build")
-                self.assertEqual(p.entries, [])
-                self.assertEqual(p.state, {"sent": {"keep.txt": state["sent"]["keep.txt"]}})
-        # a pattern with / matches the whole relative path; keep_name's prefix is left out
-        write_tree(self.src, {"docs/a.md": b"a", "docs/b.txt": b"b"})
-        state = self.state_of(keep_name="yes")
-        shutil.rmtree(self.at("docs"))
-        _src, p = self.planned(state, keep_name="yes", prune="yes", exclude="docs/*.md,src")
-        self.assertEqual(p.entries, [delete("src/docs", why="gone from the source"),
-                                     delete("src/docs/b.txt", why="gone from the source")])
-        self.assertEqual(sorted(p.state["sent"]), ["src", "src/keep.txt"])
-
-    def test_excluded_stale_spelling_is_never_deleted(self):
-        # sent holds Foo.cpp, a stale spelling of foo.cpp, which is excluded now: on a sink that
-        # folds names, a delete of Foo.cpp would remove the excluded foo.cpp
-        write_tree(self.src, {"foo.cpp": b"live", "keep.txt": b"k", "build/x.o": b"o",
-                              "docs/a.md": b"a"})
-        stale = [4, MTIME, self.exec_bit(False)]
-        keep = self.value("keep.txt")
-        state = {"sent": {"Foo.cpp": stale, "keep.txt": keep, "Build": "d",
-                          "Build/x.o": stale, "Docs": "d", "Docs/a.md": stale}}
-        _src, p = self.planned(state, prune="yes", exclude="foo.cpp,build,docs/*.md")
-        # Docs itself matches nothing: it's gone from the source, so it's deleted (a directory
-        # is removed only if empty)
-        self.assertEqual([(e.op, e.path) for e in p.entries],
-                         [("put", "docs"), ("delete", "Docs")])
-        self.assertEqual(p.state, {"sent": {"keep.txt": keep, "docs": "d"}})
-
-    def test_folded_patterns_leave_walked_paths_alone(self):
-        # the walk's own rule decides what it lists; case counts (except on Windows), so
-        # README.md is sent despite readme.md, and must not be sent again on every run
-        if WINDOWS:
-            self.skipTest("fnmatch ignores case on Windows")
-        write_tree(self.src, {"README.md": b"r"})
-        state = self.state_of(exclude="readme.md")
-        self.assertEqual(list(state["sent"]), ["README.md"])
-        _src, p = self.planned(state, prune="yes", exclude="readme.md")
-        self.assertEqual((p.entries, p.state), ([], state))
+    def test_left_out_at_the_top_is_never_deleted(self):
+        # a mailbox's down: what it leaves out at the top drops out of sent, gone or not
+        write_tree(self.src, {"bob/f": b"f", "me/x": b"x", "notes.txt": b"n"})
+        stale = [1, MTIME, self.exec_bit(False)]
+        state = {"sent": {"bob": "d", "bob/f": self.value("bob/f"), "me": "d", "me/x": stale,
+                          "notes.txt": stale, "Mac": "d", "Mac/y": stale}}
+        _src, p = self.planned(state, prune="yes", mailbox_me="me")
+        self.assertEqual(p.entries, [])
+        self.assertEqual(p.state, {"sent": {"bob": "d", "bob/f": self.value("bob/f")}})
 
     def test_empty_source(self):
         write_tree(self.src, {"a.txt": b"a", "d/b.txt": b"b"})
@@ -849,23 +758,18 @@ class PathCases:
                          % self.src)
         self.assertEqual(e.hint, "check that its disk is mounted; if it's really empty, set "
                                  "from.allow_empty = yes")
-        # only excluded entries, stage dirs and skipped links: still empty
-        write_tree(self.src, {"x.log": b"l", ".vcharon-stage-0123/lock": b""})
-        if POSIX:
-            os.symlink(self.outside, self.at("link"))
-        self.refused_with(state, "empty_source", prune="yes", exclude="*.log", symlinks="skip")
+        # only stage dirs: still empty
+        write_tree(self.src, {".vcharon-stage-0123/lock": b""})
+        self.refused_with(state, "empty_source", prune="yes")
         # with allow_empty, every sent path is a delete
-        _src, p = self.planned(state, prune="yes", allow_empty="yes", exclude="*.log",
-                              symlinks="skip")
+        _src, p = self.planned(state, prune="yes", allow_empty="yes")
         self.assertEqual(p.entries, [delete(path, why="gone from the source")
                                      for path in ("a.txt", "d", "d/b.txt")])
         self.assertEqual(p.state, {"sent": {}})
         # allow_empty without prune does nothing
-        self.assertEqual(self.planned(state, allow_empty="yes", exclude="*.log",
-                                      symlinks="skip")[1].entries, [])
+        self.assertEqual(self.planned(state, allow_empty="yes")[1].entries, [])
         # a first run with prune on an empty directory: an empty plan
-        self.assertEqual(self.planned({}, prune="yes", exclude="*.log",
-                                      symlinks="skip")[1].entries, [])
+        self.assertEqual(self.planned({}, prune="yes")[1].entries, [])
 
     def test_empty_source_with_keep_name(self):
         write_tree(self.src, {"a.txt": b"a"})
@@ -888,17 +792,16 @@ class PathCases:
     # --- state_after: never lists what a failed commit removed ---
 
     def test_state_after(self):
-        write_tree(self.src, {"a/1": b"1", "old": b"o", "gone": b"g", "x.log": b"l",
-                              "b/2": b"2"})
+        write_tree(self.src, {"a/1": b"1", "old": b"o", "gone": b"g", "b/2": b"2"})
         state = self.state_of()
         os.remove(self.at("old"))
         os.remove(self.at("gone"))
         write_tree(self.src, {"a/1": b"11", "a/new": b"n", "b/2": b"22"})
-        src, p = self.planned(state, prune="yes", exclude="*.log")
+        src, p = self.planned(state, prune="yes")
         self.assertEqual(paths(p), ["a/1", "a/new", "b/2", "gone", "old"])
         # the commit got through the delete of gone and wrote a/new, then failed
         after = src.state_after(["a/new", "not/in/the/plan"], ["gone", "b/2"])
-        # the old sent without x.log (excluded), gone (deleted), and a/1 and b/2 (not written:
+        # the old sent without gone (deleted), and a/1 and b/2 (not written:
         # the next run sends them); old stays, as its delete didn't happen
         self.assertEqual(after, {"sent": {"a": "d", "a/new": self.value("a/new"), "b": "d",
                                           "old": state["sent"]["old"]}})
@@ -912,7 +815,7 @@ class PathCases:
                                                             "gone": state["sent"]["gone"],
                                                             "old": state["sent"]["old"]}})
         # and the next run from there sends what's missing and deletes what's left
-        next_p = self.planned(after, prune="yes", exclude="*.log")[1]
+        next_p = self.planned(after, prune="yes")[1]
         self.assertEqual([(e.op, e.path) for e in next_p.entries],
                          [("put", "a/1"), ("put", "b/2"), ("delete", "old")])
 
@@ -1049,6 +952,18 @@ class ReadErrorTest(unittest.TestCase):
                     "close that program, then run again"))
 
 
+class OptionsTest(unittest.TestCase):
+    def test_no_exclude_and_no_skip(self):
+        # neither a vcharon.ini nor a channel section can set them, so neither is an option
+        for key, value in (("exclude", "*.log"), ("symlinks", "skip")):
+            with self.subTest(key=key):
+                with self.assertRaises(VCharonError) as cm:
+                    plugin.check_side("local", "path", "source", {"path": "/p", key: value})
+                self.assertEqual(cm.exception.code, "bad_options")
+        # the rejoin's one-off pull still names symlinks = error
+        plugin.check_side("local", "path", "source", {"path": "/p", "symlinks": "error"})
+
+
 class PathDoctorTest(unittest.TestCase):
     """The path source's doctor: it only reads."""
 
@@ -1086,7 +1001,21 @@ class PathDoctorTest(unittest.TestCase):
         [(level, message, hint)] = self.doctor(d)
         self.assertEqual((level, hint), ("FAIL", "check its permissions"))
         self.assertTrue(message.startswith("can't list %s: " % d), message)
-        self.assertEqual(self.doctor(f), [("FAIL", "can't read %s" % f, "check its permissions")])
+        self.assertEqual(self.doctor(f), [("FAIL", "can't read %s: %s"
+                                           % (f, os.strerror(errno.EACCES)),
+                                           "check its permissions")])
+
+    def test_a_file_it_cant_open(self):
+        # the file is opened for real: on Windows an ACL can refuse what os.access allows
+        write_tree(self.tmp, {"f.txt": b"f"})
+        f = os.path.join(self.tmp, "f.txt")
+
+        def refuse(*args, **kwargs):
+            raise PermissionError(errno.EACCES, "Access is denied")
+
+        with mock.patch.object(path_plugin, "open", refuse, create=True):
+            self.assertEqual(self.doctor(f), [("FAIL", "can't read %s: Access is denied" % f,
+                                               "check its permissions")])
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "needs mkfifo")
     def test_fifo(self):

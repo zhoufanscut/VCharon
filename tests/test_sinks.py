@@ -7,11 +7,13 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 POSIX = os.name != "nt"
 
 from vcharon import plugin, stage
 from vcharon.plan import Plan, delete, put_dir, put_file
+from vcharon.plugins import dir as dir_plugin
 from vcharon.proto import VCharonError
 
 from tests.util import patch_stats, read_tree, write_tree
@@ -106,8 +108,24 @@ class SinkDoctorTest(SinkCase):
         self.assertEqual(read_tree(self.tmp), {"root/": None})
 
     def test_dir_writable(self):
+        what = ("a directory you can write" if POSIX
+                else "a directory (write access isn't checked on Windows)")
         self.assertEqual(self.doctor("dir", path=self.root),
-                         [("ok", "to.path %s: a directory you can write" % self.root, None)])
+                         [("ok", "to.path %s: %s" % (self.root, what), None)])
+        self.assert_untouched()
+
+    def test_dir_on_windows(self):
+        # os.access ignores ACLs there, and a real write would break "only reads": the row
+        # says write access isn't checked, even for a root os.access refuses
+        with mock.patch.object(dir_plugin, "WINDOWS", True), \
+                mock.patch.object(os, "access", return_value=False):
+            self.assertEqual(self.doctor("dir", path=self.root),
+                             [("ok", "to.path %s: a directory (write access isn't checked on "
+                               "Windows)" % self.root, None)])
+            missing = os.path.join(self.root, "new")
+            self.assertEqual(self.doctor("dir", path=missing, create="yes"),
+                             [("ok", "to.path %s doesn't exist yet; the first run creates it"
+                               % missing, None)])
         self.assert_untouched()
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")

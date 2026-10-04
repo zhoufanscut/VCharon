@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import fnmatch
 import hashlib
 import os
 import stat
@@ -20,8 +19,9 @@ ENDS = ("local", "remote")
 NEEDS = ()
 CAPS = ()
 OPTIONS = {"path": Option(str, required=True), "keep_name": Option(bool, default=False),
-           "exclude": Option(list, default=[]),
-           "symlinks": Option(choice("error", "skip"), default="error"),
+           # A symlink below the root always fails the plan; "error" is still accepted, as
+           # the rejoin's one-off pull names it.
+           "symlinks": Option(choice("error"), default="error"),
            "prune": Option(bool, default=False), "allow_empty": Option(bool, default=False),
            # set by a mailbox section's down job only (DESIGN, "Channel sections")
            "mailbox_me": Option(str, default=None),
@@ -31,13 +31,14 @@ OPTIONS = {"path": Option(str, required=True), "keep_name": Option(bool, default
            "max_bytes": Option(int, default=None), "max_files": Option(int, default=None)}
 
 # options only a channel section sets: left out of the list of options
-HIDDEN = ("mailbox_me", "max_bytes", "max_files")
+HIDDEN = ("symlinks", "mailbox_me", "max_bytes", "max_files")
 
 NAME_HINT = "rename it at the source"
-LINKS_HINT = "remove them, or skip them with symlinks = skip"
-# a directory below the root it can't list; a mailbox job swaps this one (cli.SOURCE_HINTS)
-LIST_HINT = "fix its permissions, or exclude it"
-# the root itself, which no exclude and no mailbox writer fixes
+LINKS_HINT = "remove them at the source"
+# a directory below the root it can't list; a mailbox job swaps this one (cli._mailbox_hint),
+# which tells it from ROOT_LIST_HINT by its text, so the two must differ
+LIST_HINT = "fix its permissions at the source"
+# the root itself, which no mailbox writer fixes
 ROOT_LIST_HINT = "fix its permissions"
 # a missing root; a channel section's down swaps it (channel_cmd.CHANNEL_GONE_HINT)
 MISSING_HINT = "check the path"
@@ -56,19 +57,6 @@ def check_options(options):
         if options["keep_name"]:
             raise VCharonError("bad_options", "from.mailbox_me can't go with keep_name",
                                "leave out keep_name")
-    for item in options["exclude"]:
-        # fnmatch reads \ as / on Windows only; one meaning on every end is safer.
-        if "\\" in item:
-            raise VCharonError("bad_options", "from.exclude: %s: use / in patterns, not \\"
-                               % pathrules.show(item),
-                               "fix from.exclude")
-        # Patterns are relative to the source directory; a leading or trailing / would
-        # never match anything.
-        if item.startswith("/") or item.endswith("/"):
-            raise VCharonError("bad_options", "from.exclude: %s can't start or end with /"
-                               % pathrules.show(item),
-                               "fix from.exclude; patterns are relative to the source "
-                               "directory, as in docs/*.md")
 
 
 def _escaped(path):
@@ -215,15 +203,11 @@ class Source(plugin.Source):
         self._root = None
         # [(name, handle)] from the root down to the directory open() used last
         self._chain = []
-        # for state_after, once plan() ran with a state: sent after the exclude drop, each
+        # for state_after, once plan() ran with a state: sent after the mailbox drop, each
         # put's path -> its sent value, and the deletes' paths
         self._base = None
         self._values = {}
         self._deletes = set()
-        singles, wholes = [], []
-        for pattern in options["exclude"]:
-            (wholes if "/" in pattern else singles).append(pattern)
-        self._singles, self._wholes = singles, wholes
         # a mailbox's down: the writer's name, the names left out at the top this run (for
         # the log), and every name the walk met at the top, kept or left out
         self._me = options.get("mailbox_me")
@@ -236,10 +220,6 @@ class Source(plugin.Source):
         self._limits = None if None in limits else limits
         self._totals = {}
         self._over = {}
-        # the patterns under each folding receiver's rule, for stale spellings in sent
-        self._folded = [(osn, [pathrules.fold(x, osn) for x in singles],
-                         [pathrules.fold(x, osn) for x in wholes])
-                        for osn in ("windows", "darwin")]
 
     def _handles(self):
         impl = self.impl or ("path" if fsops.WINDOWS else "fd")
@@ -364,15 +344,6 @@ class Source(plugin.Source):
         planned names can fold together on a client."""
         return not is_dir or name == self._me or pathrules.writer_problem(name) is not None
 
-    def _excluded(self, parts):
-        # A pattern without / matches one part; the parts above were checked on the way down.
-        if any(fnmatch.fnmatch(parts[-1], p) for p in self._singles):
-            return True
-        if self._wholes:
-            rel = "/".join(parts)
-            return any(fnmatch.fnmatch(rel, p) for p in self._wholes)
-        return False
-
     def _scan(self, d, where, hint=LIST_HINT):
         """d's entries, sorted by name and last first, for pop()."""
         try:
@@ -419,11 +390,9 @@ class Source(plugin.Source):
         explicit stack, with one open handle per level. Returns (entries, {entry index: the
         file's parts below root}, notes)."""
         tick = self.ctx.tick
-        skip = self.options["symlinks"] == "skip"
         files = {}
         bad_names = []
         links = []
-        skipped = 0
         # (handle, entries left, its parts below the root)
         stack = [(root, self._scan(root, abs_path, ROOT_LIST_HINT), ())]
         try:
@@ -437,20 +406,17 @@ class Source(plugin.Source):
                 name, st = items.pop()
                 tick()
                 parts = here + (name,)
-                # vcharon's own stage dirs, in any case, and excluded entries: never entered,
-                # counted or noted
+                # vcharon's own stage dirs, in any case: never entered, counted or noted
                 if name.casefold().startswith(pathrules.STAGE_PREFIX):
                     continue
                 if not here:
                     self._top_names.add(name)
                 if (self._me is not None and not here
                         and self._top_left_out(name, fsops.kind(st) == DIR)):
-                    # left out as exclude leaves out (never deleted); listed in the log
+                    # left out, never deleted; listed in the log
                     if name != self._me:
                         self._strays.append(_escaped(name) + ("/" if fsops.kind(st) == DIR
                                                               else ""))
-                    continue
-                if self._excluded(parts):
                     continue
                 path = "/".join(prefix + parts)
                 try:
@@ -460,11 +426,8 @@ class Source(plugin.Source):
                     continue
                 k = fsops.kind(st)
                 if k in (LINK, OTHER):
-                    if skip:
-                        skipped += 1
-                    else:
-                        links.append("%s: %s" % (pathrules.show(path), "a symlink" if k == LINK
-                                                 else "a special file"))
+                    links.append("%s: %s" % (pathrules.show(path), "a symlink" if k == LINK
+                                             else "a special file"))
                     continue
                 if k == DIR:
                     entries.append(put_dir(path))
@@ -508,10 +471,6 @@ class Source(plugin.Source):
                          + (" (and %d more)" % (len(self._strays) - pathrules.MAX_LISTED)
                             if len(self._strays) > pathrules.MAX_LISTED else ""))
         notes = []
-        if skipped == 1:
-            notes.append("skipped 1 symlink or special file")
-        elif skipped:
-            notes.append("skipped %d symlinks or special files" % skipped)
         if self._limits is not None:
             entries, files = self._over_limits(entries, files, abs_path, notes)
         return entries, files, notes
@@ -558,59 +517,20 @@ class Source(plugin.Source):
 
     # --- what changed since the saved state ---
 
-    def _excluded_folded(self, parts):
-        """_excluded with the path and the patterns under Windows' and macOS's folds."""
-        for osn, singles, wholes in self._folded:
-            if any(fnmatch.fnmatch(pathrules.fold(parts[-1], osn), p) for p in singles):
-                return True
-            if wholes:
-                rel = "/".join(pathrules.fold(x, osn) for x in parts)
-                if any(fnmatch.fnmatch(rel, p) for p in wholes):
-                    return True
-        return False
-
-    def _drop_excluded(self, sent, top, walked):
-        """sent without the paths that exclude matches now, by the walk's rule: the path or any
-        of its ancestors, relative to the source directory. A sent path the walk didn't find
-        is also dropped when its fold matches a pattern's fold: it may be a stale spelling of
-        an excluded file, which its delete would remove on a sink that folds names. (A path
-        the walk found stays: the walk's rule already let it in.) keep_name's own directory
-        (top) is never matched. These are never deleted (DESIGN, "The path source")."""
-        if not (self._singles or self._wholes or self._me is not None):
+    def _drop_left_out(self, sent, walked):
+        """sent without the paths under a top-level name a mailbox's down leaves out
+        (_top_dropped). These are never deleted (DESIGN, "The path source")."""
+        if self._me is None:
             return dict(sent)
-        # parts -> excluded, by each rule; sent paths share their ancestors
-        memos = ({}, {})
-        rules = (self._excluded, self._excluded_folded)
         kept = {}
+        # top-level name -> dropped; sent paths share their tops
         tops = {}
         for path, value in sent.items():
-            parts = path.split("/")
-            if self._me is not None:
-                name = parts[0]
-                out = tops.get(name)
-                if out is None:
-                    out = tops[name] = self._top_dropped(name, walked)
-                if out:
-                    continue
-            if top is not None:
-                if path == top:
-                    kept[path] = value
-                    continue
-                if parts[0] == top:
-                    parts = parts[1:]
-            hit = False
-            for rule, memo in zip(rules[:1] if path in walked else rules, memos):
-                for k in range(1, len(parts) + 1):
-                    key = tuple(parts[:k])
-                    excluded = memo.get(key)
-                    if excluded is None:
-                        excluded = memo[key] = rule(key)
-                    if excluded:
-                        hit = True
-                        break
-                if hit:
-                    break
-            if not hit:
+            name = path.partition("/")[0]
+            out = tops.get(name)
+            if out is None:
+                out = tops[name] = self._top_dropped(name, walked)
+            if not out:
                 kept[path] = value
         return kept
 
@@ -639,8 +559,8 @@ class Source(plugin.Source):
         if self._over:
             held = {p: v for p, v in sent.items() if p.partition("/")[0] in self._over}
             sent = {p: v for p, v in sent.items() if p not in held}
-        # exclude doesn't apply to a single file, so neither does its drop
-        base = sent if single else self._drop_excluded(sent, top, found)
+        # mailbox_me leaves out names at the top of a tree only, so a single file drops none
+        base = sent if single else self._drop_left_out(sent, found)
         if prune and not single and all(e.path == top for e in walked):
             n = sum(1 for path in base if path != top)
             if n and not self.options["allow_empty"]:
@@ -676,7 +596,7 @@ class Source(plugin.Source):
         return entries, new_files, {"sent": new}
 
     def state_after(self, written, deleted):
-        """After a commit that failed partway: the old sent (after the exclude drop), less the
+        """After a commit that failed partway: the old sent (after the mailbox drop), less the
         deletes the commit got through and the puts it didn't write, plus the written puts
         with the values the plan gave them. So the state never lists what the commit removed.
         An unwritten put goes because an earlier delete may have removed it (a fold partner's
@@ -758,9 +678,13 @@ class Source(plugin.Source):
                 return [("FAIL", "can't list %s: %s" % (abs_path, e.strerror or e), perm_hint)]
             return [("ok", "from.path %s: a directory" % abs_path, None)]
         if stat.S_ISREG(st.st_mode):
-            if os.access(abs_path, os.R_OK):
-                return [("ok", "from.path %s: a file" % abs_path, None)]
-            return [("FAIL", "can't read %s" % abs_path, perm_hint)]
+            # Opened for real, not os.access: on Windows that ignores ACLs, so it could say
+            # yes to a file the sync then can't read. Opening reads no bytes.
+            try:
+                open(abs_path, "rb").close()
+            except OSError as e:
+                return [("FAIL", "can't read %s: %s" % (abs_path, e.strerror or e), perm_hint)]
+            return [("ok", "from.path %s: a file" % abs_path, None)]
         return [("FAIL", "from.path %s is neither a file nor a directory" % abs_path,
                  "point from.path at a file or a directory")]
 

@@ -68,7 +68,7 @@ class FingerprintTest(StateCase):
             with self.subTest(new=new):
                 self.assertNotEqual(state.fingerprint(self.job(JOB.replace(old, new))), base)
         # the other options can change without a reset
-        for extra in ("from.exclude = *.log", "from.prune = yes", "to.create = yes",
+        for extra in ("from.allow_empty = yes", "from.prune = yes", "to.create = yes",
                       "idle_timeout = 60", "to.max_deletes = 5"):
             with self.subTest(extra=extra):
                 self.assertEqual(state.fingerprint(self.job(JOB + extra + "\n")), base)
