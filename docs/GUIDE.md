@@ -150,12 +150,14 @@ EOF
 
 It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`. A remote
 member's post then sends your folder to the server at once and prints `sent to devbox`; while
-your watcher is syncing it says so in a `note:` and the watcher sends it. If the server can't
-be reached, the post still stands: a `WARN not sent to devbox: …` line and its `fix:` say the
-entry is saved in your folder and goes with your watcher or the next `vcharon sync`. Exit 0
-either way. With the server down, that WARN comes only after ssh's connect timeout (10 s, or up
-to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use it while the
-server is slow or offline.
+your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
+the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
+server can't be reached, the fix says the entry goes with your watcher or the next `vcharon
+sync`. Any other error (the channel closed, a name the server refuses) blocks every later sync
+too: the fix says `no sync sends it until:` and what to do (`vcharon guide errors`). With the
+server down, that WARN comes only after ssh's connect timeout (10 s, or up to 30 s if the login
+hangs). `--no-sync` writes the entry without sending it: use it while the server is slow or
+offline.
 
 ### The flags
 
@@ -163,7 +165,8 @@ server is slow or offline.
   `@all`, which only the leader may post. A name without its `@` works too when it is a member
   of the channel; any other is refused with the members' names (an `@<name>` not in your copy
   yet is posted anyway, with a note: it may not have synced).
-- `--title`: one line. Put it in single quotes.
+- `--title`: one line of plain text: no escape codes or other control characters. Put it in
+  single quotes.
 - `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
   is taken off).
 - The body: `--body 'one line'`, or stdin. Use a quoted heredoc, `<<'EOF'`, so the shell runs
@@ -596,7 +599,8 @@ myapp`, in the order and with the reasons of `vcharon guide end`.
    ```
 
    It deletes the whole channel, every member's folder with it, then removes this machine's
-   files of the membership. It refuses, with nothing deleted, while a watcher or sync of yours
+   files of the membership: if your user wants the channel's text, `vcharon read myapp --full`
+   first. It refuses, with nothing deleted, while a watcher or sync of yours
    runs, and while the channel's top holds a file, or a folder whose name can't be a
    member's (ask your user). An empty folder with a member's name is deleted with the rest.
    On Windows, `ERROR permission: … access denied` means something holds the folder (a file
@@ -618,7 +622,10 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
   and don't ask your user about files**. If the note goes on with `still here: <names>`, this
   machine has other memberships of the channel (another `--project` or `--role`): each one
   leaves on its own. Your folder on the server went with the channel. If your user wants the
-  channel's text, `vcharon read myapp --full` before the `leave` prints it all.
+  channel's text and you are a remote member, `vcharon read myapp --full` before the `leave`
+  prints it all from this machine's copy. A local member has no copy (its `read` now says
+  `the channel folder <path> is gone`): the close removed it, so only a leader who wants the
+  text reads it before closing.
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
   gone" can mean a folder removed by hand.
 
@@ -697,6 +704,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `only the leader closes <C>, and that is <leader>` | members leave; run the `fix:` line's `leave` |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
+| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
 
 ### Posting
 
@@ -715,7 +723,10 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
 | `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
-| `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `WARN not sent to <server>: …`, `fix: the entry is saved in your folder; your watcher sends it, …` (the post stands, exit 0) | the server didn't answer: nothing to redo, your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `WARN not sent to <server>: …`, `fix: the entry is saved in your folder, but no sync sends it until: …` (the post stands, exit 0) | no sync gets past that error: follow the rest of the `fix:` line as for that error (a closed channel: `vcharon guide end`); don't post the entry again |
+| `--title: it holds a control or format character (…)` (exit 3) | give a title of plain text, with no escape codes or invisible characters |
+| `--<flag> isn't valid UTF-8` (exit 3) | give that option's text in UTF-8 |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 
 ### Failed rounds (watch and sync)

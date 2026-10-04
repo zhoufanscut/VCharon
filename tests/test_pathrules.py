@@ -67,6 +67,23 @@ class PartTest(unittest.TestCase):
                 self.assertIsNone(pathrules.part_problem(name, "windows"))
 
 
+class PrintableTest(unittest.TestCase):
+    def test_escaped(self):
+        for raw, shown in (("a\x1b[2Jb", "a\\x1b[2Jb"), ("x\ry", "x\\x0dy"), ("\n", "\\x0a"),
+                           ("\x7f\x85\x9b", "\\x7f\\x85\\x9b"),
+                           ("\u202emac#1", "\\u202emac#1"), ("a\u2028b\u2029", "a\\u2028b\\u2029"),
+                           ("mac\u200d-web", "mac\\u200d-web"), ("\ufeff", "\\ufeff"),
+                           ("\udcff", "\\udcff"), ("\U000e0001", "\\U000e0001")):
+            with self.subTest(raw=raw):
+                self.assertEqual(pathrules.printable(raw), shown)
+
+    def test_kept(self):
+        for text in ("", "plain text", "a\tb", "mañana 東京\u3000x", "\u00a0", "\ue000",
+                     "back\\slash", "\U0001f600"):
+            with self.subTest(text=text):
+                self.assertEqual(pathrules.printable(text), text)
+
+
 class FoldTest(unittest.TestCase):
     def test_fold(self):
         nfc = unicodedata.normalize("NFC", "caf\u00e9")

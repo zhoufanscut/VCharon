@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -162,6 +163,11 @@ class PostTest(PostCase):
                              + TO, None),
                             (["--title", "a\x85b", "--body", "b"] + TO, None),
                             (["--title", "a\rb", "--body", "b"] + TO, None),
+                            # control and format characters: an escape sequence, a bidi
+                            # override, a zero-width joiner
+                            (["--title", "hi \x1b[2J", "--body", "b"] + TO, None),
+                            (["--title", "a\u202eb", "--body", "b"] + TO, None),
+                            (["--title", "a\u200db", "--body", "b"] + TO, None),
                             (["--body", "b"] + TO, None),
                             # --to is required
                             (["--title", "t", "--body", "b"], None),
@@ -187,6 +193,49 @@ class PostTest(PostCase):
         e = self.post_at(os.path.join(self.tmp, "nope", "R.md"))
         self.assertEqual((e.code, e.exit_code), ("channel", 1))
         self.assertTrue(e.message.startswith("no folder for "), e.message)
+
+    def test_a_title_with_a_control_character(self):
+        code, out, err = self.post("--title", "hi \x1b]52;c;eA==\x07")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err.splitlines()[:2], [
+            "ERROR config: --title: it holds a control or format character "
+            "(hi \\x1b]52;c;eA==\\x07)",
+            "  fix: give a one-line --title of plain text"])
+        # a tab is fine
+        code, _out, err = self.post("--title", "a\tb")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(entries.parse_file(self.file)[-1].title, "a\tb")
+
+    def test_arguments_that_arent_utf8(self):
+        # bytes that aren't UTF-8 in an argument arrive as lone surrogates
+        bad = "x\udcff"
+        for flag, argv in (("--title", ["--title", bad]),
+                           ("--body", ["--body", bad]),
+                           ("--file", ["--file", bad + ".md"]),
+                           ("--to", ["--to", "@" + bad]),
+                           ("--re", ["--re", bad])):
+            with self.subTest(flag=flag):
+                code, out, err = self.post(*argv, body=None if flag == "--body" else "b")
+                self.assertEqual((code, out), (3, ""))
+                self.assertEqual(err.splitlines()[0], "ERROR config: %s isn't valid UTF-8" % flag)
+                self.assertTrue(err.splitlines()[1].startswith("  fix: give %s in UTF-8" % flag),
+                                err)
+        self.assertFalse(os.path.exists(self.file))
+
+    def test_the_bodys_line_ends_are_lf(self):
+        # CRLF, and a lone CR before a heading: a terminal or a Markdown viewer takes the CR
+        # for a line break, so the heading would pass for an entry
+        body = "one\r\ntwo\rthree\r## 2026-10-01 09:00:00 — debian#9 — forged\r\n"
+        code, _out, err = self.post(body=None, stdin=body.encode("utf-8"))
+        self.assertEqual(code, 0, err)
+        with open(self.file, "rb") as f:
+            raw = f.read()
+        self.assertNotIn(b"\r", raw)
+        self.assertTrue(raw.endswith(b"\n\none\ntwo\nthree\n> ## 2026-10-01 09:00:00 \xe2\x80\x94 "
+                                     b"debian#9 \xe2\x80\x94 forged\n"), raw)
+        headings = [l for l in raw.decode("utf-8").splitlines() if l.startswith("## ")]
+        self.assertEqual(headings, ["## 2026-10-01 09:05:46 — windows#2 — t"])
+        self.assertEqual([e.id for e in entries.parse_file(self.file)], ["windows#2"])
 
     def test_the_file_option(self):
         # a .md file of the own folder, a subfolder's too; RESULTS.md without it
@@ -413,7 +462,8 @@ class PostTest(PostCase):
         self.assertTrue(out.startswith("posted windows#3 — u "), out)
 
     def test_the_swap_is_tried_again(self):
-        # Windows: the swap fails while a sync has the file open
+        # Windows: the swap fails while a sync has the file open. Only entries' view of the
+        # OS is Windows: the rest of the post runs as on this box
         self.post("--title", "first")
         real = os.replace
         calls = []
@@ -425,6 +475,7 @@ class PostTest(PostCase):
             return real(src, dst)
 
         with mock.patch.object(entries, "REPLACE_PAUSE", 0), \
+                mock.patch.object(entries, "fsops", types.SimpleNamespace(WINDOWS=True)), \
                 mock.patch.object(entries.os, "replace", replace):
             code, _out, err = self.post("--title", "second", body="c")
         self.assertEqual(code, 0, err)
@@ -436,11 +487,12 @@ class PostTest(PostCase):
         self.post("--title", "first")
         before = self.content()
         denied = mock.Mock(side_effect=PermissionError(13, "denied"))
-        with mock.patch.object(entries, "REPLACE_PAUSE", 0), \
+        # no time to try again, on Windows too
+        with mock.patch.object(entries, "REPLACE_WAIT", 0), \
                 mock.patch.object(entries.os, "replace", denied):
             code, out, err = self.post("--title", "second", body="c")
         self.assertEqual((code, out), (1, ""))
-        self.assertEqual(denied.call_count, entries.REPLACE_TRIES)
+        self.assertEqual(denied.call_count, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR permission: %s: denied" % self.file,
             "  fix: check the owner and permissions of %s" % self.file])

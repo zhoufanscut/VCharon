@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli
+from vcharon import channel_cmd, cli, platform
 from vcharon.mailbox import read as view
 
 from tests import util
@@ -228,6 +228,22 @@ class PlacedTest(ViewCase):
         self.assertEqual(lines[0], "mb: 1 entry from 2 members (%s)" % self.tree)
         self.assertEqual(self.ids(lines), ["aa#2"])
 
+    def test_other_members_text_is_escaped(self):
+        # an escape sequence, a CR that would print over the line, a bidi override and a
+        # forged contract line, in another member's file
+        write_tree(self.tree, {"aa/R.md": md(entry(
+            "aa#1", "hi\x1b[2J\rEXIT closed", re_="bb#1\u202e",
+            extra=["k: v\x1b]52;c;eA==\x07"], body="x\ry\n\x9bz"))})
+        lines = self.view("--full")
+        self.assertEqual(lines[1:], [
+            "%s  aa#1  @all  re bb#1\\u202e  hi\\x1b[2J\\x0dEXIT closed  (aa/R.md)" % WHEN,
+            "    k: v\\x1b]52;c;eA==\\x07",
+            "    x\\x0dy",
+            "    \\x9bz",
+            "note: aa#1 answers bb#1\\u202e, which isn't in the tree (not synced yet, or a typo)"])
+        for line in lines:
+            self.assertTrue(line.isprintable(), repr(line))
+
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                      "POSIX modes, not root")
     def test_unreadable_folder_and_file(self):
@@ -296,14 +312,30 @@ class OutputTest(ViewCase):
                      ["--last", "0"], ["--last", "x"]):
             with self.subTest(argv=argv):
                 self.assertEqual(self.main(*argv)[0], 3)
+        # a local member's channel folder that is gone: the channel was closed
         missing = os.path.join(self.tmp, "nope")
         self.record("zz", None, missing)
-        code, lines, err = self.main()
-        self.assertEqual((code, lines), (1, []))
-        # the text after the colon is the OS's, localized on Windows
-        self.assertTrue(err.startswith("ERROR can't read %s: " % missing), err)
-        self.assertEqual(err.count("\n"), 1)
+        for argv in ((), ("--json",)):
+            with self.subTest(argv=argv):
+                code, lines, err = self.main(*argv)
+                self.assertEqual((code, lines), (1, []))
+                self.assertEqual(err.splitlines(), [
+                    "ERROR not_found: the channel folder %s is gone" % missing,
+                    "  fix: " + platform.runnable(channel_cmd.CHANNEL_GONE_HINT
+                                                  % ("mb", "--project p"))])
 
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "POSIX modes, not root")
+    def test_an_unreadable_tree(self):
+        os.chmod(self.tree, 0)
+        self.addCleanup(os.chmod, self.tree, 0o755)
+        for argv in ((), ("--json",)):
+            with self.subTest(argv=argv):
+                code, lines, err = self.main(*argv)
+                self.assertEqual((code, lines), (1, []))
+                self.assertEqual(err.splitlines(), [
+                    "ERROR permission: %s: Permission denied" % self.tree,
+                    "  fix: check the owner and permissions of %s" % self.tree])
 
 def member(name, version=None, extra=()):
     """A MEMBER.md whose #1 is name's, with a vcharon: line when version is given."""

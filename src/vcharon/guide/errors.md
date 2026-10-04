@@ -73,6 +73,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `only the leader closes <C>, and that is <leader>` | members leave; run the `fix:` line's `leave` |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
+| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
 
 ## Posting
 
@@ -91,7 +92,10 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `the following arguments are required: --to` or `--to is required …` (exit 3) | pass `--to @<name>`, or `@all` as the leader |
 | `@<name> has no folder in <tree> yet` (a note; the post goes on) | check the name if that member should be there by now |
 | `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
-| `WARN not sent to <server>: …` (the post stands, exit 0) | nothing to redo: the entry is saved in your folder, and your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `WARN not sent to <server>: …`, `fix: the entry is saved in your folder; your watcher sends it, …` (the post stands, exit 0) | the server didn't answer: nothing to redo, your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
+| `WARN not sent to <server>: …`, `fix: the entry is saved in your folder, but no sync sends it until: …` (the post stands, exit 0) | no sync gets past that error: follow the rest of the `fix:` line as for that error (a closed channel: `vcharon guide end`); don't post the entry again |
+| `--title: it holds a control or format character (…)` (exit 3) | give a title of plain text, with no escape codes or invisible characters |
+| `--<flag> isn't valid UTF-8` (exit 3) | give that option's text in UTF-8 |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |
 
 ## Failed rounds (watch and sync)

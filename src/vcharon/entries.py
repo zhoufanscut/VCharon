@@ -20,8 +20,9 @@ import re
 import stat
 import tempfile
 import time
+import unicodedata
 
-from . import pathrules, platform
+from . import fsops, pathrules, platform
 from .lock import Lock
 from .proto import VCharonError
 
@@ -47,13 +48,15 @@ ALL = "@all"
 # heading or header value holding any of them is refused, so it can't look like two lines in
 # another reader either.
 LINE_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
-# os.replace on Windows: tries, and the pause between them, while another program has the
-# file open (a sync reading it)
-REPLACE_TRIES = 5
-REPLACE_PAUSE = 0.2
 # how long a post waits for another post into the same folder
 LOCK_WAIT = 30.0
 LOCK_POLL = 0.05
+# os.replace on Windows: how long it is tried, and the pause between tries, while another
+# program has the file open (a sync uploading it can hold it for seconds). Half the lock's
+# wait: the replace runs under the post lock, so a second post waiting for it still gets its
+# turn before its own wait ends.
+REPLACE_WAIT = LOCK_WAIT / 2
+REPLACE_PAUSE = 0.2
 
 
 @dataclasses.dataclass
@@ -109,9 +112,13 @@ def split_lines(text):
 
 
 def one_line_problem(value):
-    """Why value can't be a heading or header value, or None."""
+    """Why value can't be a heading or header value, or None: a line break of any kind, or
+    any other control or format character but tab (an escape sequence, a lone CR, a bidi
+    override), which would act on a reader's terminal or make the line look like another."""
     if any(c in LINE_BREAKS for c in value):
-        return "it holds a line break (%r)" % value
+        return "it holds a line break (%s)" % pathrules.printable(value)
+    if any(c != "\t" and unicodedata.category(c) in ("Cc", "Cf") for c in value):
+        return "it holds a control or format character (%s)" % pathrules.printable(value)
     return None
 
 
@@ -155,8 +162,12 @@ def parse_file(path):
 
 
 def quote_body(body):
-    """The body as posted: trailing newlines dropped, each heading-like line behind "> "."""
-    return HEADING.sub("> ", body.rstrip("\r\n"))
+    """The body as posted: its line ends LF (a lone CR too, which a terminal or a Markdown
+    viewer takes as a line break, so a heading after one would pass for an entry), trailing
+    newlines dropped, each heading-like line behind "> ". The other LINE_BREAKS characters
+    stay: entries split on "\n" only."""
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    return HEADING.sub("> ", body.rstrip("\n"))
 
 
 def build(when, name, number, title, to, re_=None, header=(), body=""):
@@ -299,13 +310,17 @@ def lock(own, wait=LOCK_WAIT, sleep=time.sleep, clock=time.monotonic):
     return _Held(lk)
 
 
-def _replace(src, dst, sleep=time.sleep):
-    for left in range(REPLACE_TRIES - 1, -1, -1):
+def _replace(src, dst, sleep=time.sleep, clock=time.monotonic):
+    """os.replace; on Windows, a PermissionError (another program has dst open) is tried
+    again for REPLACE_WAIT seconds. Elsewhere it is a real permission problem, raised at
+    once."""
+    deadline = clock() + REPLACE_WAIT
+    while True:
         try:
             os.replace(src, dst)
             return
         except PermissionError:
-            if not left:
+            if not fsops.WINDOWS or clock() >= deadline:
                 raise
             sleep(REPLACE_PAUSE)
 

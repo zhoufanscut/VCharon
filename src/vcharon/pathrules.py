@@ -45,6 +45,33 @@ def show(path):
     return quote(path)
 
 
+# the categories printable() lets through although str.isprintable() refuses them: spaces
+# other than " " (U+3000 in CJK text), private-use and unassigned characters. None of them
+# moves the cursor, reorders text or ends a line.
+_SHOWN_AS_IS = frozenset(["Zs", "Co", "Cn"])
+
+
+def printable(text):
+    """text as a terminal may show it, when it comes from another member's files: every
+    control character but tab (C0, DEL, C1: ESC starts the sequences that clear the screen
+    or set the clipboard, CR moves back over a line), every format character (Cf: bidi
+    overrides that reorder a line, zero-width joiners and spaces that hide text inside an ID;
+    a joined emoji shows its joiner escaped), U+2028/U+2029 and lone surrogates, escaped as
+    \\xNN, \\uNNNN or \\UNNNNNNNN. A backslash already in the text stays, so the form is for
+    reading, not for turning back. Everything else, other scripts included, is unchanged."""
+    if text.isprintable():
+        return text
+    out = []
+    for c in text:
+        if c == "\t" or c.isprintable() or unicodedata.category(c) in _SHOWN_AS_IS:
+            out.append(c)
+            continue
+        n = ord(c)
+        out.append("\\x%02x" % n if n < 0x100 else "\\u%04x" % n if n < 0x10000
+                   else "\\U%08x" % n)
+    return "".join(out)
+
+
 def _split_problem(path):
     """(parts, None), or (None, why the text rules refuse the path)."""
     if not isinstance(path, str) or not path:

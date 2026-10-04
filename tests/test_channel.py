@@ -1247,6 +1247,38 @@ class PostSendTest(ChannelCase):
         self.assertEqual(err, "note: a sync of game is running (your watcher's): it sends the "
                               "entry\n")
 
+    def test_a_closed_channel_gives_the_leave_fix(self):
+        # the server's channel is gone: no later sync can send the entry, so the WARN's fix is
+        # the job's own, never "your watcher sends it"
+        shutil.rmtree(os.path.join(self.root, "game"))
+        code, out, err = self.post()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(out.splitlines()), 1)
+        lines = err.splitlines()
+        self.assertTrue(lines[0].startswith("WARN not sent to fake-dest: not_found: "), lines)
+        self.assertEqual(lines[1:], [
+            platform.runnable("  fix: the entry is saved in your folder, but no sync sends it "
+                              "until: " + channel_cmd.CHANNEL_GONE_HINT
+                              % ("game", "--project web")),
+            "  log: " + os.path.join(os.environ["VCHARON_HOME"], "logs", "game.mac-web.up.log")])
+        self.assertNotIn("your watcher sends it", err)
+
+    def test_a_local_member_after_the_close(self):
+        # the leader closed the channel: its folder is gone, and only a leave helps
+        self.lead("local", where=("--local",), box="pc")
+        self.ok("join", "local", "--local")
+        self.use_box("pc")
+        self.ok("close", "local", "--project", "ui")
+        self.use_box("mac")
+        gone = os.path.join(self.root, "local")
+        for argv in (["read", "local"], ["read", "local", "--json"],
+                     ["post", "local", "--to", "@pc-ui", "--title", "t", "--body", "b"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.refusal(*argv), (
+                    "ERROR not_found: the channel folder %s is gone" % gone,
+                    platform.runnable(channel_cmd.CHANNEL_GONE_HINT
+                                      % ("local", "--project web"))))
+
     def test_a_local_member_has_nothing_to_send(self):
         self.lead("local", where=("--local",), box="pc")
         self.ok("join", "local", "--local")

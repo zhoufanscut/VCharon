@@ -9,6 +9,44 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `read` shows other members' text escaped: a control character but tab (ESC, CR, C1), a
+  format character (bidi overrides, zero-width joiners and spaces), U+2028/U+2029 and a lone
+  surrogate print as `\xNN`, `\uNNNN` or `\UNNNNNNNN`, in the entry lines, `--full`'s header
+  and body lines, and the notes. Before, a member could put escape sequences in a title or body
+  that cleared the reader's screen or printed a forged `EXIT closed` line. `--json` is
+  unchanged. The watcher and `list` are not covered by this line.
+- `post` refuses a `--title` holding a control or format character other than tab, exit 3,
+  `ERROR config: --title: it holds a control or format character (…)`; a line break keeps its
+  own text, `--title: it holds a line break (…)`, and an empty title is now `--title is empty`.
+  To adapt: pass plain-text titles. A value given to `--title`, `--body`, `--to`, `--re` or
+  `--file` that isn't valid UTF-8 is now `ERROR config: --<flag> isn't valid UTF-8` (exit 3),
+  where it was `ERROR internal`.
+- A posted body is stored with LF line ends: its `\r\n` and lone `\r` become `\n`, so a
+  heading after a lone `\r` is quoted with `> ` like any other.
+- A local member's `read` and `post` on a closed channel (its folder gone) say `ERROR
+  not_found: the channel folder <path> is gone` with the `vcharon leave` fix, where `read`
+  printed `ERROR can't read <dir>: …` with no code or fix and `post` said to join again (which
+  then failed). `read`'s other tree errors are now `ERROR <code>: …` with a `fix:` line, text
+  mode as `--json` already did. To adapt: match `read`'s error on `ERROR <code>:`.
+- A remote member's post whose send fails with anything but a connection error (`connect`,
+  `timeout`, `lost`, the helper not starting) or an error with no fix keeps the `WARN not sent
+  to <server>: …` line, but its fix is now `the entry is saved in your folder, but no sync sends
+  it until: <the up job's own fix>`, then its `log:` line; before, it always said the watcher
+  would send it. The guide's errors and post topics say what to do.
+- stdout and stderr write UTF-8 (`errors="backslashreplace"`) on every OS, set at the start of
+  every command; before, only on Windows (with `errors="replace"`). With a non-UTF-8 locale or
+  `PYTHONIOENCODING` on Linux or macOS, `create`, `join` and `whoami` failed with `ERROR
+  internal` after acting on a name the encoding couldn't hold. Measured on Linux with
+  `PYTHONIOENCODING=ascii`; inferred on macOS.
+- An unknown flag after a verb now has the fix `vcharon <verb> --help` (`vcharon skill install
+  --help` for skill install's), not `vcharon --help`. The `ERROR config: unrecognized
+  arguments: …` line is unchanged.
+- On Windows, a post's file replace that fails because another program holds the file (a sync
+  uploading it) is tried again for up to 15 s, not five times in 1 s; elsewhere a permission
+  error is no longer tried again. Not run on Windows (inferred; Linux ran the retry with a
+  faked Windows flag).
+- The guide's end topic now says only a remote member can `read` the channel after the close;
+  the leader reads it before `close`.
 - A source's fix lines no longer name options nothing can set: a symlink below a source now says
   `fix: remove them at the source` (was `remove them, or skip them with symlinks = skip`), and a
   folder it can't list `fix: fix its permissions at the source` (was `fix its permissions, or

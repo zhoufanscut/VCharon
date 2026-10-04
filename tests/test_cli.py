@@ -218,6 +218,21 @@ class CliTest(FakeSshCase):
                 self.assertEqual((code, out), (3, ""))
                 self.assertTrue(err.startswith("ERROR config: "), err)
 
+    def test_an_unknown_flag_points_to_its_verbs_help(self):
+        for argv, word, fix in (
+                (["read", "c", "--bogus"], "--bogus", "vcharon read --help"),
+                (["post", "c", "--to", "@a", "--title", "t", "--x=1"], "--x=1",
+                 "vcharon post --help"),
+                (["skill", "install", "--nope"], "--nope", "vcharon skill install --help"),
+                (["--bogus"], "--bogus", "vcharon --help"),
+                (["--bogus", "read", "c"], "--bogus", "vcharon --help")):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_cli(*argv)
+                self.assertEqual((code, out), (3, ""))
+                self.assertEqual(err.splitlines()[:2], [
+                    "ERROR config: unrecognized arguments: %s" % word,
+                    "  fix: %s" % platform.runnable(fix)])
+
     def test_no_abbreviations(self):
         # a prefix of a flag is no flag: it would become part of the contract
         for argv in (["sync", "c", "--ful"], ["sync", "c", "--re", "up"],
@@ -269,45 +284,48 @@ class CliTest(FakeSshCase):
         # each verb's own --help: test_commands' FixRoundTripTest parses its example
 
 
-class Utf8ConsoleTest(unittest.TestCase):
-    """The Windows console switch."""
+class Utf8ConsoleTest(FakeSshCase):
+    """UTF-8 output on every OS, whatever the console or the locale."""
 
-    def test_windows(self):
-        out, err = mock.Mock(), mock.Mock()
-        with mock.patch.object(cli.platform, "os_name", return_value="windows"), \
-                mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
-            cli._utf8_console()
-        for stream in (out, err):
-            stream.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+    def test_main_switches_both_streams(self):
+        for osn in ("linux", "darwin", "windows"):
+            out, err = mock.Mock(), mock.Mock()
+            with self.subTest(osn=osn), \
+                    mock.patch.object(cli.platform, "os_name", return_value=osn), \
+                    mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
+                self.assertEqual(cli.main(["--version"]), 0)
+            for stream in (out, err):
+                stream.reconfigure.assert_called_once_with(encoding="utf-8",
+                                                           errors="backslashreplace")
 
     def test_streams_without_reconfigure(self):
         class Broken:
             def reconfigure(self, **kw):
                 raise ValueError("closed")
 
-        other = mock.Mock()
-        with mock.patch.object(cli.platform, "os_name", return_value="windows"), \
-                mock.patch.object(sys, "stdout", object()), \
-                mock.patch.object(sys, "stderr", Broken()):
-            cli._utf8_console()
-        with mock.patch.object(cli.platform, "os_name", return_value="windows"), \
-                mock.patch.object(sys, "stdout", other), mock.patch.object(sys, "stderr", object()):
-            cli._utf8_console()
-        other.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+            def write(self, text):
+                pass
 
-    def test_main_calls_it(self):
-        with mock.patch.object(cli, "_utf8_console") as switch, \
-                mock.patch.object(sys, "stdout", io.StringIO()):
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", Broken()):
             self.assertEqual(cli.main(["--version"]), 0)
-        switch.assert_called_once_with()
+        self.assertEqual(out.getvalue(), VERSION + "\n")
 
-    def test_not_elsewhere(self):
-        for osn in ("linux", "darwin"):
-            out = mock.Mock()
-            with mock.patch.object(cli.platform, "os_name", return_value=osn), \
-                    mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", out):
-                cli._utf8_console()
-            out.reconfigure.assert_not_called()
+    def test_an_ascii_console_creates_and_says_so(self):
+        # a POSIX locale or PYTHONIOENCODING that isn't UTF-8: the create's lines name a path
+        # that ASCII can't hold, and once the channel exists a failed print would make a retry
+        # say "already exists"
+        project = os.path.join(self.tmp, "mañana")
+        os.makedirs(os.path.join(project, ".git"))
+        env = dict(os.environ, PYTHONIOENCODING="ascii",
+                   VCHARON_CHANNELS_ROOT=os.path.join(self.tmp, "chän"))
+        ran = subprocess.run([sys.executable, "-P", "-m", "vcharon", "create", "t", "--local"],
+                             env=env, cwd=project, capture_output=True, timeout=120,
+                             check=False)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        out = ran.stdout.decode("utf-8")
+        self.assertIn("chän", out)
+        self.assertNotIn("internal", ran.stderr.decode("utf-8"))
 
 
 def with_helper(code):

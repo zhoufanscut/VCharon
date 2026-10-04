@@ -33,12 +33,17 @@ member's folder over the channel's limits (MB or files), left out until it is ba
 a remote member, each folder its last sync left out for that reason, whose copy here stays as
 it was; an entry with no ID, in a
 folder not its ID's, or a second copy of an ID; an entry with no time, or a bad one; one stamped
-after this box's current minute; one stamped in an earlier minute than the entry its re: names
+after this box's current minute; one stamped before the entry its re: names, even within one minute
 (clocks differ?); a re: naming an ID not in the tree (not synced yet, or a typo); re: lines that
 make a cycle within a minute, which then goes by number only; last, when the members'
 MEMBER.md give two or more vcharon versions, each member's (unknown for one with none).
 
-Exit 0; 1 when the channel's folder can't be read (`ERROR can't read <dir>: ...`, on stderr).
+Every text line goes through pathrules.printable: entries are other members' text, and a
+control or format character in one is shown escaped, never sent to the terminal.
+
+Exit 0; 1 when the channel's folder can't be read: an ERROR line with its code and a fix line
+on stderr (cli.py's _read; a local member's channel folder that is gone gives the leave
+command, as the watcher does).
 
 --json prints one object instead (view_json): {"channel", "folder", "synced", "members",
 "member_info", "count", "entries", "notes"}. "folder" is the tree read; "synced" is true for a
@@ -58,7 +63,6 @@ import datetime
 import heapq
 import itertools
 import os
-import sys
 
 from .. import channels, entries, pathrules
 
@@ -243,7 +247,9 @@ def order(items, now):
 
 
 def lines(items, full):
-    """The list's lines for items, in their order."""
+    """The list's lines for items, in their order. Every part comes from a member's file, so
+    each line goes through pathrules.printable: an escape sequence or a CR in another member's
+    entry can't clear the screen or print over a line with one that looks like vcharon's."""
     out = []
     for item in items:
         e = item.e
@@ -256,7 +262,7 @@ def lines(items, full):
             out.append(INDENT + ("%s: %s" % (k, v) if k else v))
         for line in e.body.split("\n") if e.body else ():
             out.append((INDENT + line).rstrip())
-    return out
+    return [pathrules.printable(line) for line in out]
 
 
 def _now():
@@ -307,24 +313,20 @@ def _collect(root, now, skip=None, notes=()):
     return folders, ordered, notes, info
 
 
-def view(root, channel, synced=False, full=False, last=None, now=None, out=print, skip=None,
-         notes=()):
-    """Prints the view of the channel tree root; returns the exit code. skip: read_tree's;
-    notes: more notes (a remote member's: the members its last pull left out)."""
-    try:
-        folders, ordered, notes, _info = _collect(root, now, skip, notes)
-    except OSError as e:
-        print("ERROR can't read %s: %s" % (root, _why(e)), file=sys.stderr)
-        return 1
-    out("%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
-                                   _counted(len(folders), "member", "members"), root,
-                                   ", as of this box's last sync" if synced else ""))
+def view(root, channel, synced=False, full=False, last=None, now=None, skip=None, notes=()):
+    """The view's lines of the channel tree root, to print; OSError when the root can't be
+    read (the caller names it with a code and a fix). Nothing is printed here, so an error
+    writing stdout is never taken for one reading the tree. skip: read_tree's; notes: more
+    notes (a remote member's: the members its last pull left out)."""
+    folders, ordered, notes, _info = _collect(root, now, skip, notes)
+    out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
+                                      _counted(len(folders), "member", "members"), root,
+                                      ", as of this box's last sync" if synced else "")]
     shown = ordered[-last:] if last else ordered
-    for line in lines(shown, full):
-        out(line)
-    for note in notes:
-        out(note)
-    return 0
+    out += lines(shown, full)
+    # a note holds IDs, times and paths from members' files too
+    out += [pathrules.printable(note) for note in notes]
+    return out
 
 
 def view_json(root, channel, synced=False, full=False, last=None, now=None, skip=None,

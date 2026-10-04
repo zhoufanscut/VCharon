@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -87,10 +88,76 @@ class LineBreakTest(EntriesCase):
                 with self.assertRaises(VCharonError):
                     entries.build("t", "mac-a", 1, "ok", ["@x"], header=[("k", "v" + brk)])
 
+    def test_a_title_cant_hold_a_control_character(self):
+        for c in ("\x1b", "\x00", "\x7f", "\x9b", "\u202e", "\u200b", "\ufeff"):
+            with self.subTest(c=repr(c)):
+                self.assertIn("control or format character",
+                              entries.one_line_problem("a" + c + "b"))
+                with self.assertRaises(VCharonError):
+                    entries.build("t", "mac-a", 1, "ok", ["@x"], header=[("k", "v" + c)])
+        self.assertIsNone(entries.one_line_problem("a\tb mañana 東京"))
+
+    def test_the_body_is_lf_only(self):
+        # a lone CR is a line break to a terminal and to str.splitlines(): a heading after
+        # one must be quoted as after "\n"
+        text = entries.build("t", "mac-a", 1, "one", ["@x"],
+                             body="a\r\nb\r" + self.FORGED + "\r\n\r\n")
+        self.assertNotIn("\r", text)
+        self.assertTrue(text.endswith("\n\na\nb\n> " + self.FORGED + "\n"), text)
+        self.assertEqual([l for l in text.splitlines() if l.startswith("## ")],
+                         ["## t — mac-a#1 — one"])
+        # the other breaks stay as they are: entries split on "\n" only
+        self.assertIn("a\x85b", entries.quote_body("a\x85b"))
+
     def test_crlf_files_still_parse(self):
         text = "# R\r\n\r\n## t — mac-a#3 — crlf\r\nto: @x\r\n\r\nbody\r\n"
         (e,) = entries.parse(text)
         self.assertEqual((e.id, e.title, e.to, e.body), ("mac-a#3", "crlf", ("@x",), "body"))
+
+
+class ReplaceTest(EntriesCase):
+    """The swap of a post: tried again on Windows while another program has the file open,
+    for REPLACE_WAIT seconds; elsewhere a PermissionError is the file's own."""
+
+    def replace(self, fails, windows, wait=entries.REPLACE_WAIT):
+        """_replace with os.replace failing fails times: (raised, tries, pauses)."""
+        tries, pauses = [], []
+        now = [0.0]
+
+        def fake(src, dst):
+            tries.append(src)
+            if len(tries) <= fails:
+                raise PermissionError(13, "denied")
+
+        def sleep(s):
+            pauses.append(s)
+            now[0] += s
+
+        with mock.patch.object(entries, "fsops", types.SimpleNamespace(WINDOWS=windows)), \
+                mock.patch.object(entries, "REPLACE_WAIT", wait), \
+                mock.patch.object(entries, "REPLACE_PAUSE", 0.5), \
+                mock.patch.object(entries.os, "replace", fake):
+            try:
+                entries._replace("a", "b", sleep=sleep, clock=lambda: now[0])
+            except PermissionError:
+                return True, len(tries), len(pauses)
+        return False, len(tries), len(pauses)
+
+    def test_windows_tries_again(self):
+        # far more than the five tries a sync's upload could outlast
+        self.assertEqual(self.replace(20, True), (False, 21, 20))
+
+    def test_windows_gives_up_after_the_wait(self):
+        raised, tries, pauses = self.replace(10 ** 6, True, wait=3)
+        self.assertTrue(raised)
+        # pauses of 0.5 s, exact in binary
+        self.assertEqual(pauses, 6)
+        self.assertEqual(tries, pauses + 1)
+        # the wait leaves a post waiting on the lock its turn
+        self.assertLess(entries.REPLACE_WAIT, entries.LOCK_WAIT)
+
+    def test_elsewhere_raised_at_once(self):
+        self.assertEqual(self.replace(1, False), (True, 1, 0))
 
 
 class NumbersTest(EntriesCase):

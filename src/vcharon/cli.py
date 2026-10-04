@@ -67,12 +67,14 @@ SSH. C is a channel's name. Your member name comes from this box, the project (t
 holds .git, .svn or .hg, or --project) and --role; after a join, from your join record."""
 
 
+TOP_HELP = "vcharon --help"
+
+
 class _Parser(argparse.ArgumentParser):
     # argparse exits with 2 on a usage error, and 2 means busy; ours is a usage error (3).
     def error(self, message):
         raise VCharonError("config", message, hint="vcharon %s --help"
-                           % self.prog.partition(" ")[2] if " " in self.prog else
-                           "vcharon --help")
+                           % self.prog.partition(" ")[2] if " " in self.prog else TOP_HELP)
 
 
 # --repeat's limit: the watcher's --every for a streaming watch is 1 to 300 too.
@@ -290,21 +292,11 @@ def _parser():
     return parser
 
 
-def _utf8_console():
-    """(DESIGN, "Launch rules"): on Windows, stdout and stderr write UTF-8. A stream that a
-    test or another tool swapped in may not have reconfigure(). Elsewhere Python writes UTF-8
-    already."""
-    if platform.os_name() != "windows":
-        return
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError, OSError):
-            pass
-
-
 def main(argv=None):
-    _utf8_console()
+    # (DESIGN, "Launch rules"): UTF-8 on every OS, before any command acts. A Windows console's
+    # code page, or a POSIX locale or PYTHONIOENCODING that isn't UTF-8, would otherwise fail
+    # the first name it can't hold, after a create or join has already done its work.
+    watch_mod.utf8_output()
     if platform.is_frozen() and platform.os_name() == "windows":
         # the copies earlier updates renamed the running binary to (DESIGN, "Self-update")
         install.sweep_old()
@@ -322,10 +314,15 @@ def _main(argv, run):
         _update_alone(words)
         parser = _parser()
         try:
-            args = parser.parse_args(words)
+            args, extra = parser.parse_known_args(words)
         except SystemExit as e:
             # --help, --version
             return e.code if isinstance(e.code, int) else 0
+        if extra:
+            # parse_args would say the same, but from the top parser, whose fix is the top
+            # help: a flag unknown after a verb is the verb's to explain
+            raise _usage("unrecognized arguments: %s" % " ".join(extra),
+                         _help_hint(args, words, extra))
         _update_flags(args)
         if args.update:
             return _update(args, run)
@@ -334,6 +331,16 @@ def _main(argv, run):
         return COMMANDS[args.command](args, run)
 
     return _guarded(command, run)
+
+
+def _help_hint(args, words, extra):
+    """The help command for words the parse left over: the verb's (skill install's) when
+    they come after it, else the top help."""
+    command = args.command
+    if command is None or words.index(command) > words.index(extra[0]):
+        return TOP_HELP
+    action = getattr(args, "action", None) if command == "skill" else None
+    return "vcharon %s --help" % " ".join([command] + ([action] if action else []))
 
 
 def _update_alone(words):
@@ -535,8 +542,7 @@ def _stdin_is_terminal():
 def _post(args, run):
     """vcharon post C: an entry into a .md file of your own folder: RESULTS.md, --file's, or
     the leader's STEPS.md (--steps). post() checks the file (mailbox/post.py)."""
-    watch_mod.utf8_output()
-    to, title, re_ = post_mod.check_args(args.to, args.title, args.re, args.body)
+    to, title, re_ = post_mod.check_args(args.to, args.title, args.re, args.body, args.file)
     if args.steps and args.file is not None:
         raise _usage("--steps is --file %s: give one of them" % post_mod.STEPS_FILE,
                      "leave out --file, or --steps")
@@ -562,6 +568,7 @@ def _post(args, run):
             "leave out %s: your entries go into %s"
             % ("--steps" if args.steps else "--file %s" % file, post_mod.RESULTS_FILE))
     tree, synced = _tree(cfg, record)
+    _check_tree(record, tree, synced)
     own = os.path.join(tree, name)
     post_mod.check_own(own, tree if synced else None)
     # a missing own folder is post()'s to refuse, with the rejoin as its fix
@@ -577,11 +584,33 @@ def _post(args, run):
     return 0
 
 
+def _check_tree(record, tree, synced):
+    """A local member's channel folder that is gone (the channel closed): refused with the
+    leave command, as the watcher refuses it. A rejoin can't bring it back, and reading or
+    posting into nothing would only say "no such file". A remote member's copy stays until
+    its leave."""
+    if synced or os.path.isdir(tree):
+        return
+    channel, name = record["channel"], record["name"]
+    raise VCharonError("not_found", "the channel folder %s is gone" % tree,
+                       channel_cmd.CHANNEL_GONE_HINT
+                       % (channel, channel_cmd.name_flags(channel, name, record)))
+
+
+# a failed send's fix when the server may answer later: the entry waits for the next sync
+SEND_LATER_HINT = ("  fix: the entry is saved in your folder; your watcher sends it, or once the "
+                   "server answers, run: vcharon sync %s")
+# any other failure's: the up job's own fix, since no sync can send it until that is done
+SEND_BLOCKED_HINT = "  fix: the entry is saved in your folder, but no sync sends it until: %s"
+
+
 def _send_post(channel, record, flags):
     """A remote member's post goes to the server at once: its section's up job, in this
     process, its sync lines kept back. The entry is written already, so nothing here fails the
     post: a running watcher's round holds the job's lock and sends it itself (a note), and any
-    other failure is a WARN with its error, saying the entry waits for the next sync."""
+    other failure is a WARN with its error. A connection's failure (or one with no fix) says
+    the entry waits for the next sync; any other, such as a closed channel or a name the
+    server refuses, gives the job's own fix, since no later sync gets past it."""
     job = _section(record) + ".up"
     run = _Run()
     out, err = io.StringIO(), io.StringIO()
@@ -595,35 +624,48 @@ def _send_post(channel, record, flags):
               % channel, file=sys.stderr)
         return
     lines = (err.getvalue() + out.getvalue()).splitlines()
-    _code, line, _fix = watch_mod.parse_failure(code, lines, job)
+    _code, line, fix = watch_mod.parse_failure(code, lines, job)
     print("WARN not sent to %s: %s" % (record["ssh"], line.removeprefix("ERROR ")),
           file=sys.stderr)
-    print(platform.runnable("  fix: the entry is saved in your folder; your watcher sends it, "
-                            "or once the server answers, run: vcharon sync %s"
-                            % " ".join([channel] + flags)), file=sys.stderr)
+    log = None
+    if fix is None or watch_mod.error_key(line) == watch_mod.TRANSPORT:
+        fix = SEND_LATER_HINT % " ".join([channel] + flags)
+    else:
+        # parse_failure puts the job's log after its fix, on a line of its own
+        fix, _, log = fix.partition(watch_mod.LOG_SEP)
+        fix = SEND_BLOCKED_HINT % fix
+    print(platform.runnable(fix), file=sys.stderr)
+    if log:
+        print(watch_mod.LOG + log, file=sys.stderr)
 
 
 def _read(args, run):
     """vcharon read C [--json]: read_mod's view of the channel's tree on this box."""
-    watch_mod.utf8_output()
     cfg = load_config()
     record, _ = _membership(args)
     limits = channel_cmd.channel_limits(record)
     tree, synced = _tree(cfg, record)
+    _check_tree(record, tree, synced)
     # a local member reads the other folders where they are: one over the limit is left out,
     # as a remote member's pull leaves it out
     skip = None if synced else _over_limit(limits, record["name"])
     # a remote member: the members its last pull left out, whose copy here is as it was
     notes = charter.left_out_notes(_section(record)) if synced else []
-    if args.json:
-        try:
+    # only the reading is in the try: a closed stdout is _guarded's to handle
+    try:
+        if args.json:
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
                                      last=args.last, skip=skip, notes=notes)
-        except OSError as e:
-            raise fsops.error(e, tree)
+        else:
+            shown = read_mod.view(tree, args.channel, synced=synced, full=args.full,
+                                  last=args.last, skip=skip, notes=notes)
+    except OSError as e:
+        raise fsops.error(e, tree)
+    if args.json:
         return _print_json(doc)
-    return read_mod.view(tree, args.channel, synced=synced, full=args.full, last=args.last,
-                         skip=skip, notes=notes)
+    for line in shown:
+        print(line)
+    return 0
 
 
 def _over_limit(limits, me):
@@ -643,7 +685,6 @@ def _over_limit(limits, me):
 def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
     its synced copy; the watcher's own exit codes."""
-    watch_mod.utf8_output()
     if args.max_errors is not None and not args.until_change:
         raise _usage("--max-errors needs --until-change", "add --until-change, or leave out "
                      "--max-errors")

@@ -30,9 +30,11 @@ is a member's folder in the tree; any other is refused with the members' names, 
 there would go to nobody. --re is optional, an ID (<name>#<n>, an @ in front taken off),
 checked for its form only. The body comes from --body or from stdin, in UTF-8, and is never
 interpreted: give it a file or a quoted heredoc (<<'EOF'), and the shell can't run any of it
-either. It goes after the header's blank line, and a body line that starts like a Markdown
-heading (`# `, `## ` … `###### `) gets `> ` in front, so a body can't forge a header or a
-heading.
+either. It goes after the header's blank line, its line ends made LF (a lone CR too), and a
+body line that starts like a Markdown heading (`# `, `## ` … `###### `) gets `> ` in front, so
+a body can't forge a header or a heading. A title holding a line break, or any other control or
+format character but tab, is refused (vcharon read shows a body's escaped). An option's text
+that isn't valid UTF-8 is refused too.
 
 It refuses, writing nothing: a body bigger than the channel's entry limit (1 MB unless its
 leader set another); an entry file that would grow past it, and an own folder that would hold
@@ -49,8 +51,8 @@ such a stray out; below it, the twin blocks macOS and Windows clients.
 The whole new content goes to a temp file in the file's folder whose name starts with
 .vcharon-stage- (vcharon and the watcher skip those names), then replaces the file in one
 step: a reader, or a sync, sees the old file or the new one, never half of it. On Windows the
-swap fails while another program has the file open (a sync reading it); it's tried a few
-times before giving up.
+swap fails while another program has the file open (a sync reading it); it's tried again for
+up to 15 s (entries.REPLACE_WAIT) before giving up.
 """
 
 from __future__ import annotations
@@ -162,19 +164,40 @@ def _refuse(text, hint):
     return VCharonError("channel", text, hint)
 
 
-def check_args(to, title, re_, body):
+def check_utf8(values):
+    """values: [(the option, its text or None)]. A config error for the first text that
+    isn't valid UTF-8: an argument's bytes that aren't UTF-8 arrive as lone surrogates, which
+    no file can hold, as the body on stdin is refused (body_from)."""
+    for flag, value in values:
+        if value is None:
+            continue
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise VCharonError("config", "%s isn't valid UTF-8" % flag,
+                               hint="give %s in UTF-8%s" % (flag, ", or the body on stdin"
+                                                              if flag == "--body" else ""))
+
+
+def check_args(to, title, re_, body, file=None):
     """The usage errors of a post's options, before anything is read: (the --to tokens, the
     stripped title, the --re ID). A config error (exit 3) each. A bare member's name stays
-    bare in the tokens: post() takes it as @<name> once it has seen the tree."""
+    bare in the tokens: post() takes it as @<name> once it has seen the tree. file: --file,
+    checked here for UTF-8 only (file_parts checks the rest)."""
+    check_utf8([("--title", title), ("--body", body), ("--re", re_), ("--file", file)]
+               + [("--to", arg) for arg in to or ()])
     title = title.strip()
-    if not title or entries.one_line_problem(title):
-        raise VCharonError("config", "--title: one line, not empty, with no line break of any "
-                           "kind", hint="give a one-line --title")
+    if not title:
+        raise VCharonError("config", "--title is empty", hint="give a one-line --title")
+    problem = entries.one_line_problem(title)
+    if problem:
+        raise VCharonError("config", "--title: %s" % problem, hint="give a one-line --title "
+                           "of plain text")
     if re_ is not None and re_.startswith("@"):
         # @mac-web#3 for mac-web#3: the address's form, given by habit
         re_ = re_[1:]
     if re_ is not None and entries.parse_id(re_) is None:
-        raise VCharonError("config", "--re: %s isn't an ID (<name>#<n>)" % re_,
+        raise VCharonError("config", "--re: %s isn't an ID (<name>#<n>)" % pathrules.show(re_),
                            hint="give --re as <name>#<n>, the ID of the entry you answer")
     tokens = [t for arg in to or () for t in arg.split()]
     if not tokens:
@@ -234,13 +257,13 @@ def file_parts(file):
     if (os.path.isabs(file) or file.startswith(("/", "\\")) or any(":" in p for p in parts)
             or any(p in ("", ".", "..") for p in parts)):
         raise VCharonError("config", "--file %s: a file of your own folder, as a name below "
-                           "it (RESULTS.md, notes/run.md)" % file,
+                           "it (RESULTS.md, notes/run.md)" % pathrules.show(file),
                            hint="give --file as a .md file's name in your own folder")
     for part in parts:
         for osn in ("windows", "darwin"):
             problem = pathrules.part_problem(part, osn)
             if problem:
-                raise VCharonError("config", "--file %s: %s" % (file, problem),
+                raise VCharonError("config", "--file %s: %s" % (pathrules.show(file), problem),
                                    hint="pick a name every member's OS can hold")
     return parts
 
@@ -361,6 +384,8 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     path = os.path.abspath(path)
     shown = path
     if not os.path.isdir(os.path.dirname(path)):
+        # the own folder alone is gone (a closed channel's folder is the caller's to refuse:
+        # a rejoin can't bring that back)
         raise _refuse("no folder for %s: post into your own folder" % shown,
                       "join the channel again, with the --project and --role you joined with")
     base = os.path.basename(path)

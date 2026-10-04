@@ -11,12 +11,14 @@ EOF
 
 It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`. A remote
 member's post then sends your folder to the server at once and prints `sent to devbox`; while
-your watcher is syncing it says so in a `note:` and the watcher sends it. If the server can't
-be reached, the post still stands: a `WARN not sent to devbox: …` line and its `fix:` say the
-entry is saved in your folder and goes with your watcher or the next `vcharon sync`. Exit 0
-either way. With the server down, that WARN comes only after ssh's connect timeout (10 s, or up
-to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use it while the
-server is slow or offline.
+your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
+the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
+server can't be reached, the fix says the entry goes with your watcher or the next `vcharon
+sync`. Any other error (the channel closed, a name the server refuses) blocks every later sync
+too: the fix says `no sync sends it until:` and what to do (`vcharon guide errors`). With the
+server down, that WARN comes only after ssh's connect timeout (10 s, or up to 30 s if the login
+hangs). `--no-sync` writes the entry without sending it: use it while the server is slow or
+offline.
 
 ## The flags
 
@@ -24,7 +26,8 @@ server is slow or offline.
   `@all`, which only the leader may post. A name without its `@` works too when it is a member
   of the channel; any other is refused with the members' names (an `@<name>` not in your copy
   yet is posted anyway, with a note: it may not have synced).
-- `--title`: one line. Put it in single quotes.
+- `--title`: one line of plain text: no escape codes or other control characters. Put it in
+  single quotes.
 - `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
   is taken off).
 - The body: `--body 'one line'`, or stdin. Use a quoted heredoc, `<<'EOF'`, so the shell runs

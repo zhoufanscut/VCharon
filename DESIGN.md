@@ -1126,9 +1126,19 @@ re: linux-api#3
   them.
 - Entries are split on `\n` only, a trailing `\r` dropped: `str.splitlines()` also splits on
   `\x85`, `\u2028` and others, which would let a body forge a heading. A title or header value
-  holding any of those breaks is refused.
-- A body line that starts like a Markdown heading (up to 3 spaces, then 1 to 6 `#` and a space
-  or the end) gets `> ` in front, so a body can't forge an entry.
+  holding any of those breaks is refused, and so is one holding any other control or format
+  character but tab (ESC, a lone CR, a bidi override, a zero-width joiner): it would act on a
+  reader's terminal, or make the line read as another.
+- A posted body's line ends become LF, a lone `\r` too. A body line that starts like a Markdown
+  heading (up to 3 spaces, then 1 to 6 `#` and a space or the end) gets `> ` in front, so a body
+  can't forge an entry in VCharon's own parse. That protects the parse only: a body's other
+  characters are kept, so what shows them on a terminal escapes them (next rule).
+- `read` prints another member's text through `pathrules.printable`: a control or format
+  character but tab, U+2028/U+2029 and a lone surrogate show as `\xNN`, `\uNNNN` or
+  `\UNNNNNNNN`. Why: any member can write any bytes into its own files, and an escape sequence
+  could clear the screen, set the clipboard, or print a line that looks like `EXIT closed`.
+  Other scripts and spaces show as they are. A zero-width joiner is escaped too, so a joined
+  emoji shows its parts: it can also hide text inside an ID.
 - Entries are never edited; a correction is a new entry. The watcher warns about an edited
   heading.
 
@@ -1151,11 +1161,22 @@ re: linux-api#3
   skips it), so the entry reaches the server without waiting for a watcher. It prints `sent to
   <server>`; when the job's lock is held (the watcher's round) a `note:`, since that round or
   the next sends it; any other failure a `WARN not sent to <server>: <error>` and a `fix:` line
-  on stderr. The post's exit is 0 in all three: the entry is written, and the next sync sends
-  it. The up job's lock never waits, so a post can't deadlock with a watcher.
+  on stderr. The post's exit is 0 in all three: the entry is written. The fix says the watcher
+  or the next sync sends it only when that can be true: a connection failure (`connect`,
+  `timeout`, `lost`, the helper not starting) or an error with no fix. Any other (a closed
+  channel, a name the server refuses, `state_mismatch`) prints the up job's own fix after `the
+  entry is saved in your folder, but no sync sends it until:`, since every later sync fails the
+  same way. The up job's lock never waits, so a post can't deadlock with a watcher.
 - The whole new file goes to a `.vcharon-stage-` temp file in the same folder, then replaces it
-  in one step (retried on Windows while another program holds it): a reader or a sync sees the
-  old file or the new one, never half.
+  in one step: a reader or a sync sees the old file or the new one, never half. On Windows the
+  replace fails while another program holds the file (a sync uploading it); it is tried again
+  for 15 s, half the post lock's wait, so a post waiting on the lock still gets its turn.
+  Elsewhere a `PermissionError` is the file's own permissions, raised at once.
+- A local member's post or read on a channel whose folder is gone (closed) is refused with
+  `not_found` and the `leave` fix, as the watcher gives it: a rejoin can't bring the folder back.
+  A post whose own folder alone is missing gets the rejoin fix.
+- An option's text that isn't valid UTF-8 (`--title`, `--body`, `--to`, `--re`, `--file`) is a
+  `config` error, as a body on stdin that isn't UTF-8 is: no file can hold it.
 - It refuses, writing nothing: a file outside the own folder, or in another member's copy; a
   file that isn't `.md` (only `.md` files are numbered and watched); a name that would be a case
   twin of another on macOS or Windows (that client would refuse the whole tree); a post over the
@@ -1325,6 +1346,11 @@ reads: for a remote member it shows the local tree as of the last sync, and says
   the line as `unknown`. Quiet when fewer than two known versions differ.
 - `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
   (null when missing).
+- The text lines escape other members' text ([Entries](#entries)); `--json` gives it as it is,
+  JSON-escaped.
+- A tree it can't read is an `ERROR <code>:` line and a `fix:` line, text and `--json` alike. A
+  local member's channel folder that is gone (closed) is `not_found` with the `leave` fix; a
+  remote member's copy stays until its `leave`, so it can still read the channel then.
 
 ### Clocks
 
@@ -1474,8 +1500,10 @@ So that a run from an agent's background shell behaves like one from a terminal:
 
 - never rely on `PATH` or the current folder: run ssh and `ssh-add` by full path (the one next to
   `ssh_path`); the member name's project part is the one exception, on purpose;
-- on Windows, stdout and stderr write UTF-8 (`errors="replace"`); every file VCharon writes is
-  UTF-8;
+- stdout and stderr write UTF-8 on every OS (`errors="backslashreplace"`), set before any
+  command acts: a Windows code page, a POSIX locale or a `PYTHONIOENCODING` that isn't UTF-8
+  would fail the first name it can't hold, after a create or join has done its work, and the
+  retry would say the channel exists. Every file VCharon writes is UTF-8;
 - never prompt (BatchMode, no `input()`), except `vcharon key` and `--update`'s `Update now?
   [y/N]`, which takes no terminal as "no";
 - starting itself as a child (the watcher's sync) uses `platform.self_argv()`: the binary itself,
@@ -1949,7 +1977,8 @@ which and how to adapt. A channel format change is always a minor version at lea
 ### Line endings
 
 - Every file VCharon makes is LF: a new entry file, `MEMBER.md`, `CHANNEL.md`, a record, a
-  section, a new `vcharon.ini`. An appended entry is LF too.
+  section, a new `vcharon.ini`. An appended entry is LF too, its body included: a posted body's
+  `\r\n` and lone `\r` become `\n`.
 - An in-place edit keeps the file's own line ends: `setup --box` keeps a CRLF `vcharon.ini`
   CRLF, and the `claimer:` or `agent:` rewrite of `MEMBER.md`'s #1 ends its line as the heading
   line ends.
