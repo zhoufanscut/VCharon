@@ -1630,11 +1630,12 @@ version check at start-up.
   `api.github.com` only, and dropped on a redirect to another host; timeouts per socket
   operation (15 s for the API, 120 s for a download). A binary whose OpenSSL can't find its
   build machine's CA file uses the system's bundle. An HTTP 401 to a call that carried a token
-  is tried once more without it, and goes on if that works; if that call is refused too (401,
-  403, 429), the error is `bad_token`, whose fix says to unset or renew the variable it names.
+  is tried once more without it, and goes on if that works; if that call hits the rate limit
+  (403, 429), the error is `bad_token`, whose fix says to unset or renew the variable it names.
   Why: a stale token fails every later try the same way, and the release is public; a rate
   limit's fix ("set GITHUB_TOKEN") would be wrong there. A 401 without a token stays
-  `http_error`: there is nothing to drop.
+  `http_error`, also on that second call: there is nothing to drop, and the token isn't what
+  was refused.
 - **The skill**, after a swap: the agents whose skill copy holds the marker (read before the
   swap) get it rewritten by the new binary, run as `<binary> skill install --claude|--codex`
   the way the `--version` check runs it (same timeout, same environment). Not by this process:

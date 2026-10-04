@@ -305,7 +305,9 @@ def _open(url, timeout):
         try:
             return _opener.open(_request(url, None), timeout=timeout)
         except urllib.error.HTTPError as e:
-            if e.code in (401, 403, 429):
+            # 403/429: the limit a valid token gets past; a 401 here carried no token, so the
+            # token isn't what was refused, and it stays http_error
+            if e.code in (403, 429):
                 raise UpdateError("bad_token", "GitHub rejected %s (HTTP 401), and refused the "
                                   "request without it (HTTP %d)" % (token_var, e.code),
                                   BAD_TOKEN_FIX % token_var) from e

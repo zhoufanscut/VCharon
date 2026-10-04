@@ -416,7 +416,7 @@ class LatestReleaseTest(UpdateCase):
 
     def test_a_rejected_token_then_a_refusal(self):
         self.tokens(GH_TOKEN="ghp_old")
-        for code, kind in ((403, "bad_token"), (429, "bad_token"), (401, "bad_token"),
+        for code, kind in ((403, "bad_token"), (429, "bad_token"), (401, "http_error"),
                            (404, "not_found"), (500, "http_error")):
             with self.subTest(code=code):
                 sent = self.answers(401, code)
