@@ -687,9 +687,10 @@ def save_snapshot(path, root, me, files, saved, warns=(), error=None, counted=()
             f.flush()
             os.fsync(f.fileno())
         if fsops.WINDOWS:
-            # a virus scanner may hold the new file open for a moment, as for every other
-            # state file; unretried, --until-change would end with EXIT error
-            fsops.retry_in_use(os.replace, tmp, path)
+            # a virus scanner may hold the new file open for a moment (32), a program the old
+            # one (5), as for every other state file; unretried, --until-change would end with
+            # EXIT error
+            fsops.retry_in_use(os.replace, tmp, path, codes=fsops.HELD_CODES)
         else:
             os.replace(tmp, path)
     except BaseException:
@@ -1549,7 +1550,16 @@ def server_leader(root, me):
     member = os.path.join(root, me, entries.MEMBER_FILE)
     channel = os.path.basename(root)
     if not entries.own_folder(member, top=os.path.join(root, me)):
-        # a root that's gone never gets here: watch_dir ends with EXIT closed
+        # a root that's gone never gets here: watch_dir ends with EXIT closed. The own folder
+        # gone is post's and read's not_found, with the leave fix: join refuses the record of
+        # a folder the channel no longer has, so neither a rejoin nor the user brings it back
+        try:
+            os.lstat(os.path.join(root, me))
+        except FileNotFoundError:
+            raise VCharonError("not_found", "your folder %s in the channel is gone"
+                               % os.path.join(root, me), gone_fix(root, me)) from None
+        except OSError:
+            pass
         raise VCharonError("channel", "%s isn't there: your folder in the channel holds it, once "
                            "vcharon join --local has written it" % member,
                            "ask the user: your folder in %s lost its %s"

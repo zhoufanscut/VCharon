@@ -318,7 +318,7 @@ def _write_atomic(path, data, temp):
             f.flush()
             os.fsync(f.fileno())
         if fsops.WINDOWS:
-            fsops.retry_in_use(os.replace, temp, path)
+            fsops.retry_in_use(os.replace, temp, path, codes=fsops.HELD_CODES)
         else:
             os.replace(temp, path)
     except BaseException:
@@ -1279,15 +1279,17 @@ def _pull_own(server, remote_text, name, own, log, say):
 def _print_entries(tree, name, leader, channel, say):
     """The entries already in the other members' folders addressed to name, or to @all from
     the leader's. An entry whose ID names another member is one line, `WARN entry <id> in
-    <folder>/: not its folder's`, as the watcher's (DESIGN, "Trust and access"), and one with
-    no ID is left out, as the watcher leaves it. Every line goes through pathrules.printable:
-    the text is other members'."""
+    <folder>/: not its folder's`, as the watcher's (DESIGN, "Trust and access"), printed after
+    the entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two
+    files only the first in path order is shown, the copy read and the watcher keep. Every
+    line goes through pathrules.printable: the text is other members'."""
     raw = say
 
     def say(line):
         raw(pathrules.printable(line))
 
     shown = 0
+    warnings = []
     try:
         folders = sorted(os.listdir(tree))
     except OSError:
@@ -1297,17 +1299,26 @@ def _print_entries(tree, name, leader, channel, say):
         if (folder == name or pathrules.writer_problem(folder) is not None
                 or os.path.islink(path) or not os.path.isdir(path)):
             continue
-        for md in entries.md_files(path):
+        seen = set()
+        # read's path order: the paths below the tree, sorted as text
+        for md in sorted(entries.md_files(path),
+                         key=lambda p: os.path.relpath(p, tree).replace(os.sep, "/")):
             try:
                 found = entries.parse_file(md)
             except OSError:
                 continue
             for e in found:
+                if e.name == folder:
+                    # a later copy is left out whoever it is addressed to: the first decides
+                    if e.id in seen:
+                        continue
+                    seen.add(e.id)
                 if "@" + name not in e.to and not (entries.ALL in e.to and folder == leader):
                     continue
                 if e.name != folder:
                     if e.name is not None:
-                        say("WARN entry %s in %s/: not its folder's" % (e.id, folder))
+                        warnings.append("WARN entry %s in %s/: not its folder's"
+                                        % (e.id, folder))
                     continue
                 if not shown:
                     say("entries for %s already in %s:" % (name, channel))
@@ -1329,6 +1340,8 @@ def _print_entries(tree, name, leader, channel, say):
         say("")
     else:
         say("no entries for %s in %s yet" % (name, channel))
+    for line in warnings:
+        say(line)
 
 
 def _run_section(args, section, full):

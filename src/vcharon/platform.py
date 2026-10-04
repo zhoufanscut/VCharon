@@ -18,7 +18,7 @@ import sysconfig
 import tempfile
 import time
 
-from . import fsops
+from . import fsops, pathrules
 from .proto import VCharonError
 
 if os.name == "nt":
@@ -80,7 +80,9 @@ def _vcharon_home():
     # either OS's form, so either is taken.
     if not (os.path.isabs(path) or _path().isabs(path)):
         example = "C:\\vc\\home" if os.name == "nt" else "/tmp/vc/home"
-        raise VCharonError("config", "VCHARON_HOME is %r, not an absolute folder" % value,
+        # as typed: %r would double a Windows path's backslashes
+        raise VCharonError("config", "VCHARON_HOME is '%s', not an absolute folder"
+                           % pathrules.printable(value),
                            "set VCHARON_HOME to a full path, such as %s" % example)
     return path
 

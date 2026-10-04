@@ -384,8 +384,9 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     path = os.path.abspath(path)
     shown = path
     if not os.path.isdir(os.path.dirname(path)):
-        # the own folder alone is gone (a closed channel's folder is the caller's to refuse:
-        # a rejoin can't bring that back)
+        # a remote member's own folder alone is gone: its rejoin finds the folder on the
+        # server. A local member's is the caller's to refuse (cli._check_tree): join refuses
+        # the record of a folder the channel no longer has, so its fix is the leave
         raise _refuse("no folder for %s: post into your own folder" % shown,
                       "join the channel again, with the --project and --role you joined with")
     base = os.path.basename(path)

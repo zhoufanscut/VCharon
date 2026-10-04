@@ -502,7 +502,8 @@ class SnapshotTest(WatchCase):
             self.assertEqual(self.saved_at(self.state()), saved)
 
     def test_a_replace_held_for_a_moment_on_windows(self):
-        # a virus scanner holding the new file: tried again, as every other state file
+        # a virus scanner holding the new file (32), or a program with the old one open
+        # without delete sharing (5): tried again, as every other state file
         path = self.state()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         real = os.replace
@@ -510,9 +511,9 @@ class SnapshotTest(WatchCase):
 
         def replace(src, dst):
             calls.append(dst)
-            if len(calls) == 1:
+            if len(calls) <= 2:
                 e = PermissionError(13, "The process cannot access the file")
-                e.winerror = 32
+                e.winerror = (32, 5)[len(calls) - 1]
                 raise e
             return real(src, dst)
 
@@ -520,7 +521,7 @@ class SnapshotTest(WatchCase):
                 mock.patch.object(watch.fsops, "RETRY_DELAY", 0), \
                 mock.patch.object(watch.os, "replace", replace):
             watch.save_snapshot(path, self.tree, "debian", {}, "then")
-        self.assertEqual(calls, [path, path])
+        self.assertEqual(calls, [path, path, path])
         self.assertEqual(watch.load_snapshot(path, self.tree, "debian")[1], "then")
         self.assertEqual(sorted(os.listdir(os.path.dirname(path))), [os.path.basename(path)])
 
@@ -2509,7 +2510,7 @@ class EntriesTest(WatchCase):
     def test_server_mode_needs_member_md(self):
         os.remove(os.path.join(self.tree, "mac", "MEMBER.md"))
         write_tree(self.tree, {"mac/RESULTS.md": b"r", "solo/MEMBER.md/": None})
-        for me in ("mac", "solo", "nobody"):
+        for me in ("mac", "solo"):
             with self.subTest(me=me):
                 member = os.path.join(self.tree, me, "MEMBER.md")
                 with self.assertRaises(VCharonError) as cm:
@@ -2519,6 +2520,14 @@ class EntriesTest(WatchCase):
                     "channel", "%s isn't there: your folder in the channel holds it, once "
                     "vcharon join --local has written it" % member,
                     "ask the user: your folder in mb lost its MEMBER.md"))
+        # no own folder at all: join refuses that record, so the fix is the leave, as post's
+        with self.assertRaises(VCharonError) as cm:
+            watch.watch_dir(self.tree, "nobody", 10, out=self.lines.append, sleep=never,
+                            rounds=0)
+        self.assertEqual((cm.exception.code, cm.exception.message, cm.exception.hint), (
+            "not_found", "your folder %s in the channel is gone"
+            % os.path.join(self.tree, "nobody"), watch.gone_fix(self.tree, "nobody")))
+        self.assertIn("vcharon leave mb", cm.exception.hint)
         # refused before any line, lock or snapshot
         self.assertEqual(self.lines, [])
         self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "state")))
@@ -2623,8 +2632,15 @@ class ClosedTest(WatchCase):
                 self.assertEqual((code, err), (13, ""))
                 self.assertEqual(lines[1:], ["  fix: " + self.GONE, "EXIT closed"])
                 self.assertTrue(lines[0].startswith("ERROR can't read %s: " % self.tree), lines)
-        # a channel folder that's there without <me>/MEMBER.md: still refused, exit 1
+        # a channel folder that's there without <me>/: refused, exit 1, with the leave fix
         write_tree(self.tree, {"mac/x": b"x"})
+        code, out, err = self.cli("--role", "b", project="web")
+        self.assertEqual(code, 1)
+        self.assertEqual(err.splitlines(), [
+            "ERROR not_found: your folder %s in the channel is gone"
+            % os.path.join(self.tree, "debian"), "  fix: " + self.GONE])
+        # <me>/ there without its MEMBER.md: still refused, exit 1
+        write_tree(self.tree, {"debian/x": b"x"})
         code, out, err = self.cli("--role", "b", project="web")
         self.assertEqual(code, 1)
         self.assertIn("isn't there", err)

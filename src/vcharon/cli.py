@@ -568,10 +568,10 @@ def _post(args, run):
             "leave out %s: your entries go into %s"
             % ("--steps" if args.steps else "--file %s" % file, post_mod.RESULTS_FILE))
     tree, synced = _tree(cfg, record)
-    _check_tree(record, tree, synced)
     own = os.path.join(tree, name)
+    _check_tree(record, tree, synced, own)
     post_mod.check_own(own, tree if synced else None)
-    # a missing own folder is post()'s to refuse, with the rejoin as its fix
+    # a remote member's missing own folder is post()'s to refuse, with the rejoin as its fix
     path = (post_mod.file_below(own, parts) if os.path.isdir(own)
             else os.path.join(own, *parts))
     body = args.body if args.body is not None else post_mod.body_from(_stdin_bytes())
@@ -584,26 +584,32 @@ def _post(args, run):
     return 0
 
 
-def _check_tree(record, tree, synced):
-    """A local member's channel folder that is gone (the channel closed): refused with the
-    leave command, as the watcher refuses it. A rejoin can't bring it back, and reading or
-    posting into nothing would only say "no such file". A remote member's copy stays until
-    its leave."""
+def _check_tree(record, tree, synced, own=None):
+    """A local member's channel folder that is gone (the channel closed), or its own folder own
+    in it (a post's): refused with the leave command, as the watcher refuses it. A rejoin can't
+    bring either back (join refuses a record whose folder the channel no longer has), and
+    reading or posting into nothing would only say "no such file". A remote member's copy stays
+    until its leave."""
     if synced:
         return
-    # only a folder that isn't there is gone, as the watcher decides: a stat refused for
-    # another reason (a parent's permissions) is that error, never the leave fix
-    try:
-        os.stat(tree)
-        return
-    except FileNotFoundError:
-        pass
-    except OSError as e:
-        raise fsops.error(e, tree) from None
     channel, name = record["channel"], record["name"]
-    raise VCharonError("not_found", "the channel folder %s is gone" % tree,
-                       channel_cmd.CHANNEL_GONE_HINT
-                       % (channel, channel_cmd.name_flags(channel, name, record)))
+    # the own folder is lstat'ed: a link there, dangling or not, is check_own's to refuse
+    for path, what, look in [(tree, "the channel folder %s is gone", os.stat),
+                             (own, "your folder %s in the channel is gone", os.lstat)]:
+        if path is None:
+            continue
+        # only a folder that isn't there is gone, as the watcher decides: a stat refused for
+        # another reason (a parent's permissions) is that error, never the leave fix
+        try:
+            look(path)
+            continue
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise fsops.error(e, path) from None
+        raise VCharonError("not_found", what % path,
+                           channel_cmd.CHANNEL_GONE_HINT
+                           % (channel, channel_cmd.name_flags(channel, name, record)))
 
 
 # a failed send's fix when the server may answer later: the entry waits for the next sync

@@ -9,6 +9,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A local member whose own folder is gone from the channel now gets `ERROR not_found: your
+  folder <path> in the channel is gone` from `post` and from the watcher's start, with the
+  same `leave` fix as a closed channel. Before, `post` said to join again, which `join` refuses
+  for that record (an earlier channel), and the watcher said to ask the user. A remote member's
+  `post` still gets the rejoin fix. Measured on Linux.
+- `join`'s list of the entries already there prints an ID that two files hold only once, the
+  first in path order as `read` and the watcher keep it, and its `WARN entry … not its
+  folder's` lines after the list, never before its heading. Measured on Linux.
 - The watcher escapes every line it prints as `read` does: a control or format character in
   an entry's title or ID, or in a file name (`new|changed|gone <path>`, a tree `WARN`), prints
   as `\xNN`, `\uNNNN` or `\UNNNNNNNN`. Before, a member could name a file so that the line
@@ -23,7 +31,8 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   during a long one): on POSIX the child, and in a binary the Python process its bootloader
   started, now end together (SIGTERM, then SIGKILL to the process group), and a pipe something
   else still holds is no longer waited on. `--no-stream`'s 900 s timeout now kills the sync's
-  whole process group too, so a binary's sync no longer runs on holding the job's locks.
+  whole process group too, so a binary's sync no longer runs on holding the job's locks; that
+  kill is SIGKILL at once, so the binary's unpack folder stays behind in the temp folder.
   Measured on Linux with a plain Python child and grandchild, not with a built binary; Windows
   still kills only the bootloader, and that the watcher no longer waits there is inferred.
 - The watching line's `since <time>` no longer moves at each restart: a restart whose first
@@ -37,7 +46,12 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   read. Measured on Linux.
 - A watcher whose lock file a `leave` or `close` deleted at the moment it started now locks the
   new file, not the deleted one (POSIX). The snapshot's replace is retried on Windows while
-  another program holds the file, as other state files are (inferred, not run on Windows).
+  another program holds the file (inferred, not run on Windows).
+- On Windows, replacing a state file, the watcher's snapshot, `vcharon.ini` or a join record
+  now retries access denied (winerror 5) as well as a sharing violation, 3 times 0.2 s apart,
+  as a commit does: a program with the old file open is expected to give access denied. A
+  real access-denied refusal there takes about 0.6 s longer to report. Inferred, not run on
+  Windows; a Linux test takes the Windows path for the snapshot with the errors faked.
 - The docs now give `1 other entry (<folder>)`, the form the watcher prints for one entry,
   beside `<n> other entries (<folders>)`.
 - `join` and `create` refuse a join record of the name left from an earlier channel of that name

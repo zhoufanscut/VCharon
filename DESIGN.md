@@ -761,6 +761,10 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 - A state file that can't be read, or of any other shape, is `state_mismatch` too.
 - Written after a good run and through `state_after` after a commit that failed partway: a temp
   file, fsync, `os.replace`. A dry run never writes state.
+- On Windows that replace is retried after a sharing violation or access denied, 3 times 0.2 s
+  apart, as the commit's are ([Staging and commit](#staging-and-commit)); so are the watcher's
+  snapshot, `vcharon.ini`'s and a join record's: a program with the old file open is expected
+  to give access denied.
 
 ### Lock
 
@@ -1073,8 +1077,9 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   Then the entries already addressed to the member or to all are printed (the sync brought the
   others' folders), since the watcher's first start is a baseline that prints nothing. Each
   line is escaped as `read` escapes it; an entry whose ID names another member is one line,
-  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, and one with no
-  ID is left out, as the watcher leaves it.
+  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the
+  entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two files
+  only the first in path order is printed, the copy `read` and the watcher keep.
 - **The next step.** A `join` or `create` that succeeded prints, just before its `OK` line
   (which stays the last), `  next: start your watcher now, as a background command: vcharon
   watch C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post):
@@ -1206,7 +1211,9 @@ re: linux-api#3
   Elsewhere a `PermissionError` is the file's own permissions, raised at once.
 - A local member's post or read on a channel whose folder is gone (closed) is refused with
   `not_found` and the `leave` fix, as the watcher gives it: a rejoin can't bring the folder back.
-  A post whose own folder alone is missing gets the rejoin fix.
+  So is a local member's post, or watcher start, whose own folder alone is missing: join refuses
+  a record of a folder the channel no longer has. A remote member's post gets the rejoin fix: its
+  rejoin finds the folder on the server.
 - An option's text that isn't valid UTF-8 (`--title`, `--body`, `--to`, `--re`, `--file`) is a
   `config` error, as a body on stdin that isn't UTF-8 is: no file can hold it.
 - It refuses, writing nothing: a file outside the own folder, or in another member's copy; a
@@ -1669,13 +1676,14 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   Python process, so both end the usual way and the unpack folder goes; after 3 s, whatever is
   left of its process group gets SIGKILL, sent before the child is reaped, so the group's id
   can't belong to another process yet. `--no-stream`'s sync runs through `fsops.run` in a new
-  session, whose timeout kills the whole group. Why: the Python process holds the pipes, so the
-  watcher would wait on it with no end (no `EXIT` line, `--max-minutes` unable to fire, the
-  lock held), and it holds the job's locks, so every later round would be busy. A pipe whose
-  reader still runs after the child ended is left open, never closed under the reader. Windows
-  has no tree kill here: `TerminateProcess` ends the bootloader alone, and its Python process
-  ends by its own rules (its stdin's end, the orphan check); the watcher no longer waits for it
-  (inferred, not run on Windows).
+  session, whose timeout kills the whole group with SIGKILL at once, so a binary's unpack folder
+  stays behind each time: rare, and better than an orphan holding the locks. Why: the Python
+  process holds the pipes, so the watcher would wait on it with no end (no `EXIT` line,
+  `--max-minutes` unable to fire, the lock held), and it holds the job's locks, so every later
+  round would be busy. A pipe whose reader still runs after the child ended is left open, never
+  closed under the reader. Windows has no tree kill here: `TerminateProcess` ends the bootloader
+  alone, and its Python process ends by its own rules (its stdin's end, the orphan check); the
+  watcher no longer waits for it (inferred, not run on Windows).
 
 ### Self-update
 

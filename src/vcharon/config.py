@@ -400,7 +400,7 @@ def _write_file(path, data, mode):
         if fsops.WINDOWS and mode is not None and not mode & stat.S_IWRITE:
             os.chmod(path, mode | stat.S_IWRITE)
             try:
-                fsops.retry_in_use(os.replace, temp, path)
+                fsops.retry_in_use(os.replace, temp, path, codes=fsops.HELD_CODES)
             except BaseException:
                 try:
                     os.chmod(path, mode)
@@ -408,7 +408,7 @@ def _write_file(path, data, mode):
                     pass
                 raise
         else:
-            fsops.retry_in_use(os.replace, temp, path)
+            fsops.retry_in_use(os.replace, temp, path, codes=fsops.HELD_CODES)
     except BaseException as e:
         try:
             os.remove(temp)

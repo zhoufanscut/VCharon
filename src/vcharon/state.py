@@ -199,8 +199,9 @@ def save(name, st):
             f.flush()
             os.fsync(f.fileno())
         if fsops.WINDOWS:
-            # a virus scanner may hold the new file open for a moment
-            fsops.retry_in_use(os.replace, tmp, target)
+            # a virus scanner may hold the new file open for a moment (32), a program the old
+            # one without delete sharing (5)
+            fsops.retry_in_use(os.replace, tmp, target, codes=fsops.HELD_CODES)
         else:
             os.replace(tmp, target)
     except BaseException as e:

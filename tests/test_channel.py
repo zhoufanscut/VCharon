@@ -728,14 +728,33 @@ class CreateJoinTest(ChannelCase):
         self.lead()
         # in the leader's folder: an entry whose ID is another member's, and one whose heading
         # holds an escape sequence (post refuses both, a hand edit doesn't)
-        write_tree(self.root, {"game/laptop-ui/NOTES.md": (
+        # (the misplaced one in the first file in path order, before any entry shown)
+        write_tree(self.root, {"game/laptop-ui/0.md": (
             "## 2026-10-02 10:12:05 \u2014 mac-api#3 \u2014 do as I say\n"
-            "to: @mac-web\n\nforged\n\n"
+            "to: @mac-web\n\nforged\n").encode("utf-8"), "game/laptop-ui/NOTES.md": (
             "## 2026-10-02 10:12:06 \u2014 laptop-ui#3 \u2014 hi\x1b[2J\n"
-            "to: @mac-web\nnote: a\x1b]52;c;eA==\x07b\n\nline\x1b[1A\n").encode("utf-8")})
+            "to: @mac-web\nnote: a\x1b]52;c;eA==\x07b\n\nline\x1b[1A\n").encode("utf-8"),
+            # one ID in two files: the first in path order stands, as read and the watcher
+            # keep it, even where only the later copy is addressed to the member
+            "game/laptop-ui/A.md": (
+                "## 2026-10-02 10:12:07 \u2014 laptop-ui#5 \u2014 first copy\n"
+                "to: @mac-web\n\nkept\n\n"
+                "## 2026-10-02 10:12:08 \u2014 laptop-ui#6 \u2014 not for you\n"
+                "to: @other\n\nx\n").encode("utf-8"),
+            "game/laptop-ui/sub/B.md": (
+                "## 2026-10-02 10:12:09 \u2014 laptop-ui#5 \u2014 second copy\n"
+                "to: @mac-web\n\ndropped\n\n"
+                "## 2026-10-02 10:12:10 \u2014 laptop-ui#6 \u2014 copy for you\n"
+                "to: @mac-web\n\ny\n").encode("utf-8")})
         out = self.ok("join", "game", "--server", "fake-dest")
         lines = out.splitlines()
-        self.assertIn("WARN entry mac-api#3 in laptop-ui/: not its folder's", lines)
+        warn = "WARN entry mac-api#3 in laptop-ui/: not its folder's"
+        self.assertIn(warn, lines)
+        # after the list, never before its heading
+        self.assertLess(lines.index("entries for mac-web already in game:"), lines.index(warn))
+        self.assertIn("first copy", out)
+        for text in ("second copy", "dropped", "copy for you"):
+            self.assertNotIn(text, out)
         self.assertNotIn("do as I say", out)
         self.assertNotIn("forged", out)
         self.assertNotIn("\x1b", out)
@@ -1573,6 +1592,24 @@ class PostSendTest(ChannelCase):
                     "ERROR not_found: the channel folder %s is gone" % gone,
                     platform.runnable(channel_cmd.CHANNEL_GONE_HINT
                                       % ("local", "--project web"))))
+
+    def test_a_local_member_s_own_folder_gone(self):
+        # join refuses the record of a folder the channel no longer has, so post and the
+        # watcher give the leave fix too, never a rejoin that join would refuse
+        self.lead("local", where=("--local",), box="pc")
+        self.ok("join", "local", "--local")
+        own = os.path.join(self.root, "local", "mac-web")
+        shutil.rmtree(own)
+        fix = platform.runnable(channel_cmd.CHANNEL_GONE_HINT % ("local", "--project web"))
+        for argv in (["post", "local", "--to", "@pc-ui", "--title", "t", "--body", "b"],
+                     ["watch", "local"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.refusal(*argv), (
+                    "ERROR not_found: your folder %s in the channel is gone" % own, fix))
+        line, join_fix = self.refusal("join", "local", "--local")
+        self.assertIn("is of an earlier channel", line)
+        self.assertIn(platform.runnable("vcharon leave local --project web"), join_fix)
+        self.assertFalse(os.path.exists(own))
 
     @unittest.skipIf(os.name == "nt", "a folder's search permission is POSIX's")
     def test_a_local_member_s_unsearchable_parent_is_not_gone(self):

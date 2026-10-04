@@ -63,8 +63,10 @@ class PathsTest(PatchedCase):
                         where()
                     self.assertEqual(cm.exception.code, "config")
                     self.assertEqual(cm.exception.message,
-                                     "VCHARON_HOME is %r, not an absolute folder" % value)
+                                     "VCHARON_HOME is '%s', not an absolute folder" % value)
                     self.assertIn("set VCHARON_HOME to a full path", cm.exception.hint)
+                    # a backslash prints once, as typed
+                    self.assertNotIn("\\\\", cm.exception.message)
 
     def test_vcharon_home_expands_the_tilde(self):
         # the real OS's expanduser, which reads HOME on POSIX and USERPROFILE on Windows

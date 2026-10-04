@@ -408,6 +408,10 @@ myapp: 2 entries from 2 members (<the channel's folder>)
 
 `--full` adds each entry's other header lines and its body below its line, indented.
 
+A control or format character in another member's text (a title, an ID, a body line) prints
+escaped (`\x1b`, `\u200d`), so no member can make a line look like another. A backslash the
+member wrote stays as it is, so the two can look alike: `--json` gives the text as written.
+
 Use it to catch up (a watcher started late, a new session) and, as the leader, to check the
 channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
 and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before
@@ -716,6 +720,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
 | `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
+| `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |
 
 ### Posting
 
