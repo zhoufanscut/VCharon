@@ -365,8 +365,10 @@ class LatestReleaseTest(UpdateCase):
                 self.assertEqual(caught.exception.kind, "bad_response")
 
     def test_http_errors(self):
+        # no token set: a 401 has no token to blame, so it isn't retried
+        self.tokens()
         for code, kind in ((403, "rate_limited"), (429, "rate_limited"), (404, "not_found"),
-                           (500, "http_error")):
+                           (401, "http_error"), (500, "http_error")):
             def refuse(request, timeout, code=code):
                 raise urllib.error.HTTPError(update.API_LATEST, code, "no", {}, None)
 
@@ -377,6 +379,54 @@ class LatestReleaseTest(UpdateCase):
                 self.assertEqual(caught.exception.kind, kind)
                 if kind == "rate_limited":
                     self.assertEqual(caught.exception.fix, update.RATE_FIX)
+
+    def tokens(self, **set_):
+        """Only the token variables in set_, until the test ends."""
+        patcher = mock.patch.dict(os.environ, set_)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for var in update.TOKEN_VARS:
+            if var not in set_:
+                os.environ.pop(var, None)
+
+    def answers(self, *codes):
+        """An opener whose calls answer codes in turn (None: a release), and the
+        Authorization header each call carried."""
+        sent = []
+        replies = iter(codes)
+
+        def answer(request, timeout):
+            sent.append(request.get_header("Authorization"))
+            code = next(replies)
+            if code is None:
+                return io.BytesIO(json.dumps(release_json()).encode("utf-8"))
+            raise urllib.error.HTTPError(update.API_LATEST, code, "no", {}, None)
+
+        self.patch(update, "_opener", new=types.SimpleNamespace(open=answer))
+        return sent
+
+    def test_a_rejected_token_is_dropped(self):
+        # a stale token: the public release is read without it
+        for var in update.TOKEN_VARS:
+            with self.subTest(var=var):
+                self.tokens(**{var: "ghp_old"})
+                sent = self.answers(401, None)
+                self.assertEqual(update.latest_release().tag, "v9.9.9")
+                self.assertEqual(sent, ["Bearer ghp_old", None])
+
+    def test_a_rejected_token_then_a_refusal(self):
+        self.tokens(GH_TOKEN="ghp_old")
+        for code, kind in ((403, "bad_token"), (429, "bad_token"), (401, "bad_token"),
+                           (404, "not_found"), (500, "http_error")):
+            with self.subTest(code=code):
+                sent = self.answers(401, code)
+                with self.assertRaises(update.UpdateError) as caught:
+                    update.latest_release()
+                self.assertEqual(caught.exception.kind, kind)
+                self.assertEqual(sent, ["Bearer ghp_old", None])
+                if kind == "bad_token":
+                    self.assertEqual(caught.exception.fix, update.BAD_TOKEN_FIX % "GH_TOKEN")
+                    self.assertIn("GH_TOKEN (HTTP 401)", str(caught.exception))
 
     def test_a_reply_cut_short(self):
         # IncompleteRead is an HTTPException, not an OSError

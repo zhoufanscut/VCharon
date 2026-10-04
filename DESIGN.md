@@ -1629,7 +1629,12 @@ version check at start-up.
 - **Network**: https only, also after a redirect; `GITHUB_TOKEN` (or `GH_TOKEN`) is sent to
   `api.github.com` only, and dropped on a redirect to another host; timeouts per socket
   operation (15 s for the API, 120 s for a download). A binary whose OpenSSL can't find its
-  build machine's CA file uses the system's bundle.
+  build machine's CA file uses the system's bundle. An HTTP 401 to a call that carried a token
+  is tried once more without it, and goes on if that works; if that call is refused too (401,
+  403, 429), the error is `bad_token`, whose fix says to unset or renew the variable it names.
+  Why: a stale token fails every later try the same way, and the release is public; a rate
+  limit's fix ("set GITHUB_TOKEN") would be wrong there. A 401 without a token stays
+  `http_error`: there is nothing to drop.
 - **The skill**, after a swap: the agents whose skill copy holds the marker (read before the
   swap) get it rewritten by the new binary, run as `<binary> skill install --claude|--codex`
   the way the `--version` check runs it (same timeout, same environment). Not by this process:
@@ -1642,8 +1647,9 @@ version check at start-up.
 - **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;
   once the release is read `latest`, `tag`, `update_available`, `url`, `changed`, `confirmed`;
   `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
-  `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `checksum_mismatch`,
-  `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …), `message` and `fix`;
+  `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `bad_token`,
+  `checksum_mismatch`, `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …),
+  `message` and `fix`;
   another install kind's `command`; an install's `previous`, `installed`, `verified`, and
   `skills` (`{"paths", "ok", "fix"}`: the skill copies the new binary was run for, empty when
   none, whether that worked, and the command to run when it didn't).

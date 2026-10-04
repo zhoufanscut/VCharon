@@ -9,6 +9,11 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `--update`: a `GITHUB_TOKEN` (or `GH_TOKEN`) that GitHub rejects with HTTP 401 no longer
+  fails as `http_error` with "try again later", which every retry repeated. The call is tried
+  once more without the token and the update goes on; if GitHub refuses that too, the `--json`
+  error is the new `bad_token`, whose fix says to unset or renew the variable it names.
+  Measured on Linux with a faked opener (the tests); not tried against GitHub itself.
 - `install.sh` takes at most 200 MB of binary out of the archive, as `install.ps1` and
   `--update` already did: a bigger `vcharon` member fails with `error: the vcharon in <archive>
   is over 200000000 bytes; nothing was installed`. With a published `.sha256` and no

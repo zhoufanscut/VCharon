@@ -57,6 +57,8 @@ from . import VERSION, fsops, install, platform
 
 REPO = install.REPO
 API_ROOT = "https://api.github.com/"
+# read in this order; the first one set is sent
+TOKEN_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
 API_LATEST = "%srepos/%s/releases/latest" % (API_ROOT, REPO)
 RELEASES_URL = install.RELEASES_URL
 
@@ -81,6 +83,8 @@ USER_AGENT = "vcharon/%s (+https://github.com/%s)" % (VERSION, REPO)
 RETRY_FIX = "nothing was changed; try again later, or download it from %s" % RELEASES_URL
 NETWORK_FIX = "check this machine's network, then try again"
 RATE_FIX = "wait a few minutes, or set GITHUB_TOKEN, then try again"
+# a rejected token fails every try the same way until it is changed
+BAD_TOKEN_FIX = "unset or renew %s, then try again"
 PIPX_FIX = "install with pipx instead: pipx install %s" % install.GIT_SPEC
 # a release whose asset is wrong: trying again gets the same asset
 BROKEN_FIX = ("nothing was changed; the release's download looks broken: see %s, or %s"
@@ -284,16 +288,28 @@ def _open(url, timeout):
     if _opener is None:
         _opener = urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=_ssl_context()), _StripAuthOnRedirect())
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     # A token only for the API, to get past its 60 calls an hour per address on a shared NAT;
     # never sent with an asset download (public, and on another host).
+    token_var = None
     if url.startswith(API_ROOT):
-        request.add_header("Accept", "application/vnd.github+json")
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-        if token:
-            request.add_header("Authorization", "Bearer %s" % token.strip())
+        token_var = next((name for name in TOKEN_VARS if os.environ.get(name)), None)
     try:
-        return _opener.open(request, timeout=timeout)
+        try:
+            return _opener.open(_request(url, token_var), timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code != 401 or not token_var:
+                raise
+            _close(e)
+        # A stale or revoked token: the release is public, so the call works without it, and
+        # every later try would fail on the same token
+        try:
+            return _opener.open(_request(url, None), timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403, 429):
+                raise UpdateError("bad_token", "GitHub rejected %s (HTTP 401), and refused the "
+                                  "request without it (HTTP %d)" % (token_var, e.code),
+                                  BAD_TOKEN_FIX % token_var) from e
+            raise
     except urllib.error.HTTPError as e:
         if e.code in (403, 429):
             raise UpdateError("rate_limited", "GitHub refused the request for now (HTTP %d)"
@@ -306,6 +322,16 @@ def _open(url, timeout):
         # URLError: DNS, TLS, a refused connection; a socket timeout is an OSError
         raise UpdateError("network", "couldn't reach %s: %s" % (_host(url) or url, e),
                           NETWORK_FIX) from e
+
+
+def _request(url, token_var):
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    if url.startswith(API_ROOT):
+        request.add_header("Accept", "application/vnd.github+json")
+        if token_var:
+            request.add_header("Authorization",
+                               "Bearer %s" % os.environ[token_var].strip())
+    return request
 
 
 def _get_json(url, timeout):
