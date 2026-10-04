@@ -211,9 +211,11 @@ main() {
   # Only the binary, never the whole archive, and only its bytes: a link member named
   # vcharon writes nothing here, and the --version check below fails. The member is looked
   # for first because sh has no pipefail: the pipe's status below is head's, not tar's. One
-  # byte over the cap is read, so a binary of exactly MAX_BINARY bytes passes.
+  # byte over the cap is read, so a binary of exactly MAX_BINARY bytes passes. tar's own
+  # stderr stays visible, so a damaged archive says so above the error; grep reads the whole
+  # listing (no -q), so tar never writes into a closed pipe.
   echo "Extracting ..."
-  tar -tzf "${WORK_DIR}/${TARBALL}" 2>/dev/null | grep -qx "${BIN_NAME}" \
+  tar -tzf "${WORK_DIR}/${TARBALL}" | grep -x "${BIN_NAME}" > /dev/null \
     || die "${TARBALL} holds no ${BIN_NAME}"
   tar -xzOf "${WORK_DIR}/${TARBALL}" "${BIN_NAME}" \
     | head -c "$((MAX_BINARY + 1))" > "${WORK_DIR}/${BIN_NAME}"

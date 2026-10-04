@@ -255,11 +255,21 @@ class InstallShTest(unittest.TestCase):
         # zeros compress to about 0.2 MB: the cap is on what comes out, not the download
         self.release()
         self.publish(tarball({"vcharon": MAX_BINARY + 1, "LICENSE": b"MIT\n"}))
+        # the error reads the same after an unbounded write, so a head(1) that logs its
+        # arguments shows the read itself stops one byte over the cap
+        log = os.path.join(self.shims, "head.log")
+        shim = os.path.join(self.shims, "head")
+        with open(shim, "wb") as f:
+            f.write(b'#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n'
+                    % (log.encode(), shutil.which("head").encode()))
+        os.chmod(shim, 0o755)
         code, _, err = self.install()
         self.assertEqual(code, 1)
         self.assertIn("error: the vcharon in %s is over %d bytes; nothing was installed"
                       % (ASSET, MAX_BINARY), err)
         self.assert_nothing_installed()
+        with open(log, encoding="utf-8") as f:
+            self.assertIn("-c %d" % (MAX_BINARY + 1), f.read().splitlines())
 
     def test_an_archive_without_vcharon_installs_nothing(self):
         # sh has no pipefail: the member is looked for before the capped extraction
@@ -347,15 +357,7 @@ class InstallShTest(unittest.TestCase):
 
     def no_timeout_path(self):
         """A PATH of the tools install.sh uses, without timeout(1), as on macOS."""
-        tools = os.path.join(self.shims, "tools")
-        os.mkdir(tools)
-        for name in ("curl", "tar", "gzip", "sha256sum", "shasum", "awk", "sed", "grep", "head",
-                     "wc", "tr", "mktemp", "rm", "mkdir", "cp", "chmod", "mv", "cat", "sleep"):
-            found = shutil.which(name)
-            if found:
-                os.symlink(found, os.path.join(tools, name))
-        self.assertFalse(os.path.exists(os.path.join(tools, "timeout")))
-        return self.shims + os.pathsep + tools
+        return self.tools_path(("timeout",))
 
     def sleeps(self, seconds):
         """The running `sleep <seconds>` processes the last install() started (Linux /proc
@@ -390,16 +392,24 @@ class InstallShTest(unittest.TestCase):
             os.killpg(loop.pid, signal.SIGKILL)
             loop.wait()
         self.addCleanup(stop)
-        # its first sleep running: the count below would see it without the session filter
+        # its first sleep running: the count below would see it without the session filter.
+        # Found by parent pid in /proc/<pid>/stat (the 4th field, 2nd after the name), which
+        # every Linux kernel has, unlike /proc/<pid>/task/<pid>/children.
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            try:
-                with open("/proc/%d/task/%d/children" % (loop.pid, loop.pid)) as f:
-                    if f.read().split():
-                        return
-            except OSError:
-                pass
+            for pid in os.listdir("/proc"):
+                if not pid.isdigit():
+                    continue
+                try:
+                    with open("/proc/%s/stat" % pid, "rb") as f:
+                        stat_line = f.read()
+                except OSError:
+                    continue
+                fields = stat_line[stat_line.rfind(b")") + 1:].split()
+                if len(fields) >= 2 and int(fields[1]) == loop.pid:
+                    return
             time.sleep(0.05)
+        self.fail("the unrelated sleep loop never started its sleep")
 
     @unittest.skipUnless(os.path.isdir("/proc"), "counts processes through /proc")
     def test_without_timeout_a_quick_binary_leaves_no_sleeper(self):
