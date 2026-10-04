@@ -12,10 +12,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - On Windows, a commit that replaces or deletes a file, or removes a folder, retries access
   denied (winerror 5) 3 times, 0.2 s apart, as it already did a sharing violation, before it
   reports `permission`: a file another program has open, such as a `vcharon read` overlapping a
-  down commit, gives access denied, and a watcher run with `--until-change` would wake on that
-  passing error and then on its recovery. Inferred, not run on Windows: Linux tests take the
-  Windows code path with the error faked. A real access-denied refusal now takes about 0.6 s
-  longer to report.
+  down commit, is expected to give access denied, and a watcher run with `--until-change` would
+  wake on that passing error and then on its recovery. Inferred, not run on Windows: Linux tests
+  take the Windows code path with the error faked. A real access-denied refusal now takes about
+  0.6 s longer to report.
 - On POSIX, a root path with `..` after a symlink (`x/link/..`, `link -> a/b/c`) resolves to
   what `realpath` and the kernel give (`a/b`), where it used to drop `link/..` as text and use
   `x`. Measured on Linux by the tests.

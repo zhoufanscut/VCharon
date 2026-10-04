@@ -37,8 +37,8 @@ RETRIES = 3
 RETRY_DELAY = 0.2
 
 # Windows errors of a step blocked by another process holding the path: access denied (5; seen
-# for a folder held open, and expected for a file replaced or deleted while a program has it open
-# without FILE_SHARE_DELETE, as Python opens files), a sharing violation (32)
+# for a folder held open, and expected for a file replaced while a program has it open without
+# FILE_SHARE_DELETE, as Python opens files), a sharing violation (32)
 HELD_CODES = (5, 32)
 
 

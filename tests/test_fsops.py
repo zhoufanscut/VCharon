@@ -256,12 +256,13 @@ class ResolveRootTest(unittest.TestCase):
         self.link("abs", os.path.join(self.tmp, "real"))
         self.link("rel", "real/sub")
         self.link("chain", "abs")
+        self.link("chain2", "rel")
         self.link("up", "real/sub/..")
         self.link("dangling", "nowhere/deeper")
         # "link/.." goes up from the link's target, not back to the link's folder
         cases = ["real", "abs", "abs/sub", "rel", "chain/sub", "up", "up/sub/../sub",
                  "missing", "missing/a/b", "abs/missing/c", "dangling", "dangling/x",
-                 "file/x", "./real/./sub", "real/../abs", "rel/..", "chain/..", "rel/../.."]
+                 "file/x", "./real/./sub", "real/../abs", "rel/..", "chain2/..", "rel/../.."]
         for rel in cases:
             path = os.path.join(self.tmp, rel)
             with self.subTest(rel=rel):

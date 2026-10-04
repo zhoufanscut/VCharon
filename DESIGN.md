@@ -676,8 +676,8 @@ default. Linux receiver: no folding.
   step: it narrows the race without closing it. A read-only file is made writable before it is
   replaced or deleted. A sharing violation and access denied are both retried 3 times, 0.2 s
   apart, then are `in_use` and `permission`: virus scanners briefly hold new files, and a file
-  another program has open without delete sharing (as Python opens files) gives access denied
-  when it is replaced or deleted.
+  another program has open without delete sharing (as Python opens files) is expected to give
+  access denied when it is replaced (a folder held open was seen to give it).
 - A failed commit stops, removes the stage dir and reports what it did; nothing is undone.
   Running again is safe: puts overwrite, deleting a missing path does nothing, and the state never
   records more than is at the target.
