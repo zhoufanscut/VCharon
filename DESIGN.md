@@ -1295,6 +1295,23 @@ each channel limits each member's folder and each entry file.
 `vcharon watch C` prints what reached a member. A local member's watcher reads the channel
 folder every 10 s; a remote member's runs a sync and then reads its local tree.
 
+- **Output outside the channel.** `watch` refuses to start, with `ERROR config: the watcher's
+  output goes to <path>, a file in the channel: …` and exit 3, when its stdout or stderr is a
+  regular file in the channel tree as this machine holds it (a local member's channel folder, a
+  remote member's copy). Why: that file goes to every member, its `watching` line puts this
+  machine's path there, and each write is a change line in every other watcher. Checked once,
+  before the watch writes anything (the `MEMBER.md` refresh, the snapshot and its lock): each
+  stream's `fstat` against an `lstat` walk of the tree, by `(st_dev, st_ino)`, following no link;
+  pipes, terminals and files elsewhere pass. `<path>` is the file's path in the channel, never
+  this machine's. The fix says to delete it only if the redirect created it: a `>>` onto
+  `RESULTS.md` or `MEMBER.md` matches too, and agents follow fix lines as written. It names the
+  file in backticks, or as "that file" when fix lines' respelling would change the name (it
+  holds ` vcharon <verb>` and this install isn't run as plain `vcharon`). The refusal goes to stderr even when stderr is that
+  file: an agent that sent both there reads its error in it. Limits: only a file the process
+  holds itself is seen, so a pipe that ends in a channel file (`| tee <channel>/x.log`) passes,
+  and so, likely, does PowerShell's `>` on a native program, which pipes (inferred, not run);
+  cmd's and Git Bash's `>` hand over the file itself and are caught (inferred). An error raised
+  before the tree is known (the config, the membership) still goes to a redirected stderr.
 - **Remote members stream.** One long-lived child, `vcharon sync C --repeat <every>` (default
   every 2 s, 1 to 300), keeps one ssh connection; each `ROUND <code>` line ends one round. When
   the child exits it is started again after 2, 4, 8, 16, 30, 30… s, back to 2 after a good

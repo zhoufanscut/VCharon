@@ -110,6 +110,7 @@ import os
 import queue
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -742,6 +743,38 @@ def _same_file(fd, path):
         return False
     held = os.fstat(fd)
     return (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino)
+
+
+def output_in_tree(tree, streams=None):
+    """The path, inside the channel tree and with "/", of the regular file one of streams
+    (sys.stdout and sys.stderr by default: where the watcher's lines go) writes to, or None.
+    A watcher's output in the channel goes to every member, its watching line puts this
+    machine's path there, and each of its writes is a change line in the other watchers.
+    Pipes, terminals, devices and files elsewhere are fine. Files are told by (st_dev, st_ino),
+    which os.lstat fills on Windows too (DirEntry.stat leaves them 0 there); a 0 st_ino
+    can't be compared. The walk follows no link, and runs once, at the start."""
+    wanted = set()
+    for stream in (sys.stdout, sys.stderr) if streams is None else streams:
+        try:
+            st = os.fstat(stream.fileno())
+        except (AttributeError, TypeError, ValueError, OSError):
+            # no file descriptor (a test's StringIO, a closed stream, pythonw's None, a
+            # stand-in whose fileno isn't an int)
+            continue
+        if stat.S_ISREG(st.st_mode) and st.st_ino:
+            wanted.add((st.st_dev, st.st_ino))
+    if not wanted:
+        return None
+    for top, _dirs, files in os.walk(tree):
+        for name in files:
+            path = os.path.join(top, name)
+            try:
+                st = os.lstat(path)
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) in wanted:
+                return os.path.relpath(path, tree).replace(os.sep, "/")
+    return None
 
 
 class _Watch:

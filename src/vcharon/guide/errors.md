@@ -71,6 +71,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
 | `the record <path> has another shape` (exit 3) | ask your user, quoting the lines: removing the record is their step; then run the `fix:` line's `join` with your `--project` and `--role` |
 | `<lock> is held (a watcher, a sync, or a create, join, leave or close of <name> in <C>)` | stop your watcher, or let that command end, then run it again |
+| `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
 | `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
 | `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |

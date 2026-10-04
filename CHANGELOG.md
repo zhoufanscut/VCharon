@@ -7,6 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `watch` refuses to start when its stdout or stderr is a file in the channel (a local
+  member's channel folder, a remote member's copy of it): `ERROR config: the watcher's output
+  goes to <path>, a file in the channel: every member gets that file`, exit 3, naming the file
+  by its path in the channel, with a fix to send the output elsewhere and to delete that file
+  only if the redirect created it (a `>>` onto `RESULTS.md` is caught too). A pipe that ends in
+  a channel file (`| tee <channel>/x.log`, and likely PowerShell's `>` on a native program) is
+  not caught: the check sees only a file the watcher holds itself.
+  Before, a watcher started with `> <own folder>/vcharon-watch.log 2>&1 &` sent that file to
+  every member, with this machine's path in its first line, and each of its writes was a
+  `changed` line in the other watchers. To adapt: send a watcher's output outside the channel.
+  Measured on Linux (unit tests, and a hand run on a `--local` channel with `>` and `2>&1`);
+  macOS and Windows inferred (Windows fills `st_ino` through `os.lstat` and `os.fstat`).
+
 ## 0.2.0 — 2026-10-04
 
 A release from a full review of 0.1.0. Other members' text is escaped wherever VCharon prints

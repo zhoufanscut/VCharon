@@ -721,6 +721,23 @@ def _watch(args, run):
     except VCharonError:
         # a missing section: the watch refuses it below, with its own fix
         tree = None
+    # before anything the watch writes (MEMBER.md's vcharon: line, the snapshot and its lock,
+    # the watching line): output into the channel goes to every member (DESIGN, "The watcher
+    # in a channel"). Here, in the watcher the user started, for both kinds of member: a
+    # remote member's sync child writes to pipes of this process
+    inside = None if tree is None else watch_mod.output_in_tree(tree)
+    if inside is not None:
+        shown = pathrules.printable(inside)
+        # "if your redirect created it": a >> onto an entry file or MEMBER.md matches too, and
+        # an agent follows a fix line as written
+        fix = ("send the watcher's output to a file outside the channel; if your redirect "
+               "created %s, delete it")
+        hint = fix % ("`%s`" % shown)
+        if platform.runnable(hint) != hint:
+            # a file name holding " vcharon <verb>" would be respelled as a command
+            hint = fix % "that file"
+        raise _usage("the watcher's output goes to %s, a file in the channel: every member "
+                     "gets that file" % shown, hint)
     if tree is not None:
         channel_cmd.refresh_version(os.path.join(tree, record["name"]), record["name"])
     dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),

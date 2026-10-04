@@ -13,6 +13,7 @@ import queue
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2833,6 +2834,146 @@ class CommandTest(WatchCase):
                              capture_output=True, timeout=60, check=False)
         want = "new mañana.md\n".encode().replace(b"\n", os.linesep.encode())
         self.assertEqual((ran.returncode, ran.stdout), (0, want), ran.stderr)
+
+
+class OutputInChannelTest(WatchCase):
+    """A watcher whose stdout or stderr is a file in the channel tree is refused before it
+    writes anything: that file would go to every member (DESIGN, "The watcher in a
+    channel")."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        # debian, a local member of the project q; windows, a remote one of p; both trees are
+        # self.tree
+        self.local_record()
+        ClientModeTest.write_config(self)
+        self.member()
+        write_tree(self.tree, {"windows/MEMBER.md": member_md("windows", "debian")})
+
+    def files(self):
+        """Every file under the tree, and the state dir's, with its bytes."""
+        out = {}
+        for root in (self.tree, self.vcharon_home):
+            for top, _dirs, names in os.walk(root):
+                for name in names:
+                    with open(os.path.join(top, name), "rb") as f:
+                        out[os.path.join(top, name)] = f.read()
+        return out
+
+    def open_file(self, *parts):
+        return self.enterContext(open(os.path.join(*parts), "w", encoding="utf-8"))
+
+    def run_watch(self, stdout=None, stderr=None, project="q"):
+        """(exit code, stdout's text if a StringIO, stderr's likewise, whether a watch
+        started)."""
+        out = io.StringIO() if stdout is None else stdout
+        err = io.StringIO() if stderr is None else stderr
+        started = []
+        with mock.patch.object(watch, "watch_dir", lambda *a, **kw: started.append(a) or 0), \
+                mock.patch.object(watch, "watch_job", lambda *a, **kw: started.append(a) or 0), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            code = cli.main(["watch", "mb", "--project", project])
+        text = [s.getvalue() if isinstance(s, io.StringIO) else None for s in (out, err)]
+        return code, text[0], text[1], bool(started)
+
+    def refused(self, rel, named=None):
+        """The refusal's lines; named: the fix's name of the file, rel in backticks unless
+        given."""
+        return ("ERROR config: the watcher's output goes to %s, a file in the channel: every "
+                "member gets that file\n  fix: send the watcher's output to a file outside the "
+                "channel; if your redirect created %s, delete it\n"
+                % (rel, "`%s`" % rel if named is None else named))
+
+    def test_stdout_in_the_own_folder(self):
+        f = self.open_file(self.tree, "debian", "vcharon-watch.log")
+        before = self.files()
+        code, _out, err, started = self.run_watch(stdout=f)
+        self.assertEqual((code, err, started),
+                         (3, self.refused("debian/vcharon-watch.log"), False))
+        self.assertNotIn(self.tmp, err)
+        # no MEMBER.md refresh, no snapshot, no lock, nothing in the file
+        self.assertEqual(self.files(), before)
+
+    def test_stderr_in_the_own_folder(self):
+        f = self.open_file(self.tree, "debian", "vcharon-watch.log")
+        before = self.files()
+        code, out, _err, started = self.run_watch(stderr=f)
+        self.assertEqual((code, out, started), (3, "", False))
+        f.flush()
+        # the refusal goes where stderr goes, the file itself: no path of this machine in it
+        path = os.path.join(self.tree, "debian", "vcharon-watch.log")
+        # written in text mode: os.linesep line ends
+        before[path] = self.refused("debian/vcharon-watch.log").encode("utf-8").replace(
+            b"\n", os.linesep.encode())
+        self.assertEqual(self.files(), before)
+
+    def test_a_file_in_another_members_folder(self):
+        f = self.open_file(self.tree, "windows", "out.log")
+        code, _out, err, started = self.run_watch(stdout=f)
+        self.assertEqual((code, err, started), (3, self.refused("windows/out.log"), False))
+
+    def test_a_remote_members_copy(self):
+        f = self.open_file(self.tree, "windows", "vcharon-watch.log")
+        code, _out, err, started = self.run_watch(stdout=f, project="p")
+        self.assertEqual((code, err, started),
+                         (3, self.refused("windows/vcharon-watch.log"), False))
+
+    def test_appended_to_an_entry_file(self):
+        # >> RESULTS.md: the file was there before the redirect, so the fix doesn't say to
+        # delete it outright
+        path = self.post("debian", 2, "results")
+        with open(path, "rb") as f:
+            text = f.read()
+        f = self.enterContext(open(path, "a", encoding="utf-8"))
+        code, _out, err, started = self.run_watch(stdout=f)
+        self.assertEqual((code, err, started), (3, self.refused("debian/RESULTS.md"), False))
+        self.assertIn("if your redirect created", err)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), text)
+
+    @unittest.skipIf(os.name == "nt", "Windows can't hold the name")
+    def test_a_control_character_in_the_name_is_escaped(self):
+        f = self.open_file(self.tree, "debian", "a\x1bb.log")
+        code, _out, err, _started = self.run_watch(stdout=f)
+        self.assertEqual((code, err), (3, self.refused("debian/a\\x1bb.log")))
+        self.assertNotIn("\x1b", err)
+
+    def test_a_command_in_the_name_isnt_respelled(self):
+        f = self.open_file(self.tree, "debian", "x vcharon post y.log")
+        with mock.patch.object(platform, "self_command", return_value="/opt/vc/bin/vcharon"):
+            code, _out, err, _started = self.run_watch(stdout=f)
+        self.assertEqual((code, err), (3, self.refused("debian/x vcharon post y.log",
+                                                       named="that file")))
+
+    def test_the_same_inode_on_another_device(self):
+        f = self.open_file(self.tree, "debian", "vcharon-watch.log")
+        real = os.fstat
+        mine = real(f.fileno())
+
+        def fstat(fd):
+            st = real(fd)
+            if (st.st_dev, st.st_ino) != (mine.st_dev, mine.st_ino):
+                return st
+            fields = list(st)
+            fields[stat.ST_DEV] = st.st_dev + 1
+            return os.stat_result(fields)
+
+        with mock.patch.object(os, "fstat", fstat):
+            self.assertEqual(self.run_watch(stdout=f)[0::3], (0, True))
+
+    def test_a_file_outside_the_channel(self):
+        f = self.open_file(self.tmp, "vcharon-watch.log")
+        for project in ("q", "p"):
+            with self.subTest(project=project):
+                self.assertEqual(self.run_watch(stdout=f, stderr=f, project=project)[0::3],
+                                 (0, True))
+
+    def test_a_pipe(self):
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        f = self.enterContext(open(w, "w", encoding="utf-8"))
+        self.assertEqual(self.run_watch(stdout=f, stderr=f)[0::3], (0, True))
+
 
 class UpdatedTest(WatchCase):
     """EXIT updated (exit 14): vcharon's code changed under a running watcher (DESIGN,
