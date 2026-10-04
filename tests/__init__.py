@@ -7,8 +7,8 @@ folders. It's set in os.environ itself, not through a patcher, so no test
 can undo it, and every child a test starts inherits it. The shell's VCHARON_HOME and
 VCHARON_CHANNELS_ROOT are dropped, so their defaults fall in the sandbox too: a developer's
 hand-run scratch folder is no test's to write. A test sets them for itself. The sandbox is on
-for every run; the real-ssh tests point HOME back at the real home (its ~/.ssh) for their own
-length only.
+for every run, the real-ssh tests included: OpenSSH reads ~/.ssh from the account's home, not
+$HOME.
 
 Then a guard: the functions that name vcharon's folders raise an AssertionError for a path
 under the real home that isn't under the temp folder (on Windows the temp folder is under the

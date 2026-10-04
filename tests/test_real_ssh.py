@@ -26,16 +26,24 @@ DEST = os.environ.get("VCHARON_TEST_SSH")
 POSIX = os.name == "posix"
 
 
+def ssh_home():
+    """The folder whose .ssh ssh reads: the account's home on POSIX (OpenSSH ignores $HOME),
+    else the home the suite saw before its sandbox replaced HOME and USERPROFILE."""
+    if POSIX:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_dir
+    return tests.REAL_HOME
+
+
 @unittest.skipUnless(DEST, "set VCHARON_TEST_SSH=<dest> to run against a real server")
 class RealSshTest(unittest.TestCase):
     def setUp(self):
         tmp = self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        # the real home's ~/.ssh holds the key and known_hosts, so HOME leaves the suite's
-        # sandbox for this test; vcharon's own folders and the local channel root, which
-        # doctor lists, stay in the temp folder
+        # HOME stays in the suite's sandbox: OpenSSH finds ~/.ssh (key, known_hosts, config)
+        # through the account's home, not $HOME. vcharon's own folders and the local channel
+        # root, which doctor lists, go in the temp folder
         patcher = mock.patch.dict(os.environ, {
-            "HOME": tests.REAL_HOME, "USERPROFILE": tests.REAL_HOME,
             "VCHARON_HOME": tmp, "VCHARON_CHANNELS_ROOT": os.path.join(tmp, "channels")})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -131,7 +139,7 @@ class RealSshTest(unittest.TestCase):
     def test_doctor_without_the_agent(self):
         keys = [name for name in ("id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519",
                                   "id_ed25519_sk", "id_dsa", "id_xmss")
-                if os.path.exists(os.path.join(os.path.expanduser("~"), ".ssh", name))]
+                if os.path.exists(os.path.join(ssh_home(), ".ssh", name))]
         if keys:
             self.skipTest("a key file here could log in without the agent: %s" % keys)
         with mock.patch.dict(os.environ):
