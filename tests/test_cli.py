@@ -290,6 +290,11 @@ class Utf8ConsoleTest(FakeSshCase):
     def test_main_switches_both_streams(self):
         for osn in ("linux", "darwin", "windows"):
             out, err = mock.Mock(), mock.Mock()
+            for stream in (out, err):
+                # Python 3.14's argparse asks the stream whether to print in colour: a stream
+                # with no file behind it, not a tty
+                stream.fileno.side_effect = io.UnsupportedOperation
+                stream.isatty.return_value = False
             with self.subTest(osn=osn), \
                     mock.patch.object(cli.platform, "os_name", return_value=osn), \
                     mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
