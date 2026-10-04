@@ -1348,12 +1348,6 @@ def _leave(args, cfg, record, log, say, close):
         raise channels.refused("only the leader closes %s, and that is %s"
                                % (channel, record["leader"]),
                                "members leave after the leader's CLOSED; how: vcharon guide end")
-    if not close and leads:
-        # text, not a command: a close run as printed would delete the channel with no CLOSED
-        # and before the members' DONE
-        raise channels.refused("you lead %s: close it instead" % channel,
-                               "a leader ends the channel with CLOSED to @all after every "
-                               "member's DONE, then a close; how: vcharon guide end")
     # before anything on the server changes: a held lock can't leave a half-closed channel.
     # The watcher's lock stays held to the end, so no watcher starts during the command; the
     # removal releases it just before it deletes the lock file
@@ -1365,6 +1359,7 @@ def _leave(args, cfg, record, log, say, close):
 def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
     channel = args.channel
     name = record["name"]
+    leads = record["leader"] == name
     section = "%s.%s" % (channel, name)
     job = cfg.named(section)
     settings = job[0].settings if job else cfg.settings
@@ -1407,6 +1402,15 @@ def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
                 # the own folder gone there (or a channel made again): a LEAVE would go
                 # nowhere, and a sync fails on it, so the removal comes at once
                 say("  note    %s %s %s" % (channel, where, stale))
+            if leads and not gone:
+                # only a live channel is the leader's to close; a gone or stale one's record is
+                # left like a member's, since close can't remove a channel that isn't its own.
+                # Text, not a command: a close run as printed would delete the channel with no
+                # CLOSED and before the members' DONE
+                raise channels.refused("you lead %s: close it instead" % channel,
+                                       "a leader ends the channel with CLOSED to @all after "
+                                       "every member's DONE, then a close; how: vcharon "
+                                       "guide end")
     if not close and not gone:
         from . import cli
         own = _own_of(cfg, record, section)

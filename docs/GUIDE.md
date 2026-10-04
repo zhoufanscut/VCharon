@@ -694,7 +694,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `<server> has no machine id …` | follow the `fix:` line; it is your user's step |
 | `the member's name <name>: …` (exit 3) | give a shorter `--project` or `--role` |
 | `the project's name would come from your home folder …` (exit 3) | run it from the project's checkout, or pass `--project` with the project's name |
-| `your join record of <C> as <name> is of an earlier channel: …` | the channel was closed and made again (or your folder there removed) while this machine kept the old membership: run the `fix:` line's `leave` (it posts nothing), then join or create again |
+| `your join record of <C> as <name> is of an earlier channel: …` | the channel was closed and made again (or your folder there removed) while this machine kept the old membership. Tell your user, quoting the lines: the `leave` deletes this machine's copy of the old channel (`joined/<C>.<name>`), which may be the last of its text. Once they confirm, run the `fix:` line's `leave` (it posts nothing), then join or create again |
 
 ### Any command on a channel you joined
 

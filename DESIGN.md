@@ -1089,29 +1089,30 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   path is `lstat`'ed first and a symlink refused. Why: down never plans the own folder, and an
   up from a lost tree would delete the server's files and restart numbering at #1. A file
   deleted on purpose (with `MEMBER.md` still here) is not pulled back.
-- **`leave C`**: refused for the leader (it closes), and while this machine's watcher lock or a
-  sync lock of the membership is held; the watcher lock is taken, not just checked, and held to
-  the end. It checks the server's machine id against the record, then lists: a name listed as
-  unusable is refused (never taken for a gone channel); a gone channel skips to the removal.
-  So does a listed channel without the member's folder, or with another leader than the
-  record's (the own folder removed at the server, or the channel made again), with a `note`
-  saying which: a `LEAVE` would reach no one, and the sync would fail on the missing folder
-  and point back at `leave`. Else, a remote member whose own folder here lacks `MEMBER.md` is
-  refused, `not_found`, with the rejoin as its fix (a sync would send the emptied folder over
-  the server's copy); a local member's is noted and nothing posted. Else it posts `LEAVE`
-  (once: not again after a failed try) and syncs; a failed sync stops before removing
-  anything. Then it removes the local tree (only when it is exactly the computed
-  `joined/<C>.<name>`, with the no-link walk), the jobs' state, logs, locks not held, the
-  watcher's snapshot, the post lock, the record, the section file, and last the watcher's lock
-  file, after the record, so a watcher started then finds no membership; deleted and released
-  in the order a failed join uses. One `removed <path>` line each. The member's folder in the
-  channel stays: it is its history, and its name stays taken. When the channel, or the
-  member's folder in it, was gone, it ends with `note    nothing of <C> as <name> is left on
-  this machine` (and `still here: <names>` for other memberships of C on this machine, which
-  stay): an agent told nothing would ask its user what to delete. `close` prints the same.
-  Nothing is removed on its own when a watcher sees the channel closed: `EXIT closed` also
-  means a folder removed by hand, and after a close this machine's copy is the last of the
-  channel's text.
+- **`leave C`**: refused while this machine's watcher lock or a sync lock of the membership is
+  held; the watcher lock is taken, not just checked, and held to the end. It checks the server's
+  machine id against the record, then lists: a name listed as unusable is refused (never taken
+  for a gone channel); a gone channel skips to the removal. So does a listed channel without the
+  member's folder, or with another leader than the record's (the own folder removed at the
+  server, or the channel made again), with a `note` saying which: a `LEAVE` would reach no one,
+  and the sync would fail on the missing folder and point back at `leave`. Only then is the
+  leader refused (it closes): a live channel is the leader's to close, but a gone or made-again
+  one isn't there for its close to remove, and the stale record's fix line is this `leave`.
+  Else, a remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with
+  the rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
+  member's is noted and nothing posted. Else it posts `LEAVE` (once: not again after a failed
+  try) and syncs; a failed sync stops before removing anything. Then it removes the local tree
+  (only when it is exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
+  state, logs, locks not held, the watcher's snapshot, the post lock, the record, the section
+  file, and last the watcher's lock file, after the record, so a watcher started then finds no
+  membership; deleted and released in the order a failed join uses. One `removed <path>` line
+  each. The member's folder in the channel stays: it is its history, and its name stays taken.
+  When the channel, or the member's folder in it, was gone, it ends with `note    nothing of <C>
+  as <name> is left on this machine` (and `still here: <names>` for other memberships of C on
+  this machine, which stay): an agent told nothing would ask its user what to delete. `close`
+  prints the same. Nothing is removed on its own when a watcher sees the channel closed: `EXIT
+  closed` also means a folder removed by hand, and after a close this machine's copy is the last
+  of the channel's text.
 - **`close C`**: the leader only. The same lock checks first (a held lock can't leave a
   half-closed channel; the watcher lock held to the end, as `leave` holds it), the machine id
   check, then `channel.remove`, which refuses unless the leader's folder holds the only

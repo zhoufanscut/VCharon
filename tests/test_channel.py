@@ -691,20 +691,32 @@ class CreateJoinTest(ChannelCase):
         home = os.path.join(self.tmp, "home", "alice")
         deep = os.path.join(home, "notes", "x")
         os.makedirs(deep)
+        # the message names the folder as the working folder spells it: on macOS getcwd gives
+        # /private/var/... for a temp folder made as /var/...
+        os.chdir(home)
+        home_seen = os.getcwd()
+        homes = [home]
+        if CAN_SYMLINK:
+            # a home reached through a link (or spelled otherwise) is the same folder
+            link = os.path.join(self.tmp, "home-link")
+            os.symlink(home, link, target_is_directory=True)
+            homes.append(link)
+        cases = [(h, home, False) for h in homes] + [(home, deep, True)]
+        for home_named, cwd, dotfiles in cases:
+            with self.subTest(home=home_named, cwd=cwd), \
+                    mock.patch.object(platform, "home", return_value=home_named):
+                if dotfiles:
+                    # a home kept in git for its dotfiles names every folder below it
+                    os.mkdir(os.path.join(home, ".git"))
+                os.chdir(cwd)
+                for argv in (("join", "game", "--server", "fake-dest"),
+                             ("create", "docs", "--server", "fake-dest")):
+                    line, fix = self.refusal(*argv, code=3)
+                    self.assertEqual(line, "ERROR config: the project's name would come "
+                                     "from your home folder %s, whose name is your user "
+                                     "name: give --project" % home_seen)
+                    self.assertEqual(fix, "for example: --project web")
         with mock.patch.object(platform, "home", return_value=home):
-            for cwd, dotfiles in ((home, False), (deep, True)):
-                with self.subTest(cwd=cwd):
-                    if dotfiles:
-                        # a home kept in git for its dotfiles names every folder below it
-                        os.mkdir(os.path.join(home, ".git"))
-                    os.chdir(cwd)
-                    for argv in (("join", "game", "--server", "fake-dest"),
-                                 ("create", "docs", "--server", "fake-dest")):
-                        line, fix = self.refusal(*argv, code=3)
-                        self.assertEqual(line, "ERROR config: the project's name would come "
-                                         "from your home folder %s, whose name is your user "
-                                         "name: give --project" % home)
-                        self.assertEqual(fix, "for example: --project web")
             self.assertEqual(sorted(os.listdir(self.root)), ["game"])
             self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))),
                              ["laptop-ui"])
@@ -1318,6 +1330,44 @@ class StaleMembershipTest(ChannelCase):
         self.ok("create", "game", "--server", "fake-dest")
         found = entries.parse_file(os.path.join(self.root, "game", "mac-web", "CHANNEL.md"))
         self.assertEqual([(e.name, e.number) for e in found], [("mac-web", 2)])
+
+    def test_a_leader_s_record_of_a_gone_channel(self):
+        # the leader's own record: its leave refusal is for a live channel only, or the leave
+        # fix below would send it to a close, which can't remove what isn't there
+        self.lead()
+        shutil.rmtree(os.path.join(self.root, "game"))
+        self.use_box("laptop")
+        fix = platform.runnable(
+            "run vcharon leave game --project ui (it posts nothing, and removes this machine's "
+            "files of that membership), then create again")
+        self.assertEqual(self.refusal("create", "game", "--server", "fake-dest", "--project",
+                                      "ui"),
+                         ("ERROR channel: your join record of game as laptop-ui is of an "
+                          "earlier channel: game is gone from fake-dest", fix))
+        out = self.ok("leave", "game", "--project", "ui")
+        self.assertIn("  note    game is gone on the server", out.splitlines())
+        self.assertEqual([p for p in read_tree(self.homes["laptop"]) if "game.laptop-ui" in p],
+                         [])
+        self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
+
+    def test_a_leader_s_record_of_a_channel_made_again(self):
+        self.lead()
+        shutil.rmtree(os.path.join(self.root, "game"))
+        self.lead(box="linux", project="ui")
+        before = self.server_tree()
+        self.use_box("laptop")
+        line, fix = self.refusal("join", "game", "--server", "fake-dest", "--project", "ui")
+        self.assertEqual(line, "ERROR channel: your join record of game as laptop-ui is of an "
+                         "earlier channel: game on fake-dest has no folder laptop-ui (the "
+                         "channel was made again, or the folder removed)")
+        self.assertIn(platform.runnable("vcharon leave game --project ui"), fix)
+        out = self.ok("leave", "game", "--project", "ui")
+        self.assertIn("  note    game on the server has no folder laptop-ui (the channel was "
+                      "made again, or the folder removed)", out.splitlines())
+        # nothing posted into, or removed from, the new channel
+        self.assertEqual(self.server_tree(), before)
+        out = self.ok("join", "game", "--server", "fake-dest", "--project", "ui")
+        self.assertIn("  claimed game/laptop-ui; the leader is linux-ui", out.splitlines())
 
     def test_leave_when_the_own_folder_at_the_server_is_gone(self):
         self.lead()

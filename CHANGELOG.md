@@ -18,7 +18,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - `leave` finishes when the channel has no folder of the member, or another leader than the
   record's: `note    <C> on the server has no folder <name> (…)` (or `is led by …`), nothing posted,
   then the removal and its `nothing of <C> as <name> is left on this machine` note. Before, it
-  posted `LEAVE`, its sync failed, and the sync's fix pointed back at `leave`. A remote member whose
+  posted `LEAVE`, its sync failed, and the sync's fix pointed back at `leave`. This holds for the
+  leader's own record too: `you lead <C>: close it instead` now comes only for a channel that is
+  still there and still its own. A remote member whose
   own folder on this machine lacks `MEMBER.md` gets `ERROR not_found: your own folder <path> has no
   MEMBER.md on this machine` with the rejoin as its fix, where it failed with `ERROR internal`; a
   local member's is noted, and nothing posted.
