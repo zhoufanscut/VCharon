@@ -1097,7 +1097,9 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   server, or the channel made again), with a `note` saying which: a `LEAVE` would reach no one,
   and the sync would fail on the missing folder and point back at `leave`. Only then is the
   leader refused (it closes): a live channel is the leader's to close, but a gone or made-again
-  one isn't there for its close to remove, and the stale record's fix line is this `leave`.
+  one isn't there for its close to remove, and the stale record's fix line is this `leave`. The
+  leader's `leave` lists before it checks the locks (the listing changes nothing): a lock refusal
+  first would have it stop the watcher of a channel it still leads.
   Else, a remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with
   the rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
   member's is noted and nothing posted. Else it posts `LEAVE` (once: not again after a failed

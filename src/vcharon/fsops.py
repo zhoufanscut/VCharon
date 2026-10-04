@@ -62,6 +62,18 @@ def kind(st):
     return OTHER
 
 
+def missing(path):
+    """True only when path is known not to exist: a folder that can't be read is the caller's to
+    report, with its own hint."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def error(e, path):
     """An OSError as a VCharonError; path is what the message names (a plan path, or the root)."""
     # winerror first: Windows sets errno to EACCES for both 5 and 32.

@@ -1049,6 +1049,15 @@ class LeaveCloseTest(ChannelCase):
             "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
         # text, never a close to run: that would skip CLOSED and the members' DONE
         self.assertNotIn("vcharon close", err)
+        # its own watcher running: still close, not "stop the watcher", which would stop the
+        # watcher of a channel it still leads
+        child = hold(self, lock)
+        got, _out, err = self.channel("leave", "game", "--project", "ui")
+        self.assertEqual(got, 1)
+        self.assertEqual(err.splitlines()[:2], [
+            "ERROR channel: you lead game: close it instead",
+            "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
+        release(child)
         self.use_box("mac")
         for held in locks:
             with self.subTest(lock=held):

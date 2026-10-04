@@ -775,7 +775,7 @@ def _own_folder_intact(cfg, record):
     if not jobs:
         return
     own = plugin.Ctx("local").resolve(jobs[0].mailbox.own_folder, "mailbox.local")
-    if _missing(os.path.join(own, entries.MEMBER_FILE)):
+    if fsops.missing(os.path.join(own, entries.MEMBER_FILE)):
         raise channel_cmd.channels.refused(
             "your own folder %s has no %s: forgetting what up has sent would leave it so"
             % (own, entries.MEMBER_FILE),
@@ -1726,18 +1726,6 @@ def _session(conn, stack, jr):
     return conn.session
 
 
-def _missing(path):
-    """True only when path is known not to exist: a folder that can't be read is the run's to
-    report, with its own hint."""
-    try:
-        os.lstat(path)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    return False
-
-
 def _own_folder(job, log, dry_run):
     """A mailbox job's folders on the client, <local> and <local>/<me>: up's path source
     never creates its own path. Only while up has sent nothing: a folder that vanished after
@@ -1758,7 +1746,7 @@ def _own_folder(job, log, dry_run):
         # the folder was emptied or replaced (a failed restore, a stray .DS_Store in a new
         # one): up's prune would delete the server's copy, so neither job runs.
         if (job.mailbox.channel and isinstance(sent, dict) and entries.MEMBER_FILE in sent
-                and _missing(os.path.join(path, entries.MEMBER_FILE))):
+                and fsops.missing(os.path.join(path, entries.MEMBER_FILE))):
             raise VCharonError("not_found", "the own folder %s has no %s, which %s has sent: it "
                                "was emptied or replaced" % (path, entries.MEMBER_FILE, up),
                                channel_cmd.rejoin_hint(job.mailbox.channel, job.ssh,

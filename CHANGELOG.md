@@ -20,10 +20,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   then the removal and its `nothing of <C> as <name> is left on this machine` note. Before, it
   posted `LEAVE`, its sync failed, and the sync's fix pointed back at `leave`. This holds for the
   leader's own record too: `you lead <C>: close it instead` now comes only for a channel that is
-  still there and still its own. A remote member whose
-  own folder on this machine lacks `MEMBER.md` gets `ERROR not_found: your own folder <path> has no
-  MEMBER.md on this machine` with the rejoin as its fix, where it failed with `ERROR internal`; a
-  local member's is noted, and nothing posted.
+  still there and still its own. A remote member whose own folder on this machine lacks
+  `MEMBER.md` gets `ERROR not_found: your own folder <path> has no MEMBER.md on this machine` with
+  the rejoin as its fix, where it failed with `ERROR internal`; a local member's is noted, and
+  nothing posted.
 - `join` and `create` without `--project` refuse a new name whose project folder is the home folder
   (the home itself, or any folder of a home kept in git for its dotfiles): exit 3, `ERROR config:
   the project's name would come from your home folder <path>, whose name is your user name: give

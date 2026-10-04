@@ -1351,12 +1351,19 @@ def _leave(args, cfg, record, log, say, close):
     # before anything on the server changes: a held lock can't leave a half-closed channel.
     # The watcher's lock stays held to the end, so no watcher starts during the command; the
     # removal releases it just before it deletes the lock file
-    watcher, snapshot = _check_locks(record, section, channel)
-    with watcher:
-        return _leave_held(args, cfg, record, log, say, close, watcher, snapshot)
+    with contextlib.ExitStack() as locks:
+        def take():
+            watcher, snapshot = _check_locks(record, section, channel)
+            locks.enter_context(watcher)
+            return watcher, snapshot
+        # a leader's leave lists the server first (no change there either): on a live channel
+        # its answer is close, and a lock refusal first would have it stop the watcher of a
+        # channel it still leads
+        taken = None if leads and not close else take()
+        return _leave_held(args, cfg, record, log, say, close, take, taken)
 
 
-def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
+def _leave_held(args, cfg, record, log, say, close, take, taken):
     channel = args.channel
     name = record["name"]
     leads = record["leader"] == name
@@ -1411,10 +1418,12 @@ def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
                                        "a leader ends the channel with CLOSED to @all after "
                                        "every member's DONE, then a close; how: vcharon "
                                        "guide end")
+        if taken is None:
+            taken = take()
+    watcher, snapshot = taken
     if not close and not gone:
-        from . import cli
         own = _own_of(cfg, record, section)
-        if own is not None and cli._missing(os.path.join(own, entries.MEMBER_FILE)):
+        if own is not None and fsops.missing(os.path.join(own, entries.MEMBER_FILE)):
             if record["ssh"] is not None:
                 # this machine lost the folder: a LEAVE can't be posted into it, and the sync
                 # refuses an own folder without MEMBER.md once up has sent it; a rejoin brings
