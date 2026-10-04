@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import cli, platform
+from vcharon import cli, doctor, platform
 
 from tests.util import read_tree, use_test_jobs, write_tree
 
@@ -34,6 +34,10 @@ class RealSshTest(unittest.TestCase):
         # channel root, which doctor lists, goes in the temp folder too
         patcher = mock.patch.dict(os.environ, {
             "VCHARON_HOME": tmp, "VCHARON_CHANNELS_ROOT": os.path.join(tmp, "channels")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # the box's PATH may hold other vcharon installs: doctor's exit code here is about ssh
+        patcher = mock.patch.object(doctor, "path_check", lambda *a, **kw: None)
         patcher.start()
         self.addCleanup(patcher.stop)
 

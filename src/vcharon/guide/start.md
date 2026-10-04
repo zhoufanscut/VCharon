@@ -23,16 +23,17 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   `linux`). Your user can set another, once per machine: `vcharon setup --box laptop`. Two
   machines with the same OS, working on the same project in one channel, need different
   boxes.
-- `<project>`: the name of the folder that holds `.git`, found from the current directory
-  upwards (with no `.git` anywhere above, the current folder's own name), lowercased, at most
-  14 characters. So **run vcharon from your project's folder**, or pass `--project P`
-  every time.
+- `<project>`: the name of the nearest folder that holds `.git`, `.svn` or `.hg`, found from
+  the current directory upwards (with none anywhere above, the current folder's own name),
+  lowercased, at most 14 characters. So **run vcharon from inside your project's checkout**,
+  or pass `--project P` every time.
 - `<role>`: only with `--role R` (1 to 6 of `a-z0-9`). **A second session in the same project
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
   `--role oc`).
 
-`vcharon whoami C` shows your name, your folder and where the channel is, once you have joined.
+`vcharon whoami C` shows your name, your folder and where the channel is, once you have joined,
+and the version of vcharon you run.
 
 ## Before the first channel
 
@@ -66,10 +67,15 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
-  line names your folder: `OK  in myapp as linux-api; your folder is <path>`.
+  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. The line before
+  it is your next step, the watcher command with your own flags: `next: start your watcher
+  now, as a background command: vcharon watch myapp --until-change --project api`.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
-  folder, 1000 kB per entry file). Then post the plan: `vcharon guide post`.
+  folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then
+  `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all --title '…'
+  --project web, with the body on stdin`. That second line is a template, not a command: start
+  the watcher, then write the plan's title and body yourself (`vcharon guide post`).
 - **Start your watcher right after `join` or `create`, before anything else**
   (`vcharon guide watch`). Its first start takes this machine's copy of the channel as seen and
   prints none of it; for a remote member, entries posted since the join's sync come in its first

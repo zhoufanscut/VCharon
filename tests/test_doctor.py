@@ -52,6 +52,9 @@ _platform.machine_id = lambda *args, **kw: None
 """
 
 DENIED = "fake@host: Permission denied (publickey)."
+# the real scan and check: FakeSshCase replaces the check with one that adds no row
+ON_PATH = doctor.vcharons_on_path
+PATH_CHECK = doctor.path_check
 # What doctor tells you to do when no agent answers, for this machine's OS (doctor._agent's
 # rule): start the Windows service, or a shell to start an agent in.
 NO_AGENT_FIX = (keys.ADMIN_HINT if platform.os_name() == "windows"
@@ -640,6 +643,193 @@ class DoctorTest(DoctorCase):
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
+
+
+class PathTest(DoctorCase):
+    """Another vcharon on PATH: a warning after this one, a failure before it."""
+
+    def setUp(self):
+        DoctorCase.setUp(self)
+        self.write_config("[vcharon]\n")
+
+    def folder(self, name, files=(), mode=0o755):
+        """A folder of fake commands, each a small file with mode."""
+        path = os.path.join(self.tmp, "path", name)
+        os.makedirs(path, exist_ok=True)
+        for one in files:
+            with open(os.path.join(path, one), "wb") as f:
+                f.write(b"#!/bin/sh\n")
+            os.chmod(os.path.join(path, one), mode)
+        return path
+
+    def scan(self, *folders, osn=None):
+        return ON_PATH(os.pathsep.join(folders), osn or "linux")
+
+    def test_scan(self):
+        a = self.folder("a", ["vcharon"])
+        b = self.folder("b", ["vcharon"])
+        files = self.folder("c", ["vcharon.exe", "vcharon-old", "other"])
+        os.makedirs(os.path.join(self.folder("d"), "vcharon"))
+        # in PATH's order, each file once, an empty entry skipped; a folder named vcharon and
+        # other names aren't commands
+        self.assertEqual(self.scan(b, "", files, a, b, os.path.join(self.tmp, "path", "d")),
+                         [os.path.join(b, "vcharon"), os.path.join(a, "vcharon")])
+        self.assertEqual(self.scan(), [])
+        if util.CAN_SYMLINK:
+            # a link to a file already found is that file
+            link = self.folder("link")
+            os.symlink(os.path.join(a, "vcharon"), os.path.join(link, "vcharon"))
+            self.assertEqual(self.scan(a, link), [os.path.join(a, "vcharon")])
+            self.assertEqual(self.scan(link, a), [os.path.join(link, "vcharon")])
+
+    @unittest.skipIf(os.name == "nt", "Windows has no execute bit")
+    def test_scan_skips_a_file_that_cant_run(self):
+        plain = self.folder("plain", ["vcharon"], mode=0o644)
+        self.assertEqual(self.scan(plain), [])
+
+    def test_scan_on_windows(self):
+        # by extension, PATHEXT's order, the mode never asked; a name without one isn't run
+        a = self.folder("a", ["vcharon.exe"], mode=0o644)
+        b = self.folder("b", ["vcharon.cmd", "vcharon.bat", "vcharon", "vcharon.txt"])
+        os.environ.pop("PATHEXT", None)
+        self.assertEqual(self.scan(a, b, osn="windows"), [
+            os.path.join(a, "vcharon.exe"), os.path.join(b, "vcharon.bat"),
+            os.path.join(b, "vcharon.cmd")])
+        os.environ["PATHEXT"] = ".CMD;;.cmd;.EXE"
+        self.assertEqual(self.scan(a, b, osn="windows"), [
+            os.path.join(a, "vcharon.exe"), os.path.join(b, "vcharon.cmd")])
+        # off Windows, only the plain name
+        self.assertEqual(self.scan(a, b), [os.path.join(b, "vcharon")])
+
+    def run_with(self, found, mine, code, kind="binary", first=...):
+        """doctor --json with vcharons_on_path finding found, mine this install's, a typed
+        vcharon running first (default: found's first) and an install of kind: its path checks,
+        and the human lines' path rows."""
+        if first is ...:
+            first = found[0] if found else None
+        self.patch(doctor, "vcharons_on_path", return_value=found)
+        self.patch(platform, "runs_this", side_effect=lambda one: one == mine)
+        self.patch(install, "detect", return_value=install.Install(kind, self.tmp))
+        self.patch(doctor, "path_check", side_effect=lambda rep, k: PATH_CHECK(
+            rep, k, which=lambda name: first))
+        got, out, err = self.run_cli("doctor", "--json")
+        self.assertEqual(got, code, out + err)
+        doc = json.loads(out)
+        lines = self.doctor(code=code)
+        return [c for c in doc["checks"] if c["subject"] == "path"], self.of(lines, "path"), doc
+
+    def paths(self):
+        return (os.path.join(self.tmp, n, "vcharon") for n in ("a", "b", "c"))
+
+    def test_another_after_this_one_warns(self):
+        mine, old, older = self.paths()
+        checks, rows, doc = self.run_with([mine, old, older], mine, 0)
+        text = "another vcharon on PATH, after this one: %s, %s" % (old, older)
+        self.assertEqual(checks, [{"level": "warn", "subject": "path", "text": text,
+                                   "fix": doctor.LATER_HINT, "note": None}])
+        self.assertEqual(rows, [("warn", text)])
+        self.assertEqual((doc["ok"], doc["warnings"]), (True, 1))
+        # right after the install line
+        lines = self.doctor(code=0)
+        self.assertEqual(self.subjects(lines)[:3], ["vcharon", "install", "path"])
+        row = lines.index("  warn  path     " + text)
+        self.assertEqual(lines[row + 1], " " * 17 + "fix: " + doctor.LATER_HINT)
+        # a fix an agent would follow asks its user first
+        for hint in (doctor.LATER_HINT, doctor.FIRST_HINT, doctor.CHECKOUT_HINT):
+            self.assertTrue(hint.startswith("ask your user "), hint)
+
+    def test_another_before_this_one_fails(self):
+        mine, old, older = self.paths()
+        for kind in ("binary", "pipx", "uv", "pip"):
+            with self.subTest(kind=kind):
+                checks, rows, doc = self.run_with([old, mine, older], mine, 1, kind)
+                text = ("the vcharon first on PATH is another install, %s (and on PATH: %s); "
+                        "this one runs as %s" % (old, older, platform.self_command()))
+                self.assertEqual(checks, [{"level": "FAIL", "subject": "path", "text": text,
+                                           "fix": doctor.FIRST_HINT, "note": None}])
+                self.assertEqual(rows, [("FAIL", text)])
+                self.assertEqual((doc["ok"], doc["failed"]), (False, 1))
+        # this one not on PATH at all: the same
+        checks, _rows, _doc = self.run_with([old], mine, 1)
+        self.assertEqual(checks[0]["text"], "the vcharon first on PATH is another install, %s; "
+                         "this one runs as %s" % (old, platform.self_command()))
+
+    def test_a_checkout_only_warns(self):
+        # run by hand as <venv python> -m vcharon: normal for a checkout
+        mine, old, _older = self.paths()
+        for found in ([old, mine], [old]):
+            with self.subTest(found=found):
+                checks, _rows, doc = self.run_with(found, mine, 0, "source")
+                self.assertEqual(checks, [{
+                    "level": "warn", "subject": "path",
+                    "text": "the vcharon first on PATH is another install, %s; this checkout "
+                            "runs as %s" % (old, platform.self_command()),
+                    "fix": doctor.CHECKOUT_HINT, "note": None}])
+                self.assertTrue(doc["ok"])
+
+    def test_what_a_typed_vcharon_runs_decides(self):
+        # which's answer, as self_command's: on Windows a vcharon in the current folder comes
+        # before PATH, though the scan never looks there
+        mine, old, _older = self.paths()
+        here = os.path.join(self.tmp, "here", "vcharon.exe")
+        checks, _rows, _doc = self.run_with([mine], mine, 1, first=here)
+        self.assertEqual(checks[0]["text"], "the vcharon first on PATH is another install, %s; "
+                         "this one runs as %s" % (here, platform.self_command()))
+        # which finds none, the scan one: that one is named
+        checks, _rows, _doc = self.run_with([old], mine, 1, first=None)
+        self.assertTrue(checks[0]["text"].startswith(
+            "the vcharon first on PATH is another install, %s; " % old), checks[0]["text"])
+
+    def test_the_current_folder_doesnt_count_on_windows(self):
+        # a binary started from its download folder: which finds it there first, but a typed
+        # vcharon in Git Bash or PowerShell runs the old one on PATH
+        here = self.folder("Downloads", ["vcharon.exe"])
+        old_dir = self.folder("old", ["vcharon.exe"])
+        mine, old = os.path.join(here, "vcharon.exe"), os.path.join(old_dir, "vcharon.exe")
+        cwd = os.getcwd()
+        os.chdir(here)
+        self.addCleanup(os.chdir, cwd)
+        os.environ.update(PATH=old_dir, PATHEXT=".EXE")
+        self.patch(platform, "runs_this", side_effect=lambda one: one == mine)
+        self.patch(platform, "self_command", return_value="'%s'" % mine)
+        self.os_name("windows")
+        rep = doctor.Report([].append, doctor.CLIENT_SUBJECTS)
+        PATH_CHECK(rep, "binary", which=lambda name: mine)
+        self.assertEqual([(c["level"], c["text"]) for c in rep.checks], [
+            ("FAIL", "the vcharon first on PATH is another install, %s; this one runs as '%s'"
+             % (old, mine))])
+
+    def test_only_this_one_or_none(self):
+        mine = os.path.join(self.tmp, "a", "vcharon")
+        for found in ([mine], []):
+            with self.subTest(found=found):
+                checks, rows, _doc = self.run_with(found, mine, 0)
+                self.assertEqual((checks, rows), ([], []))
+
+    def test_a_binary_on_path_twice(self):
+        # the real question of which file is this install: a binary is sys.executable
+        binary = os.path.join(self.folder("bin", ["vcharon"]), "vcharon")
+        other = os.path.join(self.folder("old", ["vcharon"]), "vcharon")
+        for patcher in (mock.patch.object(sys, "frozen", True, create=True),
+                        mock.patch.object(sys, "_MEIPASS", self.tmp, create=True),
+                        mock.patch.object(sys, "executable", binary)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        lines = []
+        self.patch(doctor, "vcharons_on_path",
+                   side_effect=lambda: self.scan(os.path.dirname(other),
+                                                 os.path.dirname(binary)))
+        rep = doctor.Report(lines.append, doctor.CLIENT_SUBJECTS)
+        PATH_CHECK(rep, "binary", which=lambda name: other)
+        self.assertEqual(rep.checks[0]["level"], "FAIL")
+        self.assertTrue(rep.checks[0]["text"].startswith(
+            "the vcharon first on PATH is another install, %s; this one runs as " % other),
+            rep.checks[0]["text"])
+        # first on PATH itself: the other one comes after it
+        rep = doctor.Report(lines.append, doctor.CLIENT_SUBJECTS)
+        PATH_CHECK(rep, "binary", which=lambda name: binary)
+        self.assertEqual((rep.checks[0]["level"], rep.checks[0]["text"]),
+                         ("warn", "another vcharon on PATH, after this one: %s" % other))
 
 
 class ClockTest(DoctorCase):

@@ -64,7 +64,7 @@ Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
 SSH. C is a channel's name. Your member name comes from this box, the project (the folder that
-holds .git, or --project) and --role; after a join, from your join record."""
+holds .git, .svn or .hg, or --project) and --role; after a join, from your join record."""
 
 
 class _Parser(argparse.ArgumentParser):
@@ -128,7 +128,8 @@ def _parser():
 
     def ident(one):
         one.add_argument("--project", metavar="P", help="your name's project part; default: "
-                         "the folder that holds .git, from the current directory")
+                         "the nearest folder that holds .git, .svn or .hg, from the current "
+                         "directory up")
         one.add_argument("--role", metavar="R", help="your name's last part, 1 to 6 of a-z0-9: "
                          "a second session in the same project on this box passes one")
 
@@ -479,6 +480,8 @@ def _whoami(args, run):
         _say("vcharon: whoami %s" % args.channel)
         _whoami_lines(doc)
         _say("  box      %s" % cfg.box_text())
+        # the version this box runs: vcharon read notes when the members' differ
+        _say("  vcharon  %s" % VERSION)
         return 0
     channel_cmd.check_role(args.role)
     project = channel_cmd.project_part(args.project)
@@ -493,6 +496,7 @@ def _whoami(args, run):
     _say("  box      %s" % cfg.box_text())
     _say("  project  %s%s" % (project, "  role %s" % args.role if args.role else ""))
     _say("  name     %s (a join from here)" % name)
+    _say("  vcharon  %s" % VERSION)
     if not mine:
         _say("  no channels joined from this project")
     for one in doc["channels"]:
@@ -640,14 +644,24 @@ def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
     its synced copy; the watcher's own exit codes."""
     watch_mod.utf8_output()
-    dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),
-                                                               line)))
     if args.max_errors is not None and not args.until_change:
         raise _usage("--max-errors needs --until-change", "add --until-change, or leave out "
                      "--max-errors")
     # a config vcharon can't read refuses the watch, as it does every other command
-    load_config()
+    cfg = load_config()
     record, flags = _membership(args)
+    # every start, a restart after EXIT updated too: the own MEMBER.md's vcharon: line follows
+    # an update made without a rejoin (a leader never rejoins). Before the watchdog's start, so
+    # nothing it reads counts as an import after the start
+    try:
+        tree, _ = _tree(cfg, record)
+    except VCharonError:
+        # a missing section: the watch refuses it below, with its own fix
+        tree = None
+    if tree is not None:
+        channel_cmd.refresh_version(os.path.join(tree, record["name"]), record["name"])
+    dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),
+                                                               line)))
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),

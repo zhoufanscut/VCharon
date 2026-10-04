@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, config, platform, run, ssh, stage
+from vcharon import charter, cli, config, doctor, platform, run, ssh, stage
 from vcharon.log import Log
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -118,6 +118,11 @@ class FakeSshCase(unittest.TestCase):
         # so no test ever reaches the real agent
         patcher = mock.patch.object(ssh, "ssh_add_prefix",
                                     lambda settings: [sys.executable, FAKE_SSH_ADD])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # the box's PATH may hold other vcharon installs (a developer's): doctor's lines must
+        # not depend on it. Doctor's PATH tests run the real check on their own folders
+        patcher = mock.patch.object(doctor, "path_check", lambda *a, **kw: None)
         patcher.start()
         self.addCleanup(patcher.stop)
 

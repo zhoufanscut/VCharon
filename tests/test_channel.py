@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 
@@ -190,6 +191,33 @@ class NamesTest(unittest.TestCase):
         os.makedirs(plain)
         self.assertEqual(channel_cmd.project_of(plain), "Here")
 
+    def test_project_from_svn_or_hg(self):
+        # an SVN (1.7 and later) or Mercurial checkout's root, from any folder below it: a
+        # member that changes folders keeps its name
+        for mark in (".svn", ".hg"):
+            with self.subTest(mark=mark):
+                root = os.path.join(self.tmp, mark[1:], "Core")
+                deep = os.path.join(root, "RPC", "x")
+                os.makedirs(deep)
+                os.mkdir(os.path.join(root, mark))
+                self.assertEqual(channel_cmd.project_of(deep), "Core")
+                self.assertEqual(channel_cmd.project_of(root), "Core")
+        # only a directory counts: a file named .svn or .hg is no checkout
+        plain = os.path.join(self.tmp, "files", "Top")
+        here = os.path.join(plain, "Here")
+        os.makedirs(here)
+        for mark in (".svn", ".hg"):
+            with open(os.path.join(plain, mark), "w") as f:
+                f.write("x\n")
+        self.assertEqual(channel_cmd.project_of(here), "Here")
+        # the nearest marker wins: a git repo inside an SVN checkout is its own project
+        outer = os.path.join(self.tmp, "nested", "outer")
+        inner = os.path.join(outer, "inner")
+        os.makedirs(os.path.join(inner, "src"))
+        os.mkdir(os.path.join(outer, ".svn"))
+        os.mkdir(os.path.join(inner, ".git"))
+        self.assertEqual(channel_cmd.project_of(os.path.join(inner, "src")), "inner")
+
     def test_cleaning_and_cutting(self):
         for text, want in (("Web", "web"), ("a  b--c", "a-b-c"), ("-x-", "x"),
                            ("游戏_ui", "_ui"), ("abcdefghijklmnopq", "abcdefghijklmn"),
@@ -240,8 +268,16 @@ class CreateJoinTest(ChannelCase):
         self.root = os.path.join(self.home, ".local", "state", "vcharon", "channels")
         self.use_box("laptop")
         out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
-        self.assertIn("OK  created game", out)
         own = os.path.join(self.joined("game.laptop-ui"), "laptop-ui")
+        # the next steps, with the flags that find the membership from any folder, then the OK
+        # line, still the last
+        self.assertEqual(out.splitlines()[-3:], [
+            platform.runnable("  next: start your watcher now, as a background command: "
+                              "vcharon watch game --until-change --project ui"),
+            platform.runnable("  then post the plan (vcharon guide post): vcharon post game "
+                              "--steps --to @all --title '…' --project ui, with the body on "
+                              "stdin"),
+            "OK  created game; your folder is %s" % own])
         # the record, the section, the local tree; the run pushed both files
         self.assertEqual(self.record("game.laptop-ui"), {
             "version": 1, "channel": "game", "name": "laptop-ui", "leader": "laptop-ui",
@@ -270,7 +306,7 @@ class CreateJoinTest(ChannelCase):
             ("laptop-ui#1", "member", ("@laptop-ui",),
              [("channel", "game"), ("name", "laptop-ui"), ("leader", "laptop-ui"),
               ("box", "laptop"), ("os", platform.os_word()), ("agent", "other"),
-              ("project", "ui"), ("claimer", claimer)])])
+              ("project", "ui"), ("claimer", claimer), ("vcharon", vcharon.VERSION)])])
         ch = entries.parse_file(os.path.join(own, "CHANNEL.md"))
         self.assertEqual([(e.id, e.title, e.to) for e in ch],
                          [("laptop-ui#2", "channel game created", ("@all",))])
@@ -327,14 +363,19 @@ class CreateJoinTest(ChannelCase):
     def test_join_local(self):
         self.lead()
         self.use_box("linux")
-        out = self.ok("join", "game", "--local", "--project", "x")
-        own = os.path.join(self.root, "game", "linux-x")
+        out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
+        own = os.path.join(self.root, "game", "linux-x-b")
+        # the watcher is next (a member posts no plan); the OK line stays the last
+        self.assertEqual(out.splitlines()[-2:], [
+            platform.runnable("  next: start your watcher now, as a background command: "
+                              "vcharon watch game --until-change --project x --role b"),
+            "OK  in game as linux-x-b; your folder is %s" % own])
         self.assertEqual(sorted(os.listdir(own)), ["MEMBER.md", "RESULTS.md"])
-        self.assertIn("entries for linux-x already in game:", out)
-        self.assertEqual(self.record("game.linux-x"), {
-            "version": 1, "channel": "game", "name": "linux-x", "leader": "laptop-ui",
+        self.assertIn("entries for linux-x-b already in game:", out)
+        self.assertEqual(self.record("game.linux-x-b"), {
+            "version": 1, "channel": "game", "name": "linux-x-b", "leader": "laptop-ui",
             "ssh": None, "remote": os.path.join(self.root, "game"),
-            "machine": TEST_MACHINE_ID, "project": "x", "role": None,
+            "machine": TEST_MACHINE_ID, "project": "x", "role": "b",
             **util.record_format()})
 
     def test_the_same_name_in_two_channels(self):
@@ -547,6 +588,9 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(code, 4)
         self.assertIn(platform.runnable("vcharon: the sync failed; you are in game: run vcharon "
                                         "sync game --full --project web again"), out)
+        # no next step and no OK line: the sync comes first
+        self.assertNotIn("next: start your watcher", out)
+        self.assertNotIn("OK  ", out)
         self.assertEqual(self.record("game.mac-web")["name"], "mac-web")
         # no MEMBER.md at the server, so no claimer: a plain join gets back in by the record
         member = os.path.join(self.root, "game", "mac-web")
@@ -665,6 +709,26 @@ class ServerCallsTest(ChannelCase):
         [ch] = channels.list_channels(self.root)["channels"]
         self.assertEqual(ch["fields"]["c"], {"box": None, "os": None, "agent": None,
                                              "project": None})
+
+    def test_member_fields_skip_lines_they_dont_know(self):
+        # a newer vcharon's MEMBER.md may hold more header lines: each field is still read, the
+        # rest left alone; the version only in a version's shape
+        text = ("# MEMBER\n\n## t — a#1 — member\nto: @a\nbox: aaa\nnewer: 1\n"
+                "a line without a colon\nvcharon: %s\nclaimer: %s\n" % ("%s", "a" * 16))
+        for version, want in (("0.1.0", "0.1.0"), ("0.2.0rc1", "0.2.0rc1"),
+                              ("1.0.0+local.2", "1.0.0+local.2"), ("0.2 beta", None),
+                              ("v0.1.0", None), ("", None)):
+            with self.subTest(version=version):
+                found = channels.member_fields((text % version).encode("utf-8"), "a")
+                self.assertEqual(found, {"box": "aaa", "os": None, "agent": None,
+                                         "project": None, "claimer": "a" * 16,
+                                         "vcharon": want})
+        # vcharon list shows its four fields, never the version
+        write_tree(self.root, {"game/a/MEMBER.md": (text % "0.1.0").encode("utf-8")})
+        [ch] = channels.list_channels(self.root)["channels"]
+        self.assertEqual(ch["fields"]["a"], {"box": "aaa", "os": None, "agent": None,
+                                             "project": None})
+        self.assertEqual(channels.claim(self.root, "game", "a", False)["claimer"], "a" * 16)
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
     def test_symlinks_refused(self):
@@ -1983,7 +2047,7 @@ class MemberFieldsTest(ChannelCase):
                 self.assertNotIn(word, text, (path, word))
         header = entries.header_of(tree["game/mac-web/MEMBER.md"].decode("utf-8"), "mac-web")
         self.assertEqual(sorted(header), ["agent", "box", "channel", "claimer", "leader", "name",
-                                          "os", "project"])
+                                          "os", "project", "vcharon"])
         self.assertEqual((header["box"], header["os"], header["project"]),
                          ("mac", platform.os_word(), "web"))
 
@@ -2018,6 +2082,91 @@ class MemberFieldsTest(ChannelCase):
         out = self.ok("join", "game", "--local")
         self.assertNotIn("  agent: ", out)
         self.assertEqual(self.member_header()["agent"], "codex")
+
+    def test_a_rejoin_updates_the_version(self):
+        # a member that joined with another vcharon: the rejoin says which one runs now
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
+        own = os.path.join(self.joined("game.mac-web"), "mac-web")
+        path = os.path.join(own, "MEMBER.md")
+        entries.set_header(path, own, "mac-web", 1, "vcharon", "0.0.9")
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("  vcharon: %s (was 0.0.9)" % vcharon.VERSION, out)
+        # sent by the rejoin's sync
+        self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertNotIn("  vcharon: ", out)
+        # a MEMBER.md written before the line existed: added at the header's end, the rest kept
+        with open(path, "rb") as f:
+            text = f.read()
+        old = text.replace(b"vcharon: %s\n" % vcharon.VERSION.encode(), b"")
+        with open(path, "wb") as f:
+            f.write(old)
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("  vcharon: %s (was not set)" % vcharon.VERSION, out)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), text)
+
+    def test_a_watcher_start_updates_the_version(self):
+        # an update without a rejoin (a leader never rejoins; EXIT updated restarts the watcher
+        # alone): the watcher's start sets the line, in place, and prints nothing
+        self.lead(where=("--local",))
+        self.use_box("laptop")
+        own = os.path.join(self.root, "game", "laptop-ui")
+        path = os.path.join(own, "MEMBER.md")
+        entries.set_header(path, own, "laptop-ui", 1, "vcharon", "0.0.9")
+        with open(path, "rb") as f:
+            stale = f.read()
+        started = []
+        with mock.patch.object(watch, "watch_dir", lambda *a, **kw: started.append(a) or 0):
+            code, out, err = self.run_cli("watch", "game", "--project", "ui")
+        self.assertEqual((code, out, err, len(started)), (0, "", "", 1))
+        with open(path, "rb") as f:
+            # one line changed; the heading stays, so no watcher takes the entry for edited
+            self.assertEqual(f.read(), stale.replace(b"vcharon: 0.0.9",
+                                                     b"vcharon: " + vcharon.VERSION.encode()))
+        # a MEMBER.md from before the line: added
+        with open(path, "wb") as f:
+            f.write(stale.replace(b"vcharon: 0.0.9\n", b""))
+        with mock.patch.object(watch, "watch_dir", lambda *a, **kw: 0):
+            self.assertEqual(self.run_cli("watch", "game", "--project", "ui")[:2], (0, ""))
+        self.assertEqual(entries.header_of(entries.read_text(path), "laptop-ui")["vcharon"],
+                         vcharon.VERSION)
+        # a remote member: its local tree's copy, which the next sync sends
+        self.use_box("mac")
+        self.ok("join", "game", "--server", "fake-dest")
+        own = os.path.join(self.joined("game.mac-web"), "mac-web")
+        entries.set_header(os.path.join(own, "MEMBER.md"), own, "mac-web", 1, "vcharon", "0.0.9")
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        self.assertEqual(self.member_header()["vcharon"], "0.0.9")
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: 0):
+            self.assertEqual(self.run_cli("watch", "game")[:2], (0, ""))
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
+
+    def test_a_failed_version_update_never_stops_the_watch(self):
+        self.lead(where=("--local",))
+        self.use_box("laptop")
+        own = os.path.join(self.root, "game", "laptop-ui")
+        entries.set_header(os.path.join(own, "MEMBER.md"), own, "laptop-ui", 1, "vcharon",
+                           "0.0.9")
+        # a post holds the own folder's lock (another process): one try, skipped at once
+        hold(self, entries.lock_path(own))
+        started = time.monotonic()
+        with mock.patch.object(watch, "watch_dir", lambda *a, **kw: 0):
+            self.assertEqual(self.run_cli("watch", "game", "--project", "ui"), (0, "", ""))
+        self.assertLess(time.monotonic() - started, entries.LOCK_WAIT / 3)
+        self.assertEqual(self.member_header_of(own, "laptop-ui")["vcharon"], "0.0.9")
+        # any other failure: the same
+        busy = VCharonError("io", "can't open the post lock")
+        with mock.patch.object(entries, "set_header", side_effect=busy), \
+                mock.patch.object(watch, "watch_dir", lambda *a, **kw: 0):
+            self.assertEqual(self.run_cli("watch", "game", "--project", "ui"), (0, "", ""))
+        self.assertEqual(self.member_header_of(own, "laptop-ui")["vcharon"], "0.0.9")
+
+    def member_header_of(self, own, name):
+        return entries.header_of(entries.read_text(os.path.join(own, "MEMBER.md")), name)
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
     def test_a_symlinked_member_md_is_refused_before_the_record(self):

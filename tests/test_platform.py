@@ -524,6 +524,41 @@ class SelfTest(unittest.TestCase):
         other = os.path.join(self.tmp, "vcharon")
         open(other, "w").close()
         self.assertEqual(platform.self_command(lambda name: other, HOST), quoted)
+        # doctor's PATH check asks the same question of each vcharon on PATH
+        self.assertTrue(platform.runs_this(binary))
+        self.assertFalse(platform.runs_this(other))
+
+    def test_the_current_folder_doesnt_count_on_windows(self):
+        # cmd.exe (and shutil.which) look in the current folder first; Git Bash and PowerShell,
+        # where agents type commands, never do: a vcharon.exe started from its download folder
+        # isn't what a typed vcharon runs there
+        here = os.path.join(self.tmp, "Downloads")
+        on_path = os.path.join(self.tmp, "old")
+        for folder in (here, on_path):
+            os.makedirs(folder)
+            open(os.path.join(folder, "vcharon.exe"), "w").close()
+        binary = os.path.join(here, "vcharon.exe")
+        old = os.path.join(on_path, "vcharon.exe")
+        cwd = os.getcwd()
+        os.chdir(here)
+        self.addCleanup(os.chdir, cwd)
+        which = lambda name: binary
+        with mock.patch.dict(os.environ, {"PATHEXT": ".EXE"}):
+            self.assertEqual(platform.typed_vcharon(which, "windows", on_path), old)
+            self.assertIsNone(platform.typed_vcharon(which, "windows", ""))
+            # the current folder on PATH itself: it counts
+            self.assertEqual(platform.typed_vcharon(
+                which, "windows", os.pathsep.join([here, on_path])), binary)
+            # elsewhere, which's answer as it is
+            self.assertEqual(platform.typed_vcharon(which, "linux", on_path), binary)
+            self.assertEqual(platform.typed_vcharon(lambda name: old, "windows", on_path), old)
+            self.assertIsNone(platform.typed_vcharon(lambda name: None, "windows", on_path))
+            # so a binary run from there is spelled by its path, not as vcharon
+            self.frozen(binary)
+            with mock.patch.dict(os.environ, {"PATH": on_path}):
+                self.assertEqual(platform.self_command(which, "windows"),
+                                 platform._quoted([binary], "windows"))
+                self.assertFalse(platform.runs_this(old))
 
     def test_a_posix_binary_path(self):
         # the declared OS's form, on a path of that OS

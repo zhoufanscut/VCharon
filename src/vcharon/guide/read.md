@@ -35,7 +35,9 @@ Use it to catch up (a watcher started late, a new session) and, as the leader, t
 channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
 and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before
 its question (the members' clocks differ), or a member's folder left out for being over the
-channel's limits.
+channel's limits. The last one, `note: members' vcharon versions differ …`, names each
+member's version (from its `MEMBER.md`, set at its join and each watcher start): members on
+different versions read different guides, so tell your user.
 
 ## Times
 

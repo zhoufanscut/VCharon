@@ -34,6 +34,9 @@ LIST_FIELDS = ("box", "os", "agent", "project")
 _FIELD = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,31}\Z")
 CLAIMER_LEN = 16
 _CLAIMER = re.compile(r"\A[0-9a-f]{%d}\Z" % CLAIMER_LEN)
+# MEMBER.md's vcharon: line, the version the member last joined or watched with: 0.1.0,
+# 0.2.0rc1 (a version string, not a name, so dots are fine)
+_VERSION = re.compile(r"\A[0-9][0-9a-z.+-]{0,31}\Z")
 
 
 def _no_tick():
@@ -41,16 +44,25 @@ def _no_tick():
 
 
 def member_fields(data, name):
-    """MEMBER.md's bytes: {"box", "os", "agent", "project", "claimer"} from the header of its
-    entry name#1, each None when missing or not in the shape vcharon writes."""
+    """MEMBER.md's bytes: {"box", "os", "agent", "project", "claimer", "vcharon"} from the
+    header of its entry name#1, each None when missing or not in the shape vcharon writes.
+    Other header lines are left alone: a newer vcharon may write more."""
     header = header_of(data.decode("utf-8", "replace"), name, 1)
     out = {}
     for key in LIST_FIELDS:
         value = header.get(key)
         out[key] = value if value is not None and _FIELD.match(value) else None
-    value = header.get("claimer")
-    out["claimer"] = value if value is not None and _CLAIMER.match(value) else None
+    for key, shape in (("claimer", _CLAIMER), ("vcharon", _VERSION)):
+        value = header.get(key)
+        out[key] = value if value is not None and shape.match(value) else None
     return out
+
+
+def read_member(folder, name):
+    """member_fields of the member folder's MEMBER.md (read as _member_file reads it); {}
+    when there is none to read."""
+    data = _member_file(folder)
+    return member_fields(data, name) if data is not None else {}
 
 
 def _read_head(reader):
@@ -219,8 +231,7 @@ def _channel_info(path, name, tick):
     for entry in sorted(os.scandir(path), key=lambda e: e.name):
         if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
             members.append(entry.name)
-            data = _member_file(entry.path)
-            found = member_fields(data, entry.name) if data is not None else {}
+            found = read_member(entry.path, entry.name)
             fields[entry.name] = {k: found.get(k) for k in LIST_FIELDS}
             try:
                 st = os.lstat(os.path.join(entry.path, CHANNEL_FILE))

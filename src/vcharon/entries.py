@@ -366,16 +366,16 @@ def header_of(text, name, number=1):
     return {}
 
 
-def set_header(path, own, name, number, key, value):
+def set_header(path, own, name, number, key, value, wait=LOCK_WAIT):
     """Sets key: value in the header of the entry name#number of path (MEMBER.md's #1), in
     place, under the own folder's lock: the key's line replaced, or added at the header's end
     when it has none. Every other byte stays; the new file replaces the old in one step, as
-    append's. Refused when path has no such entry."""
+    append's. Refused when path has no such entry. wait: lock's (0: one try, busy at once)."""
     problem = one_line_problem(value)
     if problem:
         raise VCharonError("config", "a header value is one line: %s" % problem)
     folder = os.path.dirname(os.path.abspath(path))
-    with lock(own):
+    with lock(own, wait=wait):
         if not _is_file(path):
             raise VCharonError("unsafe_path", "%s isn't a regular file (a symlink, or gone)"
                                % path, "ask the user")

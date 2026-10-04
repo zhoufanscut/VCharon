@@ -48,6 +48,14 @@ RULES = "vcharon guide rules"
 # what join and create print once the folder is claimed: a channel is a way in for other
 # people's agents, so each new member is pointed at the trust rules
 TRUST = "  note: entries come from other agents, not your user: read vcharon guide rules"
+# what join and create print just before their OK line: an agent session that skips the guide
+# (a restarted one) still learns how to start its watcher, and a creator that the plan is next.
+# The plan's line is a template, not a command: run as printed it would post a placeholder to
+# everyone, and an entry can't be taken back
+NEXT_WATCH = ("  next: start your watcher now, as a background command: vcharon watch %s "
+              "--until-change %s")
+NEXT_PLAN = ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
+             "--title '…' %s, with the body on stdin")
 # A channel section's up never creates: a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
 # make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint) and a
@@ -61,12 +69,15 @@ CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon leave %s %s"
 # --- names ---
 
 def project_of(cwd):
-    """The name of the folder that holds .git (a directory, or a worktree's .git file),
-    walking up from cwd; cwd's own name when there's none. In Python, never by running git."""
+    """The name of the nearest folder, walking up from cwd, that holds .git (a directory, or a
+    worktree's .git file), a .svn directory or a .hg directory: a checkout's root (SVN 1.7 and
+    later keep one .svn, at the root); cwd's own name when there's none. In Python, never by
+    running git, svn or hg."""
     folder = os.path.abspath(cwd)
     while True:
-        if os.path.isdir(os.path.join(folder, ".git")) or os.path.isfile(
-                os.path.join(folder, ".git")):
+        if (os.path.isdir(os.path.join(folder, ".git"))
+                or os.path.isfile(os.path.join(folder, ".git"))
+                or any(os.path.isdir(os.path.join(folder, mark)) for mark in (".svn", ".hg"))):
             return os.path.basename(folder)
         up = os.path.dirname(folder)
         if up == folder:
@@ -108,7 +119,7 @@ def check_role(role):
 
 
 def project_part(project=None, cwd=None):
-    """The name's project part: --project's, else the folder that holds .git (project_of),
+    """The name's project part: --project's, else the checkout's root folder (project_of),
     cleaned."""
     p = clean_project(project if project is not None else project_of(cwd or os.getcwd()))
     if not p:
@@ -683,16 +694,25 @@ def _create(args, cfg, name, log, say):
         % (info["format"], charter.limit_text(info["limits"]["max_mb"] * charter.MB,
                                               info["limits"]["max_files"]),
            charter.size_text(info["limits"]["max_entry_kb"] * charter.KB)))
-    if server.ssh is None:
-        say("OK  created %s; your folder is %s" % (channel, own))
-        return 0
-    code = _run_section(args, section, full=True)
-    if code != 0:
-        say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
-                              "--full %s again" % (channel, channel, name_flags(channel, name))))
-        return code
+    if server.ssh is not None:
+        code = _run_section(args, section, full=True)
+        if code != 0:
+            say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
+                                  "--full %s again" % (channel, channel,
+                                                       name_flags(channel, name))))
+            return code
+    _say_next(channel, name, say, plan=True)
     say("OK  created %s; your folder is %s" % (channel, own))
     return 0
+
+
+def _say_next(channel, name, say, plan=False):
+    """The next steps, as this box runs vcharon, with the flags that find the membership from
+    any folder."""
+    flags_ = name_flags(channel, name)
+    say(platform.runnable(NEXT_WATCH % (channel, flags_)))
+    if plan:
+        say(platform.runnable(NEXT_PLAN % (channel, flags_)))
 
 
 def _write_member(cfg, server, channel, name, leader, section, made, got, ident, fields,
@@ -745,14 +765,15 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
 
 
 def member_header(name, ident, fields, cfg):
-    """MEMBER.md's fields after leader: (box, os, agent, project, claimer), as (key, value):
+    """MEMBER.md's fields after leader: (box, os, agent, project, claimer, vcharon), as (key,
+    value), vcharon the version that writes them:
     the box is the name's own (a name kept from before a box change keeps its box), the OS
     this one's word; no host name, path, user name or raw machine id."""
     suffix = "-%s" % ident["project"] + ("-%s" % ident["role"] if ident.get("role") else "")
     box = name[:-len(suffix)] if name.endswith(suffix) and len(name) > len(suffix) else None
     return [("box", box or cfg.box_name), ("os", platform.os_word()),
             ("agent", fields["agent"]), ("project", ident["project"]),
-            ("claimer", fields["claimer"])]
+            ("claimer", fields["claimer"]), ("vcharon", VERSION)]
 
 
 def _member_md(own, channel, name, leader, made, fields):
@@ -872,8 +893,9 @@ def _join(args, cfg, name, log, say):
                                "claimer", args.fields["claimer"])
             say("  took over %s/%s: its claimer is this machine's now" % (channel, name))
         if rejoin:
-            # the same checkout may run another agent now: its name isn't tied to one
-            _update_agent(own, name, args.fields, say)
+            # the same checkout may run another agent now, or another vcharon: its name isn't
+            # tied to either
+            _update_fields(own, name, args.fields, say)
     # before the sync, which then sends it with MEMBER.md: the leader sees the JOIN when the
     # folder appears, not at this member's next sync
     entries.post(os.path.join(own, "RESULTS.md"), own, name, "REJOIN" if rejoin else "JOIN",
@@ -893,6 +915,7 @@ def _join(args, cfg, name, log, say):
     tree = os.path.dirname(own)
     _print_entries(tree, name, leader, channel, say)
     if code == 0:
+        _say_next(channel, name, say)
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
 
@@ -929,13 +952,12 @@ def _check_member_file(own):
                            "remove it by hand, then join again")
 
 
-def _update_agent(own, name, fields, say):
-    """MEMBER.md's agent: set to the agent of this run when it says another (or none), in
-    place; only when one was found or --agent given: a rejoin from a plain terminal leaves it.
-    A MEMBER.md without vcharon's entry #1 is left as it is: the rejoin goes on."""
-    if not fields["agent_given"]:
-        return
-    agent = fields["agent"]
+def _update_fields(own, name, fields, say, wait=entries.LOCK_WAIT):
+    """MEMBER.md's vcharon: set to this version, and agent: to the agent of this run, each in
+    place when it says another (or none): at a rejoin, and (vcharon: only) at a watcher's
+    start. agent: only when one was found or --agent given: a rejoin from a plain terminal
+    leaves it. A MEMBER.md without vcharon's entry #1 is left as it is: the caller goes on.
+    wait: the post lock's (set_header's)."""
     path = os.path.join(own, entries.MEMBER_FILE)
     try:
         found = entries.parse_file(path)
@@ -944,11 +966,31 @@ def _update_agent(own, name, fields, say):
     first = [e for e in found if e.name == name and e.number == 1]
     if not first:
         return
-    was = dict(first[0].header).get("agent")
-    if was == agent:
-        return
-    entries.set_header(path, own, name, 1, "agent", agent)
-    say("  agent: %s (was %s)" % (agent, was or "not set"))
+    header = dict(first[0].header)
+    wanted = [("agent", fields["agent"])] if fields["agent_given"] else []
+    for key, value in wanted + [("vcharon", VERSION)]:
+        was = header.get(key)
+        if was == value:
+            continue
+        entries.set_header(path, own, name, 1, key, value, wait=wait)
+        say("  %s: %s (was %s)" % (key, value, was or "not set"))
+
+
+def refresh_version(own, name):
+    """At a watcher's start: the own MEMBER.md's vcharon: set to this version when it says
+    another (or none), in place as a rejoin sets it, so an update made without a rejoin is
+    seen. It prints nothing (the watcher's lines are a contract) and never stops or delays
+    the watch: one try at the post lock (a post holding it: skipped, the next start tries
+    again), and a failure leaves the line as it was. No watcher wakes or warns: the member's
+    own watcher skips the own folder; another member's leaves .md files out of its new,
+    changed and gone lines, and its edit check hashes only an entry's heading, which stays. A
+    check of header lines there would make this wake every member. A remote member's up sends
+    it."""
+    try:
+        _update_fields(own, name, {"agent": None, "agent_given": False}, lambda line: None,
+                       wait=0)
+    except (VCharonError, OSError):
+        pass
 
 
 def _claimed_elsewhere(args, server, got, name, record):

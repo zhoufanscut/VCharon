@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -56,8 +57,8 @@ from .proto import VCharonError
 ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
-CLIENT_SUBJECTS = ("vcharon", "install", "bundle", "python", "config", "box", "ssh", "agent",
-                   "dirs", "machine", "claimer")
+CLIENT_SUBJECTS = ("vcharon", "install", "path", "bundle", "python", "config", "box", "ssh",
+                   "agent", "dirs", "machine", "claimer")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
 # reorder entries posted near a minute's end; from 30 s it will do so often.
@@ -68,6 +69,16 @@ LINUX_ID_HINT = "as root, run systemd-machine-id-setup: it writes /etc/machine-i
 # a bundle without the helper: the package's .py files are missing from this install
 BUNDLE_HINT = "this install is broken: install vcharon again"
 ZONE_HINT = "give both the same time zone; entry headings carry local time with no zone"
+# Other vcharon installs on PATH. Each fix asks the user: an agent follows a fix line, and
+# removing software or changing PATH is the user's to decide.
+LATER_HINT = ("ask your user to uninstall the vcharon they don't use, or to take its folder off "
+              "PATH: a shell with another PATH order runs the other one")
+FIRST_HINT = ("ask your user to uninstall that vcharon, or to put this one's folder before it "
+              "on PATH: until then a vcharon typed as a command runs the other one")
+# a checkout is often run by hand, as <venv python> -m vcharon: there is no folder of its own to
+# put on PATH
+CHECKOUT_HINT = ("ask your user which vcharon agents should run: a vcharon typed as a command "
+                 "runs the one first on PATH, not this checkout")
 
 
 def _counted(n, word):
@@ -165,6 +176,44 @@ def _install(rep):
         text = "with %s: vcharon --update prints the command that updates it" % inst.kind
     rep.check("ok", "install", text)
     return {"kind": inst.kind, "path": inst.path}
+
+
+# the PATH scan lives in platform, beside self_command, which uses it on Windows too; doctor's
+# own name for it is what its tests replace
+vcharons_on_path = platform.vcharons_on_path
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def path_check(rep, kind, which=shutil.which):
+    """Other vcharon installs on PATH (DESIGN, "Fix lines"). What a typed vcharon runs is
+    platform.typed_vcharon's answer, as self_command's, so this row and the fix lines'
+    spelling agree. One after this install is a warning:
+    a shell or tool with another PATH order runs it. One that a typed vcharon runs instead, or
+    this install not on PATH at all, is a failure for an install of its own (the vcharon an
+    agent types, and the guide it reads, aren't this one), and a warning for a checkout (kind
+    "source"), which is normally run by hand."""
+    first = platform.typed_vcharon(which)
+    first_mine = first is not None and platform.runs_this(first)
+    others = [one for one in vcharons_on_path() if not platform.runs_this(one)]
+    if first is not None and not first_mine and not any(_same(first, o) for o in others):
+        others.insert(0, first)
+    if not others:
+        return
+    if first_mine:
+        rep.check("warn", "path", "another vcharon on PATH, after this one: %s"
+                  % ", ".join(others), LATER_HINT)
+        return
+    shown = first if first is not None else others[0]
+    rest = ", ".join(o for o in others if not _same(o, shown))
+    checkout = kind == "source"
+    rep.check("warn" if checkout else "FAIL", "path",
+              "the vcharon first on PATH is another install, %s%s; this %s runs as %s"
+              % (shown, " (and on PATH: %s)" % rest if rest else "",
+                 "checkout" if checkout else "one", platform.self_command()),
+              CHECKOUT_HINT if checkout else FIRST_HINT)
 
 
 def _bundle(rep):
@@ -564,6 +613,7 @@ def main(args, run):
     say("vcharon: doctor%s" % (" --server " + target if target is not None else ""))
     _vcharon(rep)
     installed = _install(rep)
+    path_check(rep, installed["kind"])
     helper_bundle = _bundle(rep)
     _python(rep)
     _config(rep, cfg, cfg_err, not dests)

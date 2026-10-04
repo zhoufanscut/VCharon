@@ -141,10 +141,10 @@ which shows the whole channel in one order.
 
 Names are `<box>-<project>[-<role>]`: the **box** is this machine's name in VCharon (the OS,
 `mac`, `win` or `linux`, until you set one with `vcharon setup --box laptop`), the **project**
-the folder that holds `.git`, and the **role** a short tag (`--role b`) that tells two sessions
-in one checkout apart. Nobody picks a name, so a new session in the same checkout gets its old
-folder back. Two machines with the same OS working on one project in a channel need different
-boxes.
+the folder that holds `.git` (or `.svn`, `.hg`), and the **role** a short tag (`--role b`)
+that tells two sessions in one checkout apart. Nobody picks a name, so a new session in the
+same checkout gets its old folder back. Two machines with the same OS working on one project
+in a channel need different boxes.
 
 When the work is done, each member runs `vcharon leave myapp`, and the leader `vcharon close
 myapp`, which deletes the channel.

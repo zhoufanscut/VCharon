@@ -885,10 +885,14 @@ member's folder name.
   setup. Never a host name, not as a default nor as a fallback: a host name can name an
   employer or a network, and a silent fallback would give one machine a second name.
   `whoami`, `doctor` and `setup` print where it came from.
-- `<project>`: the name of the folder holding `.git` (a folder, or a worktree's `.git` file),
-  found by walking up from the current folder in Python, not by running `git`; else the current
-  folder's own name. Lowercased, each run of characters other than `a-z0-9_` made one `-`, `-`
-  stripped at both ends, cut to 14, `-` stripped again. `--project P` overrides it.
+- `<project>`: the name of the nearest folder, walking up from the current one, that holds
+  `.git` (a folder, or a worktree's `.git` file), a `.svn` folder or a `.hg` folder, found in
+  Python, not by running `git`, `svn` or `hg`; else the current folder's own name. Lowercased,
+  each run of characters other than `a-z0-9_` made one `-`, `-` stripped at both ends, cut to
+  14, `-` stripped again. `--project P` overrides it. Why `.svn` and `.hg` too: a member must
+  keep its name in any folder of its checkout, whatever the version control. SVN 1.7 and later
+  keep one `.svn`, at the working copy's root; an older working copy (a `.svn` in every folder)
+  names the current folder, so pass `--project` there.
 - `-<role>`: only with `--role R`, 1 to 6 of `a-z0-9`.
 - The whole name: lowercase `a-z0-9-_`, starting with a letter or digit, at most 32 (10 + 1 +
   14 + 1 + 6), not a name Windows reserves: a Windows client must be able to hold the folder,
@@ -907,13 +911,31 @@ Using the current folder breaks "never rely on the current directory" ([Launch
 rules](#launch-rules)) on purpose: the name says where the agent works.
 
 `MEMBER.md`'s entry #1 holds `channel:`, `name:`, `leader:`, then `box:`, `os:` (`mac`, `win`,
-`linux`), `agent:` (`claude`, `codex`, `opencode`, `other`), `project:` and `claimer:`. No host
-name, path, user name or raw machine id. `vcharon list` shows box, os, agent and project.
+`linux`), `agent:` (`claude`, `codex`, `opencode`, `other`), `project:`, `claimer:` and
+`vcharon:` (the version the member last ran). No host name, path, user name or raw machine id.
+`vcharon list` shows box, os, agent and project; `vcharon read` notes differing versions
+([Mixed versions](#mixed-versions)).
 
 - `agent:` comes from `--agent`, else from the environment the agent's CLI sets
   (`CLAUDECODE`, `CODEX_THREAD_ID`, `OPENCODE`), else `other`; more than one found gives
   `other`. A rejoin updates it only when one was found or given: a rejoin from a plain terminal
   leaves it.
+- `vcharon:` is written at `join` and `create`, and set in place to the running version when
+  it says another (or none: a `MEMBER.md` from before the line gets it added at its header's
+  end) by every rejoin, which prints `  vcharon: <new> (was <old>)`, and by every start of the
+  member's watcher (a restart after `EXIT updated` too), which prints nothing, its lines being
+  a contract. Why the watcher: an update needs no rejoin (a leader never rejoins), but every
+  agent restarts its watcher. The watcher's start does it before its first round and before
+  the watchdog's start mark (nothing it reads is an import after the start), and tries the
+  post lock once: a post holding it, or any failure, leaves the line and the watch starts at
+  once. No watcher wakes or warns: the member's own watcher skips the own folder; another
+  member's leaves `.md` files out of its `new`/`changed`/`gone` lines, and its edit check hashes
+  only an entry's heading, which stays (a check of header lines there would wake every member
+  at each such start). A remote member's up sends it. So the line can lag until the member's
+  next watcher start that gets the lock.
+- A reader takes the fields it knows and leaves every other header line alone, so a newer
+  vcharon may add one. 0.1.0's readers do the same: they look up `leader:`, `agent:`,
+  `claimer:` and the four list fields by key, and skip the rest.
 
 ### The claimer
 
@@ -1004,6 +1026,16 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the member's next sync.
   Then the entries already addressed to the member or to all are printed (the sync brought the
   others' folders), since the watcher's first start is a baseline that prints nothing.
+- **The next step.** A `join` or `create` that succeeded prints, just before its `OK` line
+  (which stays the last), `  next: start your watcher now, as a background command: vcharon
+  watch C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post):
+  vcharon post C --steps --to @all --title '…' <flags>, with the body on stdin`. The flags are
+  the record's (`--project`, and `--role` when it has one), so the commands work from any
+  folder; spelled as this machine runs vcharon. The watcher line is a command to run as
+  printed; the plan line is a template (a placeholder title, and the trailing words make it
+  refuse to parse), since a plan posted as printed would reach everyone and can't be taken
+  back. Why: an agent that skips the guide still sees what to run next. A join whose sync
+  failed prints neither: its sync is the next step.
 - **The rejoin's pull** is decided from up's saved state, never from how the folder looks (a
   stray `.DS_Store` would pass for a tree): it pulls when up has no usable state, has sent
   nothing, or has sent `MEMBER.md` and `MEMBER.md` is missing here. It pulls into a temp folder
@@ -1239,7 +1271,12 @@ reads: for a remote member it shows the local tree as of the last sync, and says
   its folder's, the first with that ID) takes part.
 - `note:` lines after the list: an unreadable folder or file, a left-out folder, an entry with no
   or a wrong-folder ID or a duplicate, a bad or future time, an answer stamped before its
-  question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle.
+  question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle; last, when the
+  members' `MEMBER.md` give two or more `vcharon:` versions, `note: members' vcharon versions
+  differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a member without
+  the line as `unknown`. Quiet when fewer than two known versions differ.
+- `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
+  (null when missing).
 
 ### Clocks
 
@@ -1255,6 +1292,9 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
 ### Mixed versions
 
 - The helper is safe: each client sends its own, and the hello requires its own version.
+- Members on different versions read different guides. Each `MEMBER.md` says the version its
+  member last ran (`vcharon:`), `whoami` prints the running one, and `read` notes when the
+  members' differ. Why: nothing else in a channel shows which version a member runs.
 - A channel's files are guarded by the format ([Formats](#formats)).
 - The record and the section hold everything a later command needs, so a membership made by one
   version is used by the next; a record a newer layout needs and lacks is refused with the
@@ -1307,11 +1347,11 @@ Every verb also takes `-v` (log lines to stderr too).
 - **Short help**: `vcharon --help` fits one screen and lists the exit codes; each verb's
   `--help` shows one example.
 - `setup` writes the config, or prints what this machine uses; `doctor` checks this machine
-  (how VCharon was installed, Python, config, box, ssh client, agent keys, folders, machine
-  id), each server of the channels joined or the one named (login through the `-v` probe,
-  Python, distro, clock, an echo of 4 MiB), and each channel section's jobs; it only reads,
-  apart from a temp file in the state and log dirs. `ping` connects, echoes all 256 byte
-  values plus 1 MiB of random bytes, and prints the round trip.
+  (how VCharon was installed, other vcharon installs on PATH, Python, config, box, ssh client,
+  agent keys, folders, machine id), each server of the channels joined or the one named (login
+  through the `-v` probe, Python, distro, clock, an echo of 4 MiB), and each channel section's
+  jobs; it only reads, apart from a temp file in the state and log dirs. `ping` connects,
+  echoes all 256 byte values plus 1 MiB of random bytes, and prints the round trip.
 - `sync` is for remote members only (a local member's folder is in the channel itself). `--full`
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
@@ -1405,6 +1445,27 @@ line of text>` for the agent or its user.
 
   Why: a fix line an agent runs as printed must work here; `vcharon` alone isn't on every
   install's `PATH`.
+- **Other installs on PATH**: `doctor`'s `path` row. It walks `PATH` in order (an empty entry
+  skipped) for a file named `vcharon` that may be run, or on Windows `vcharon` plus one of
+  `PATHEXT`'s extensions (Windows runs by extension, not by mode), each file once by its real
+  path; this install's own is the one `self_command` would call `vcharon` (`platform.runs_this`).
+  What a typed `vcharon` runs is `platform.typed_vcharon`'s answer, the one `self_command`
+  spells from too, so the row and the fix lines agree: `shutil.which`'s, except that on Windows
+  a hit found only through the current folder (not itself on `PATH`) is dropped for the first
+  one on `PATH`. Git Bash's and PowerShell's order counts, not cmd.exe's: agents type commands
+  there, and neither searches the current folder.
+  - Another one after this one: `warn`, since a shell or tool with another `PATH` order runs it.
+  - A typed `vcharon` runs another one, or this one isn't on `PATH`: `FAIL` (doctor exits 1)
+    for a binary, pipx, uv or pip install; `warn` for a checkout (install kind `source`), which
+    is normally run by hand as `<venv python> -m vcharon` and has no folder of its own to put
+    on `PATH`.
+  - Each fix line starts `ask your user to …`: an agent follows fix lines, and removing
+    software or changing `PATH` is the user's call.
+
+  Why: an agent whose `vcharon` is another install reads that install's guide and runs its
+  code. Limits of the scan: a literal `~` in a `PATH` entry isn't expanded (bash expands it, so
+  bash may find a `vcharon` there that doctor doesn't list), and a quoted Windows entry isn't
+  unquoted.
 - `<command>` is one of the verbs, `--version` or `--help`, after the text's start, a space, `(`
   or a backquote, and before a space, the end, or one of `),.;` and a backquote. So `vcharon's`,
   a path and the `-m vcharon` it wrote are never rewritten, and applying it twice changes nothing
@@ -1671,8 +1732,10 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     "folder", "tree", "box", "box_source"}`. `whoami` without C: `{"box", "box_source",
     "project", "role", "name", "channels"}`, each channel as with C without `box` and
     `box_source`.
-  - `read`: `{"channel", "folder", "synced", "members", "count", "entries", "notes"}`; each entry
-    `{"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}`.
+  - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
+    "notes"}`; each of `member_info` `{"name", "box", "os", "agent", "project", "vcharon"}`;
+    each entry `{"time", "id", "name", "number", "to", "re", "title", "file", "header",
+    "body"}`.
   - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
     "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
     "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",

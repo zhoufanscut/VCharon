@@ -9,6 +9,32 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon doctor` has a `path` row when another vcharon is on PATH: a warning when it comes
+  after this one; when a typed `vcharon` runs the other one (or this one isn't on PATH), a
+  failure (exit 1) for a binary, pipx, uv or pip install, a warning for a checkout. Its fix
+  lines ask the user. Also in `doctor --json`'s `checks`. On Windows a `vcharon` found only in
+  the current folder no longer counts as on PATH, here and in how fix lines spell vcharon: Git
+  Bash and PowerShell don't search it. Seen in a channel run (measured): a Windows box with
+  two installs on PATH ran the older one. To adapt: where another vcharon comes first on PATH,
+  `doctor` now exits 1; remove it or put this one's folder before it.
+- `MEMBER.md`'s entry #1 has a `vcharon:` line, the version the member runs: written at join,
+  updated by a rejoin (`  vcharon: <new> (was <old>)`) and, silently, by each start of the
+  member's watcher (so an update without a rejoin shows too). `vcharon read` ends with a
+  `note:` naming each member's version when two or more differ, `read --json` has a new
+  `member_info` field (each member's `MEMBER.md` fields, `vcharon` among them), and `vcharon
+  whoami` prints a `vcharon` line. Seen in a channel run (measured): members on 0.1.0rc2 and
+  0.1.0, with nothing showing it. 0.1.0 skips the new line (measured on Linux: its
+  `member_fields` and `header_of`).
+- `join` and `create` print the next step before their `OK` line, which stays last: `  next:
+  start your watcher now, as a background command: vcharon watch C --until-change --project
+  P`, and for `create` a template line for the plan, `  then post the plan (vcharon guide
+  post): vcharon post C --steps --to @all --title '…' --project P, with the body on stdin`.
+  Seen in a channel run (measured): a restarted agent session read only part of the guide and
+  skipped its steps for a new session (it didn't run `join` again).
+- A member's project is now the nearest folder holding `.git`, `.svn` or `.hg`, not only
+  `.git`, so a member in a subfolder of an SVN or Mercurial checkout gets the checkout's name.
+  To adapt: a member that joined from a subfolder of such a checkout now gets another name;
+  pass the `--project` it joined with to keep using that membership.
 - `vcharon read` lists an entry whose heading time has no seconds (only 0.1.0rc1 wrote them)
   first, with a `bad time` note, instead of at the start of its minute. To adapt: post it again,
   or edit its heading's time to `YYYY-mm-dd HH:MM:SS`.

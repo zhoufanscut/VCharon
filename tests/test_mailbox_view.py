@@ -276,6 +276,8 @@ class OutputTest(ViewCase):
         doc = json.loads(line)
         self.assertEqual(doc, {
             "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
+            "member_info": [{"name": n, "box": None, "os": None, "agent": None,
+                             "project": None, "vcharon": None} for n in ("aa", "bb")],
             "count": 4, "notes": [],
             "entries": [
                 {"time": "2026-10-02 10:01:00", "id": "aa#2", "name": "aa", "number": 2,
@@ -301,6 +303,64 @@ class OutputTest(ViewCase):
         # the text after the colon is the OS's, localized on Windows
         self.assertTrue(err.startswith("ERROR can't read %s: " % missing), err)
         self.assertEqual(err.count("\n"), 1)
+
+
+def member(name, version=None, extra=()):
+    """A MEMBER.md whose #1 is name's, with a vcharon: line when version is given."""
+    lines = ["box: mac", "project: web"] + (["vcharon: " + version] if version else [])
+    return ("# MEMBER\n" + entry(name + "#1", "member", to="@aa",
+                                 extra=lines + list(extra))).encode("utf-8")
+
+
+class VersionTest(ViewCase):
+    """The members' vcharon versions, from their MEMBER.md: a note when two differ, and each
+    member's in --json."""
+
+    def note(self, lines):
+        found = [n for n in self.notes(lines) if "vcharon versions" in n]
+        return found[0] if found else None
+
+    def test_two_versions_differ(self):
+        write_tree(self.tree, {"aa/MEMBER.md": member("aa", "0.1.0"),
+                               "aa/R.md": md(entry("aa#2", re_="zz#9")),
+                               "bb/MEMBER.md": member("bb", "0.2.0rc1"),
+                               "cc/MEMBER.md": member("cc"), "dd/": None})
+        lines = self.view()
+        # after every other note: one per line, the last line
+        self.assertEqual(lines[-2:], [
+            "note: aa#2 answers zz#9, which isn't in the tree (not synced yet, or a typo)",
+            "note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
+            "bb 0.2.0rc1, cc unknown, dd unknown; their guides may differ"])
+        doc = json.loads(self.main("--json")[1][0])
+        self.assertEqual([(m["name"], m["vcharon"]) for m in doc["member_info"]],
+                         [("aa", "0.1.0"), ("bb", "0.2.0rc1"), ("cc", None), ("dd", None)])
+        self.assertEqual(doc["member_info"][0], {"name": "aa", "box": "mac", "os": None,
+                                                 "agent": None, "project": "web",
+                                                 "vcharon": "0.1.0"})
+        self.assertEqual(doc["notes"][-1], lines[-1].removeprefix("note: "))
+
+    def test_quiet_unless_two_known_versions_differ(self):
+        for tree in ({"aa/MEMBER.md": member("aa", "0.1.0"), "bb/MEMBER.md": member("bb", "0.1.0"),
+                      "cc/MEMBER.md": member("cc")},
+                     {"aa/MEMBER.md": member("aa", "0.1.0"), "bb/MEMBER.md": member("bb")},
+                     {"aa/MEMBER.md": member("aa"), "bb/": None},
+                     # a value in another shape counts as none
+                     {"aa/MEMBER.md": member("aa", "0.1.0"),
+                      "bb/MEMBER.md": member("bb", "0.2 beta")}):
+            with self.subTest(tree=sorted(tree)):
+                shutil.rmtree(self.tree)
+                write_tree(self.tree, tree)
+                self.assertIsNone(self.note(self.view()))
+
+    def test_another_members_first_entry_and_unknown_lines(self):
+        # only the folder's own #1 counts; a header line this vcharon doesn't know is ignored
+        # (a newer vcharon may write more)
+        write_tree(self.tree, {
+            "aa/MEMBER.md": member("aa", "0.1.0", extra=["future: x", "no colon here"]),
+            "bb/MEMBER.md": member("aa", "0.2.0") + member("bb", "0.1.0")[len("# MEMBER\n"):]})
+        self.assertIsNone(self.note(self.view()))
+        doc = json.loads(self.main("--json")[1][0])
+        self.assertEqual([m["vcharon"] for m in doc["member_info"]], ["0.1.0", "0.1.0"])
 
 
 class JobTest(ViewCase):

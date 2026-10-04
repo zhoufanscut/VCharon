@@ -35,18 +35,21 @@ it was; an entry with no ID, in a
 folder not its ID's, or a second copy of an ID; an entry with no time, or a bad one; one stamped
 after this box's current minute; one stamped in an earlier minute than the entry its re: names
 (clocks differ?); a re: naming an ID not in the tree (not synced yet, or a typo); re: lines that
-make a cycle within a minute, which then goes by number only.
+make a cycle within a minute, which then goes by number only; last, when the members'
+MEMBER.md give two or more vcharon versions, each member's (unknown for one with none).
 
 Exit 0; 1 when the channel's folder can't be read (`ERROR can't read <dir>: ...`, on stderr).
 
 --json prints one object instead (view_json): {"channel", "folder", "synced", "members",
-"count", "entries", "notes"}. "folder" is the tree read; "synced" is true for a remote member's
-copy; "members" the member folders read; "count" every entry in the tree, while "entries" holds
-the ones shown (--last), in the view's order, each {"time", "id", "name", "number", "to", "re",
-"title", "file", "header", "body"}: "file" is the entry's file relative to the tree, with "/";
-"time", "id", "name", "number" and "re" are null when the entry lacks them; "header" (a list of
-[key, value], key "" for a line without one) and "body" are null unless --full. "notes" are the
-note lines' texts, without "note: ".
+"member_info", "count", "entries", "notes"}. "folder" is the tree read; "synced" is true for a
+remote member's copy; "members" the member folders read; "member_info" each one's {"name",
+"box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it lacks;
+"vcharon" the version the member last joined or watched with); "count" every entry in the
+tree, while "entries" holds the ones shown (--last), in the view's order, each {"time", "id",
+"name", "number", "to", "re", "title", "file", "header", "body"}: "file" is the entry's file
+relative to the tree, with "/"; "time", "id", "name", "number" and "re" are null when the
+entry lacks them; "header" (a list of [key, value], key "" for a line without one) and "body"
+are null unless --full. "notes" are the note lines' texts, without "note: ".
 """
 
 from __future__ import annotations
@@ -57,7 +60,7 @@ import itertools
 import os
 import sys
 
-from .. import entries, pathrules
+from .. import channels, entries, pathrules
 
 INDENT = "    "
 
@@ -262,16 +265,46 @@ def _now():
     return datetime.datetime.now()  # noqa: DTZ005
 
 
+# the fields of a member's MEMBER.md #1 that --json gives: vcharon list's, and the version
+INFO_FIELDS = channels.LIST_FIELDS + ("vcharon",)
+
+
+def member_info(root, folders):
+    """[{"name", "box", "os", "agent", "project", "vcharon"}] of the member folders read, from
+    each one's MEMBER.md #1; None for a field it lacks, or holds in another shape."""
+    out = []
+    for name in folders:
+        found = channels.read_member(os.path.join(root, name), name)
+        out.append(dict([("name", name)] + [(k, found.get(k)) for k in INFO_FIELDS]))
+    return out
+
+
+def version_note(info):
+    """The note when the members' MEMBER.md give two or more vcharon versions, each member
+    with its version (unknown for one with none); None otherwise. Why: members on different
+    versions read different guides, and nothing else in a channel shows it."""
+    if len({one["vcharon"] for one in info if one["vcharon"]}) < 2:
+        return None
+    return ("note: members' vcharon versions differ (from their MEMBER.md): %s; their guides "
+            "may differ" % ", ".join("%s %s" % (one["name"], one["vcharon"] or "unknown")
+                                     for one in info))
+
+
 def _collect(root, now, skip=None, notes=()):
-    """(member folders, items in the view's order, notes) of the tree root; OSError when the
-    root can't be read. notes: more notes' texts, first."""
+    """(member folders, items in the view's order, notes, member_info) of the tree root;
+    OSError when the root can't be read. notes: more notes' texts, first; the version note,
+    if any, last."""
     folders, items, read_notes = read_tree(root, skip)
     read_notes = ["note: %s" % n for n in notes] + read_notes
     if now is None:
         now = _now()
     ordered, minute_notes = order(items, now)
     notes = read_notes + [n for item in ordered for n in item.notes] + minute_notes
-    return folders, ordered, notes
+    info = member_info(root, folders)
+    versions = version_note(info)
+    if versions is not None:
+        notes.append(versions)
+    return folders, ordered, notes, info
 
 
 def view(root, channel, synced=False, full=False, last=None, now=None, out=print, skip=None,
@@ -279,7 +312,7 @@ def view(root, channel, synced=False, full=False, last=None, now=None, out=print
     """Prints the view of the channel tree root; returns the exit code. skip: read_tree's;
     notes: more notes (a remote member's: the members its last pull left out)."""
     try:
-        folders, ordered, notes = _collect(root, now, skip, notes)
+        folders, ordered, notes, _info = _collect(root, now, skip, notes)
     except OSError as e:
         print("ERROR can't read %s: %s" % (root, _why(e)), file=sys.stderr)
         return 1
@@ -298,7 +331,7 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
               notes=()):
     """The view as one JSON object (the module's docstring has its fields); OSError when the
     root can't be read. skip and notes: view's."""
-    folders, ordered, notes = _collect(root, now, skip, notes)
+    folders, ordered, notes, info = _collect(root, now, skip, notes)
     shown = ordered[-last:] if last else ordered
     items = []
     for item in shown:
@@ -308,5 +341,5 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
                       "header": [[k or "", v] for k, v in e.header] if full else None,
                       "body": e.body if full else None})
     return {"channel": channel, "folder": root, "synced": synced, "members": folders,
-            "count": len(ordered), "entries": items,
+            "member_info": info, "count": len(ordered), "entries": items,
             "notes": [n.removeprefix("note: ") for n in notes]}

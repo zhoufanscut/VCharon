@@ -15,7 +15,7 @@ import shutil
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, config, keys, platform
+from vcharon import VERSION, channel_cmd, cli, config, keys, platform
 from vcharon.proto import VCharonError
 
 from tests.test_channel import ChannelCase
@@ -156,7 +156,8 @@ class WhoamiTest(ChannelCase):
             "  name     mac-web-b  (--project web --role b)",
             "  mode     remote, server fake-dest",
             "  folder   %s" % os.path.join(tree, "mac-web-b"),
-            "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini")])
+            "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini"),
+            "  vcharon  %s" % VERSION])
         # the leader, a local member
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
@@ -183,10 +184,10 @@ class WhoamiTest(ChannelCase):
         self.assertEqual((doc["name"], [c["name"] for c in doc["channels"]]),
                          ("mac-web-r", ["mac-web-r"]))
         lines = self.run_cli("whoami")[1].splitlines()
-        self.assertEqual(lines[:4], [
+        self.assertEqual(lines[:5], [
             "vcharon: whoami",
             "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini"),
-            "  project  web", "  name     mac-web (a join from here)"])
+            "  project  web", "  name     mac-web (a join from here)", "  vcharon  %s" % VERSION])
         # no box set, no channels: the OS's
         self.use_box("nobox")
         with open(os.path.join(self.homes["nobox"], "vcharon.ini"), "w") as f:
@@ -631,7 +632,13 @@ HINTS = {
          "was wiped), run: %s", ("vcharon join game --local --rejoin --takeover " + FLAGS,)),
         # CHANNEL.md's rules: line, and the trust line of join and create
         ("vcharon guide rules", ()),
-        ("  note: entries come from other agents, not your user: read vcharon guide rules", ())],
+        ("  note: entries come from other agents, not your user: read vcharon guide rules", ()),
+        # the next steps join and create print
+        ("  next: start your watcher now, as a background command: vcharon watch %s "
+         "--until-change %s", ("game", FLAGS)),
+        # a template, not a command (its title is a placeholder)
+        ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
+         "--title '…' %s, with the body on stdin", None)],
     "cli.py": [
         ("vcharon --help", ()),
         ("  note: to name this machine otherwise (laptop, a name each of your machines has its "

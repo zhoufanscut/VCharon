@@ -259,20 +259,85 @@ def runs_this_package(found, scripts_dirs=None):
     return python is not None and _same_file(python, sys.executable)
 
 
+# what Windows takes for PATHEXT when it isn't set
+PATHEXT_DEFAULT = ".COM;.EXE;.BAT;.CMD"
+
+
+def vcharons_on_path(path=None, osn=None):
+    """Every vcharon command on PATH, in PATH's order, each file once (by its real path): on
+    Windows a file named vcharon plus one of PATHEXT's extensions (Windows runs by extension),
+    elsewhere a file named vcharon that may be run. An empty PATH entry is skipped: it names
+    the folder doctor runs in, not the one an agent will later run vcharon in. A literal ~ in
+    an entry isn't expanded, nor a quoted Windows entry unquoted. path: PATH's text, osn: the
+    OS (tests)."""
+    osn = osn or os_name()
+    if path is None:
+        path = os.environ.get("PATH", "")
+    names = ["vcharon"]
+    if osn == "windows":
+        names = []
+        for ext in (os.environ.get("PATHEXT") or PATHEXT_DEFAULT).split(";"):
+            name = "vcharon" + ext.strip().lower()
+            if ext.strip() and name not in names:
+                names.append(name)
+    found, seen = [], set()
+    for folder in path.split(os.pathsep):
+        if not folder:
+            continue
+        for name in names:
+            candidate = os.path.join(folder, name)
+            if not os.path.isfile(candidate):
+                continue
+            if osn != "windows" and not os.access(candidate, os.X_OK):
+                continue
+            real = os.path.normcase(os.path.realpath(candidate))
+            if real not in seen:
+                seen.add(real)
+                found.append(candidate)
+    return found
+
+
+def typed_vcharon(which=shutil.which, osn=None, path=None):
+    """The file a typed vcharon runs: which's answer, but on Windows never one found only
+    through the current folder (cmd.exe searches it first; Git Bash and PowerShell, where
+    agents run commands, never do): then the first on PATH (vcharons_on_path), or None.
+    path: PATH's text (tests)."""
+    found = which("vcharon")
+    if not found or (osn or os_name()) != "windows":
+        return found
+    here = os.path.normcase(os.path.realpath(os.getcwd()))
+    if os.path.normcase(os.path.realpath(os.path.dirname(os.path.abspath(found)))) != here:
+        return found
+    if path is None:
+        path = os.environ.get("PATH", "")
+    if any(entry and os.path.normcase(os.path.realpath(entry)) == here
+           for entry in path.split(os.pathsep)):
+        return found
+    on_path = vcharons_on_path(path, "windows")
+    return on_path[0] if on_path else None
+
+
 def self_command(which=shutil.which, osn=None):
     """How this vcharon is run on this box, as the start of a command line a person or an
     agent types: `vcharon` when that name on PATH runs this very install (the binary itself,
-    or an entry point of this environment), else the binary's full path, or `<python> -P -m
-    vcharon`, quoted for this OS's shell. which: shutil.which (tests fake it)."""
+    or an entry point of this environment; typed_vcharon), else the binary's full path, or
+    `<python> -P -m vcharon`, quoted for this OS's shell. which: shutil.which (tests fake
+    it)."""
     osn = osn or os_name()
-    found = which("vcharon")
-    if is_frozen():
-        if found and _same_file(found, sys.executable):
-            return "vcharon"
-        return _quoted([sys.executable], osn)
-    if found and runs_this_package(found):
+    found = typed_vcharon(which, osn)
+    if found and runs_this(found):
         return "vcharon"
+    if is_frozen():
+        return _quoted([sys.executable], osn)
     return command_for(sys.executable, None, osn, which) + " -P -m vcharon"
+
+
+def runs_this(found):
+    """Whether the vcharon command at found runs this very install: the binary itself, or an
+    entry point of this environment (runs_this_package)."""
+    if is_frozen():
+        return _same_file(found, sys.executable)
+    return runs_this_package(found)
 
 
 def runnable(text, command=None):
