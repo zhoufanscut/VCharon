@@ -363,7 +363,7 @@ def _dirs(rep):
         except OSError as e:
             good = False
             rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e),
-                      "fix its permissions, or set VCHARON_HOME")
+                      "fix its permissions, or set VCHARON_HOME to an absolute folder")
     if good:
         rep.check("ok", "dirs", "state %s, logs %s, joined %s, channels %s"
                   % (where["state"], where["logs"], where["joined"], where["channels"]))

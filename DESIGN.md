@@ -723,6 +723,10 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
   release smoke test). The channel root doesn't follow it: the server never sees a client's
   setting, and a machine's local and remote members must share one root.
   `VCHARON_CHANNELS_ROOT` moves the root, for tests only.
+- `VCHARON_HOME` must be absolute after `~` is expanded, else every command that reads it
+  fails with `config`: a relative folder would follow the current directory, putting records
+  in whatever checkout a command ran from, and a channel section's `mailbox.local` is refused
+  unless absolute.
 - `joined` is set per OS, not taken from the state dir: macOS's state dir has a space, and the
   tree's path is written into a section.
 - The channel root is the same text on every OS (`~/.local/state/vcharon/channels`): one text
@@ -770,12 +774,14 @@ Read with `configparser`:
 | `box` | the OS: `mac`, `win`, `linux` | this machine's part of every member name; a writer's name of at most 10 characters ([Member names](#member-names)) |
 | `ssh_path` | per OS ([The ssh command](#the-ssh-command)) | the ssh client, an absolute path (`~` allowed) |
 | `remote_python` | `python3` | the server's Python command; no quotes, backslashes or leading `-` |
-| `connect_timeout` | 10 | seconds |
-| `handshake_timeout` | 30 | seconds from starting ssh to the ready marker |
-| `idle_timeout` | 300 | seconds with nothing moving while the controller waits; at least 30, three times the helper's tick |
-| `run_timeout` | 0 | one sync (one round with `--repeat`), in seconds; 0 is no limit |
+| `connect_timeout` | 10 | seconds, 1 to 86400 |
+| `handshake_timeout` | 30 | seconds from starting ssh to the ready marker, 1 to 86400 |
+| `idle_timeout` | 300 | seconds with nothing moving while the controller waits; 30 (three times the helper's tick) to 86400 |
+| `run_timeout` | 0 | one sync (one round with `--repeat`), in seconds, 0 to 86400; 0 is no limit |
 | `compress` | no | pass `-C` to ssh |
 
+- Every timeout is at most 86400 s (a day): past 2147483 s a wait's milliseconds overflow, and
+  ssh refuses a `ConnectTimeout` of 2^31 s or more with an error that doesn't name the key.
 - Unknown keys are errors, so a typo fails loudly. Any other section in `vcharon.ini` is refused:
   channel sections live in `channels.d/`.
 - `vcharon setup` writes the file when it's missing, with a commented `# box = <os>` line;

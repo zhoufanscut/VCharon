@@ -70,7 +70,19 @@ def home():
 
 
 def _vcharon_home():
-    return os.environ.get("VCHARON_HOME") or None
+    value = os.environ.get("VCHARON_HOME")
+    if not value:
+        return None
+    path = os.path.expanduser(value)
+    # A relative folder would follow the current directory: records would land in whatever
+    # checkout a command runs from, and a channel section's mailbox.local would be refused.
+    # os_name() is this machine's OS outside tests; a test that declares another OS may give
+    # either OS's form, so either is taken.
+    if not (os.path.isabs(path) or _path().isabs(path)):
+        example = "C:\\vc\\home" if os.name == "nt" else "/tmp/vc/home"
+        raise VCharonError("config", "VCHARON_HOME is %r, not an absolute folder" % value,
+                           "set VCHARON_HOME to a full path, such as %s" % example)
+    return path
 
 
 def _xdg(var, default):

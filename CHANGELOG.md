@@ -9,6 +9,19 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A relative `VCHARON_HOME` is now refused with `ERROR config: VCHARON_HOME is '<value>', not
+  an absolute folder` (exit 3) and the fix `set VCHARON_HOME to a full path, such as
+  /tmp/vc/home`; `~` in it is expanded. It used to follow the current folder, so records landed
+  inside the checkout a command ran from. doctor's `dirs` fix now says `set VCHARON_HOME to an
+  absolute folder`. The timeout settings (`connect_timeout`, `handshake_timeout`,
+  `idle_timeout`, `run_timeout`, in `[vcharon]` or a channel section) now stop at 86400 s; a
+  larger value is a `config` error naming the key, where before ssh refused every run with
+  `invalid time value.`, or doctor and `vcharon key` failed as `internal`. Their messages now
+  give the range (`1 to 86400`, `30 to 86400`, `0 to 86400`) instead of `N or more`. To adapt:
+  set `VCHARON_HOME` to an absolute folder and keep timeouts at a day or less. Measured on
+  Linux: ssh's `invalid time value.` for a `ConnectTimeout` of 2^31, `communicate()`'s
+  `OverflowError` at 2147484 s, and the new refusals (a hand run and tests). Windows, where the
+  fix's example is `C:\vc\home` and a path needs a drive, is inferred.
 - On Windows, a commit that replaces or deletes a file, or removes a folder, retries access
   denied (winerror 5) 3 times, 0.2 s apart, as it already did a sharing violation, before it
   reports `permission`: a file another program has open, such as a `vcharon read` overlapping a

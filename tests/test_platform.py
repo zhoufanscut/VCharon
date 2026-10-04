@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from vcharon import platform
+from vcharon.proto import VCharonError
 
 
 def on(osn, **env):
@@ -44,6 +45,35 @@ class PathsTest(PatchedCase):
         self.patch(on("windows", VCHARON_HOME="D:\\fh"))
         self.assertEqual(platform.config_path(), "D:\\fh\\vcharon.ini")
         self.assertEqual(platform.log_dir(), "D:\\fh\\logs")
+
+    def test_relative_vcharon_home_is_refused(self):
+        # a relative folder would follow the current directory, so each command is refused;
+        # "\\vc" has no drive, so it is relative on Windows too
+        for value in ("vc", "./vc", "..", "\\vc"):
+            with self.subTest(value=value):
+                patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": value})
+                patcher.start()
+                self.addCleanup(patcher.stop)
+                for where in (platform.config_path, platform.state_dir, platform.log_dir,
+                              platform.joined_dir):
+                    with self.assertRaises(VCharonError) as cm:
+                        where()
+                    self.assertEqual(cm.exception.code, "config")
+                    self.assertEqual(cm.exception.message,
+                                     "VCHARON_HOME is %r, not an absolute folder" % value)
+                    self.assertIn("set VCHARON_HOME to a full path", cm.exception.hint)
+
+    def test_vcharon_home_expands_the_tilde(self):
+        # the real OS's expanduser, which reads HOME on POSIX and USERPROFILE on Windows
+        home = os.path.abspath(os.sep + "home-me")
+        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": "~/vc", "HOME": home,
+                                               "USERPROFILE": home})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        want = os.path.join(home, "vc", "state")
+        self.assertEqual(os.path.normpath(platform.state_dir()), want)
+        self.assertEqual(os.path.normpath(platform.config_path()),
+                         os.path.join(home, "vc", "vcharon.ini"))
 
     def test_standard_dirs(self):
         # (os, environment) -> (config file, state dir, logs dir)

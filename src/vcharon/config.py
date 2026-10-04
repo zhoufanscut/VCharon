@@ -23,6 +23,10 @@ codecs.lookup("utf-8-sig")
 
 # A busy helper ticks at most every TICK_EVERY seconds; a shorter idle limit would kill it.
 MIN_IDLE = 3 * TICK_EVERY
+# The ceiling for every timeout setting: a day, which no wait needs. Past 2147483 s a wait's
+# milliseconds overflow (communicate() raises OverflowError), and ssh refuses a ConnectTimeout
+# of 2^31 s or more without naming the setting.
+MAX_TIMEOUT = 86400
 
 
 @dataclasses.dataclass
@@ -415,6 +419,16 @@ def _write_file(path, data, mode):
         raise
 
 
+def _seconds(value):
+    """A timeout setting's number, or -1 when it isn't plain digits. Past the cap's length it is
+    MAX_TIMEOUT + 1 without int(), which refuses text of more than 4300 digits with a ValueError."""
+    if not _DIGITS.match(value):
+        return -1
+    if len(value.lstrip("0")) > len(str(MAX_TIMEOUT)):
+        return MAX_TIMEOUT + 1
+    return int(value)
+
+
 def _setting(settings, key, value, where, hint):
     """Checks one [vcharon] setting and sets it; False for a key that isn't one. A channel section's
     overrides come through here too, so they get exactly the same checks."""
@@ -437,20 +451,20 @@ def _setting(settings, key, value, where, hint):
             raise VCharonError("config", "%s: can't start with '-'" % where, hint=hint)
         settings.remote_python = value
     elif key in ("connect_timeout", "handshake_timeout"):
-        if not _DIGITS.match(value) or int(value) < 1:
-            raise VCharonError("config", "%s: must be a whole number of seconds, 1 or more"
-                               % where, hint=hint)
+        if not 1 <= _seconds(value) <= MAX_TIMEOUT:
+            raise VCharonError("config", "%s: must be a whole number of seconds, 1 to %d"
+                               % (where, MAX_TIMEOUT), hint=hint)
         setattr(settings, key, int(value))
     elif key == "idle_timeout":
-        if not _DIGITS.match(value) or int(value) < MIN_IDLE:
-            raise VCharonError("config", "%s: must be a whole number of seconds, %d or more "
-                               "(three times the helper's %d s tick interval)"
-                               % (where, MIN_IDLE, TICK_EVERY), hint=hint)
+        if not MIN_IDLE <= _seconds(value) <= MAX_TIMEOUT:
+            raise VCharonError("config", "%s: must be a whole number of seconds, %d to %d "
+                               "(at least three times the helper's %d s tick interval)"
+                               % (where, MIN_IDLE, MAX_TIMEOUT, TICK_EVERY), hint=hint)
         settings.idle_timeout = int(value)
     elif key == "run_timeout":
-        if not _DIGITS.match(value):
-            raise VCharonError("config", "%s: must be a whole number of seconds, 0 or more"
-                               % where, hint=hint)
+        if not 0 <= _seconds(value) <= MAX_TIMEOUT:
+            raise VCharonError("config", "%s: must be a whole number of seconds, 0 to %d (0 is "
+                               "no limit)" % (where, MAX_TIMEOUT), hint=hint)
         settings.run_timeout = int(value)
     elif key == "compress":
         if value.lower() not in _BOOLS:

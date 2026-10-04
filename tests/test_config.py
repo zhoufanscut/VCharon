@@ -115,27 +115,44 @@ class ConfigTest(ConfigCase):
         for key in ("connect_timeout", "handshake_timeout"):
             for value in ("0", "-5", "abc", "1.5", "", "+3", " 1_0"):
                 err = self.refused("[vcharon]\n%s = %s\n" % (key, value), key,
-                                   "whole number of seconds, 1 or more")
+                                   "whole number of seconds, 1 to 86400")
                 self.assertIn("[vcharon] %s" % key, err.message)
             self.assertEqual(getattr(self.load("[vcharon]\n%s = 1\n" % key).settings, key), 1)
+            self.assertEqual(getattr(self.load("[vcharon]\n%s = 86400\n" % key).settings, key),
+                             86400)
         # The helper ticks every 10 s, so less than three ticks would kill a busy helper.
         for value in ("0", "1", "29", "-30", "abc", "30.5"):
             self.refused("[vcharon]\nidle_timeout = %s\n" % value, "[vcharon] idle_timeout",
-                         "whole number of seconds, 30 or more", "10 s tick")
+                         "whole number of seconds, 30 to 86400", "10 s tick")
         self.assertEqual(self.load("[vcharon]\nidle_timeout = 30\n").settings.idle_timeout, 30)
-        self.refused("[vcharon]\nrun_timeout = -1\n", "0 or more")
-        self.refused("[vcharon]\nrun_timeout = x\n", "0 or more")
+        self.refused("[vcharon]\nrun_timeout = -1\n", "0 to 86400")
+        self.refused("[vcharon]\nrun_timeout = x\n", "0 to 86400")
         self.assertEqual(self.load("[vcharon]\nrun_timeout = 0\n").settings.run_timeout, 0)
         self.assertEqual(self.load("[vcharon]\nrun_timeout = 60\n").settings.run_timeout, 60)
 
     def test_message_format(self):
         err = self.refused("[vcharon]\nconnect_timeout = 0\n")
         self.assertEqual(err.message, "vcharon.ini [vcharon] connect_timeout: must be a whole "
-                         "number of seconds, 1 or more")
+                         "number of seconds, 1 to 86400")
         self.assertIn(self.path, err.hint)
         err = self.refused("[vcharon]\nidle_timeout = 10\n")
         self.assertEqual(err.message, "vcharon.ini [vcharon] idle_timeout: must be a whole number "
-                         "of seconds, 30 or more (three times the helper's 10 s tick interval)")
+                         "of seconds, 30 to 86400 (at least three times the helper's 10 s tick "
+                         "interval)")
+        err = self.refused("[vcharon]\nrun_timeout = 86401\n")
+        self.assertEqual(err.message, "vcharon.ini [vcharon] run_timeout: must be a whole number "
+                         "of seconds, 0 to 86400 (0 is no limit)")
+
+    def test_timeouts_have_a_ceiling(self):
+        # ssh refuses a ConnectTimeout of 2^31 s without naming the setting, and a wait past
+        # 2147483 s overflows; 4301 digits would make int() itself raise
+        for key in ("connect_timeout", "handshake_timeout", "idle_timeout", "run_timeout"):
+            for value in ("86401", "2147484", "2147483648", "9" * 4301):
+                with self.subTest(key=key, value=value[:12]):
+                    self.refused("[vcharon]\n%s = %s\n" % (key, value), "[vcharon] %s" % key,
+                                 "to 86400")
+            self.assertEqual(getattr(self.load("[vcharon]\n%s = 0086400\n" % key).settings,
+                                     key), 86400)
 
     def test_bools(self):
         for value, want in (("yes", True), ("YES", True), ("true", True), ("1", True),
@@ -326,6 +343,15 @@ class MailboxTest(MailboxCase):
                 self.assertEqual(e.message, "%s %s: unknown key" % (WHERE, line.split(" = ")[0]))
         e = self.channel_refused(MAILBOX + "compress = maybe\n")
         self.assertEqual(e.message, "%s compress: must be yes or no" % WHERE)
+
+    def test_timeout_overrides_have_the_ceiling(self):
+        # a section's overrides get [vcharon]'s checks, the upper limit too
+        for key in ("idle_timeout", "run_timeout"):
+            with self.subTest(key=key):
+                e = self.channel_refused(MAILBOX + "%s = 86401\n" % key)
+                self.assertTrue(e.message.startswith("%s %s: must be a whole number of seconds, "
+                                                     % (WHERE, key)), e.message)
+                self.assertIn("to 86400", e.message)
 
     def test_paths(self):
         e = self.channel_refused(MAILBOX.replace("mailbox.local  = ~/vcharon_mailbox",
