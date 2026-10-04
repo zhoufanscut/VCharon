@@ -863,16 +863,17 @@ class LeaveCloseTest(ChannelCase):
         # no LEAVE once the channel is gone)
         post_lock = entries.lock_path(os.path.join(self.joined("game.mac-web"),
                                                    "mac-web"))
-        hold(self, post_lock)
+        holder = hold(self, post_lock)
         shutil.rmtree(os.path.join(self.root, "game"))
         out = self.ok("leave", "game")
         self.assertNotIn("  removed %s" % post_lock, out.splitlines())
         self.assertTrue(os.path.isfile(post_lock))
+        # the lock's checks are done; Windows refuses to read a locked file, and read_tree
+        # below reads every file
+        release(holder)
         self.assertFalse(os.path.exists(self.joined("game.mac-web")))
         self.assertIn("  note    game is gone on the server", out)
-        # checked by name: the held lock can't be read on Windows, so no read_tree here
-        self.assertFalse(os.path.exists(
-            os.path.join(self.homes["mac"], "channels.d", "game.mac-web.ini")))
+        self.assertNotIn("channels.d/game.mac-web.ini", self.box_files())
         self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
         # what the guide's end topic tells an agent: nothing of the channel stays here
         # this box's other membership of game is named, since it stays
