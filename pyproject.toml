@@ -34,7 +34,9 @@ dev = ["ruff>=0.16.10,<0.17"]
 # the standalone binary: pyinstaller vcharon.spec. Pinned: vcharon.spec was checked against
 # this version's collect_data_files and collect_submodules, and the one-file bootloader's
 # behaviour under a running watcher was measured with it (DESIGN, "Running watchers").
-build = ["pyinstaller==6.22.3"]
+# hooks-contrib too: its hooks decide what goes into the binary, and PyInstaller asks only for
+# a floor (>=2026.7).
+build = ["pyinstaller==6.22.3", "pyinstaller-hooks-contrib==2026.8"]
 
 [project.scripts]
 vcharon = "vcharon.cli:main"

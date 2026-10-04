@@ -3,7 +3,10 @@
 # "Releases"): install.sh on Linux and macOS, install.ps1 on Windows (Git Bash). The fake
 # release is served on 127.0.0.1 through the installers' test-only URL overrides. First with a
 # wrong .sha256, which must fail and install nothing; then with the right one, which must
-# install the archive's binary, and that binary must print VERSION.
+# install the archive's binary, and that binary must print VERSION; then once more over that
+# install, which must replace the binary in place and leave nothing else in its folder. On
+# Windows the right-checksum install also runs under Windows PowerShell 5.1 (powershell.exe),
+# what `irm | iex` runs in by default, besides pwsh 7.
 #
 #   sh tests/install_check.sh ASSETS_DIR ASSET VERSION WORK_DIR
 #
@@ -82,13 +85,18 @@ else
   INSTALLED="${WORK}/home/.local/bin/vcharon"
 fi
 
-# the installer of this OS, in WORK; its output in WORK/install.out, its exit code returned
+# the installer of this OS, in WORK; its output in WORK/install.out, its exit code returned.
+# KEEP=1 keeps the last run's install, to replace it; PS names the PowerShell on Windows.
+KEEP=""
+PS=pwsh
 run_installer() {
-  rm -rf "${WORK}/home" "${WORK}/localappdata"
+  if [ -z "${KEEP}" ]; then
+    rm -rf "${WORK}/home" "${WORK}/localappdata"
+  fi
   mkdir -p "${WORK}/home" "${WORK}/localappdata"
   code=0
   if [ -n "${WINDOWS}" ]; then
-    LOCALAPPDATA="$(cygpath -w "${WORK}/localappdata")" pwsh -NoProfile -NonInteractive \
+    LOCALAPPDATA="$(cygpath -w "${WORK}/localappdata")" "${PS}" -NoProfile -NonInteractive \
       -ExecutionPolicy Bypass -File "$(cygpath -w "${REPO}/install.ps1")" \
       > "${WORK}/install.out" 2>&1 || code=$?
   else
@@ -114,8 +122,36 @@ run_installer || fail "the installer failed"
 grep -q "Checking the checksum" "${WORK}/install.out" || fail "the checksum wasn't checked"
 [ -f "${INSTALLED}" ] || fail "no binary at ${INSTALLED}"
 # a Windows program ends its lines with CRLF, and Git Bash's $(...) keeps the CR
-GOT="$("${INSTALLED}" --version | tr -d '\r')"
-[ "${GOT}" = "${VERSION}" ] || fail "the installed binary printed '${GOT}', expected '${VERSION}'"
+check_version() {
+  GOT="$("${INSTALLED}" --version | tr -d '\r')"
+  [ "${GOT}" = "${VERSION}" ] || fail "the installed binary printed '${GOT}', expected '${VERSION}'"
+}
+check_version
+
+# the old binary's bytes are a marker, so only a binary the installer put there in its place
+# prints the version; afterwards the folder holds the binary alone: no vcharon.exe.old-* (the
+# renamed old one, deleted since it isn't running), no work folder, no staged file
+echo ""
+echo "\$ the installer, over that install"
+printf 'the old binary\n' > "${INSTALLED}"
+KEEP=1
+run_installer || fail "the installer failed to replace an installed binary"
+KEEP=""
+check_version
+LEFT="$(ls -A "$(dirname "${INSTALLED}")")"
+[ "${LEFT}" = "$(basename "${INSTALLED}")" ] \
+  || fail "the install folder holds more than the binary after a replace: ${LEFT}"
+
+if [ -n "${WINDOWS}" ]; then
+  echo ""
+  echo "\$ the installer, under Windows PowerShell 5.1"
+  command -v powershell.exe > /dev/null 2>&1 || fail "no powershell.exe on this runner"
+  PS=powershell.exe
+  run_installer || fail "the installer failed under Windows PowerShell 5.1"
+  PS=pwsh
+  grep -q "Checking the checksum" "${WORK}/install.out" || fail "the checksum wasn't checked"
+  check_version
+fi
 
 echo ""
 echo "install_check: OK (${ARCHIVE}, ${VERSION})"

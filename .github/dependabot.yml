@@ -1,0 +1,8 @@
+# The workflows pin each action to a commit SHA, with its version in a comment (DESIGN,
+# "Releases"); Dependabot proposes the bumps, SHA and comment together, as pull requests.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

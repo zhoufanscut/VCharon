@@ -1766,10 +1766,21 @@ maintainer asks before tagging.
   with the system's own `sha256sum` (macOS: `shasum -a 256`).
 - **`tests/install_check.sh`** serves the packed archive as a fake release on `127.0.0.1` through
   the installers' test-only URL overrides and runs this OS's installer (`install.sh`, or
-  `install.ps1` under `pwsh` on Windows) twice: with a wrong `.sha256`, which must fail and
-  install nothing, then with the real one, whose installed binary must print the tag's version.
-  On Windows `install.ps1` also adds its folder to the user's PATH, so the check runs there only
-  where `CI` is set.
+  `install.ps1` under `pwsh` on Windows): with a wrong `.sha256`, which must fail and install
+  nothing; with the real one, whose installed binary must print the tag's version; then over
+  that install, whose binary it first overwrites with a marker, so only a real replace prints
+  the version, and after which the folder must hold the binary alone (on Windows: no
+  `vcharon.exe.old-*` left). On Windows the real-checksum install runs once more under Windows
+  PowerShell 5.1 (`powershell.exe`), what `irm | iex` runs in by default, whose branches (TLS
+  1.2) pwsh never takes. `install.ps1` also adds its folder to the user's PATH, so on Windows the
+  check runs only where `CI` is set.
+- **The build's inputs are fixed**, so a release is built from what was checked, not from what
+  was newest that day: the actions at commit SHAs (a tag can be moved; the publish job holds a
+  write token), with the version in a comment, which Dependabot bumps weekly as pull requests
+  (`.github/dependabot.yml`); pip and the `build` extra (PyInstaller and its hooks package) at
+  exact versions. The build installs only the `build` extra: it runs no lint. PyInstaller's
+  own dependencies still float, without hashes: a hash lock per OS can't be made and checked on
+  one machine.
 - **One job publishes**, after all three builds: it takes their assets, checks there are exactly
   the nine and that each checksum holds, and runs `gh release create`. A version with a
   pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
