@@ -10,6 +10,7 @@ import os
 import shutil
 import socket
 import tempfile
+import threading
 import time
 import unicodedata
 import unittest
@@ -1013,9 +1014,34 @@ class PathDoctorTest(unittest.TestCase):
         def refuse(*args, **kwargs):
             raise PermissionError(errno.EACCES, "Access is denied")
 
-        with mock.patch.object(path_plugin, "open", refuse, create=True):
+        # the Windows branch, which opens with open(); POSIX's os.open is test_unreadable's
+        with mock.patch.object(path_plugin.fsops, "WINDOWS", True), \
+                mock.patch.object(path_plugin, "open", refuse, create=True):
             self.assertEqual(self.doctor(f), [("FAIL", "can't read %s: Access is denied" % f,
                                                "check its permissions")])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs mkfifo")
+    def test_a_fifo_swapped_in_after_the_stat(self):
+        # no writer ever opens the FIFO, so a blocking open would hang
+        write_tree(self.tmp, {"f.txt": b"f"})
+        fifo = os.path.join(self.tmp, "fifo")
+        os.mkfifo(fifo)
+        file_st = os.stat(os.path.join(self.tmp, "f.txt"))
+        real_stat = os.stat
+
+        def stat(p, *args, **kwargs):
+            return file_st if p == fifo else real_stat(p, *args, **kwargs)
+
+        rows = []
+        with mock.patch.object(path_plugin.os, "stat", stat):
+            t = threading.Thread(target=lambda: rows.append(self.doctor(fifo)), daemon=True)
+            t.start()
+            t.join(30)
+        if t.is_alive():
+            # free the blocked open, so the thread ends
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            self.fail("doctor blocked on a FIFO")
+        self.assertEqual(rows, [[("ok", "from.path %s: a file" % fifo, None)]])
 
     @unittest.skipUnless(hasattr(os, "mkfifo"), "needs mkfifo")
     def test_fifo(self):

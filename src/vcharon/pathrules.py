@@ -34,8 +34,8 @@ MAX_LISTED = 100
 # lowercase only, so two writers' folders can't fold together on a Windows or macOS client.
 WRITER = re.compile(r"\A[a-z0-9][a-z0-9_-]{0,31}\Z")
 
-UNSAFE_HINT = "rename or exclude these paths at the source"
-COLLISION_HINT = "rename or exclude one of them at the source"
+UNSAFE_HINT = "rename these paths at the source"
+COLLISION_HINT = "rename one of them at the source"
 
 
 def show(path):

@@ -2056,13 +2056,13 @@ class MailboxTest(FakeSshCase):
         code, _out, err = self.run_jobs("pull")
         self.assertEqual(code, 1)
         self.assertIn("ERROR collision: debian/Notes.md and debian/notes.md are the same path "
-                      "on macOS\n  fix: rename or exclude one of them at the source\n", err)
+                      "on macOS\n  fix: rename one of them at the source\n", err)
         os.remove(os.path.join(self.server, "debian", "notes.md"))
         write_tree(self.server, {"debian/CON.md": b"c"})
         self.folding("windows")
         code, _out, err = self.run_jobs("pull")
         self.assertIn("ERROR unsafe_path: debian/CON.md: CON.md is a reserved name on Windows"
-                      "\n  fix: rename or exclude these paths at the source\n", err)
+                      "\n  fix: rename these paths at the source\n", err)
         os.remove(os.path.join(self.server, "debian", "CON.md"))
         if CAN_SYMLINK:
             os.symlink("STEPS.md", os.path.join(self.server, "debian", "lnk"))

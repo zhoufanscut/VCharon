@@ -189,6 +189,15 @@ def _counted(n, word):
     return "%d %s%s" % (n, word, "" if n == 1 else "s")
 
 
+def _open_to_read(path):
+    """Opens path to read and closes it at once. O_NONBLOCK on POSIX: a FIFO swapped in after
+    doctor's stat can't hang the open."""
+    if fsops.WINDOWS:
+        open(path, "rb").close()
+    else:
+        os.close(os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)))
+
+
 class Source(plugin.Source):
     # Which directory handles to use: None is PathDir on Windows and FdDir elsewhere. Tests
     # set "path" to run the Windows code on POSIX.
@@ -681,7 +690,7 @@ class Source(plugin.Source):
             # Opened for real, not os.access: on Windows that ignores ACLs, so it could say
             # yes to a file the sync then can't read. Opening reads no bytes.
             try:
-                open(abs_path, "rb").close()
+                _open_to_read(abs_path)
             except OSError as e:
                 return [("FAIL", "can't read %s: %s" % (abs_path, e.strerror or e), perm_hint)]
             return [("ok", "from.path %s: a file" % abs_path, None)]

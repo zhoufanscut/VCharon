@@ -149,7 +149,7 @@ class CheckPlanTest(unittest.TestCase):
                          "windows", "unsafe_path")
         self.assertEqual(e.message, "a/: has an empty, \".\" or \"..\" part "
                                     "(and 203 more; see the log)")
-        self.assertEqual(e.hint, "rename or exclude these paths at the source")
+        self.assertEqual(e.hint, "rename these paths at the source")
         lines = e.detail.split("\n")
         self.assertEqual(len(lines), 100)
         self.assertEqual(lines[1], "/b: has an empty, \".\" or \"..\" part")
@@ -163,7 +163,7 @@ class CheckPlanTest(unittest.TestCase):
     def test_many_collisions(self):
         e = self.refused(files("a", "a", "b", "b"), "linux")
         self.assertEqual(e.message, "a is put twice (and 1 more; see the log)")
-        self.assertEqual(e.hint, "rename or exclude one of them at the source")
+        self.assertEqual(e.hint, "rename one of them at the source")
 
 
 class WindowsPathTest(unittest.TestCase):

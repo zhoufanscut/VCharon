@@ -85,9 +85,10 @@ def config_changed(job):
 
 def fingerprint(job):
     """What ties a state to its config (DESIGN, "State file"): a config.Job's ssh, from, to,
-    from.path and to.path, as written; null for a missing path. Other options (exclude, prune,
-    create) can change without a reset. A mailbox job's list also ends with its writer name, which
-    reaches down only through its exclude: renaming the writer refuses both states."""
+    from.path and to.path, as written; null for a missing path. Other options (prune,
+    allow_empty, create) can change without a reset. A mailbox job's list also ends with its
+    writer name, which reaches down only through mailbox_me: renaming the writer refuses both
+    states."""
     raw = [job.ssh, job.from_text, job.to_text, job.source.options.get("path"),
            job.sink.options.get("path")]
     if job.mailbox is not None:

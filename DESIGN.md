@@ -528,8 +528,8 @@ Each may define `doctor(self)`, which only reads. Each object gets `self.ctx`: `
 
 - A doctor check that can't be made by reading says so in its row instead of guessing: on
   Windows `os.access` ignores ACLs, so it is never the proof that a path can be read or written.
-  A file is opened to show it can be read; write access isn't checked there.
-
+  A file source is opened to show it can be read; on Windows the dir sink's write access isn't
+  checked.
 - A plugin does all its work on its own end and never calls the other end.
 - A sink writes only through `stage.Stager` ([Applying a plan](#applying-a-plan)), which
   enforces "only inside the root, only planned deletes".

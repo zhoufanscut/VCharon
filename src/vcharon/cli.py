@@ -1726,10 +1726,9 @@ def _own_folder(job, log, dry_run):
     log.info("created %s, the mailbox's own folder" % path)
 
 
-# The general hints for a name the source can't send or list: each tells the source's owner to
-# rename, exclude or skip it. A mailbox section can't exclude or skip, and only a folder's writer
-# can change it; _mailbox_hint swaps them. Compared as text, since an error
-# from the helper arrives with its hint as text.
+# The general hints for a name the source can't send or list speak to the owner of the whole
+# source; only a folder's writer can change a mailbox folder, so _mailbox_hint swaps them.
+# Compared as text, since an error from the helper arrives with its hint as text.
 SOURCE_HINTS = frozenset([pathrules.UNSAFE_HINT, pathrules.COLLISION_HINT,
                           path_plugin.LINKS_HINT, path_plugin.NAME_HINT])
 MAILBOX_DOWN_HINT = ("the writer of each folder named above %s; your up still runs; more: "

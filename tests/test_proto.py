@@ -165,7 +165,7 @@ class FrameTest(unittest.TestCase):
                         ((100 << 20) + (300 << 10), "100.3"), (1, "0.1")):
             self.assertEqual(proto._mib(n), text, n)
         self.assertEqual(cm.exception.hint,
-                         "the plan is too big: exclude part of the tree, or copy it in parts")
+                         "the plan is too big: copy the tree in parts")
         # exactly at the limit is fine
         exact = {"t": ""}
         exact["t"] = "x" * (proto.MAX_JSON - len(proto.encode_json(exact)))

@@ -701,8 +701,7 @@ class RunTest(FakeSshCase):
         self.assertEqual((e.code, e.exit_code), ("too_big", 1))
         self.assertRegex(e.message, r"\Aa message of [0-9.]+ MiB is over vcharon's [0-9.]+ MiB "
                                     r"limit\Z")
-        self.assertEqual(e.hint, "the plan is too big: exclude part of the tree, or copy it in "
-                                 "parts")
+        self.assertEqual(e.hint, "the plan is too big: copy the tree in parts")
         self.assertTrue(eng.session.usable)
         self.assertEqual(eng.session.echo(b"still in step"), b"still in step")
         self.assertEqual(read_tree(dst), {})

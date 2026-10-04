@@ -99,7 +99,7 @@ def encode_json(obj):
         # Nothing was sent, so both sides are still in step. In practice it's a huge plan.
         raise VCharonError("too_big", "a message of %s MiB is over vcharon's %s MiB limit"
                            % (_mib(len(data)), _mib(MAX_JSON)),
-                           "the plan is too big: exclude part of the tree, or copy it in parts")
+                           "the plan is too big: copy the tree in parts")
     return data
 
 

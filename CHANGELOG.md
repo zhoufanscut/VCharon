@@ -9,17 +9,20 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
-- A source's fix lines no longer name options nothing can set: a symlink below a source now
-  says `fix: remove them at the source` (was `remove them, or skip them with symlinks = skip`),
-  and a folder it can't list `fix: fix its permissions at the source` (was `fix its
-  permissions, or exclude it`). Channel jobs' own fix lines are unchanged; the rejoin's one-off
-  pull showed the old ones. The path source's `exclude` and `symlinks = skip`, which no
-  vcharon.ini or channel section could set, are gone. `doctor` now opens a file source to show
-  it can be read (it used `os.access`), and its failure row adds the reason: `can't read <path>:
-  <reason>`. On Windows the dir sink's row reads `to.path <path>: a directory (write access
-  isn't checked on Windows)` in place of `a directory you can write`, and a missing root's
-  parent isn't checked: `os.access` ignores ACLs there. Measured on Linux (tests, with the OS
-  flag patched for the Windows row); not run on Windows (inferred).
+- A source's fix lines no longer name options nothing can set: a symlink below a source now says
+  `fix: remove them at the source` (was `remove them, or skip them with symlinks = skip`), and a
+  folder it can't list `fix: fix its permissions at the source` (was `fix its permissions, or
+  exclude it`). Names unsafe on this OS say `fix: rename these paths at the source` and
+  colliding names `fix: rename one of them at the source` (both said `rename or exclude`), and a
+  plan over the message limit `fix: the plan is too big: copy the tree in parts` (was `exclude
+  part of the tree, or copy it in parts`). Channel jobs' own fix lines are unchanged; the
+  rejoin's one-off pull showed the old ones. The path source's `exclude` and `symlinks = skip`,
+  which no vcharon.ini or channel section could set, are gone. `doctor` now opens a file source
+  to show it can be read (it used `os.access`), and its failure row adds the reason: `can't read
+  <path>: <reason>`. On Windows the dir sink's row reads `to.path <path>: a directory (write
+  access isn't checked on Windows)` in place of `a directory you can write`, and a missing
+  root's parent isn't checked: `os.access` ignores ACLs there. Measured on Linux (tests, with
+  the OS flag patched for the Windows row); not run on Windows (inferred).
 - `--update`: a `GITHUB_TOKEN` (or `GH_TOKEN`) that GitHub rejects with HTTP 401 no longer
   fails as `http_error` with "try again later", which every retry repeated. The call is tried
   once more without the token and the update goes on; if that call hits the rate limit (HTTP
