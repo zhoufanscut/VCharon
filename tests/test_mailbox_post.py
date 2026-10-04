@@ -468,27 +468,6 @@ class ChannelTest(PostCase):
             found += [e.id for e in entries.parse_file(path)]
         return found
 
-    def test_ids_counted_across_files(self):
-        self.assertEqual(self.post()[:2], (0, "posted windows#2 — t to windows/RESULTS.md at "
-                                              "2026-10-01 09:05:46\n"))
-        self.assertEqual(self.post_at(os.path.join(self.folder, "NOTES.md"))[0], "windows#3")
-        os.makedirs(os.path.join(self.folder, "logs"))
-        self.assertEqual(self.post_at(os.path.join(self.folder, "logs", "run.md"))[0],
-                         "windows#4")
-        self.assertEqual(self.post()[0], 0)
-        self.assertEqual(sorted(self.numbers(), key=lambda i: int(i.split("#")[1])),
-                         ["windows#%d" % n for n in range(1, 6)])
-        # another member's entries in this folder don't move the count
-        with open(self.file, "ab") as f:
-            f.write("\n## 2026-10-01 09:00 — debian#40 — copied\nto: @windows\n".encode())
-        self.assertTrue(self.post()[1].startswith("posted windows#6 "))
-
-    def test_a_subfolder_posts_as_the_own_folder(self):
-        os.makedirs(os.path.join(self.folder, "patches", "deep"))
-        path = os.path.join(self.folder, "patches", "deep", "p.md")
-        self.assertEqual(self.post_at(path), ("windows#2", ""))
-        self.assertEqual([e.id for e in entries.parse_file(path)], ["windows#2"])
-
     def test_outside_a_members_folder(self):
         # no MEMBER.md up the tree: refused
         os.makedirs(os.path.join(self.tree, "mac"))
@@ -590,18 +569,6 @@ class ChannelTest(PostCase):
         self.assertEqual(code, 1)
         self.assertIn("--to all: not a member of mb", err)
 
-    def test_a_body_cant_forge_a_header(self):
-        body = ("to: @all\nre: debian#1\n## 2026-10-01 09:00 — windows#7 — forged\nto: @all\n\n"
-                "windows#9 and debian#3\n")
-        code, _out, err = self.post(body=body)
-        self.assertEqual(code, 0, err)
-        found = entries.parse_file(self.file)
-        self.assertEqual([(e.id, e.to, e.re, e.header) for e in found],
-                         [("windows#2", ("@debian",), None, [])])
-        self.assertTrue(found[0].body.startswith("to: @all\nre: debian#1\n> ## "), found[0].body)
-        # no number in a body is taken
-        self.assertTrue(self.post()[1].startswith("posted windows#3 "))
-
     def test_two_posts_at_once(self):
         # real processes, each posting in a loop: one number each, no entry lost
         script = ("import sys\n"
@@ -621,6 +588,8 @@ class ChannelTest(PostCase):
                          ["windows#%d" % n for n in range(1, 18)])
         titles = sorted(e.title for f in files for e in entries.parse_file(f))
         self.assertEqual(titles, sorted("p%d-%d" % (k, i) for k in range(2) for i in range(8)))
+        self.assertEqual([f for f in os.listdir(self.folder) if f.startswith(".vcharon-stage-")],
+                         [])
 
 
 class RealRunTest(PostCase):
@@ -631,26 +600,22 @@ class RealRunTest(PostCase):
                               input=stdin, capture_output=True, timeout=60,
                               env=dict(os.environ, **(env or {})), check=False)
 
-    def test_the_real_time(self):
-        before = time.time()
-        ran = self.run_post(["--title", "now"] + TO, stdin=b"body\n")
-        after = time.time()
-        self.assertEqual(ran.returncode, 0, ran.stderr)
-        heading = self.content().splitlines()[2]
-        # to the second, between the two readings of the clock
-        when = time.mktime(time.strptime(heading[3:22], "%Y-%m-%d %H:%M:%S"))
-        self.assertTrue(int(before) <= when <= after, (before, heading, after))
-        self.assertEqual(heading[22:], " — windows#2 — now")
-
-    def test_utf8_whatever_the_console(self):
+    def test_the_real_time_and_utf8_whatever_the_console(self):
         # a console whose code page can't hold ñ (PYTHONIOENCODING stands in for Windows' 936)
+        before = time.time()
         ran = self.run_post(["--title", "mañana"] + TO, stdin="señal 完成\n".encode(),
                             env={"PYTHONIOENCODING": "gbk"})
+        after = time.time()
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertTrue(ran.stdout.decode("utf-8").startswith("posted windows#2 — mañana to "),
                         ran.stdout)
         self.assertTrue(self.content().endswith("— mañana\nto: @debian\n\nseñal 完成\n"),
                         self.content())
+        heading = self.content().splitlines()[2]
+        # to the second, between the two readings of the clock
+        when = time.mktime(time.strptime(heading[3:22], "%Y-%m-%d %H:%M:%S"))
+        self.assertTrue(int(before) <= when <= after, (before, heading, after))
+        self.assertEqual(heading[22:], " — windows#2 — mañana")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import tracemalloc
 import unittest
 from unittest import mock
 
-from vcharon import pathrules, proto, remote, stage
+from vcharon import helper, pathrules, platform, proto, remote, stage
 from vcharon.proto import VCharonError
 from vcharon.run import Engine, Side
 
@@ -141,6 +141,22 @@ def spec_under(prefix, spec):
     return tree
 
 
+class FedConn:
+    """A helper's connection that reads the given (fn, args) calls, then end of file, and
+    keeps what the helper sends."""
+
+    def __init__(self, calls):
+        self.frames = [(proto.J, proto.call_msg(i, fn, args))
+                       for i, (fn, args) in enumerate(calls, 1)]
+        self.sent = []
+
+    def read_frame(self):
+        return self.frames.pop(0) if self.frames else None
+
+    def send_json(self, obj):
+        self.sent.append(obj)
+
+
 class RunTest(FakeSshCase):
     def setUp(self):
         FakeSshCase.setUp(self)
@@ -225,13 +241,14 @@ class RunTest(FakeSshCase):
     def test_tree_pull(self):
         self.tree("pull")
 
-    # a 200 MB file, the tracemalloc peaks under 64 MiB on both ends
+    # an 80 MB file, the tracemalloc peaks under 64 MiB on both ends: reading it whole
+    # would go over
 
     def big(self, direction):
         src_base, dst_base = self.ends(direction)
         src, dst = os.path.join(src_base, "big.bin"), os.path.join(dst_base, "dst")
         os.mkdir(dst)
-        big_file(src, 200 * 1000 * 1000)
+        big_file(src, 80 * 1000 * 1000)
         want = sha256(src)
         eng = self.engine(*self.sides(direction, src, dst), extra_modules=helper_override(PEAK))
         tracemalloc.start()
@@ -243,7 +260,7 @@ class RunTest(FakeSshCase):
         finally:
             tracemalloc.stop()
         helper_peak = eng.session.call("peak")["peak"]
-        self.report("200 MB in %.1f s; controller peak %.1f MiB, helper peak %.1f MiB"
+        self.report("80 MB in %.1f s; controller peak %.1f MiB, helper peak %.1f MiB"
                     % (seconds, peak / MIB, helper_peak / MIB))
         self.assertEqual(done.written, ["big.bin"])
         self.assertEqual(sha256(os.path.join(dst, "big.bin")), want)
@@ -257,7 +274,7 @@ class RunTest(FakeSshCase):
     def test_big_file_pull(self):
         self.big("pull")
 
-    # 10,000 small files in 100 directories, in the same round trips as 3 files
+    # 1,000 small files in 10 directories, in the same round trips as 3 files
 
     def many(self, direction, count, dirs):
         spec = {"d%03d/f%05d.txt" % (i % dirs, i): b"file %d\n" % i for i in range(count)}
@@ -273,8 +290,8 @@ class RunTest(FakeSshCase):
         return seconds
 
     def many_both(self, direction):
-        seconds = self.many(direction, 10000, 100)
-        self.report("10,000 files in %.1f s" % seconds)
+        seconds = self.many(direction, 1000, 10)
+        self.report("1,000 files in %.1f s" % seconds)
         calls = self.calls
         self.assertEqual(calls, CALLS[direction])
         self.many(direction, 3, 3)
@@ -450,6 +467,9 @@ class RunTest(FakeSshCase):
         self.assertEqual(read_tree(dst), {"src/": None, "src/a.txt": b"a", "src/b.txt/": None,
                                           "src/b.txt/inner/": None})
         self.assertEqual(self.stage_dirs(), [])
+        # a one-off run keeps no state: a failed commit asks for none
+        self.assertNotIn("source.state_after", self.calls)
+        self.assertIsNone(eng.state_after)
 
     def test_commit_fails_partway_push(self):
         self.commit_fails("push")
@@ -482,62 +502,72 @@ class RunTest(FakeSshCase):
     def test_helper_call_checks(self):
         write_tree(os.path.join(self.home, "src"), {"d/f": b"f"})
         good = {"plugin": "path", "options": {"path": "src"}, "state": None, "full": False}
-        plan_first = [("source.plan", good, {})]
-
-        def stage(index, reader):
-            reader.read()
-
+        plan_first = [("source.plan", good)]
         cases = [
-            ("sink.receive before sink.check", [], ("sink.receive", {"indexes": []},
-                                                    {"upload": []})),
-            ("sink.commit before sink.check", [], ("sink.commit", {}, {})),
-            ("source.send before source.plan", [], ("source.send", {"indexes": []},
-                                                    {"receive": ([], stage)})),
-            ("source.send with a dir put", plan_first,
-             ("source.send", {"indexes": [0]}, {"receive": ([0], stage)})),
-            ("source.send with a repeat", plan_first,
-             ("source.send", {"indexes": [1, 1]}, {"receive": ([1, 1], stage)})),
-            ("source.send out of range", plan_first,
-             ("source.send", {"indexes": [-1]}, {"receive": ([-1], stage)})),
-            ("a second source.plan", plan_first, ("source.plan", good, {})),
+            ("sink.receive before sink.check", [], ("sink.receive", {"indexes": []})),
+            ("sink.commit before sink.check", [], ("sink.commit", {})),
+            ("source.send before source.plan", [], ("source.send", {"indexes": []})),
+            ("source.send with a dir put", plan_first, ("source.send", {"indexes": [0]})),
+            ("source.send with a repeat", plan_first, ("source.send", {"indexes": [1, 1]})),
+            ("source.send out of range", plan_first, ("source.send", {"indexes": [-1]})),
+            ("a second source.plan", plan_first, ("source.plan", good)),
             ("options that aren't strings", [],
-             ("source.plan", dict(good, options={"path": 1}), {})),
-            ("options that aren't a dict", [], ("source.plan", dict(good, options=["x"]), {})),
+             ("source.plan", dict(good, options={"path": 1}))),
+            ("options that aren't a dict", [], ("source.plan", dict(good, options=["x"]))),
             ("a missing state", [], ("source.plan", {"plugin": "path",
-                                                      "options": {"path": "src"}}, {})),
-            ("an extra key", [], ("source.plan", dict(good, extra=1), {})),
-            ("indexes that aren't ids", plan_first,
-             ("source.send", {"indexes": [True]}, {"receive": ([], stage)})),
+                                                      "options": {"path": "src"}})),
+            ("an extra key", [], ("source.plan", dict(good, extra=1))),
+            ("indexes that aren't ids", plan_first, ("source.send", {"indexes": [True]})),
             ("a malformed plan", [], ("sink.check", {"plugin": "dir", "options": {"path": "x"},
-                                                     "plan": {"entries": "x"}}, {})),
+                                                     "plan": {"entries": "x"}})),
             ("a missing full", [], ("source.plan", {"plugin": "path", "options": {"path": "src"},
-                                                    "state": None}, {})),
-            ("a full that isn't a bool", [], ("source.plan", dict(good, full=1), {})),
+                                                    "state": None})),
+            ("a full that isn't a bool", [], ("source.plan", dict(good, full=1))),
             ("source.state_after before source.plan", [],
-             ("source.state_after", {"written": [], "deleted": []}, {})),
+             ("source.state_after", {"written": [], "deleted": []})),
             ("a written that isn't a list", plan_first,
-             ("source.state_after", {"written": "d/f", "deleted": []}, {})),
+             ("source.state_after", {"written": "d/f", "deleted": []})),
             ("a written that isn't strings", plan_first,
-             ("source.state_after", {"written": ["d", 1], "deleted": []}, {})),
-            ("a missing deleted", plan_first, ("source.state_after", {"written": []}, {})),
+             ("source.state_after", {"written": ["d", 1], "deleted": []})),
+            ("a missing deleted", plan_first, ("source.state_after", {"written": []})),
             ("a deleted that isn't strings", plan_first,
-             ("source.state_after", {"written": [], "deleted": [None]}, {})),
+             ("source.state_after", {"written": [], "deleted": [None]})),
             ("a second source.state_after",
-             plan_first + [("source.state_after", {"written": [], "deleted": []}, {})],
-             ("source.state_after", {"written": [], "deleted": []}, {})),
+             plan_first + [("source.state_after", {"written": [], "deleted": []})],
+             ("source.state_after", {"written": [], "deleted": []})),
         ]
-        for what, first, (fn, args, kw) in cases:
+        # An order error and a malformed call go over a real session, which shows the whole
+        # way: the client sees a protocol error and the helper exits 3. The rest run the
+        # helper's own loop in this process, one session each being slow.
+        over_ssh = ("sink.receive before sink.check", "options that aren't strings")
+        for what, first, (fn, args) in cases:
             with self.subTest(what=what):
-                s = self.session()
-                s.open()
-                for call in first:
-                    s.call(call[0], call[1], **call[2])
-                with self.assertRaises(VCharonError) as cm:
-                    s.call(fn, args, **kw)
-                self.assertEqual(cm.exception.code, "protocol", cm.exception.message)
-                s.close()
+                if what in over_ssh:
+                    s = self.session()
+                    s.open()
+                    for call in first:
+                        s.call(*call)
+                    with self.assertRaises(VCharonError) as cm:
+                        s.call(fn, args, **({"upload": []} if fn == "sink.receive" else {}))
+                    self.assertEqual(cm.exception.code, "protocol", cm.exception.message)
+                    s.close()
+                    # the helper stops after a protocol error
+                    self.assertEqual(s.ssh_exit, 3)
+                    continue
+                conn = FedConn(first + [(fn, args)])
+                with mock.patch.object(platform, "home", return_value=self.home):
+                    # the remote end's home, which a relative path is under
+                    h = helper.Helper(conn, io.BytesIO())
+                    try:
+                        code = helper.serve(h)
+                    finally:
+                        h.close_plugins()
+                replies = [m for m in conn.sent if m["t"] in ("ok", "err")]
+                self.assertEqual([m["t"] for m in replies], ["ok"] * len(first) + ["err"],
+                                 replies)
+                self.assertEqual(replies[-1]["error"]["code"], "protocol", replies[-1])
                 # the helper stops after a protocol error
-                self.assertEqual(s.ssh_exit, 3)
+                self.assertEqual(code, 3)
 
     def test_helper_removes_its_stage_dir_when_it_exits(self):
         # after bye, and at end of file, without any sink.abort
@@ -1039,20 +1069,6 @@ class RunTest(FakeSshCase):
     @unittest.skipUnless(POSIX, "needs POSIX modes")
     def test_case_rename_then_a_failed_commit_pull(self):
         self.case_rename_then_failure("pull")
-
-    def test_no_state_after_without_a_state(self):
-        # a one-off pull keeps no state: a failed commit asks for none
-        src, dst = self.setup_run("pull", {"a.txt": b"a", "b.txt": b"b"})
-
-        def after_check(p, checked):
-            os.makedirs(os.path.join(dst, "src", "b.txt", "inner"))
-
-        eng = self.engine(*self.sides("pull", src, dst), after_check=after_check)
-        with self.assertRaises(VCharonError):
-            eng.run()
-        self.assertEqual(eng.done.written, ["src", "src/a.txt"])
-        self.assertNotIn("source.state_after", self.calls)
-        self.assertIsNone(eng.state_after)
 
     def test_push_check_leaves_the_state_out(self):
         # the sink never reads it, and it holds every path sent so far

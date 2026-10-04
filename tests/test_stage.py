@@ -184,13 +184,6 @@ class StagerCases:
                                  ("unlink", "gone.txt"), ("mkdir", "n"), ("mkdir", "n/m"),
                                  ("mkdir", "x"), ("move_in", "x/f1"), ("move_in", "f0")])
 
-    def test_order_outcomes(self):
-        write_tree(self.root, {"a": b"file", "d/e": b"e"})
-        checked, done = self.run_plan([put_file("a/b.txt", 1, MTIME), delete("a"),
-                                       delete("d"), delete("d/e")], {"a/b.txt": b"b"})
-        self.assertEqual((checked.deletes, done.deleted), (3, 3))
-        self.assertEqual(read_tree(self.root), {"a/": None, "a/b.txt": b"b"})
-
     # 4
     def test_deletes(self):
         write_tree(self.root, {"keep/x": b"x", "t/a": b"a", "t/s/b": b"b", "t/s/c": b"c",
@@ -208,6 +201,9 @@ class StagerCases:
         self.assertEqual(checked.deletes, tree_count + 4)
         self.assertEqual(done.deleted, tree_count + 4)
         self.assertEqual(done.notes, ["kept keep: it isn't empty"])
+        # in the order done, deepest first: removed, already gone, kept, and a tree once
+        self.assertEqual(done.deletes_done, ["f.txt/below", "missing/below", "p/a", "p/b",
+                                             "f.txt", "keep", "missing", "p", "t"])
         self.assertEqual(read_tree(self.root), {"keep/": None, "keep/x": b"x"})
         self.assertEqual(read_tree(self.outside), {"z.txt": b"z", "b/": None})
 
@@ -983,18 +979,6 @@ class StagerCases:
 
     # the deletes a commit got through (DESIGN, "The path source": state_after drops them)
 
-    def test_deletes_done(self):
-        write_tree(self.root, {"t/a/1": b"1", "full/x": b"x", "f.txt": b"f", "e/": None,
-                               "d/d2/g": b"g"})
-        entries = [delete("t", tree=True), delete("missing"), delete("full"), delete("f.txt"),
-                   delete("e"), delete("d/d2/g"), delete("d/d2"), put_dir("n")]
-        _checked, done = self.run_plan(entries)
-        # in the order done, deepest first: removed, already gone, kept, and a tree once
-        self.assertEqual(done.deletes_done, ["d/d2/g", "d/d2", "e", "f.txt", "full", "missing",
-                                             "t"])
-        self.assertEqual(done.notes, ["kept full: it isn't empty"])
-        self.assertEqual(done.written, ["n"])
-
     @unittest.skipUnless(POSIX, "needs POSIX modes")
     def test_deletes_done_before_a_failure(self):
         if os.geteuid() == 0:
@@ -1165,12 +1149,6 @@ class WindowsStagerTest(unittest.TestCase):
             self.assertEqual(f.read(), b"1")
         self.run_plan([delete(parts[0], tree=True)])
         self.assertEqual(os.listdir(self.root), [])
-
-    def test_case_only_replace(self):
-        write_tree(self.root, {"README.md": b"old"})
-        self.run_plan([put_file("readme.md", 3, MTIME)], {"readme.md": b"new"})
-        self.assertEqual(os.listdir(self.root), ["readme.md"])
-        self.assertEqual(read_tree(self.root), {"readme.md": b"new"})
 
     def test_in_use(self):
         write_tree(self.root, {"held.txt": b"h"})

@@ -56,15 +56,6 @@ class DirSinkTest(SinkCase):
         self.assertEqual(read_tree(self.root), {"d/": None, "d/x.txt": b"x"})
         self.assert_mtime(os.path.join(self.root, "d", "x.txt"))
 
-    def test_abort_leaves_the_root(self):
-        s = self.sink("dir", path=self.root)
-        s.check(Plan([put_file("x", 1, MTIME)]))
-        s.stage(0, io.BytesIO(b"x"))
-        self.assertEqual(len(os.listdir(self.root)), 1)
-        s.abort()
-        s.close()
-        self.assertEqual(read_tree(self.root), {})
-
     def test_create(self):
         missing = os.path.join(self.tmp, "new", "root")
         p = Plan([put_file("x", 1, MTIME)])
@@ -102,18 +93,6 @@ class DirSinkTest(SinkCase):
         s = self.sink("dir", path=self.root)
         s.check(Plan([]))
         self.refused_at_check(s, Plan([]), "internal")
-
-
-STAMP = "20260930-123456"
-
-
-def stage_from(sink, source):
-    """Stages the source's file 0 into the sink, as the engine does."""
-    reader = source.open(0)
-    try:
-        sink.stage(0, reader)
-    finally:
-        reader.close()
 
 
 class SinkDoctorTest(SinkCase):

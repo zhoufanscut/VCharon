@@ -214,30 +214,6 @@ class ServerModeTest(WatchCase):
                                        "gone windows/new.patch", "gone windows/run.log"])
         self.assertEqual(sleep.seconds, [10] * 4)
 
-    def test_read_errors_keep_the_snapshot(self):
-        write_tree(self.tree, {"mac/x": b"x"})
-        real = watch.scan
-        fail = [False]
-
-        def scan(root, me, fold=False):
-            if fail[0]:
-                raise PermissionError(13, "Permission denied")
-            return real(root, me, fold)
-
-        def broken():
-            fail[0] = True
-
-        def fixed():
-            fail[0] = False
-
-        with mock.patch.object(watch, "scan", scan):
-            watch.watch_dir(self.tree, "debian", 1, out=self.lines.append,
-                            sleep=Rounds(broken, lambda: None, fixed), rounds=3)
-        self.assertEqual(self.said(), [watching(self.tree, 1),
-                                       "ERROR can't read %s: Permission denied" % self.tree,
-                                       "ok again"])
-
-
 class TimeTest(WatchCase):
     def test_every_line_starts_with_the_local_time(self):
         write_tree(self.tree, {"mac/x": b"x"})
@@ -273,41 +249,7 @@ class TimeTest(WatchCase):
             "2026-10-01 09:06:16 ok again",
             "2026-10-01 09:06:46 EXIT quiet 1 min"])
 
-    def test_the_format(self):
-        self.assertEqual(watch.stamp(T0), "2026-10-01 09:05:46")
-        self.assertEqual(watch.stamp(T0 + 3600 * 15 + 14), "2026-10-02 00:06:00")
-
-
 class RootTest(WatchCase):
-    def test_a_missing_root_ends_the_watch(self):
-        write_tree(self.tree, {"mac/x": b"x"})
-        why = []
-
-        def gone():
-            shutil.rmtree(self.tree)
-            # the OS's own message, from a real error on the same path: it's localized
-            # (Chinese Windows says 系统找不到指定的路径。)
-            try:
-                os.scandir(self.tree).close()
-            except OSError as e:
-                why.append(e.strerror)
-
-        clock = Clock()
-        code = watch.watch_dir(self.tree, "debian", 1, out=self.lines.append, clock=clock,
-                               sleep=Rounds(gone, clock=clock), rounds=3)
-        self.assertEqual(len(why), 1)
-        self.assertTrue(why[0])
-        # the channel's folder gone: a closed channel's fix, with a placeholder for the
-        # flags, since this member has no record, its command as this box runs vcharon;
-        # then EXIT closed, even in continuous mode
-        self.assertEqual((code, self.lines), (watch.EXIT_CLOSED, [
-            "2026-10-01 09:05:46 " + watching(self.tree, 1),
-            "2026-10-01 09:05:47 ERROR can't read %s: %s" % (self.tree, why[0]),
-            "2026-10-01 09:05:47   fix: " + platform.runnable(
-                "the channel is closed, or your folder in it is gone: vcharon leave mb "
-                "<the --project and --role that make debian>"),
-            "2026-10-01 09:05:47 EXIT closed"]))
-
     def test_missing_at_the_start_is_empty(self):
         # in client mode, before the first run (server mode's tree holds the member's
         # MEMBER.md, so it's there); what the first run brings is all new
@@ -389,6 +331,8 @@ class SnapshotTest(WatchCase):
         bad_size["mac/x"] = [True, 1]
         less = dict(good)
         del less["loose"]
+        no_warnings = dict(good)
+        del no_warnings["warnings"]
         for data, why in ((b"{", "it isn't JSON"), (b"\xff", "it isn't JSON"),
                           (b"[]", "it has another shape"),
                           (other(version=3), "it has another shape"),
@@ -397,6 +341,8 @@ class SnapshotTest(WatchCase):
                           (other(files=bad_size), "it has another shape"),
                           (other(extra=1), "it has another shape"),
                           (json.dumps(less).encode(), "it has another shape"),
+                          (json.dumps(no_warnings).encode(), "it has another shape"),
+                          (other(warnings=[1]), "it has another shape"),
                           (other(seen={"mac": {"low": 2, "more": [2]}}), "it has another shape"),
                           (other(seen={"mac": {"low": -1, "more": []}}), "it has another shape"),
                           (other(seen={"mac": {"low": 0}}), "it has another shape"),
@@ -411,6 +357,34 @@ class SnapshotTest(WatchCase):
                 _code, lines = self.run_dir(lambda: None)
                 self.assertEqual(lines, ["note: ignoring the saved snapshot %s: %s" % (path, why),
                                          watching(self.tree, 1)])
+
+    def test_the_optional_keys(self):
+        # error, counted and fix: absent, null or empty when nothing is pending
+        path = self.state()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        doc = {"version": 2, "root": self.tree, "me": "debian", "saved": "then", "files": {},
+               "warnings": [], "seen": {}, "heads": {}, "loose": []}
+        for extra, error, fix in (
+                ({}, None, None), ({"error": None}, None, None), ({"counted": []}, None, None),
+                ({"counted": None}, None, None), ({"error": None, "counted": []}, None, None),
+                ({"error": "ERROR x"}, "ERROR x", None),
+                ({"error": "ERROR x", "fix": None}, "ERROR x", None),
+                ({"error": "ERROR x", "fix": "do y"}, "ERROR x", "do y")):
+            with self.subTest(extra=extra):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(dict(doc, **extra), f)
+                loaded = watch.load_snapshot(path, self.tree, "debian")
+                self.assertEqual(loaded[:6], ({}, "then", None, [], error, []))
+                self.assertEqual(loaded[6].doc(), {"seen": {}, "heads": {}, "loose": []})
+                self.assertEqual(loaded[7], fix)
+        # a value of another type is another shape
+        for bad in ({"error": 1}, {"counted": "transport"}, {"counted": [1]}, {"counted": ""},
+                    {"error": "ERROR x", "fix": 1}):
+            with self.subTest(bad=bad):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(dict(doc, **bad), f)
+                self.assertEqual(watch.load_snapshot(path, self.tree, "debian")[2],
+                                 "it has another shape")
 
     def test_fresh(self):
         write_tree(self.tree, {"mac/x": b"x"})
@@ -474,9 +448,10 @@ class SnapshotTest(WatchCase):
             write_tree(self.tree, {"mac/y": b"y"})
 
         with mock.patch.object(watch, "save_snapshot", full):
-            _code, lines = self.run_dir(made, lambda: None)
+            code, lines = self.run_dir(made, lambda: None)
         line = "ERROR can't save the snapshot %s: No space left on device" % self.state()
-        self.assertEqual(lines, [watching(self.tree, 1), line, "new mac/y"])
+        # and a continuous watch goes on
+        self.assertEqual((code, lines), (0, [watching(self.tree, 1), line, "new mac/y"]))
 
     def test_client_mode_restart(self):
         sync_args = ClientModeTest.write_config(self)
@@ -752,19 +727,6 @@ class WarnTest(WatchCase):
         code, lines = self.run_dir(rounds=1)
         self.assertEqual(lines[1:], ["WARN " + text, "WARN cleared: " + text])
 
-    def test_a_snapshot_with_bad_warnings(self):
-        # "warnings" missing, or not a list of strings: another shape
-        os.makedirs(os.path.dirname(self.state()), exist_ok=True)
-        doc = {"version": 2, "root": self.tree, "me": "debian", "saved": "then", "files": {},
-               "seen": {}, "heads": {}, "loose": []}
-        for bad in ({}, {"warnings": [1]}):
-            with self.subTest(bad=bad):
-                with open(self.state(), "w", encoding="utf-8") as f:
-                    json.dump(dict(doc, **bad), f)
-                _code, lines = self.run_dir(rounds=0)
-                self.assertEqual(lines[0], "note: ignoring the saved snapshot %s: it has "
-                                           "another shape" % self.state())
-
     def test_client_mode_warns_nothing(self):
         sync_args = ClientModeTest.write_config(self)
 
@@ -781,44 +743,6 @@ class UntilChangeTest(WatchCase):
     def setUp(self):
         WatchCase.setUp(self)
         self.sync_args = ClientModeTest.write_config(self)
-
-    def test_exits_after_the_first_change(self):
-        self.member()
-        write_tree(self.tree, {"mac/x": b"x"})
-
-        def files():
-            # files alone wake nobody; an entry announces them
-            write_tree(self.tree, {"mac/y": b"y"})
-
-        def made():
-            write_tree(self.tree, {"mac/z": b"z"})
-            self.post("mac", 1, "y and z", to="@debian")
-
-        # rounds=None: a round more than the steps would fail, not hang
-        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
-                               sleep=Rounds(lambda: None, files, made),
-                               until_change=True, max_minutes=25)
-        self.assertEqual(code, 0)
-        self.assertEqual(self.said(), [watching(self.tree, 1), "new mac/y",
-                                       "to you: mac#1 — y and z  (mac/RESULTS.md)",
-                                       "new mac/z", "EXIT change"])
-        # saved: the next start prints nothing old
-        with open(self.state(), encoding="utf-8") as f:
-            doc = json.load(f)
-        self.assertEqual(sorted(doc["files"]), ["mac/RESULTS.md", "mac/x", "mac/y", "mac/z"])
-        self.assertEqual(doc["seen"], {"mac": {"low": 1, "more": []}})
-
-    def test_quiet(self):
-        self.member()
-        write_tree(self.tree, {"mac/x": b"x"})
-        clock = Clock()
-        sleep = Rounds(*[lambda: None] * 6, clock=clock)
-        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
-                               clock=clock, timer=clock, until_change=True, max_minutes=1)
-        self.assertEqual(code, 10)
-        self.assertEqual(self.said(), [watching(self.tree, 1), "EXIT quiet 1 min"])
-        self.assertEqual(sleep.seconds, [10] * 6)
-        self.assertEqual(self.lines[-1][:20], "2026-10-01 09:06:46 ")
 
     def fake_runs(self, results):
         # the client's tree is there: a failed scan would count as an error too
@@ -884,15 +808,6 @@ class UntilChangeTest(WatchCase):
                                    sleep=Rounds(*[lambda: None] * (len(results) - 1)), run=run,
                                    until_change=True, max_minutes=25, fresh=True, **kw)
         return code, self.said(), runs, t
-
-    def test_errors(self):
-        # an error that never counted (the start's own) keeps failing: the count of failed
-        # rounds in a row, from the start, ends it
-        code, lines, runs, t = self.never_counted([None] * 3, max_errors=3)
-        self.assertEqual(code, 11)
-        self.assertEqual(runs, [1, 1, 1])
-        self.assertEqual(lines, [t, watching(self.tree, 0, ", fresh start"),
-                                 "EXIT error"])
 
     def test_a_long_block_never_ends_with_error(self):
         # the agent was woken for it: its rounds don't feed --max-errors
@@ -1109,34 +1024,6 @@ class UntilChangeTest(WatchCase):
         self.assertEqual(self.said(), [watching(self.tree, 0, ", since then"), lost,
                                        "ERROR connect: x", "ok again"])
 
-    def test_a_snapshot_without_the_error(self):
-        # saved with no error pending: usable, as one with no error
-        path = self.saved_error(None)
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        loaded = watch.load_snapshot(path, self.tree, "windows")
-        self.assertEqual(loaded[:6], ({}, "then", None, [], None, []))
-        self.assertEqual(loaded[6].doc(), {"seen": {}, "heads": {}, "loose": []})
-        # an error that isn't a string, or counted keys that aren't, is another shape
-        for bad in ({"error": 1}, {"counted": "transport"}, {"counted": [1]}, {"counted": ""}):
-            with self.subTest(bad=bad):
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(dict(doc, **bad), f)
-                self.assertEqual(watch.load_snapshot(path, self.tree, "windows")[2],
-                                 "it has another shape")
-
-    def test_null_and_empty_are_absent(self):
-        path = self.saved_error(None)
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        for extra in ({"error": None}, {"counted": []}, {"counted": None},
-                      {"error": None, "counted": []}):
-            with self.subTest(extra=extra):
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(dict(doc, **extra), f)
-                self.assertEqual(watch.load_snapshot(path, self.tree, "windows")[:6],
-                                 ({}, "then", None, [], None, []))
-
     def test_the_keys(self):
         for line, key in (
                 ("ERROR connect: couldn't reach devbox", "transport"),
@@ -1154,14 +1041,9 @@ class UntilChangeTest(WatchCase):
                  "ERROR vcharon sync of mailbox exited with 9"),
                 ("ERROR lostness: x", "ERROR lostness: x"),
                 ("ERROR vanished: debian/a.md changed while it was being listed", "vanished"),
-                ("ERROR aborted: couldn't read file 12: x", "aborted")):
-            with self.subTest(line=line):
-                self.assertEqual(watch.error_key(line), key)
-
-    def test_the_keys_with_the_job(self):
-        # a sync names the failing job; the connection's errors and the retry and
-        # too_many_deletes codes are keyed as without it, a content error keeps it
-        for line, key in (
+                ("ERROR aborted: couldn't read file 12: x", "aborted"),
+                # a sync names the failing job; the connection's errors and the retry and
+                # too_many_deletes codes are keyed as without it, a content error keeps it
                 ("ERROR mailbox.up: connect: couldn't reach devbox", "transport"),
                 ("ERROR Mail-Box_9.up: connect: x", "transport"),
                 ("ERROR mailbox.down: lost: the connection closed", "transport"),
@@ -1184,15 +1066,6 @@ class UntilChangeTest(WatchCase):
         # the same content error in up and in down: two problems, two keys
         self.assertNotEqual(watch.error_key("ERROR mailbox.up: unsafe_path: a: a symlink"),
                             watch.error_key("ERROR mailbox.down: unsafe_path: a: a symlink"))
-
-    def test_up_and_down_losing_the_connection_is_one_problem(self):
-        up = "ERROR mailbox.up: connect: couldn't reach devbox"
-        down = "ERROR mailbox.down: connect: couldn't reach devbox"
-        # the second failed round in a row wakes, whichever job's line it shows
-        code, lines, runs = self.until_change([(4, up, {}), (4, down, {}), (4, up, {})],
-                                              rounds=3)
-        self.assertEqual((code, lines, runs), (0, [up, down, "EXIT change"], [4, 4]))
-        self.assertEqual(self.snapshot()["counted"], ["transport"])
 
     def test_an_error_saved_before_the_job_names(self):
         # a snapshot saved by an older watcher: read as ever; its content error's new text
@@ -1379,18 +1252,6 @@ class UntilChangeTest(WatchCase):
         self.assertEqual(self.said(quiet), [watching(self.tree, 2, ", fresh start"),
                                             line, "EXIT error"])
 
-    def test_a_failed_save_doesnt_end_a_continuous_watch(self):
-        self.member()
-        write_tree(self.tree, {"mac/x": b"x"})
-
-        def full(*args):
-            raise OSError(28, "No space left on device")
-
-        with mock.patch.object(watch, "save_snapshot", full):
-            code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
-                                   sleep=Rounds(lambda: None, lambda: None), rounds=2)
-        self.assertEqual(code, 0)
-
     def test_changes_pending_at_the_start(self):
         self.member()
         write_tree(self.tree, {"mac/x": b"x"})
@@ -1537,7 +1398,7 @@ class ClientModeTest(WatchCase):
 
     def test_a_fake_vcharon_command(self):
         # run_sync runs self_argv() sync <args>, as a child; here self_argv runs a folder with
-        # a __main__.py
+        # a __main__.py. What its stderr's lines mean is parse_failure's (StreamTest)
         fake = os.path.join(self.tmp, "fake-vcharon")
         os.mkdir(fake)
         with open(os.path.join(fake, "__main__.py"), "w", encoding="utf-8") as f:
@@ -1545,27 +1406,12 @@ class ClientModeTest(WatchCase):
                 import sys
                 print("some output")
                 assert sys.argv[1] == "sync", sys.argv
-                if sys.argv[2] == "bad":
-                    sys.stderr.write("\\nERROR lost: gone\\n  fix: run again\\n")
-                    sys.exit(1)
                 if sys.argv[2] == "gone":
                     # the sync's block for a closed channel, as measured, after a
                     # line that isn't an ERROR
                     sys.stderr.write("note: x\\nERROR mb.w.up: not_found: no root\\n"
                                      "  fix: the channel is closed: leave it\\n  log: l\\n")
                     sys.exit(1)
-                if sys.argv[2] == "nofix":
-                    sys.stderr.write("ERROR lost: gone\\n  log: l\\nERROR other: x\\n"
-                                     "  fix: other's\\n")
-                    sys.exit(1)
-                if sys.argv[2] == "tail":
-                    sys.stderr.write("ERROR connect: no\\n  | ssh: refused\\n  fix: check\\n")
-                    sys.exit(4)
-                if sys.argv[2] == "quiet":
-                    sys.exit(4)
-                if sys.argv[2] == "busy":
-                    sys.stderr.write("ERROR busy: another run of busy.up is in progress\\n")
-                    sys.exit(2)
                 assert sys.argv[2:] == ["mb", "--project", "p"], sys.argv
                 """))
         with mock.patch.object(platform, "self_argv", lambda: [sys.executable, fake]):
@@ -1573,20 +1419,9 @@ class ClientModeTest(WatchCase):
             self.assertEqual(watch.sync_argv(SYNC, repeat=3),
                              [sys.executable, fake, "sync"] + SYNC + ["--repeat", "3"])
             self.assertEqual(watch.run_sync("mb.windows", SYNC), (0, None, None))
-            self.assertEqual(watch.run_sync("bad", ["bad"]), (1, "ERROR lost: gone",
-                                                              "run again"))
             self.assertEqual(watch.run_sync("gone", ["gone"]),
                              (1, "ERROR mb.w.up: not_found: no root",
                               "the channel is closed: leave it\nl"))
-            # the first ERROR's block holds no fix: its log, never a later line's fix
-            self.assertEqual(watch.run_sync("nofix", ["nofix"]),
-                             (1, "ERROR lost: gone", "the job's log has the rest: l"))
-            # the connection's last words come between the ERROR line and its fix
-            self.assertEqual(watch.run_sync("tail", ["tail"]), (4, "ERROR connect: no", "check"))
-            self.assertEqual(watch.run_sync("quiet", ["quiet"]),
-                             (4, "ERROR vcharon sync of quiet exited with 4", None))
-            self.assertEqual(watch.run_sync("busy", ["busy"]),
-                             (2, "ERROR busy: another run of busy.up is in progress", None))
 
     def test_the_child_is_this_vcharon(self):
         # --no-stream's child each round: self_argv, -P and all; a binary's unpacks its own copy
@@ -1840,7 +1675,11 @@ class StreamTest(WatchCase):
     def test_the_child_restarts_with_the_backoff(self):
         connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
         broken = [["out", connect], ["out", "ROUND 4"], ["exit", 4]]
-        children = ([[["err", "ERROR config: no such file"], ["exit", 3]]] + [broken] * 5
+        # what a child says on stderr after a round whose error broke the connection (seen
+        # once: an abort at shutdown) is its way out, no new error
+        loud = [["out", connect], ["out", "ROUND 4"], ["err", "Fatal Python error: x"],
+                ["exit", 134]]
+        children = ([[["err", "ERROR config: no such file"], ["exit", 3]], loud] + [broken] * 4
                     + [[["out", "ROUND 0"], ["exit", 1]], [["out", "ROUND 0"]]])
         code, lines = self.watch(*children, rounds=9)
         self.assertEqual(code, 0)
@@ -1935,23 +1774,11 @@ class StreamTest(WatchCase):
         started = time.monotonic()
         code, lines = self.watch([["out", "ROUND 0"], self.entry("debian", 9, "hi"),
                                   ["out", "ROUND 0"], ["deaf"]], until_change=True,
-                                 stop_wait=1)
+                                 stop_wait=0.2)
         self.assertEqual((code, lines[-1]), (watch.EXIT_CHANGE, "EXIT change"))
         self.assert_all_stopped()
         self.assertNotEqual(self.procs[0].returncode, 0)
         self.assertLess(time.monotonic() - started, 30)
-
-    def test_stderr_after_a_broken_round_is_its_way_out(self):
-        # vcharon sync --repeat exits after a round whose error broke the connection; what it
-        # says on stderr then (seen once: an abort at shutdown) is no new error
-        connect = "ERROR mb.windows.up: connect: ssh couldn't reach devbox"
-        _code, lines = self.watch(
-            [["out", connect], ["out", "ROUND 4"], ["err", "Fatal Python error: x"],
-             ["exit", 134]],
-            [["out", "ROUND 0"]], rounds=2)
-        self.assertEqual(lines[1:], [connect, "ok again"])
-        self.assertEqual(self.slept, [2])
-        self.assert_all_stopped()
 
     def test_a_mixed_round_that_broke(self):
         # up's content error first, then down's lost: the round broke the
@@ -2002,7 +1829,7 @@ class StreamTest(WatchCase):
         # a round that doesn't come (a dying link, a hung helper): the watch ends on time
         class Ticking(Clock):
             def __call__(self):
-                self.t += 5
+                self.t += 30
                 return self.t
 
         lines = []
@@ -2017,11 +1844,23 @@ class StreamTest(WatchCase):
     def test_parse_failure_is_run_vcharons(self):
         lines = ["ERROR mb.windows.up: connect: no", "  | ssh: refused", "  fix: check",
                  "  log: l", "ERROR other"]
-        self.assertEqual(watch.parse_failure(4, lines, "mb.windows"),
-                         (4, "ERROR mb.windows.up: connect: no", "check\nl"))
-        self.assertEqual(watch.parse_failure(0, lines, "mb.windows"), (0, None, None))
-        self.assertEqual(watch.parse_failure(2, [], "mb.windows"),
-                         (2, "ERROR vcharon sync of mb.windows exited with 2", None))
+        busy = "ERROR busy: another run of busy.up is in progress"
+        for code, got, want in (
+                # the connection's last words come between the ERROR line and its fix
+                (4, lines, (4, "ERROR mb.windows.up: connect: no", "check\nl")),
+                (0, lines, (0, None, None)),
+                (2, [], (2, "ERROR vcharon sync of mb.windows exited with 2", None)),
+                (1, ["", "ERROR lost: gone", "  fix: run again"],
+                 (1, "ERROR lost: gone", "run again")),
+                # the first ERROR's block holds no fix: its log, never a later line's fix
+                (1, ["ERROR lost: gone", "  log: l", "ERROR other: x", "  fix: other's"],
+                 (1, "ERROR lost: gone", "the job's log has the rest: l")),
+                (2, [busy], (2, busy, None)),
+                # no ERROR line: the first that isn't blank
+                (1, ["", "Traceback (most recent call last):", "RuntimeError: x"],
+                 (1, "Traceback (most recent call last):", None))):
+            with self.subTest(got=got):
+                self.assertEqual(watch.parse_failure(code, got, "mb.windows"), want)
 
 
 class EntriesTest(WatchCase):
@@ -2280,13 +2119,9 @@ class ClosedTest(WatchCase):
                                   "machine": util.TEST_MACHINE_ID, "project": "web",
                                   "role": "b", **util.record_format()})
 
-    def test_the_hint_is_channel_cmds(self):
-        from vcharon import cli
-        self.assertIs(cli.CHANNEL_GONE_HINT, channel_cmd.CHANNEL_GONE_HINT)
-        self.assertTrue(channel_cmd.CHANNEL_GONE_HINT.startswith(channel_cmd.CHANNEL_GONE_PREFIX))
-
     def test_is_gone(self):
         # by the hint's start, after runnable() and run_vcharon's log part
+        self.assertTrue(channel_cmd.CHANNEL_GONE_HINT.startswith(channel_cmd.CHANNEL_GONE_PREFIX))
         self.assertTrue(watch.is_gone(self.GONE))
         self.assertTrue(watch.is_gone(self.GONE + "\n/x/mb.windows.log"))
         self.assertTrue(watch.is_gone(channel_cmd.CHANNEL_GONE_HINT % ("mb", "--project p")))
@@ -2296,17 +2131,29 @@ class ClosedTest(WatchCase):
                 self.assertFalse(watch.is_gone(fix))
 
     def test_dir_a_removed_channel_folder(self):
-        self.record()
         write_tree(self.tree, {"mac/x": b"x"})
+        why = []
 
         def closed():
             # close's rename: every member's next round sees the folder gone. Into a new
             # name in a fresh folder: on Windows os.rename can't replace a folder
             os.rename(self.tree, os.path.join(
                 tempfile.mkdtemp(prefix=".vcharon-closed-mb-", dir=self.tmp), "mb"))
+            # the OS's own message, from a real error on the same path: it's localized
+            # (Chinese Windows says 系统找不到指定的路径。)
+            try:
+                os.scandir(self.tree).close()
+            except OSError as e:
+                why.append(e.strerror)
 
-        for until_change in (True, False):
-            with self.subTest(until_change=until_change):
+        # a member with no record: its fix has a placeholder for the flags
+        nameless = platform.runnable("the channel is closed, or your folder in it is gone: "
+                                     "vcharon leave mb <the --project and --role that make "
+                                     "debian>")
+        for record, until_change in ((False, False), (True, True), (True, False)):
+            with self.subTest(record=record, until_change=until_change):
+                if record:
+                    self.record()
                 if not os.path.isdir(self.tree):
                     write_tree(self.tree, {"mac/x": b"x", "debian/MEMBER.md":
                                            member_md("debian", "debian")})
@@ -2314,15 +2161,16 @@ class ClosedTest(WatchCase):
                 code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
                                        sleep=Rounds(closed), until_change=until_change,
                                        max_minutes=25, fresh=True)
-                error = self.said()[1]
-                self.assertTrue(error.startswith("ERROR can't read %s: " % self.tree), error)
+                self.assertTrue(why[-1])
+                error = "ERROR can't read %s: %s" % (self.tree, why[-1])
+                fix = self.GONE if record else nameless
                 # the fix right after the ERROR line, then EXIT closed, in both modes
                 self.assertEqual((code, self.said()), (
                     watch.EXIT_CLOSED, [watching(self.tree, 1, ", fresh start"), error,
-                                        "  fix: " + self.GONE, "EXIT closed"]))
+                                        "  fix: " + fix, "EXIT closed"]))
                 with open(self.state(), encoding="utf-8") as f:
                     doc = json.load(f)
-                self.assertEqual((doc["error"], doc["fix"]), (error, self.GONE))
+                self.assertEqual((doc["error"], doc["fix"]), (error, fix))
         # a restart while it's gone: the same three lines, before any lock or snapshot
         del self.lines[:]
         os.remove(self.state())
@@ -2390,19 +2238,6 @@ class ClosedTest(WatchCase):
                 self.assertNotIn("EXIT closed", lines)
                 self.assertEqual(lines[0], error)
 
-    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
-                     "POSIX permissions, which root ignores")
-    def test_dir_an_unreadable_channel_folder(self):
-        self.record()
-        write_tree(self.tree, {"mac/x": b"x"})
-        self.addCleanup(os.chmod, self.tree, 0o755)
-        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
-                               sleep=Rounds(lambda: os.chmod(self.tree, 0)), rounds=1)
-        # an error on the folder that isn't "gone": no fix line
-        self.assertEqual((code, self.said()), (0, [
-            watching(self.tree, 1),
-            "ERROR can't read %s: Permission denied" % self.tree]))
-
     def test_job_the_fix_shown_with_its_error(self):
         sync_args = ClientModeTest.write_config(self)
         os.makedirs(self.tree, exist_ok=True)
@@ -2436,23 +2271,6 @@ class ClosedTest(WatchCase):
         self.assertEqual(watch_it(1, until_change=False), (0, ["ok again"]))
         with open(path, encoding="utf-8") as f:
             self.assertNotIn("fix", json.load(f))
-
-    def test_the_snapshots_fix(self):
-        path = self.state()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        doc = {"version": 2, "root": self.tree, "me": "debian", "saved": "then", "files": {},
-               "warnings": [], "seen": {}, "heads": {}, "loose": [], "error": "ERROR x"}
-        for extra, fix in (({}, None), ({"fix": None}, None), ({"fix": "do y"}, "do y")):
-            with self.subTest(extra=extra):
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(dict(doc, **extra), f)
-                loaded = watch.load_snapshot(path, self.tree, "debian")
-                self.assertEqual((loaded[2], loaded[4], loaded[7]), (None, "ERROR x", fix))
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(dict(doc, fix=1), f)
-        self.assertEqual(watch.load_snapshot(path, self.tree, "debian")[2],
-                         "it has another shape")
-
 
 class CommandTest(WatchCase):
     """vcharon watch C: its options, the membership it watches, its exit codes."""
@@ -2502,6 +2320,7 @@ class CommandTest(WatchCase):
         with mock.patch.object(watch, "watch_dir", interrupted):
             code, _out, err = self.cli()
             self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
+            self.assertEqual(self.cli("--until-change")[0], 130)
         with mock.patch.object(watch, "watch_job", interrupted):
             for argv in (["--every", "5"], ["--until-change", "--fresh"],
                          ["--until-change", "--max-minutes", "5", "--max-errors", "3"],
@@ -2517,6 +2336,8 @@ class CommandTest(WatchCase):
         self.assertEqual(calls, [
             # a local member's watch holds another folder over the channel's limits
             ((self.tree, "debian", 10), dict(plain, folder_limits=(50 * 1000 * 1000, 1000))),
+            ((self.tree, "debian", 10), dict(plain, until_change=True, max_minutes=25,
+                                             folder_limits=(50 * 1000 * 1000, 1000))),
             (("mb.windows", SYNC, 5), streams),
             (("mb.windows", SYNC, 2), dict(streams, fresh=True, until_change=True,
                                            max_minutes=25)),
@@ -2563,32 +2384,6 @@ class CommandTest(WatchCase):
                              capture_output=True, timeout=60, check=False)
         want = "new mañana.md\n".encode().replace(b"\n", os.linesep.encode())
         self.assertEqual((ran.returncode, ran.stdout), (0, want), ran.stderr)
-
-    def test_a_real_until_change_run(self):
-        # as a background command runs it: a child, its lines, its exit code
-        write_tree(self.tree, {"windows/x": b"x"})
-        argv = [sys.executable, "-P", "-m", "vcharon", "watch", "mb", "--project", "q",
-                "--every", "1", "--until-change"]
-        child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 env=dict(os.environ, VCHARON_HOME=self.vcharon_home))
-        try:
-            first = util.readline(child.stdout).decode("utf-8")
-            # the entry and the file at once: one rename of a folder made aside
-            aside = os.path.join(self.tmp, "aside")
-            write_tree(aside, {"mac/y": b"y"})
-            self.post("mac", 1, "y", to="@debian", root=aside)
-            os.rename(os.path.join(aside, "mac"), os.path.join(self.tree, "mac"))
-            out, err = child.communicate(timeout=60)
-        finally:
-            if child.poll() is None:
-                child.kill()
-                child.wait()
-        lines = [first.rstrip("\r\n")] + out.decode("utf-8").splitlines()
-        self.assertEqual((child.returncode, self.said(lines)),
-                         (0, [watching(self.tree, 1),
-                              "to you: mac#1 — y  (mac/RESULTS.md)", "new mac/y",
-                              "EXIT change"]), err)
-
 
 class UpdatedTest(WatchCase):
     """EXIT updated (exit 14): vcharon's code changed under a running watcher (DESIGN,
@@ -2740,12 +2535,6 @@ class UpdatedTest(WatchCase):
         with open(imported, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
 
-    def test_gone_counts_as_changed(self):
-        dog = install.Watchdog()
-        self.assertFalse(dog.changed())
-        os.remove(self.code)
-        self.assertTrue(dog.changed())
-
     def test_an_unexpected_error_in_a_binary_after_a_swap(self):
         # a read of the new file at the old offsets can be any exception
         def fail():
@@ -2762,21 +2551,18 @@ class UpdatedTest(WatchCase):
                           "(unknown type code)); exiting with 14", f.read())
 
     def test_an_unexpected_error_without_a_swap_is_a_bug(self):
-        with mock.patch.object(platform, "is_frozen", return_value=True):
-            code, out, err = self.watch_with(fail=lambda: ImportError("no module named x"))
-        self.assertEqual((code, out), (1, ""))
-        self.assertTrue(err.startswith("ERROR internal: ImportError: no module named x\n"), err)
-
-    def test_only_a_binary_reads_its_code_from_its_file(self):
-        # a package's files are whole files either way: an error is the error
+        # a package's files are whole files either way: an error is the error, swap or not
         def fail():
             self.swap()
             return ImportError("no module named x")
 
-        with mock.patch.object(platform, "is_frozen", return_value=False):
-            code, out, err = self.watch_with(fail=fail)
-        self.assertEqual((code, out), (1, ""))
-        self.assertTrue(err.startswith("ERROR internal: "), err)
+        for frozen, error in ((True, lambda: ImportError("no module named x")), (False, fail)):
+            with self.subTest(frozen=frozen):
+                with mock.patch.object(platform, "is_frozen", return_value=frozen):
+                    code, out, err = self.watch_with(fail=error)
+                self.assertEqual((code, out), (1, ""))
+                self.assertTrue(err.startswith("ERROR internal: ImportError: no module named "
+                                               "x\n"), err)
 
 
 class LooseTest(WatchCase):

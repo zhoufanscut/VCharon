@@ -1584,6 +1584,8 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   `127.0.0.1` or `localhost` exactly, and refuse any URL with an `@`; otherwise https only, and
   `install.sh` holds redirects to https too). Only a 404 for the `.sha256` warns; any other failure
   to get it fails, as for `--update`, where only a release that lists no `.sha256` warns.
+  `VCHARON_INSTALL_VERSION_TIMEOUT` and `VCHARON_INSTALL_KILL_GRACE` (whole seconds; anything
+  else gets the default) are for the same tests: they shorten the waits for a hung binary.
   `install.sh` writes only the archive member's bytes (`tar -O`, so a link member gives an empty
   file, which fails the version check), gives that check 60 s (without `timeout(1)`: TERM, then
   KILL after 5 s), and cleans up on INT, TERM and HUP. `install.ps1` stops a binary that overruns

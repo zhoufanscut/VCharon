@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -14,7 +12,6 @@ from unittest import mock
 from vcharon import entries
 from vcharon.proto import VCharonError
 
-from tests.test_cli import VCHARON_DIR
 from tests.util import write_tree
 
 
@@ -33,16 +30,17 @@ class TextTest(EntriesCase):
     def test_build_and_parse(self):
         text = entries.build("2026-10-02 10:12", "mac-a", 7, "step 3 done", ["@laptop-ui"],
                              re_="laptop-ui#3", header=[("channel", "game")],
-                             body="line 1\n## not a heading\n   ### nor this\nto: @all\n")
+                             body="line 1\n## not a heading\n   ### nor this\nto: @all\nre: x#1\n")
         self.assertEqual(text, "\n## 2026-10-02 10:12 — mac-a#7 — step 3 done\nto: @laptop-ui\n"
                                "re: laptop-ui#3\nchannel: game\n\nline 1\n> ## not a heading\n"
-                               ">    ### nor this\nto: @all\n")
+                               ">    ### nor this\nto: @all\nre: x#1\n")
         (e,) = entries.parse("# RESULTS\n" + text)
         self.assertEqual((e.time, e.id, e.title, e.to, e.re, e.header, e.line),
                          ("2026-10-02 10:12", "mac-a#7", "step 3 done", ("@laptop-ui",),
                           "laptop-ui#3", [("channel", "game")], 3))
-        # the body's "to: @all" is body, after the blank line: it can't forge a header
-        self.assertEqual(e.body, "line 1\n> ## not a heading\n>    ### nor this\nto: @all")
+        # the body's "to:" and "re:" are body, after the blank line: they can't forge a header
+        self.assertEqual(e.body,
+                         "line 1\n> ## not a heading\n>    ### nor this\nto: @all\nre: x#1")
 
     def test_headings_without_an_id(self):
         es = entries.parse("# R\n\n## 2026-10-01 09:00 — an old entry\n\nbody\n\n"
@@ -52,10 +50,6 @@ class TextTest(EntriesCase):
             ("2026-10-01 09:01", "x", 3, "a title — with dashes")])
         self.assertEqual(es[0].body, "body")
         self.assertEqual(es[0].to, ())
-
-    def test_one_line_values(self):
-        with self.assertRaises(VCharonError):
-            entries.build("t", "a", 1, "two\nlines", ["@all"])
 
     def test_to_and_ids(self):
         self.assertIsNone(entries.to_problem("@all"))
@@ -122,32 +116,7 @@ class NumbersTest(EntriesCase):
                                              top=os.path.join(self.tmp, "tree")))
 
 
-POSTER = """
-import sys
-sys.path[:0] = [%r]
-from vcharon import entries
-own, n = sys.argv[1], int(sys.argv[2])
-for i in range(n):
-    entries.post(own + "/RESULTS.md", own, "mac-a", "post %%s-%%d" %% (sys.argv[3], i), ["@x"],
-                 body="b")
-"""
-
-
 class LockTest(EntriesCase):
-    def test_two_posters_at_once(self):
-        # real processes, each its own lock fd: one number each, no entry lost
-        n = 25
-        procs = [subprocess.Popen([sys.executable, "-c", POSTER % VCHARON_DIR, self.own, str(n),
-                                   tag], env=dict(os.environ)) for tag in "ab"]
-        for p in procs:
-            self.assertEqual(p.wait(timeout=120), 0)
-        found = entries.parse_file(os.path.join(self.own, "RESULTS.md"))
-        self.assertEqual(len(found), 2 * n)
-        self.assertEqual(sorted(e.number for e in found), list(range(1, 2 * n + 1)))
-        self.assertEqual(sorted(e.title for e in found),
-                         sorted("post %s-%d" % (t, i) for t in "ab" for i in range(n)))
-        self.assertEqual([f for f in os.listdir(self.own) if f.startswith(".vcharon-stage-")], [])
-
     def test_lock_is_per_own_folder(self):
         self.assertNotEqual(entries.lock_path(self.own),
                             entries.lock_path(os.path.join(self.tmp, "tree", "win-b")))

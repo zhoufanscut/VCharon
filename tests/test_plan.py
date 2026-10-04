@@ -45,8 +45,7 @@ class RoundTripTest(unittest.TestCase):
                                            "notes": []})
         # a new list per Plan
         self.assertIsNot(plan.Plan([]).notes, plan.Plan([]).notes)
-
-    def test_builders(self):
+        # builders: a delete without tree or why sends only op and path
         self.assertEqual(plan.put_dir("d"), plan.Entry("put", "d", kind="dir"))
         self.assertEqual(plan.to_json(plan.Plan([plan.delete("x")]))["entries"],
                          [{"op": "delete", "path": "x"}])

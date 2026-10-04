@@ -191,33 +191,29 @@ class KeyTest(KeyCase):
         self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
 
     def test_key_path_with_a_space(self):
-        self.os_name("darwin")
+        # one argument to ssh-add on each OS; on POSIX a list argv can't split it, so the
+        # Windows row is what a Windows runner checks
         key = os.path.join(self.tmp, "my keys", "id rsa")
         os.mkdir(os.path.dirname(key))
         with open(key, "w") as f:
             f.write("k")
-        self.locked(key)
-        out, _err = self.key_cli("fake-dest")
-        self.assertEqual(self.adds(), [["--apple-use-keychain", key]])
-        self.assertIn('                IdentityFile "%s"' % key, out)
-
-    def test_key_path_with_a_space_linux_windows(self):
-        key = os.path.join(self.tmp, "my keys", "id rsa")
-        os.mkdir(os.path.dirname(key))
-        with open(key, "w") as f:
-            f.write("k")
-        os.environ["SSH_AUTH_SOCK"] = os.path.join(self.tmp, "agent.sock")
-        for osn, rc in (("linux", 0), ("windows", 1)):
+        for osn, rc in (("darwin", None), ("linux", 0), ("windows", 1)):
             with self.subTest(osn=osn):
                 self.os_name(osn)
-                self.agent(rc, "3072 SHA256:x other (RSA)\n" if rc == 0 else "")
+                if rc is not None:
+                    os.environ["SSH_AUTH_SOCK"] = os.path.join(self.tmp, "agent.sock")
+                    self.agent(rc, "3072 SHA256:x other (RSA)\n" if rc == 0 else "")
                 if os.path.exists(self.unlock):
                     os.remove(self.unlock)
                 if os.path.exists(self.add_log):
                     os.remove(self.add_log)
                 self.locked(key)
-                _out, _err = self.key_cli("fake-dest")
-                self.assertEqual(self.adds(), [[key]])
+                out, _err = self.key_cli("fake-dest")
+                if osn == "darwin":
+                    self.assertEqual(self.adds(), [["--apple-use-keychain", key]])
+                    self.assertIn('                IdentityFile "%s"' % key, out)
+                else:
+                    self.assertEqual(self.adds(), [[key]])
 
     def test_not_runnable_isnt_a_locked_key(self):
         # bash's own "Permission denied" for a remote_python it can't run
@@ -266,7 +262,8 @@ class KeyTest(KeyCase):
         self.assertEqual((said, self.ssh_runs(), self.adds()), ([], [], []))
 
     def test_agent_only(self):
-        for osn in ("linux", "darwin", "windows"):
+        # a Mac takes the same way as Windows: only Linux adds the forwarded-agent note
+        for osn in ("linux", "windows"):
             with self.subTest(osn=osn):
                 self.os_name(osn)
                 self.agent(0, "3072 SHA256:x c@h (RSA)\n")
@@ -321,13 +318,6 @@ class KeyTest(KeyCase):
         _out, err = self.key_cli("fake-dest", code=4)
         self.assertEqual(err[1], "  fix: no agent answers at %s: a forwarded agent ends with "
                                  "its ssh login; log in again" % sock)
-        self.assertEqual(self.adds(), [])
-
-    def test_host_key(self):
-        os.environ.update(FAKE_SSH_STDERR="Host key verification failed.", FAKE_SSH_EXIT="255")
-        _out, err = self.key_cli("fake-dest", code=4)
-        self.assertEqual(err[0], "ERROR connect: ssh couldn't verify the host key of fake-dest")
-        self.assertIn("  fix: run ssh fake-dest once in a terminal", err)
         self.assertEqual(self.adds(), [])
 
     def test_add_fails(self):

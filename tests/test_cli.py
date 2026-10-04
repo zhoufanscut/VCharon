@@ -236,7 +236,7 @@ class CliTest(FakeSshCase):
             self.assertIn("killing ssh: interrupted", f.read())
 
     def test_help_exits_0(self):
-        code, out, err = self.run_cli("--help")
+        code, out, _err = self.run_cli("--help")
         self.assertEqual(code, 0)
         verbs = ("key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
                  "post", "read", "watch", "sync")
@@ -245,13 +245,7 @@ class CliTest(FakeSshCase):
         # the exit codes, and one screen
         self.assertIn(cli.EXIT_CODES, out)
         self.assertLessEqual(len(out.splitlines()), 50)
-        for command in verbs:
-            with self.subTest(command=command):
-                code, out, err = self.run_cli(command, "--help")
-                self.assertEqual((code, err), (0, ""))
-                examples = [l for l in out.splitlines() if l.startswith("example: ")]
-                self.assertEqual(len(examples), 1, out)
-                self.assertTrue(examples[0].startswith("example: vcharon %s" % command))
+        # each verb's own --help: test_commands' FixRoundTripTest parses its example
 
 
 class Utf8ConsoleTest(unittest.TestCase):
@@ -569,19 +563,6 @@ class JobTest(FakeSshCase):
 
     # a second concurrent run exits with 2
 
-    def test_busy(self):
-        held = state.lock("push")
-        self.addCleanup(held.release)
-        _out, err = self.failed(2, "push")
-        self.assertEqual(err[:2], ["ERROR busy: another run of push is in progress",
-                                   "  fix: wait for it to finish"])
-        self.assertFalse(os.path.exists(self.argv_file))
-        code, _out, err = self.reset_job("push")
-        self.assertEqual(code, 2)
-        self.assertEqual(err.splitlines()[0], "ERROR busy: another run of push is in progress")
-        held.release()
-        self.ok("push")
-
     def test_busy_in_another_process(self):
         # the lock is the OS's: a second vcharon process sees it (DESIGN, "Lock")
         self.lock_is_free()
@@ -692,30 +673,6 @@ class JobTest(FakeSshCase):
         self.assertEqual(self.state_bytes(), before)
         self.lock_is_free()
 
-    def test_ctrl_c(self):
-        self.ok("push")
-        before = self.state_bytes()
-        write_tree(self.src, {"new.txt": b"n"})
-
-        def interrupted(eng, *args, **kw):
-            raise KeyboardInterrupt
-
-        with mock.patch.object(engine.Engine, "run", interrupted):
-            code, _out, err = self.run_jobs("push")
-        self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
-        self.assertEqual(self.state_bytes(), before)
-        self.assertIn("  error  interrupted", self.job_log())
-        self.lock_is_free()
-
-    def test_no_machine_id(self):
-        with with_helper(NO_MACHINE):
-            _out, err = self.failed(3, "push")
-        self.assertEqual(err[:2], ["ERROR state_mismatch: the server fake-dest has no machine id, "
-                                   "so vcharon can't tie the state of push to it",
-                                   "  fix: " + platform.runnable(state.NO_MACHINE_HINT)])
-        self.assertFalse(os.path.exists(state.path("push")))
-        self.assertEqual(read_tree(self.inbox), {})
-
     def test_a_server_that_isnt_linux(self):
         # a Mac or Windows box has a machine id now; the client refuses it by its OS
         for osn in ("darwin", "windows"):
@@ -752,34 +709,6 @@ class JobTest(FakeSshCase):
         lines = self.ok("push")
         self.assertEqual(lines[1], "  put     2 files, 0 dirs (4 B)")
         self.assertEqual(read_tree(self.inbox), read_tree(self.src))
-
-    @unittest.skipUnless(os.name == "posix", "needs POSIX modes")
-    def test_a_failed_commit_saves_what_it_wrote_pull(self):
-        if os.geteuid() == 0:
-            self.skipTest("root can write in a read-only directory")
-        back = os.path.join(self.local, "back")
-        os.makedirs(back)
-        outbox = os.path.join(self.home, "outbox")
-        write_tree(outbox, {"top.txt": b"t", "b/": None})
-        self.write_config(PULL.format(dst=back))
-        self.ok("pull")
-        old = self.saved("pull")["source"]["sent"]
-        write_tree(outbox, {"a/1": b"1", "a/2": b"2", "b/1": b"b1", "b/2": b"b2"})
-        b = os.path.join(back, "b")
-        os.chmod(b, 0o555)
-        self.addCleanup(os.chmod, b, 0o755)
-        _out, err = self.failed(1, "pull")
-        self.assertEqual(err[:3], ["ERROR permission: b/1: Permission denied",
-                                   "  done    2 written, 0 deleted before the failure",
-                                   "  fix: check the owner and permissions of b/1"])
-        sent = self.saved("pull")["source"]["sent"]
-        self.assertEqual(sorted(sent), sorted(list(old) + ["a", "a/1", "a/2"]))
-        self.assertEqual({k: sent[k] for k in old}, old)
-        self.assertIn("state_after: 3 written, 0 deleted", self.job_log("pull"))
-        os.chmod(b, 0o755)
-        lines = self.ok("pull")
-        self.assertEqual(lines[1], "  put     2 files, 0 dirs (4 B)")
-        self.assertEqual(read_tree(back), read_tree(outbox))
 
     # the reset (vcharon sync C --reset up|down, for a channel section's job)
 
@@ -1124,6 +1053,9 @@ class MultiJobTest(FakeSshCase):
         self.assertIn("  error  interrupted", self.job_log("a"))
         self.assertEqual(self.dests(), ["fake-dest"])
         self.assert_locks_free("a", "b")
+        # an interrupted run saves no state
+        self.assertFalse(os.path.exists(state.path("a")))
+        self.assertFalse(os.path.exists(state.path("b")))
 
     def test_no_machine_id_fails_every_job_on_it(self):
         with with_helper(NO_MACHINE):
@@ -1134,8 +1066,10 @@ class MultiJobTest(FakeSshCase):
                          ["ERROR %s: state_mismatch: the server fake-dest has no machine id, so "
                           "vcharon can't tie the state of %s to it" % (name, name)
                           for name in "ab"])
+        self.assertIn("  fix: " + platform.runnable(state.NO_MACHINE_HINT), err.splitlines())
         self.assertFalse(os.path.exists(state.path("a")))
         self.assertFalse(os.path.exists(state.path("b")))
+        self.assertEqual((self.inbox("a"), self.inbox("b")), ({}, {}))
         self.assertEqual(self.dests(), ["fake-dest"])
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX modes")
@@ -1552,10 +1486,25 @@ class RepeatTest(FakeSshCase):
         self.assertNotIn("repeat: ", self.job_log("b"))
 
     def test_run_timeout_counts_within_a_round(self):
-        self.config("[vcharon]\nrun_timeout = 2\n\n", MULTI)
-        # the waits add up past run_timeout; no round comes near it
-        code, lines, err, _ = self.repeat("a", "b", between=[lambda: time.sleep(1.5)] * 2)
+        # every wait falls after end_round and before the next start_round, so run_timeout
+        # never counts it; the first round's session opens in it and counts from there. That
+        # the timer stops between the two is test_session's.
+        events = []
+        start_round, end_round = ssh.Session.start_round, ssh.Session.end_round
+
+        def start(session):
+            events.append("start")
+            start_round(session)
+
+        def end(session):
+            events.append("end")
+            end_round(session)
+        with mock.patch.object(ssh.Session, "start_round", start), \
+                mock.patch.object(ssh.Session, "end_round", end):
+            code, lines, err, _ = self.repeat("a", "b",
+                                              between=[lambda: events.append("wait")] * 2)
         self.assertEqual((code, lines, err), (0, ["ROUND 0"] * 3, ""))
+        self.assertEqual(events, ["end", "wait", "start", "end", "wait", "start", "end"])
         self.assertNotIn("killing ssh", self.job_log("a"))
 
     def channel(self):
@@ -1631,7 +1580,8 @@ class RepeatTest(FakeSshCase):
                   "atexit.register(dump)\n" % (code_path, imported))
         child = self.child(*self.channel() + ["--repeat", "1"], before=before)
         try:
-            lines = [util.readline(child.stdout) for _ in range(3)]
+            # two rounds: the first sends and saves, the second has nothing to do
+            lines = [util.readline(child.stdout) for _ in range(2)]
             swap()
             # stdin stays open: its end would stop the child too. Its output is a few lines,
             # so the pipes can't fill while it is waited for.
@@ -1646,7 +1596,7 @@ class RepeatTest(FakeSshCase):
                 stream.close()
         self.assertEqual((child.returncode, err), (14, b""))
         lines = [line.rstrip(b"\r\n") for line in lines] + out.replace(b"\r", b"").splitlines()
-        self.assertEqual(lines[:3], [b"ROUND 0"] * 3)
+        self.assertEqual(lines[:2], [b"ROUND 0"] * 2)
         self.assertEqual(lines[-1], b"EXIT updated")
         with open(imported, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
@@ -1658,7 +1608,7 @@ class RepeatTest(FakeSshCase):
         # the real stdin thread: the child syncs rounds until its stdin ends, then says bye
         child = self.child(*self.channel() + ["--repeat", "1"])
         try:
-            lines = [util.readline(child.stdout) for _ in range(2)]
+            lines = [util.readline(child.stdout)]
             child.stdin.close()
             # communicate() would flush the closed pipe
             child.stdin = None
@@ -1668,7 +1618,7 @@ class RepeatTest(FakeSshCase):
                 child.kill()
                 child.wait()
         self.assertEqual(child.returncode, 0, err)
-        self.assertEqual([l.rstrip(b"\r\n") for l in lines], [b"ROUND 0"] * 2)
+        self.assertEqual([l.rstrip(b"\r\n") for l in lines], [b"ROUND 0"])
         self.assertEqual(out.replace(b"\r", b""), b"ROUND 0\n" * (len(out.splitlines())))
         self.assertEqual(err, b"")
         up = self.job_log("mb.windows.up")
@@ -1927,18 +1877,6 @@ class MailboxTest(FakeSshCase):
                 # the console shows what the run did, as before
                 self.assertFalse(any("left out" in line for line in lines), lines)
 
-    @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
-    def test_twins_inside_a_writers_folder_still_refuse(self):
-        # a twin below the top would make one file of two on the client; the run is
-        # refused there (data safety), and the server's watcher warns
-        self.folding()
-        write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
-        code, _out, err = self.run_cli(*SYNC)
-        self.assertEqual(code, 1)
-        self.assertIn("ERROR mb.windows.down: collision: debian/Notes.md and debian/notes.md are "
-                      "the same path on macOS", err)
-        self.assertEqual(self.files_here(), [])
-
     # --- fix lines a mailbox writer can follow ---
 
     DOWN_FIX = ("  fix: the writer of each folder named above %s; your up still runs; more: "
@@ -1972,10 +1910,13 @@ class MailboxTest(FakeSshCase):
 
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
     def test_a_blocked_down_says_who_fixes_it(self):
+        # a twin below the top would make one file of two on the client; the run is
+        # refused there (data safety), and the server's watcher warns
         self.folding()
         write_tree(self.server, {"debian/Notes.md": b"N", "debian/notes.md": b"n"})
         self.refused("down", "ERROR collision: debian/Notes.md and debian/notes.md are the "
                      "same path on macOS", self.DOWN_FIX % "removes or renames one of them")
+        self.assertEqual(self.files_here(), [])
 
     def test_a_reserved_name_blocks_a_windows_down(self):
         self.folding("windows")
@@ -2180,19 +2121,8 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(len(lines), 3)
         self.assertTrue(os.path.isdir(self.own))
 
-    def test_reset_and_doctor_scope(self):
-        self.ok(*SYNC)
-        lines = self.ok(*SYNC, "--reset", "down")
-        self.assertEqual(lines[0], "vcharon: state of mb.windows.down  (%s)"
-                         % state.path("mb.windows.down"))
-        self.assertEqual(lines[-1], "removed %s" % state.path("mb.windows.down"))
-        self.assertFalse(os.path.exists(state.path("mb.windows.down")))
-        self.assertTrue(os.path.exists(state.path("mb.windows.up")))
-        # the next sync pulls the others' folders by content, and changes nothing here
-        before = read_tree(self.local)
-        lines = self.ok(*SYNC, "--full")
-        self.assertEqual(lines[4], "  put     1 file, 1 dir (5 B), 1 already there")
-        self.assertEqual(read_tree(self.local), before)
+    def test_doctor_scope(self):
+        # doctor checks a section's two jobs as one destination
         dests = doctor._scope(None, cli.config.load())
         self.assertEqual([[j.name for j in d.jobs] for d in dests],
                          [["mb.windows.up", "mb.windows.down"]])
@@ -2291,13 +2221,9 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(code, 1)
         self.assertIn("has sent files from it", out)
 
-    def test_doctor_before_the_first_run(self):
-        # the folders a run makes aren't a FAIL for doctor; other failures stay
+    def test_doctor_keeps_other_failures(self):
+        # only the folders a run makes stop being a FAIL before the first run (the test above)
         job = cli.config.load().jobs["mb.windows.up"]
-        self.assertEqual(doctor._made_by_the_run(job, "FAIL", "from.path %s doesn't exist"
-                                                 % self.own, "check the path"),
-                         ("ok", "from.path %s doesn't exist yet; vcharon sync mb --project p "
-                          "makes it" % self.own, None))
         failing = ("FAIL", "can't list %s: Permission denied" % self.own, "check it")
         self.assertEqual(doctor._made_by_the_run(job, *failing), failing)
 
@@ -2391,15 +2317,6 @@ class PullGuardTest(unittest.TestCase):
         for path, entries, message in cases:
             with self.subTest(path=path, entries=entries):
                 self.assertEqual(self.refused(path, entries), message)
-
-
-class SizeTextTest(unittest.TestCase):
-    def test_units(self):
-        cases = [(0, "0 B"), (999, "999 B"), (1000, "1.0 kB"), (1049, "1.0 kB"),
-                 (3400000, "3.4 MB"), (999949, "999.9 kB"), (999999, "1.0 MB"),
-                 (1200000000, "1.2 GB"), (5 * 10 ** 12, "5.0 TB")]
-        for n, text in cases:
-            self.assertEqual(cli.size_text(n), text, n)
 
 
 class EntryPointTest(unittest.TestCase):

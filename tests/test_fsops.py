@@ -582,7 +582,7 @@ def _gone(pid, seconds=5):
 
 
 class RunTest(unittest.TestCase):
-    """fsops.run and run_terminal."""
+    """fsops.run (run_terminal runs for real in test_keys: ssh-add's exit 0 and 1)."""
 
     def py(self, code):
         return [sys.executable, "-c", code]
@@ -709,10 +709,6 @@ class RunTest(unittest.TestCase):
                 proc.kill.assert_called()
                 for stream in (proc.stdout, proc.stderr):
                     self.assertEqual(stream.close.called, not windows)
-
-    def test_run_terminal(self):
-        self.assertEqual(fsops.run_terminal(self.py("import sys; sys.exit(7)")), 7)
-        self.assertEqual(fsops.run_terminal(self.py("pass")), 0)
 
 
 if __name__ == "__main__":

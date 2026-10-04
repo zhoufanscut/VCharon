@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from vcharon import helper, proto
 from vcharon.proto import D, E, J, VCharonError
@@ -96,13 +97,6 @@ class FrameTest(unittest.TestCase):
         err = proto.decode_error(p4)
         self.assertEqual((err.code, err.message), ("vanished", "gone"))
 
-    def test_send_data_splits(self):
-        conn = Loopback()
-        conn.send_data(os.urandom(600000))
-        conn.send_data(b"")
-        sizes = [len(p) for k, p in frames_of(conn.buf.getvalue())]
-        self.assertEqual(sizes, [262144, 262144, 75712])
-
     def test_helper_conn_send_data_splits(self):
         fd, path = tempfile.mkstemp()
         self.addCleanup(os.remove, path)
@@ -158,13 +152,15 @@ class FrameTest(unittest.TestCase):
         with self.assertRaises(UnicodeEncodeError):
             proto.encode_json({"t": "\udcff"})
 
+    @mock.patch.object(proto, "MAX_JSON", 1 << 20)
     def test_encode_json_too_big(self):
+        # a 1 MiB limit: the real one's 64 MiB messages would take most of a second to build
         big = {"t": "ok", "result": "x" * proto.MAX_JSON}
         with self.assertRaises(VCharonError) as cm:
             proto.encode_json(big)
         self.assertEqual((cm.exception.code, cm.exception.exit_code), ("too_big", 1))
         self.assertEqual(cm.exception.message,
-                         "a message of 64.1 MiB is over vcharon's 64 MiB limit")
+                         "a message of 1.1 MiB is over vcharon's 1 MiB limit")
         for n, text in ((1 << 20, "1"), ((1 << 20) + 1, "1.1"), (100 << 20, "100"),
                         ((100 << 20) + (300 << 10), "100.3"), (1, "0.1")):
             self.assertEqual(proto._mib(n), text, n)
@@ -247,51 +243,36 @@ class StreamTest(unittest.TestCase):
         conn = Loopback()
         first, last = b"a" * 10, os.urandom(300000)
         readers = [Reader(first), Reader(last)]
+        opened = []
 
         def gone():
-            raise VCharonError("vanished", "b.txt is gone")
+            raise VCharonError("vanished", "b.txt is gone", "it changed during the run; run again")
 
-        proto.send_stream(conn, [(0, lambda: readers[0]), (1, gone), (2, lambda: readers[1])])
+        def third():
+            opened.append(2)
+            return readers[1]
+
+        proto.send_stream(conn, [(0, lambda: readers[0]), (1, gone), (2, third)])
         self.assertTrue(readers[0].closed_by_sender)
-        # the sender stopped after the failed file: the run fails anyway
-        self.assertFalse(readers[1].closed_by_sender)
+        # the sender stopped after the failed file, without opening the next: the run fails
+        # anyway
+        self.assertEqual(opened, [])
         frames = frames_of(conn.buf.getvalue())
         self.assertEqual(b"".join(p for k, p in frames if k == D), first)
         self.assertEqual(frames[-1][0], J)
         self.assertEqual(json.loads(frames[-1][1].decode("utf-8")),
-                         {"t": "end", "error": {"code": "vanished", "message": "b.txt is gone"}})
+                         {"t": "end", "error": {"code": "vanished", "message": "b.txt is gone",
+                                                "hint": "it changed during the run; run again"}})
         got = {}
         with self.assertRaises(VCharonError) as cm:
             proto.receive_stream(conn, [0, 1, 2], collect(got))
-        # the file's own error, from its E frame
-        self.assertEqual((cm.exception.code, cm.exception.message), ("vanished", "b.txt is gone"))
+        # the file's own error, hint and all, from its E frame
+        self.assertEqual((cm.exception.code, cm.exception.message, cm.exception.hint),
+                         ("vanished", "b.txt is gone", "it changed during the run; run again"))
         self.assertEqual(got, {0: first})
         with self.assertRaises(VCharonError) as cm:
             conn.next_frame()
         self.assertEqual(cm.exception.code, "lost")
-
-    def test_stops_after_a_file_that_fails(self):
-        conn = Loopback()
-        opened = []
-
-        def opener(i):
-            def open_():
-                opened.append(i)
-                if i == 0:
-                    raise VCharonError("vanished", "a.txt is gone, or isn't a regular file any "
-                                       "more", "it changed during the run; run again")
-                return Reader(b"file %d" % i)
-            return open_
-
-        proto.send_stream(conn, [(i, opener(i)) for i in range(3)])
-        # the third file's opener is never called, nor the second's
-        self.assertEqual(opened, [0])
-        staged = []
-        with self.assertRaises(VCharonError) as cm:
-            proto.receive_stream(conn, [0, 1, 2], lambda index, fin: staged.append(fin.read()))
-        self.assertEqual(cm.exception.code, "vanished")
-        self.assertEqual(cm.exception.hint, "it changed during the run; run again")
-        self.assertEqual(staged, [])
 
     def test_read_error_ends_the_stream_too(self):
         conn = Loopback()
@@ -305,13 +286,6 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(opened, [])
         with self.assertRaises(VCharonError) as cm:
             proto.receive_stream(conn, [0, 1], collect({}))
-        self.assertEqual(cm.exception.code, "aborted")
-
-    def test_os_error_from_read_is_aborted(self):
-        conn = Loopback()
-        proto.send_stream(conn, [(0, lambda: Reader(b"xyz", fail_after=0))])
-        with self.assertRaises(VCharonError) as cm:
-            proto.receive_stream(conn, [0], collect({}))
         self.assertEqual(cm.exception.code, "aborted")
         self.assertIn("couldn't read file 0", cm.exception.message)
 

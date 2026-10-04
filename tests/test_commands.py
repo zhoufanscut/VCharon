@@ -93,8 +93,8 @@ class IdentityTest(ChannelCase):
         # membership back, and makes no second one
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
-        with open(os.path.join(self.homes["mac"], "vcharon.ini"), "w") as f:
-            f.write("[vcharon]\nbox = macbook\n")
+        out = self.ok("setup", "--box", "macbook")
+        self.assertIn("  note: your channels keep the names you joined with", out)
         self.assertEqual(self.name_of(), "mac-web")
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertIn("vcharon: join game  as mac-web on fake-dest", out)
@@ -302,19 +302,6 @@ class SetupTest(ChannelCase):
         if os.name != "nt":
             self.assertEqual(os.stat(self.ini).st_mode & 0o777, 0o444)
 
-    def test_a_box_change_after_a_join_keeps_the_name(self):
-        self.lead()
-        # no box set: the OS's
-        self.use_box("fresh")
-        name = platform.os_word() + "-web"
-        self.ok("join", "game", "--server", "fake-dest")
-        out = self.ok("setup", "--box", "desk")
-        self.assertIn("  note: your channels keep the names you joined with", out)
-        doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
-        self.assertEqual((doc["name"], doc["box"]), (name, "desk"))
-        out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("as %s on" % name, out)
-
 
 @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
 class PostLinkTest(ChannelCase):
@@ -420,18 +407,27 @@ class SyncTest(ChannelCase):
         self.ok("join", "game", "--server", "fake-dest")
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
         state = os.path.join(self.homes["mac"], "state")
-        for job in ("up", "down"):
+        for job, other in (("up", "down"), ("down", None)):
             with self.subTest(job=job):
                 path = os.path.join(state, "game.mac-web.%s.json" % job)
                 self.assertTrue(os.path.exists(path))
                 lines = self.ok("sync", "game", "--reset", job).splitlines()
+                self.assertEqual(lines[0], "vcharon: state of game.mac-web.%s  (%s)"
+                                 % (job, path))
                 self.assertEqual(lines[-1], "removed %s" % path)
                 self.assertFalse(os.path.exists(path))
-        # the next full sync sends by content: nothing new reaches the server
+                # the reset is one job's: the other's state stays
+                if other:
+                    self.assertTrue(os.path.exists(
+                        os.path.join(state, "game.mac-web.%s.json" % other)))
+        # the next full sync goes by content: nothing new reaches the server, and down
+        # changes nothing here
         before = read_tree(os.path.join(self.root, "game"))
+        here = read_tree(self.joined("game.mac-web"))
         out = self.ok("sync", "game", "--full")
         self.assertIn("already there", out)
         self.assertEqual(read_tree(os.path.join(self.root, "game")), before)
+        self.assertEqual(read_tree(self.joined("game.mac-web")), here)
 
     def test_a_lost_own_folder_comes_back_by_the_rejoin(self):
         # the fix as printed: a rejoin pulls the own folder back from the server
@@ -594,8 +590,10 @@ class FixRoundTripTest(ChannelCase):
             if verb.startswith("--"):
                 continue
             with self.subTest(verb=verb):
-                _code, out, _err = self.run_cli(verb, "--help")
+                code, out, err = self.run_cli(verb, "--help")
+                self.assertEqual((code, err), (0, ""))
                 [example] = [l for l in out.splitlines() if l.startswith("example: ")]
+                self.assertTrue(example.startswith("example: vcharon %s" % verb), example)
                 [argv] = commands(example[len("example: "):])
                 self.assertEqual(argv[0], verb)
                 parser.parse_args(argv)

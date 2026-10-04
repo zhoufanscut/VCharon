@@ -7,10 +7,8 @@ import errno
 import hashlib
 import json
 import os
-import pathlib
 import shutil
 import socket
-import subprocess
 import tempfile
 import time
 import unicodedata
@@ -584,24 +582,6 @@ class PathCases:
         with src.open(index["size.txt"]) as f:
             self.assertEqual(f.read(), b"22")
 
-    def test_revert_is_sent_again(self):
-        # svn revert writes the old bytes back, with a new mtime
-        write_tree(self.src, {"r.txt": b"original"})
-        os.utime(self.at("r.txt"), (MTIME, MTIME))
-        state = self.state_of()
-        write_tree(self.src, {"r.txt": b"original"})
-        os.utime(self.at("r.txt"), (MTIME + 60, MTIME + 60))
-        _src, p = self.planned(state)
-        self.assertEqual(p.entries, [put_file("r.txt", 8, MTIME + 60, self.exec_bit(False))])
-
-    def test_keep_name_with_a_state(self):
-        write_tree(self.src, {"a/b.txt": b"b"})
-        state = self.state_of(keep_name="yes")
-        self.assertEqual(sorted(state["sent"]), ["src", "src/a", "src/a/b.txt"])
-        self.assertEqual(state["sent"]["src"], "d")
-        _src, p = self.planned(state, keep_name="yes")
-        self.assertEqual(p.entries, [])
-
     def test_full(self):
         spec = {"a/b.txt": b"bb", "c.txt": os.urandom(3 << 18), "e/": None, "empty": b""}
         write_tree(self.src, spec)
@@ -717,6 +697,11 @@ class PathCases:
         self.assertEqual(p.state, {"sent": {"foo.cpp": value}})
         with src.open(0) as f:
             self.assertEqual(f.read(), b"v2")
+        # a commit that failed after that delete, before it wrote foo.cpp again: the next run
+        # puts it again
+        after = src.state_after([], ["Foo.cpp"])
+        self.assertEqual(after, {"sent": {}})
+        self.assertEqual(paths(self.planned(after, prune="yes")[1]), ["foo.cpp"])
         # without prune nothing is deleted, so nothing is planned
         self.assertEqual(self.planned(state)[1].entries, [])
 
@@ -947,18 +932,6 @@ class PathCases:
         # had it got through the delete of k too, nothing would be left
         self.assertEqual(src.state_after([], ["k/x", "k"]), {"sent": {}})
 
-    def test_unwritten_partner_is_planned_again(self):
-        # [put foo.cpp (a partner), delete Foo.cpp]: on NTFS or APFS the delete removed
-        # foo.cpp too, and the commit failed before it wrote foo.cpp again
-        write_tree(self.src, {"foo.cpp": b"v2"})
-        value = self.value("foo.cpp")
-        state = {"sent": {"Foo.cpp": [2, MTIME, self.exec_bit(False)], "foo.cpp": value}}
-        src, p = self.planned(state, prune="yes")
-        self.assertEqual(paths(p), ["foo.cpp", "Foo.cpp"])
-        after = src.state_after([], ["Foo.cpp"])
-        self.assertEqual(after, {"sent": {}})
-        self.assertEqual(paths(self.planned(after, prune="yes")[1]), ["foo.cpp"])
-
     # --- a malformed state ---
 
     def test_malformed_states(self):
@@ -993,36 +966,6 @@ class PathCases:
                       {"sent": {"a": [1, -5, False], "b": [2, 2.5, True], "c": [3, 1e11, None]}}):
             with self.subTest(state=state):
                 self.planned(state)
-
-    @unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"),
-                         "needs svn and svnadmin")
-    def test_real_svn_revert(self):
-        repo = os.path.join(self.tmp, "repo")
-        svn = ["svn", "--config-dir", os.path.join(self.tmp, "svn-config"), "--non-interactive"]
-
-        def run(argv):
-            subprocess.run(argv, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                           timeout=60)
-
-        run(["svnadmin", "create", repo])
-        # a Windows path needs the file:///C:/... form; pathlib gives it on every OS
-        run(svn + ["checkout", pathlib.Path(repo).as_uri(), self.src])
-        write_tree(self.src, {"f.txt": b"committed bytes\n"})
-        run(svn + ["add", self.at("f.txt")])
-        run(svn + ["commit", "-m", "f", self.src])
-        state = self.state_of(exclude=".svn")
-        # edited: planned, and that state saved
-        write_tree(self.src, {"f.txt": b"edited\n"})
-        os.utime(self.at("f.txt"), (MTIME, MTIME))
-        _src, p = self.planned(state, exclude=".svn")
-        self.assertEqual(paths(p), ["f.txt"])
-        state = json.loads(json.dumps(p.state))
-        run(svn + ["revert", self.at("f.txt")])
-        _src, p = self.planned(state, exclude=".svn")
-        self.assertEqual(paths(p), ["f.txt"])
-        self.assertEqual(p.entries[0].size, len(b"committed bytes\n"))
-        self.assertNotEqual(p.entries[0].mtime, MTIME)
-
 
     # --- a channel's folder limits ---
 

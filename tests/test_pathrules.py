@@ -94,13 +94,6 @@ class CheckPlanTest(unittest.TestCase):
         self.assertEqual(self.check([put_dir("a"), put_file("a/b", 1, 0), delete("c")], "linux"),
                          [("a",), ("a", "b"), ("c",)])
 
-    def test_file_and_dir_folded(self):
-        entries = [put_file("A", 1, 0), put_file("a/b.txt", 1, 0)]
-        for osn in ("windows", "darwin"):
-            e = self.refused(entries, osn)
-            self.assertIn("are the same path on", e.message)
-        self.check(entries, "linux")
-
     def test_file_below_file(self):
         for osn in OSES:
             for entries in (files("a", "a/b"), files("a/b", "a")):
@@ -109,10 +102,16 @@ class CheckPlanTest(unittest.TestCase):
                     self.assertEqual(e.message,
                                      "a is put as a file, but a/b needs it to be a directory")
 
-    def test_dir_spelled_twice(self):
-        e = self.refused([put_dir("Docs"), put_file("docs/a.txt", 1, 0)], "darwin")
-        self.assertEqual(e.message, "Docs and docs are the same path on macOS")
-        self.check([put_dir("Docs"), put_file("docs/a.txt", 1, 0)], "linux")
+    def test_a_folder_spelled_twice(self):
+        # a file or a directory, then a path below another spelling of it: the spellings are
+        # compared before the kinds
+        for entries, names in (([put_dir("Docs"), put_file("docs/a.txt", 1, 0)], "Docs and docs"),
+                               ([put_file("A", 1, 0), put_file("a/b.txt", 1, 0)], "A and a")):
+            with self.subTest(names=names):
+                for osn, shown in (("windows", "Windows"), ("darwin", "macOS")):
+                    e = self.refused(entries, osn)
+                    self.assertEqual(e.message, "%s are the same path on %s" % (names, shown))
+                self.check(entries, "linux")
         self.check([put_dir("docs"), put_file("docs/a.txt", 1, 0)], "darwin")
 
     def test_nfc_and_nfd(self):

@@ -16,6 +16,13 @@ PIPX_LINE="  pipx install git+https://github.com/${REPO}"
 # the new binary's --version: a one-file binary unpacks itself first (the installer's tests
 # shorten it)
 VERSION_TIMEOUT="${VCHARON_INSTALL_VERSION_TIMEOUT:-60}"
+# without timeout(1): the seconds between TERM and KILL of a binary that hangs (the
+# installer's tests shorten it too)
+KILL_GRACE="${VCHARON_INSTALL_KILL_GRACE:-5}"
+# a value that isn't a whole number of seconds gets the default: under set -e a failed sleep
+# would end the watcher before its KILL, and a hung binary would hang the install
+case ${VERSION_TIMEOUT} in ''|*[!0-9]*) VERSION_TIMEOUT=60 ;; esac
+case ${KILL_GRACE} in ''|*[!0-9]*) KILL_GRACE=5 ;; esac
 
 # A failure's line on stderr, then exit 1.
 die() {
@@ -81,7 +88,7 @@ version_of() {
     sleeper=$!
     wait "${sleeper}"
     kill "${pid}" 2>/dev/null || exit 0
-    sleep 5
+    sleep "${KILL_GRACE}"
     kill -9 "${pid}" 2>/dev/null
   ) > /dev/null 2>&1 &
   killer=$!

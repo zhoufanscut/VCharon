@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shutil
@@ -44,37 +45,31 @@ class PathsTest(PatchedCase):
         self.assertEqual(platform.config_path(), "D:\\fh\\vcharon.ini")
         self.assertEqual(platform.log_dir(), "D:\\fh\\logs")
 
-    def test_darwin(self):
-        self.patch(on("darwin", HOME="/Users/me", XDG_CONFIG_HOME="/x"))
-        self.assertEqual(platform.config_path(), "/Users/me/.config/vcharon/vcharon.ini")
-        self.assertEqual(platform.state_dir(),
-                         "/Users/me/Library/Application Support/vcharon/state")
-        self.assertEqual(platform.log_dir(), "/Users/me/Library/Logs/vcharon")
-
-    def test_linux_defaults(self):
-        self.patch(on("linux", HOME="/home/me"))
-        self.assertEqual(platform.config_path(), "/home/me/.config/vcharon/vcharon.ini")
-        self.assertEqual(platform.state_dir(), "/home/me/.local/state/vcharon/state")
-        self.assertEqual(platform.log_dir(), "/home/me/.local/state/vcharon/logs")
-
-    def test_linux_xdg(self):
-        self.patch(on("linux", HOME="/home/me", XDG_CONFIG_HOME="/cfg", XDG_STATE_HOME="/st"))
-        self.assertEqual(platform.config_path(), "/cfg/vcharon/vcharon.ini")
-        self.assertEqual(platform.state_dir(), "/st/vcharon/state")
-        self.assertEqual(platform.log_dir(), "/st/vcharon/logs")
-
-    def test_linux_relative_xdg_is_ignored(self):
-        self.patch(on("linux", HOME="/home/me", XDG_CONFIG_HOME="cfg", XDG_STATE_HOME="st"))
-        self.assertEqual(platform.config_path(), "/home/me/.config/vcharon/vcharon.ini")
-        self.assertEqual(platform.log_dir(), "/home/me/.local/state/vcharon/logs")
-
-    def test_windows(self):
-        self.patch(on("windows", APPDATA="C:\\Users\\me\\AppData\\Roaming",
-                      LOCALAPPDATA="C:\\Users\\me\\AppData\\Local"))
-        self.assertEqual(platform.config_path(),
-                         "C:\\Users\\me\\AppData\\Roaming\\vcharon\\vcharon.ini")
-        self.assertEqual(platform.state_dir(), "C:\\Users\\me\\AppData\\Local\\vcharon\\state")
-        self.assertEqual(platform.log_dir(), "C:\\Users\\me\\AppData\\Local\\vcharon\\logs")
+    def test_standard_dirs(self):
+        # (os, environment) -> (config file, state dir, logs dir)
+        linux = ("/home/me/.config/vcharon/vcharon.ini", "/home/me/.local/state/vcharon/state",
+                 "/home/me/.local/state/vcharon/logs")
+        for osn, env, want in (
+                ("darwin", {"HOME": "/Users/me", "XDG_CONFIG_HOME": "/x"},
+                 ("/Users/me/.config/vcharon/vcharon.ini",
+                  "/Users/me/Library/Application Support/vcharon/state",
+                  "/Users/me/Library/Logs/vcharon")),
+                ("linux", {"HOME": "/home/me"}, linux),
+                ("linux", {"HOME": "/home/me", "XDG_CONFIG_HOME": "/cfg", "XDG_STATE_HOME": "/st"},
+                 ("/cfg/vcharon/vcharon.ini", "/st/vcharon/state", "/st/vcharon/logs")),
+                # a relative XDG folder is ignored
+                ("linux", {"HOME": "/home/me", "XDG_CONFIG_HOME": "cfg", "XDG_STATE_HOME": "st"},
+                 linux),
+                ("windows", {"APPDATA": "C:\\Users\\me\\AppData\\Roaming",
+                             "LOCALAPPDATA": "C:\\Users\\me\\AppData\\Local"},
+                 ("C:\\Users\\me\\AppData\\Roaming\\vcharon\\vcharon.ini",
+                  "C:\\Users\\me\\AppData\\Local\\vcharon\\state",
+                  "C:\\Users\\me\\AppData\\Local\\vcharon\\logs"))):
+            with self.subTest(os=osn, env=env), contextlib.ExitStack() as stack:
+                for patcher in on(osn, **env):
+                    stack.enter_context(patcher)
+                self.assertEqual((platform.config_path(), platform.state_dir(),
+                                  platform.log_dir()), want)
 
 
 class SshPathTest(PatchedCase):
@@ -84,19 +79,17 @@ class SshPathTest(PatchedCase):
             self.assertEqual(platform.default_ssh_path(), "/usr/bin/ssh")
 
     def test_windows(self):
-        self.patch(on("windows", SystemRoot="D:\\Win"))
-        self.patch([mock.patch.object(platform, "is_wow64", return_value=False)])
-        self.assertEqual(platform.default_ssh_path(), "D:\\Win\\System32\\OpenSSH\\ssh.exe")
-
-    def test_windows_without_systemroot(self):
-        self.patch(on("windows"))
-        self.patch([mock.patch.object(platform, "is_wow64", return_value=False)])
-        self.assertEqual(platform.default_ssh_path(), "C:\\Windows\\System32\\OpenSSH\\ssh.exe")
-
-    def test_wow64_uses_sysnative(self):
-        self.patch(on("windows", SystemRoot="C:\\Windows"))
-        self.patch([mock.patch.object(platform, "is_wow64", return_value=True)])
-        self.assertEqual(platform.default_ssh_path(), "C:\\Windows\\Sysnative\\OpenSSH\\ssh.exe")
+        # (SystemRoot, a 32-bit Python on 64-bit Windows) -> the path
+        for root, wow64, want in (
+                ("D:\\Win", False, "D:\\Win\\System32\\OpenSSH\\ssh.exe"),
+                (None, False, "C:\\Windows\\System32\\OpenSSH\\ssh.exe"),
+                ("C:\\Windows", True, "C:\\Windows\\Sysnative\\OpenSSH\\ssh.exe")):
+            env = {"SystemRoot": root} if root else {}
+            with self.subTest(root=root, wow64=wow64), contextlib.ExitStack() as stack:
+                for patcher in on("windows", **env) + [
+                        mock.patch.object(platform, "is_wow64", return_value=wow64)]:
+                    stack.enter_context(patcher)
+                self.assertEqual(platform.default_ssh_path(), want)
 
     def test_is_wow64(self):
         real = struct.calcsize
@@ -322,6 +315,41 @@ class FilesTest(unittest.TestCase):
                  text + "its os-release names no distro (no ID=)")):
             with self.subTest(hello=hello):
                 self.assertEqual(platform.distro_warning(hello), want)
+
+    def test_os_release_to_the_warning(self):
+        # a server's os-release file, through the hello's fields (helper.hello), to doctor's
+        # warning; --json's "tested" is that there is none. test_doctor's DistroTest runs an old
+        # Debian and a missing file end to end.
+        text = "VCharon is tested on Debian 13 or later; "
+        for data, warning, fields in (
+                (b'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nNAME="Debian GNU/Linux"\n'
+                 b'VERSION_ID="13"\nVERSION="13 (trixie)"\nID=debian\n', None, ("debian", "13")),
+                (b'ID=debian\nVERSION_ID="14"\nPRETTY_NAME="Debian GNU/Linux 14 (forky)"\n', None,
+                 ("debian", "14")),
+                (b'ID=debian\nVERSION_ID="12"\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n',
+                 text + "it is ID=debian VERSION_ID=12 (Debian GNU/Linux 12 (bookworm))",
+                 ("debian", "12")),
+                (b'NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="24.04"\n'
+                 b'PRETTY_NAME="Ubuntu 24.04.1 LTS"\n',
+                 text + "it is ID=ubuntu VERSION_ID=24.04 (Ubuntu 24.04.1 LTS)",
+                 ("ubuntu", "24.04")),
+                (None, text + "its os-release names no distro (no ID=)", (None, None)),
+                (b"\x00\xff garbage\nno equals here\n=\n",
+                 text + "its os-release names no distro (no ID=)", (None, None)),
+                (b"ID=debian\nVERSION_ID=thirteen\n",
+                 text + "it is ID=debian VERSION_ID=thirteen", ("debian", "thirteen"))):
+            with self.subTest(data=data):
+                path = os.path.join(self.tmp, "os-release")
+                if data is None:
+                    path = os.path.join(self.tmp, "missing")
+                else:
+                    with open(path, "wb") as f:
+                        f.write(data)
+                release = platform.os_release((path,)) or {}
+                hello = {"distro": release.get("PRETTY_NAME"), "distro_id": release.get("ID"),
+                         "distro_version": release.get("VERSION_ID")}
+                self.assertEqual((hello["distro_id"], hello["distro_version"]), fields)
+                self.assertEqual(platform.distro_warning(hello), warning)
 
     def test_small_facts(self):
         self.assertIn(platform.os_name(), ("linux", "darwin", "windows"))

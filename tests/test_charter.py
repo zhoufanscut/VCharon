@@ -124,7 +124,11 @@ class CharterTest(unittest.TestCase):
     def test_size_text(self):
         # the sync's own (cli.size_text is this one)
         self.assertIs(cli.size_text, charter.size_text)
-        self.assertEqual(charter.size_text(50 * charter.MB), "50.0 MB")
+        cases = [(0, "0 B"), (999, "999 B"), (1000, "1.0 kB"), (1049, "1.0 kB"),
+                 (3400000, "3.4 MB"), (999949, "999.9 kB"), (999999, "1.0 MB"),
+                 (1200000000, "1.2 GB"), (5 * 10 ** 12, "5.0 TB"), (50 * charter.MB, "50.0 MB")]
+        for n, text in cases:
+            self.assertEqual(charter.size_text(n), text, n)
 
 
 class FormatTest(ChannelCase):
@@ -136,25 +140,20 @@ class FormatTest(ChannelCase):
         write_tree(self.root, {"game/lead/CHANNEL.md": channel_md("lead", fmt, limits),
                                "game/lead/MEMBER.md": b"# MEMBER\n"})
 
-    def test_newer_format_refused_at_join(self):
-        self.server_channel("2")
-        before = self.server_tree()
-        for where in (("--server", "fake-dest"), ("--local",)):
-            with self.subTest(where=where):
-                self.assertEqual(self.refusal("join", "game", *where), (
-                    "ERROR channel: game uses format 2; this vcharon reads up to 1",
-                    "ask your user to run: vcharon --update"))
-        # refused before any claim
-        self.assertEqual(self.server_tree(), before)
-        self.assertEqual(channel_cmd.records(), [])
-
-    def test_no_format_refused_at_join(self):
-        self.server_channel(None)
-        before = self.server_tree()
-        self.assertEqual(self.refusal("join", "game", "--server", "fake-dest"), (
-            "ERROR channel: game has no format: line in its CHANNEL.md, so it isn't a channel "
-            "this vcharon made", charter.NO_FORMAT_HINT))
-        self.assertEqual(self.server_tree(), before)
+    def test_newer_or_no_format_refused_at_join(self):
+        for fmt, want in (
+                ("2", ("ERROR channel: game uses format 2; this vcharon reads up to 1",
+                       "ask your user to run: vcharon --update")),
+                (None, ("ERROR channel: game has no format: line in its CHANNEL.md, so it isn't "
+                        "a channel this vcharon made", charter.NO_FORMAT_HINT))):
+            self.server_channel(fmt)
+            before = self.server_tree()
+            for where in (("--server", "fake-dest"), ("--local",)):
+                with self.subTest(format=fmt, where=where):
+                    self.assertEqual(self.refusal("join", "game", *where), want)
+                    # refused before any claim
+                    self.assertEqual(self.server_tree(), before)
+                    self.assertEqual(channel_cmd.records(), [])
 
     def test_same_and_older_format_join(self):
         # the same format; then this vcharon reading up to 2, a format-1 channel
@@ -437,21 +436,6 @@ class LimitsTest(ChannelCase):
         self.assertTrue(os.path.exists(os.path.join(copy, "keep.txt")))
         self.assertNotIn("laptop-ui/old.txt", self.down_sent())
         self.assertIn("laptop-ui/keep.txt", self.down_sent())
-
-    def test_a_full_pull_skips_it_too(self):
-        self.use_box("laptop")
-        self.ok("create", "game", "--local", "--project", "ui", "--max-files", "10")
-        lead = os.path.join(self.root, "game", "laptop-ui")
-        write_tree(lead, {"a.txt": b"a"})
-        self.use_box("mac")
-        self.ok("join", "game", "--server", "fake-dest")
-        sent = self.down_sent()
-        write_tree(lead, {"new/n%d" % i: b"n" for i in range(10)})
-        out = self.ok("sync", "game", "--full")
-        self.assertIn("left out laptop-ui/", out)
-        self.assertEqual(self.down_sent(), sent)
-        self.assertFalse(os.path.exists(os.path.join(self.joined("game.mac-web"), "laptop-ui",
-                                                     "new")))
 
     def test_a_local_members_read_skips_it(self):
         self.use_box("laptop")

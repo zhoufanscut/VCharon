@@ -296,14 +296,16 @@ class InstallShTest(unittest.TestCase):
         # one that ignores TERM too: KILL after the grace
         hung = (b"#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 1; done\n")
         self.release(binary=hung)
-        env = dict(self.env(), PATH=self.no_timeout_path(), VCHARON_INSTALL_VERSION_TIMEOUT="3")
+        # a timeout of 2, not 1: the hung binary's own `sleep 1`s aren't the watcher's
+        env = dict(self.env(), PATH=self.no_timeout_path(), VCHARON_INSTALL_VERSION_TIMEOUT="2",
+                   VCHARON_INSTALL_KILL_GRACE="1")
         started = time.monotonic()
         code, _, err = self.install(env=env)
         self.assertEqual(code, 1)
         self.assertIn("the downloaded binary didn't run here", err)
         self.assertLess(time.monotonic() - started, 30)
         time.sleep(1.5)
-        self.assertEqual(self.sleeps(3), [])
+        self.assertEqual(self.sleeps(2), [])
         self.assert_nothing_installed()
 
     def test_a_signal_cleans_up(self):
@@ -311,7 +313,8 @@ class InstallShTest(unittest.TestCase):
         for signum, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)):
             with self.subTest(signal=signum):
                 self.release()
-                self.server.files["/download/%s/%s" % (TAG, ASSET)] = 1.5
+                # the download stalls long enough for the signal to land during it
+                self.server.files["/download/%s/%s" % (TAG, ASSET)] = 1.0
                 child = subprocess.Popen([self.shell, INSTALL_SH], env=self.env(),
                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 try:
@@ -364,7 +367,13 @@ class InstallShTest(unittest.TestCase):
         self.assertIn("unsupported OS: FreeBSD", err)
 
 
+def _sh_is_dash():
+    sh, dash = shutil.which("sh"), shutil.which("dash")
+    return bool(sh and dash) and os.path.realpath(sh) == os.path.realpath(dash)
+
+
 @unittest.skipUnless(shutil.which("dash"), "needs dash")
+@unittest.skipIf(_sh_is_dash(), "sh is dash: InstallShTest already ran under it")
 class InstallDashTest(InstallShTest):
     """The same under dash, Debian's sh: no bash-only syntax, and its trap rules."""
 

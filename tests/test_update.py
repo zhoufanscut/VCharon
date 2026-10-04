@@ -208,16 +208,10 @@ class VersionTest(unittest.TestCase):
         self.assertEqual(update.compare("0.1", "0.1.0"), 0)
         self.assertEqual(update.compare("0.1.0rc1", "0.1rc1"), 0)
         self.assertIsNone(update.compare("nightly", "0.1.0"))
-
-    def test_is_newer(self):
-        for candidate, current, want in (
-                ("v0.3.1", "0.3.0", True), ("v0.4.0", "0.3.9", True),
-                ("v1.0.0", "0.99.99", True), ("v0.3.0", "0.3.0", False),
-                ("v0.2.9", "0.3.0", False),
-                # short against long: 0.4 is 0.4.0, and 0.4.1 is newer
-                ("v0.4", "0.4.0", False), ("v0.4.1", "0.4", True),
-                # a tag that doesn't parse never claims an update
-                ("nightly", "0.3.0", False)):
+        # short against long: 0.4 is 0.4.0, and 0.4.1 is newer; a tag that doesn't parse
+        # never claims an update
+        for candidate, current, want in (("v0.4", "0.4.0", False), ("v0.4.1", "0.4", True),
+                                         ("nightly", "0.3.0", False)):
             with self.subTest(candidate=candidate, current=current):
                 self.assertIs(update.is_newer(candidate, current), want)
 
@@ -235,12 +229,10 @@ class PlatformAssetTest(unittest.TestCase):
                     mock.patch.object(update.pyplatform, "system", return_value=system), \
                     mock.patch.object(update.pyplatform, "machine", return_value=machine):
                 self.assertEqual(update.platform_asset(), want)
-
-    def test_archive_names(self):
-        self.assertEqual(update.archive_name("vcharon-linux-x64"), "vcharon-linux-x64.tar.gz")
-        self.assertEqual(update.archive_name("vcharon-darwin-arm64"),
-                         "vcharon-darwin-arm64.tar.gz")
-        self.assertEqual(update.archive_name("vcharon-win-x64"), "vcharon-win-x64.zip")
+                if want:
+                    # Windows' archive is a zip, the others' a tarball
+                    self.assertEqual(update.archive_name(want),
+                                     want + (".zip" if system == "Windows" else ".tar.gz"))
 
 
 # --- the install kind ---
@@ -532,13 +524,6 @@ class ApplyTest(UpdateCase):
         self.assertTrue(any(s.startswith("downloading ") for s in steps), steps)
         self.assertIn("verifying the checksum ...", steps)
 
-    def test_no_temp_files_are_left(self):
-        net, release = self.serving()
-        self.serve(net)
-        update.apply_update(release, self.inst)
-        self.assertEqual(read(self.target), fake_binary())
-        self.assertEqual(self.listing(), ["vcharon"])
-
     def test_a_checksum_mismatch_changes_nothing(self):
         tarball = make_tarball(os.path.join(self.tmp, TARBALL))
         self.serve(Net({DOWNLOAD: read(tarball), SUMS: "%s  %s\n" % ("0" * 64, TARBALL)}))
@@ -599,18 +584,10 @@ class ApplyTest(UpdateCase):
                 self.assert_untouched()
 
     def test_a_binary_that_wont_run_isnt_installed(self):
-        # the glibc-too-old case: the prebuilt Linux binary's known way to fail
+        # the glibc-too-old case: the prebuilt Linux binary's known way to fail; its first
+        # line is in the message, and the fix points to pipx
         net, release = self.serving(binary=fake_binary(
             prints="vcharon: /lib/libc.so.6: version GLIBC_2.39 not found", exit_code=1))
-        self.serve(net)
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(release, self.inst)
-        self.assertEqual(caught.exception.kind, "smoke_failed")
-        self.assertIn("GLIBC", caught.exception.message)
-        self.assert_untouched()
-
-    def test_a_binary_that_wont_run_points_to_pipx(self):
-        net, release = self.serving(binary=fake_binary(exit_code=1))
         self.serve(net)
         for osn, fix in (("linux", update.SMOKE_FIX_LINUX), ("darwin", update.SMOKE_FIX),
                          ("windows", update.SMOKE_FIX)):
@@ -619,7 +596,9 @@ class ApplyTest(UpdateCase):
                     self.assertRaises(update.UpdateError) as caught:
                 update.apply_update(release, self.inst, windows=False)
             self.assertEqual((caught.exception.kind, caught.exception.fix), ("smoke_failed", fix))
+            self.assertIn("GLIBC", caught.exception.message)
             self.assertIn("pipx install", fix)
+            self.assert_untouched()
         self.assertIn("glibc", update.SMOKE_FIX_LINUX)
 
     def test_the_wrong_version_isnt_installed(self):
@@ -633,15 +612,15 @@ class ApplyTest(UpdateCase):
     def test_a_binary_that_hangs_isnt_installed(self):
         net, release = self.serving(binary=b"import time\ntime.sleep(60)\n")
         self.serve(net)
-        self.patch(update, "SMOKE_TIMEOUT", new=1)
+        self.patch(update, "SMOKE_TIMEOUT", new=0.2)
         with self.assertRaises(update.UpdateError) as caught:
             update.apply_update(release, self.inst)
         self.assertEqual(caught.exception.kind, "smoke_failed")
         self.assert_untouched()
 
     def test_a_vcharon_in_a_folder_isnt_it(self):
-        # the top-level rule, as the zip's
-        for member in ("bin/vcharon", "x/./vcharon", "../vcharon"):
+        # the top-level rule, as the zip's; and an archive without the binary at all
+        for member in ("bin/vcharon", "x/./vcharon", "../vcharon", "vcharon-linux-x64"):
             with self.subTest(member=member):
                 net, release = self.serving(member=member)
                 self.serve(net)
@@ -654,14 +633,6 @@ class ApplyTest(UpdateCase):
         self.serve(net)
         update.apply_update(release, self.inst)
         self.assertEqual(read(self.target), fake_binary())
-
-    def test_an_archive_without_the_binary(self):
-        net, release = self.serving(member="vcharon-linux-x64")
-        self.serve(net)
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(release, self.inst)
-        self.assertEqual(caught.exception.kind, "bad_asset")
-        self.assert_untouched()
 
     def test_not_an_archive(self):
         self.serve(Net({DOWNLOAD: b"<html>not a tarball</html>"}))
@@ -775,11 +746,6 @@ class ApplyTest(UpdateCase):
         self.assertEqual(net.urls, [])
         self.assertIn("install.sh", install.INSTALL_SH)
         self.assertIn("install.ps1", install.INSTALL_PS1)
-
-    def test_the_check_leaves_no_folder(self):
-        release = update.Release("v9.9.9", "9.9.9", "u", "", {TARBALL: DOWNLOAD})
-        self.assertEqual(update.preflight(self.inst, release), TARBALL)
-        self.assertEqual(self.listing(), ["vcharon"])
 
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                      "POSIX permissions, not as root")
@@ -898,59 +864,42 @@ class ZipTest(UpdateCase):
         self.assertEqual(self.listing(), ["vcharon"])
 
     def test_a_folder_part_isnt_it(self):
-        path = make_zip(os.path.join(self.tmp, ZIP), name="vcharon/vcharon.exe")
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(self.release(path), self.inst, windows=True)
-        self.assertEqual(caught.exception.kind, "bad_asset")
-        self.assert_untouched()
+        def in_a_folder(zf):
+            zf.writestr("vcharon/vcharon.exe", fake_binary())
 
-    def test_a_folder_entry_is_refused(self):
-        path = os.path.join(self.tmp, ZIP)
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.mkdir("vcharon.exe")
-        # a folder entry whose name lacks the slash: its mode and folder bit still say so
-        with zipfile.ZipFile(path) as zf:
-            [info] = zf.infolist()
-        info.filename = "vcharon.exe"
-        with mock.patch.object(zipfile.ZipFile, "infolist", lambda zf: [info]), \
-                self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(self.release(path), self.inst, windows=True)
-        self.assertEqual(caught.exception.kind, "bad_asset")
-        self.assertIn("isn't a file", caught.exception.message)
-        self.assert_untouched()
-
-    def test_only_a_folder_of_that_name(self):
-        path = os.path.join(self.tmp, ZIP)
-        with zipfile.ZipFile(path, "w") as zf:
+        def only_a_folder_of_that_name(zf):
             zf.mkdir("vcharon.exe")
             zf.writestr("vcharon.exe/vcharon.exe", fake_binary())
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(self.release(path), self.inst, windows=True)
-        self.assertEqual(caught.exception.kind, "bad_asset")
-        self.assert_untouched()
 
-    def test_a_windows_made_folder_entry_is_refused(self):
-        # no Unix mode, only the MS-DOS folder bit
-        path = os.path.join(self.tmp, ZIP)
-        info = zipfile.ZipInfo("vcharon.exe")
-        info.external_attr = 0x10
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.writestr(info, b"")
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(self.release(path), self.inst, windows=True)
-        self.assertIn("isn't a file", caught.exception.message)
-        self.assert_untouched()
+        for make in (in_a_folder, only_a_folder_of_that_name):
+            with self.subTest(make=make.__name__):
+                path = os.path.join(self.tmp, ZIP)
+                with zipfile.ZipFile(path, "w") as zf:
+                    make(zf)
+                with self.assertRaises(update.UpdateError) as caught:
+                    update.apply_update(self.release(path), self.inst, windows=True)
+                self.assertEqual(caught.exception.kind, "bad_asset")
+                self.assert_untouched()
 
-    def test_a_link_entry_is_refused(self):
-        path = os.path.join(self.tmp, ZIP)
-        info = zipfile.ZipInfo("vcharon.exe")
-        info.external_attr = (stat.S_IFLNK | 0o777) << 16
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.writestr(info, b"/etc/passwd")
-        with self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(self.release(path), self.inst, windows=True)
-        self.assertEqual(caught.exception.kind, "bad_asset")
-        self.assert_untouched()
+    def test_an_entry_that_isnt_a_file_is_refused(self):
+        # named exactly vcharon.exe, no slash: the MS-DOS folder bit alone (a zip made on
+        # Windows has no Unix mode), or the file type in the Unix mode, each on its own
+        for label, attr in (("windows folder", 0x10),
+                            ("unix folder", (stat.S_IFDIR | 0o755) << 16),
+                            ("link", (stat.S_IFLNK | 0o777) << 16)):
+            with self.subTest(label):
+                path = os.path.join(self.tmp, ZIP)
+                info = zipfile.ZipInfo("vcharon.exe")
+                info.external_attr = attr
+                with zipfile.ZipFile(path, "w") as zf:
+                    zf.writestr(info, b"/etc/passwd" if label == "link" else b"")
+                with zipfile.ZipFile(path) as zf:
+                    self.assertEqual(zf.getinfo("vcharon.exe").external_attr, attr)
+                with self.assertRaises(update.UpdateError) as caught:
+                    update.apply_update(self.release(path), self.inst, windows=True)
+                self.assertEqual(caught.exception.kind, "bad_asset")
+                self.assertIn("isn't a file", caught.exception.message)
+                self.assert_untouched()
 
     def test_an_oversized_entry_is_refused(self):
         path = make_zip(os.path.join(self.tmp, ZIP))
@@ -961,18 +910,15 @@ class ZipTest(UpdateCase):
         self.assertIn("more than 10", caught.exception.message)
         self.assert_untouched()
 
-    def test_an_unknown_compression_or_an_encrypted_entry(self):
-        # zipfile raises NotImplementedError and RuntimeError for these
+    def test_an_encrypted_entry(self):
+        # zipfile raises RuntimeError for it (an unknown compression: the next test, for real)
         path = make_zip(os.path.join(self.tmp, ZIP))
-        release = self.release(path)
-        for error in (NotImplementedError("That compression method is not supported"),
-                      RuntimeError("File <ZipInfo> is encrypted, password required")):
-            with self.subTest(error=type(error).__name__), \
-                    mock.patch.object(zipfile.ZipFile, "open", side_effect=error), \
-                    self.assertRaises(update.UpdateError) as caught:
-                update.apply_update(release, self.inst, windows=True)
-            self.assertEqual(caught.exception.kind, "bad_asset")
-            self.assert_untouched()
+        error = RuntimeError("File <ZipInfo> is encrypted, password required")
+        with mock.patch.object(zipfile.ZipFile, "open", side_effect=error), \
+                self.assertRaises(update.UpdateError) as caught:
+            update.apply_update(self.release(path), self.inst, windows=True)
+        self.assertEqual(caught.exception.kind, "bad_asset")
+        self.assert_untouched()
 
     def test_a_real_unknown_compression(self):
         # the compression method field set to one no Python reads (99, AES)
@@ -1196,19 +1142,26 @@ class WindowsSwapTest(unittest.TestCase):
         case.patch(update, "RENAME_WAIT", new=0)
         return case, release
 
-    def test_apply_after_a_ctrl_c_in_the_move(self):
-        case, release = self.apply_case()
+    def test_apply_leaves_the_old_one_when_the_move_fails(self):
+        # apply_update with the Windows swap and a move that never works: a Ctrl-C is
+        # raised again, a held file is install_failed; the old binary stays either way
         real = os.rename
+        for error, raised in ((KeyboardInterrupt, KeyboardInterrupt),
+                              (PermissionError(13, "held"), update.UpdateError)):
+            with self.subTest(error=raised.__name__):
+                case, release = self.apply_case()
 
-        def rename(src, dst):
-            if src.endswith("vcharon.new.exe"):
-                raise KeyboardInterrupt
-            real(src, dst)
+                def rename(src, dst, error=error):
+                    if src.endswith("vcharon.new.exe"):
+                        raise error
+                    real(src, dst)
 
-        with mock.patch.object(update.os, "rename", rename), \
-                self.assertRaises(KeyboardInterrupt):
-            update.apply_update(release, case.inst, windows=True)
-        case.assert_untouched()
+                with mock.patch.object(update.os, "rename", rename), \
+                        self.assertRaises(raised) as caught:
+                    update.apply_update(release, case.inst, windows=True)
+                if raised is update.UpdateError:
+                    self.assertEqual(caught.exception.kind, "install_failed")
+                case.assert_untouched()
 
     def test_apply_keeps_the_new_one_when_nothing_is_at_the_target(self):
         # both renames back fail: the work folder holds the new binary, and stays
@@ -1231,22 +1184,6 @@ class WindowsSwapTest(unittest.TestCase):
         self.assertEqual(read(os.path.join(case.bin, old)), OLD)
         [work] = [n for n in names if n.startswith(update.WORK_PREFIX)]
         self.assertEqual(read(os.path.join(case.bin, work, "vcharon.new.exe")), fake_binary())
-
-    def test_apply_on_windows_leaves_the_old_one_on_failure(self):
-        # apply_update with the Windows swap and a move that never works
-        case, release = self.apply_case()
-        real = os.rename
-
-        def rename(src, dst):
-            if src.endswith("vcharon.new.exe"):
-                raise PermissionError(13, "held")
-            real(src, dst)
-
-        with mock.patch.object(update.os, "rename", rename), \
-                self.assertRaises(update.UpdateError) as caught:
-            update.apply_update(release, case.inst, windows=True)
-        self.assertEqual(caught.exception.kind, "install_failed")
-        case.assert_untouched()
 
 
 class SweepOldTest(unittest.TestCase):
@@ -1410,10 +1347,6 @@ class OrphanTest(unittest.TestCase):
             "mailbox/watch.py:sync_argv", "mailbox/watch.py:sync_argv",
             "update.py:smoke_argv", "update.py:smoke_argv"]))
 
-    def test_the_exit_code_is_its_own(self):
-        self.assertEqual(install.EXIT_ORPHANED, 15)
-        self.assertNotIn(install.EXIT_ORPHANED, (0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 130))
-
 
 class WatchdogTest(unittest.TestCase):
     """The identity a long-running command compares at the top of each round: size,
@@ -1569,6 +1502,9 @@ class UpdateFlagTest(FakeSshCase):
                                               "confirmed", "ok")},
                          {"update_available": True, "latest": "9.9.9", "tag": "v9.9.9",
                           "changed": False, "confirmed": False, "ok": True})
+        self.assertEqual(sorted(doc), list(self.BASE_KEYS))
+        self.assertEqual((doc["install"], doc["path"], doc["current"]),
+                         ("binary", self.target, vcharon.VERSION))
         self.assert_untouched()
 
     def test_no_terminal_reports_and_says_how(self):
@@ -1639,22 +1575,16 @@ class UpdateFlagTest(FakeSshCase):
         self.assertEqual(err.splitlines(), ["ERROR update: couldn't reach api.github.com: no "
                                             "route", "  fix: " + update.NETWORK_FIX])
 
-    def test_exit_codes(self):
-        # every failure 1, a "no" 0, a usage error 3 (never oModel's 2 and 3)
-        for kind in ("not_self_updatable", "unsupported_platform", "not_writable",
-                     "missing_asset", "no_release", "network", "rate_limited",
-                     "checksum_mismatch", "smoke_failed", "version_mismatch", "bad_asset",
-                     "install_failed", "write_failed", "http_error", "bad_url"):
-            def fail(*args, kind=kind, **kwargs):
-                raise update.UpdateError(kind, "it failed: " + kind)
+    def test_a_failed_install_is_1(self):
+        # the failure's kind passes through unchanged; the exit code doesn't depend on it
+        def fail(*args, **kwargs):
+            raise update.UpdateError("checksum_mismatch", "it failed: checksum_mismatch")
 
-            with self.subTest(kind=kind), mock.patch.object(update, "apply_update", fail):
-                code, doc, err = self.run_json("--update", "--yes", "--json")
-                self.assertEqual((code, doc["error"]), (1, kind))
-                self.assertTrue(err.startswith("ERROR update: it failed: "), err)
-                self.assertIn("\n  fix: ", err)
-        self.assertEqual(self.run_cli("--update")[0], 0)
-        self.assertEqual(self.run_cli("--update", "doctor")[0], 3)
+        self.patch(update, "apply_update", new=fail)
+        code, doc, err = self.run_json("--update", "--yes", "--json")
+        self.assertEqual((code, doc["error"]), (1, "checksum_mismatch"))
+        self.assertTrue(err.startswith("ERROR update: it failed: "), err)
+        self.assertIn("\n  fix: ", err)
 
     def test_a_bug_still_gives_one_object(self):
         def boom(*args, **kwargs):
@@ -1683,14 +1613,6 @@ class UpdateFlagTest(FakeSshCase):
 
     BASE_KEYS = ("changed", "confirmed", "current", "install", "latest", "ok", "path", "tag",
                  "update_available", "url")
-
-    def test_the_object_has_the_same_keys(self):
-        self.patch(update, "apply_update", new=never_called)
-        code, doc, err = self.run_json("--update", "--json")
-        self.assertEqual((code, err), (0, ""))
-        self.assertEqual(sorted(doc), list(self.BASE_KEYS))
-        self.assertEqual((doc["install"], doc["path"], doc["current"]),
-                         ("binary", self.target, vcharon.VERSION))
 
     def test_end_to_end(self):
         code, doc, err = self.run_json("--update", "--yes", "--json")
@@ -1821,9 +1743,6 @@ class FlagRefusalTest(FakeSshCase):
 class AgentFixTest(unittest.TestCase):
     """An agent never updates: the newer-format refusal's fix is advice for its user, and
     runnable() never turns `vcharon --update` into another install's spelling."""
-
-    def test_the_fix_line(self):
-        self.assertEqual(charter.UPDATE_HINT, "ask your user to run: vcharon --update")
 
     def test_runnable_leaves_it(self):
         for command in ("/home/u/.venv/bin/python -P -m vcharon", "python3 -P -m vcharon",

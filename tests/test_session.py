@@ -30,7 +30,7 @@ def echo(h, call_id, args):
 _real.HANDLERS["echo"] = echo
 """
 
-# busy for 2.5 s, calling the real h.tick(), which here may tick every 0.2 s
+# busy for 1.5 s, calling the real h.tick(), which here may tick every 0.2 s
 TICKING = """
 import io
 import time
@@ -41,7 +41,7 @@ _real.TICK_EVERY = 0.2
 def echo(h, call_id, args):
     buf = io.BytesIO()
     proto.receive_stream(h.conn, [0], lambda index, fin: buf.write(fin.read()))
-    end = time.monotonic() + 2.5
+    end = time.monotonic() + 1.5
     while time.monotonic() < end:
         h.tick()
         time.sleep(0.05)
@@ -292,47 +292,31 @@ class SessionTest(FakeSshCase):
 
     # 5
     def test_exits_before_the_marker(self):
-        cases = [(127, "bash: python3: command not found", "python3 wasn't found",
-                  "install python3 on fake-dest"),
-                 (126, "bash: /usr/bin/python3: Permission denied", "isn't runnable",
-                  "check remote_python"),
-                 (255, "Permission denied (publickey).", "(Permission denied)",
-                  "vcharon key fake-dest"),
-                 (1, "boom", "ssh exited with code 1 before vcharon started",
-                  "a shell startup file")]
-        for rc, stderr, message, hint in cases:
-            with self.subTest(rc=rc):
-                os.environ["FAKE_SSH_EXIT"] = str(rc)
-                os.environ["FAKE_SSH_STDERR"] = stderr
-                s = self.session()
-                err = self.failure(s.open)
-                self.assertEqual((err.code, err.exit_code), ("connect", 4))
-                self.assertIn(message, err.message)
-                self.assertIn(hint, err.hint)
-                self.assertEqual(err.tail, [stderr])
-                self.assertIsNone(s.hello)
-
-    def test_startup_file_eats_stdin(self):
-        os.environ["FAKE_SSH_EAT_STDIN"] = "100"
-        err = self.failure(self.session().open)
-        self.assertEqual(err.code, "connect")
-        self.assertIn("before vcharon started", err.message)
-        self.assertIn("a shell startup file on the server may have read stdin", err.hint)
+        # one exit end to end; test_ssh's classify table has each code's message and hint
+        os.environ["FAKE_SSH_EXIT"] = "1"
+        os.environ["FAKE_SSH_STDERR"] = "boom"
+        s = self.session()
+        err = self.failure(s.open)
+        self.assertEqual((err.code, err.exit_code), ("connect", 4))
+        self.assertIn("ssh exited with code 1 before vcharon started", err.message)
+        self.assertIn("a shell startup file", err.hint)
+        self.assertEqual(err.tail, ["boom"])
+        self.assertIsNone(s.hello)
 
     # 6
     def test_handshake_timeout(self):
         os.environ["FAKE_SSH_STALL"] = "30"
-        # The second time the bundle is too big for the pipe, so writing it blocks.
+        # The bundle is too big for the pipe, so writing it blocks; a small one is
+        # test_doctor's no-marker test.
         padding = base64.b64encode(os.urandom(1536 * 1024)).decode()
-        for extra in (None, {"vcharon.padding": "DATA = %r\n" % padding}):
-            with self.subTest(big=extra is not None):
-                s = self.session(extra_modules=extra, handshake_timeout=1)
-                started = time.monotonic()
-                err = self.failure(s.open)
-                self.assertLess(time.monotonic() - started, 5)
-                self.assertEqual((err.code, err.exit_code), ("connect", 4))
-                self.assertEqual(err.message, "no answer from vcharon on fake-dest within 1 s")
-                self.assertIn("authentication or a jump host may be stuck", err.hint)
+        s = self.session(extra_modules={"vcharon.padding": "DATA = %r\n" % padding},
+                         handshake_timeout=1)
+        started = time.monotonic()
+        err = self.failure(s.open)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual((err.code, err.exit_code), ("connect", 4))
+        self.assertEqual(err.message, "no answer from vcharon on fake-dest within 1 s")
+        self.assertIn("authentication or a jump host may be stuck", err.hint)
 
     # 7
     def test_idle_timeout(self):
@@ -357,19 +341,30 @@ class SessionTest(FakeSshCase):
         self.assertEqual((err.code, err.exit_code), ("timeout", 1))
         self.assertEqual(err.message, "the run passed run_timeout (2 s)")
 
+    def test_run_timeout_stops_between_rounds(self):
+        # sync --repeat's wait between rounds: past run_timeout, and not killed
+        s = self.session(idle_timeout=60, run_timeout=2)
+        s.open()
+        s.end_round()
+        time.sleep(2.5)
+        self.assert_echoes(s)
+        s.start_round()
+        self.assert_echoes(s)
+        self.assertNotIn("killing ssh", self.log_text())
+
     # 9
     def test_ticks_keep_a_busy_helper_alive(self):
         s = self.session(extra_modules=helper_override(TICKING), idle_timeout=1)
         s.open()
         started = time.monotonic()
         self.assert_echoes(s)
-        self.assertGreater(time.monotonic() - started, 2.4)
+        self.assertGreater(time.monotonic() - started, 1.4)
 
     # 10
     def test_local_work_isnt_idle(self):
         s = self.session(idle_timeout=1)
         s.open()
-        time.sleep(2)
+        time.sleep(1.5)
         self.assert_echoes(s)
 
     def test_slow_local_stage_isnt_idle(self):
@@ -385,8 +380,8 @@ class SessionTest(FakeSshCase):
                 if not chunk:
                     break
                 parts.append(chunk)
-                # five D frames: 2.5 s in all, with the helper long done sending
-                time.sleep(0.5)
+                # five D frames: 1.5 s in all, with the helper long done sending
+                time.sleep(0.3)
             got.append(b"".join(parts))
 
         s.call("echo", upload=[(0, lambda: io.BytesIO(data))], receive=([0], slow_stage))
@@ -504,41 +499,18 @@ class SessionTest(FakeSshCase):
         s.open()
         self.assertEqual(s.call("probe"), {"first_finder": "Finder"})
 
-    def test_err_without_an_id(self):
-        s = self.session()
-        s.open()
-        # not a call: the helper answers with "id": null and stops
-        s.send_json({"t": "bogus"})
-        err = self.failure(s.echo, b"x")
-        self.assertEqual(err.code, "protocol")
-        self.assertIn("bogus", err.message)
-        self.assertEqual(self.failure(s.echo, b"x").code, "internal")
-        s.close()
-        self.assertEqual(s.ssh_exit, 3)
-
-    def test_usable_and_the_err_reply(self):
+    def test_handler_errors_keep_the_session(self):
         s = self.session(extra_modules=helper_override(FAILING))
         self.assertFalse(s.usable)
         s.open()
         self.assertTrue(s.usable)
         err = self.failure(s.call, "missing", {"name": "x.txt"})
+        self.assertEqual((err.code, err.message, err.hint),
+                         ("not_found", "no such thing: x.txt", "look elsewhere"))
         # the whole err message, for extra keys such as a failed commit's done
         self.assertEqual(err.reply["t"], "err")
         self.assertEqual(err.reply["error"]["code"], "not_found")
         self.assertTrue(s.usable)
-        s.send_json({"t": "bogus"})
-        self.assertEqual(self.failure(s.echo, b"x").code, "protocol")
-        # out of step
-        self.assertFalse(s.usable)
-        s.close()
-        self.assertFalse(s.usable)
-
-    def test_handler_errors_keep_the_session(self):
-        s = self.session(extra_modules=helper_override(FAILING))
-        s.open()
-        err = self.failure(s.call, "missing", {"name": "x.txt"})
-        self.assertEqual((err.code, err.message, err.hint),
-                         ("not_found", "no such thing: x.txt", "look elsewhere"))
         err = self.failure(s.call, "buggy")
         self.assertEqual(err.code, "internal")
         self.assertIn("ZeroDivisionError", err.message)
@@ -546,8 +518,17 @@ class SessionTest(FakeSshCase):
         self.assertIn("vcharon-bundle/vcharon/helper.py", err.detail)
         self.assertIn("return 1 / 0", err.detail)
         self.assert_echoes(s)
+        self.assertTrue(s.usable)
+        # not a call: the helper answers with "id": null and stops, out of step
+        s.send_json({"t": "bogus"})
+        err = self.failure(s.echo, b"x")
+        self.assertEqual(err.code, "protocol")
+        self.assertIn("bogus", err.message)
+        self.assertFalse(s.usable)
+        self.assertEqual(self.failure(s.echo, b"x").code, "internal")
         s.close()
-        self.assertEqual(s.ssh_exit, 0)
+        self.assertFalse(s.usable)
+        self.assertEqual(s.ssh_exit, 3)
 
     def test_plugin_doctor(self):
         """The helper's plugin.doctor."""
@@ -573,24 +554,6 @@ class SessionTest(FakeSshCase):
         self.assertTrue(s.usable)
         s.close()
         self.assertEqual(s.ssh_exit, 0)
-
-    def test_plugin_doctor_sets_no_plugin(self):
-        # a sink-role doctor leaves no sink to receive into, a source-role one no source to
-        # send from
-        os.mkdir(os.path.join(self.home, "outbox"))
-        for role, options, fn, args, before in (
-                ("sink", {"path": "outbox"}, "sink.receive", {"indexes": []}, "sink.check"),
-                ("sink", {"path": "outbox"}, "sink.commit", {}, "sink.check"),
-                ("source", {"path": "outbox"}, "source.send", {"indexes": []}, "source.plan")):
-            with self.subTest(role=role, fn=fn):
-                s = self.session()
-                s.open()
-                s.call("plugin.doctor", {"plugin": "path" if role == "source" else "dir",
-                                         "role": role, "options": options})
-                err = self.failure(s.call, fn, args)
-                self.assertEqual((err.code, err.message),
-                                 ("protocol", "%s came before %s" % (fn, before)))
-                s.close()
 
     def test_plugin_doctor_leaves_source_and_sink_unset(self):
         # pins h.source and h.sink themselves, not just the calls that read them

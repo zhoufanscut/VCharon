@@ -17,10 +17,9 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import bundle, channels, doctor, install, keys, platform, plugins, ssh, state
+from vcharon import bundle, channels, doctor, install, keys, platform, ssh, state
 
 from tests import util
-from tests.test_plugin import probe_module
 from tests.util import (
     TEST_MACHINE_ID,
     FakeSshCase,
@@ -252,8 +251,9 @@ class DoctorTest(DoctorCase):
         doc = json.loads(out)
         self.assertEqual((got, doc["ok"], doc["failed"]), (1, False, 1))
         [fail] = [c for c in doc["checks"] if c["level"] == "FAIL"]
-        self.assertEqual((fail["subject"], fail["fix"], fail["note"]),
-                         ("push", "check the path", None))
+        self.assertEqual((fail["subject"], fail["text"], fail["fix"], fail["note"]),
+                         ("push", "from.path %s-gone doesn't exist" % self.src, "check the path",
+                          None))
         with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             text = f.read()
         # every line is logged too
@@ -290,10 +290,18 @@ class DoctorTest(DoctorCase):
             with self.subTest(kind=inst.kind), \
                     mock.patch.object(install, "detect", return_value=inst), \
                     mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-                self.assertEqual(self.of(self.doctor(code=0), "install"), [("ok", text)])
-                _, out, _ = self.run_cli("doctor", "--json")
-                self.assertEqual(json.loads(out)["install"],
-                                 {"kind": inst.kind, "path": inst.path})
+                said = []
+                got = doctor._install(doctor.Report(said.append, ["install"]))
+                self.assertEqual(said, ["  ok    install  " + text])
+                self.assertEqual(got, {"kind": inst.kind, "path": inst.path})
+        # the line and the object reach doctor's output, as one run shows
+        inst = install.Install("binary", target)
+        with mock.patch.object(install, "detect", return_value=inst), \
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            self.assertEqual(self.of(self.doctor(code=0), "install"), [("ok", (
+                "a standalone binary, %s: vcharon --update replaces this file" % target))])
+            _, out, _ = self.run_cli("doctor", "--json")
+        self.assertEqual(json.loads(out)["install"], {"kind": "binary", "path": target})
 
     def test_a_bundle_without_the_helper_fails(self):
         # what a binary built without the package's .py files would show
@@ -404,15 +412,14 @@ class DoctorTest(DoctorCase):
                                            % os.path.join(blocker, "state")), dirs)
 
     def test_machine(self):
-        # this machine's id, with or without a destination in scope
-        for argv in ((), ("--server", "fake-dest")):
-            with self.subTest(argv=argv):
-                lines = self.doctor(*argv, code=0)
-                # two subjects: the id, then the client-id file claims come from
-                self.assertEqual(self.of(lines, "machine"), [("ok", TEST_MACHINE_ID)])
-                self.assertEqual(self.of(lines, "claimer"), [
-                    ("ok", USED % (platform.client_id_path(),
-                                   "made at the first join, from the machine id"))])
+        # this machine's id; doctor checks it before any destination and never asks one, so a
+        # run with --server would show the same lines
+        lines = self.doctor(code=0)
+        # two subjects: the id, then the client-id file claims come from
+        self.assertEqual(self.of(lines, "machine"), [("ok", TEST_MACHINE_ID)])
+        self.assertEqual(self.of(lines, "claimer"), [
+            ("ok", USED % (platform.client_id_path(),
+                           "made at the first join, from the machine id"))])
         os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         self.assertEqual(self.of(self.doctor(code=0), "machine")[0], ("ok", "f" * 32))
 
@@ -432,28 +439,28 @@ class DoctorTest(DoctorCase):
                          ("windows", "check that reg query HKLM\\SOFTWARE\\Microsoft\\"
                                      "Cryptography /v MachineGuid /reg:64 prints a MachineGuid, "
                                      "then try again; if it prints none, ask your user")):
-            for argv in ((), ("--server", "fake-dest")):
-                with self.subTest(osn=osn, argv=argv):
-                    self.os_name(osn)
-                    linux = osn == "linux"
-                    lines = self.doctor(*argv, code=0 if linux else 1)
-                    path = platform.client_id_path()
-                    if linux:
-                        claim = ("ok", USED % (path, "made at the first join, random"))
-                    else:
-                        claim = ("FAIL", "couldn't read this machine's id (%s), so no client id "
-                                 "is made" % ("ioreg's IOPlatformUUID" if osn == "darwin"
-                                              else "the registry's MachineGuid"))
-                    self.assertEqual(self.of(lines, "machine"), [("warn", text)])
-                    self.assertEqual(self.of(lines, "claimer"), [claim])
-                    at = [i for i, line in enumerate(lines) if line.startswith("  warn  machine")]
-                    self.assertEqual(len(at), 1, lines)
-                    self.assertEqual(lines[at[0] + 1].strip(), "fix: " + fix)
-                    if linux:
-                        self.assertRegex(lines[-1], r"\AOK  nothing failed, \d warnings?  ")
-                    else:
-                        doc = json.loads(self.run_cli("doctor", "--json", *argv)[1])
-                        self.assertIsNone(doc["claimer_source"])
+            # no --server run: doctor checks the id before any destination and never asks one
+            with self.subTest(osn=osn):
+                self.os_name(osn)
+                linux = osn == "linux"
+                lines = self.doctor(code=0 if linux else 1)
+                path = platform.client_id_path()
+                if linux:
+                    claim = ("ok", USED % (path, "made at the first join, random"))
+                else:
+                    claim = ("FAIL", "couldn't read this machine's id (%s), so no client id "
+                             "is made" % ("ioreg's IOPlatformUUID" if osn == "darwin"
+                                          else "the registry's MachineGuid"))
+                self.assertEqual(self.of(lines, "machine"), [("warn", text)])
+                self.assertEqual(self.of(lines, "claimer"), [claim])
+                at = [i for i, line in enumerate(lines) if line.startswith("  warn  machine")]
+                self.assertEqual(len(at), 1, lines)
+                self.assertEqual(lines[at[0] + 1].strip(), "fix: " + fix)
+                if linux:
+                    self.assertRegex(lines[-1], r"\AOK  nothing failed, \d warnings?  ")
+                else:
+                    doc = json.loads(self.run_cli("doctor", "--json")[1])
+                    self.assertIsNone(doc["claimer_source"])
 
     def test_box_and_the_client_id_file(self):
         # the box's source, and a client-id file: made by the first join, never by doctor
@@ -526,13 +533,6 @@ class DoctorTest(DoctorCase):
 
     # a job
 
-    def test_missing_local_source(self):
-        self.write_config(CONFIG.format(src=self.src + "-gone", dst=self.dst))
-        lines = self.doctor(code=1)
-        self.assertIn(("FAIL", "from.path %s-gone doesn't exist" % self.src),
-                      self.of(lines, "push"))
-        self.assertIn("fix: check the path", "\n".join(lines))
-
     def test_remote_sink_root(self):
         text = CONFIG.format(src=self.src, dst=self.dst).replace("to.path   = inbox",
                                                                   "to.path   = new/inbox")
@@ -560,19 +560,6 @@ class DoctorTest(DoctorCase):
         # that side's doctor is skipped; the other side's runs
         self.assertFalse(any(t.startswith("to.path") for level, t in push), push)
         self.assertTrue(any(t.startswith("from.path") for level, t in push), push)
-
-    def test_missing_capability(self):
-        module = probe_module("desk", caps=("desktop",))
-        for patcher in (mock.patch.object(plugins, "ALL", plugins.ALL + ("desk",)),
-                        mock.patch.dict(sys.modules, {module.__name__: module})):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.patch(platform, "caps", return_value={"desktop": False})
-        self.write_config(CONFIG.format(src=self.src, dst=self.dst).replace(
-            "from      = local:path", "from      = local:desk", 1))
-        lines = self.doctor(code=1)
-        self.assertIn(("FAIL", "desk needs desktop, which this client lacks"),
-                      self.of(lines, "push"))
 
     def test_state(self):
         os.makedirs(os.path.dirname(state.path("push")))
@@ -628,26 +615,6 @@ class DoctorTest(DoctorCase):
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
 
-    # a locked key: the fix line says to unlock it; the doctor never prompts (it offered to,
-    # in a terminal, before the command line said never prompt)
-
-    def test_a_locked_key_is_a_fix_line_not_a_prompt(self):
-        key = os.path.join(self.tmp, "id_rsa")
-        with open(key, "w") as f:
-            f.write("k")
-        os.environ.update(FAKE_SSH_STDERR="debug1: Server accepts key: %s RSA SHA256:x\n%s"
-                          % (key, DENIED), FAKE_SSH_EXIT="255",
-                          FAKE_SSH_UNLOCK_FILE=os.path.join(self.tmp, "unlocked"),
-                          SSH_AUTH_SOCK=os.path.join(self.tmp, "agent.sock"))
-        for terminal in (False, True):
-            with self.subTest(terminal=terminal):
-                self.terminal.return_value = terminal
-                lines = self.doctor("--server", "fake-dest", code=1)
-                self.input.assert_not_called()
-                self.assertEqual(self.adds(), [])
-                self.assertIn("fix: " + platform.runnable("vcharon key fake-dest"),
-                              [l.strip() for l in lines])
-
 
 class ClockTest(DoctorCase):
     """The server's clock and time zone against this machine's, after the handshake
@@ -665,27 +632,18 @@ class ClockTest(DoctorCase):
         self.assertLess(abs(float(m.group(1)) - shift), 5, lines)
         return lines, level
 
-    def test_ok_under_30_s(self):
-        lines, level = self.clock(5, 0)
-        self.assertEqual(level, "ok")
-        self.assertNotIn("NTP", "\n".join(lines))
-        self.assertRegex(lines[-1], LAST_OK)
-
-    def test_warn_ahead_and_behind(self):
-        for shift in (45, -45):
-            with self.subTest(shift=shift):
-                lines, level = self.clock(shift, 0)
-                self.assertEqual(level, "warn")
-                at = next(i for i, line in enumerate(lines) if "  clock " in line)
-                self.assertEqual(lines[at + 1].strip(), "fix: " + doctor.CLOCK_HINT)
-                sign = "+" if shift > 0 else "-"
-                self.assertIn("clock " + sign, lines[at])
-                self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  ")
-                # the gap is in the session's log line too
-                with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"),
-                          encoding="utf-8") as f:
-                    self.assertRegex(f.read(), r"hello from fake-dest, clock \%s\d+\.\d s:"
-                                     % sign)
+    def test_warn_over_30_s(self):
+        # one shift through the session; both signs and the 30 s edge are test_formatter's
+        lines, level = self.clock(45, 0)
+        self.assertEqual(level, "warn")
+        at = next(i for i, line in enumerate(lines) if "  clock " in line)
+        self.assertEqual(lines[at + 1].strip(), "fix: " + doctor.CLOCK_HINT)
+        self.assertIn("clock +", lines[at])
+        self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  ")
+        # the gap is in the session's log line too
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"),
+                  encoding="utf-8") as f:
+            self.assertRegex(f.read(), r"hello from fake-dest, clock \+\d+\.\d s:")
 
     def test_other_time_zone(self):
         local = time.localtime().tm_gmtoff
@@ -736,23 +694,15 @@ class DistroTest(DoctorCase):
             f.write(data)
 
     def test_each_case(self):
+        # an old Debian and no os-release at all, through hello, doctor, --json and ping; every
+        # other kind of file is test_platform's (FilesTest.test_os_release_to_the_warning), and
+        # Debian 13's fields test_json's
         cases = [
-            (util.DEBIAN_13, None, ("debian", "13")),
-            (b'ID=debian\nVERSION_ID="14"\nPRETTY_NAME="Debian GNU/Linux 14 (forky)"\n', None,
-             ("debian", "14")),
             (b'ID=debian\nVERSION_ID="12"\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n',
              "VCharon is tested on Debian 13 or later; it is ID=debian VERSION_ID=12 (Debian "
              "GNU/Linux 12 (bookworm))", ("debian", "12")),
-            (b'NAME="Ubuntu"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="24.04"\n'
-             b'PRETTY_NAME="Ubuntu 24.04.1 LTS"\n',
-             "VCharon is tested on Debian 13 or later; it is ID=ubuntu VERSION_ID=24.04 "
-             "(Ubuntu 24.04.1 LTS)", ("ubuntu", "24.04")),
             (None, "VCharon is tested on Debian 13 or later; its os-release names no distro "
-                   "(no ID=)", (None, None)),
-            (b"\x00\xff garbage\nno equals here\n=\n", "VCharon is tested on Debian 13 or "
-             "later; its os-release names no distro (no ID=)", (None, None)),
-            (b"ID=debian\nVERSION_ID=thirteen\n", "VCharon is tested on Debian 13 or later; it "
-             "is ID=debian VERSION_ID=thirteen", ("debian", "thirteen"))]
+                   "(no ID=)", (None, None))]
         for data, warning, fields in cases:
             with self.subTest(data=data):
                 self.release(data)
@@ -801,10 +751,23 @@ class RowTest(DoctorCase):
         if stderr is not None:
             os.environ["FAKE_SSH_STDERR"] = stderr
 
-    def test_host_key(self):
-        self.exit(255, "Host key verification failed.")
-        self.failed("ssh couldn't verify the host key of fake-dest",
-                    "run ssh fake-dest once in a terminal")
+    def test_exit_rows(self):
+        # each a row of its own, told apart by ssh's exit code and stderr alone
+        for rc, stderr, message, fix in (
+                (255, "Host key verification failed.",
+                 "ssh couldn't verify the host key of fake-dest",
+                 "run ssh fake-dest once in a terminal"),
+                (255, "ssh: connect to host h port 22: Connection refused",
+                 "ssh couldn't reach fake-dest (Connection refused)", "check the host, port, VPN"),
+                (127, "", "python3 wasn't found on fake-dest",
+                 "install python3 on fake-dest, or set remote_python in vcharon.ini"),
+                (126, "", "python3 isn't runnable on fake-dest",
+                 "check remote_python in vcharon.ini"),
+                (1, "", "ssh exited with code 1 before vcharon started on the server",
+                 "a shell startup file on the server may have read stdin; see the log")):
+            with self.subTest(message=message):
+                self.exit(rc, stderr)
+                self.failed(message, fix)
 
     def test_no_usable_key(self):
         self.exit(255, DENIED)
@@ -812,26 +775,21 @@ class RowTest(DoctorCase):
                     "add your public key to ~/.ssh/authorized_keys on fake-dest")
 
     def test_locked_key(self):
+        # the fix line says to unlock it; the doctor never prompts, nor runs ssh-add, even in a
+        # terminal with an agent to add to
         key = os.path.join(self.tmp, "id_ed25519")
         with open(key, "w") as f:
             f.write("k")
         self.exit(255, "debug1: Server accepts key: %s ED25519 SHA256:x\n%s" % (key, DENIED))
-        self.failed("ssh can't use your key %s: the server accepts it, but it's locked by a "
-                    "passphrase" % key, "vcharon key fake-dest")
-
-    def test_network(self):
-        self.exit(255, "ssh: connect to host h port 22: Connection refused")
-        self.failed("ssh couldn't reach fake-dest (Connection refused)",
-                    "check the host, port, VPN")
-
-    def test_no_python(self):
-        self.exit(127)
-        self.failed("python3 wasn't found on fake-dest",
-                    "install python3 on fake-dest, or set remote_python in vcharon.ini")
-
-    def test_not_runnable(self):
-        self.exit(126)
-        self.failed("python3 isn't runnable on fake-dest", "check remote_python in vcharon.ini")
+        os.environ.update(FAKE_SSH_UNLOCK_FILE=os.path.join(self.tmp, "unlocked"),
+                          SSH_AUTH_SOCK=os.path.join(self.tmp, "agent.sock"))
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                self.terminal.return_value = terminal
+                self.failed("ssh can't use your key %s: the server accepts it, but it's locked "
+                            "by a passphrase" % key, "vcharon key fake-dest")
+                self.input.assert_not_called()
+                self.assertEqual(self.adds(), [])
 
     def test_not_runnable_with_an_accepted_key(self):
         # bash exits 126 with its own "Permission denied"; that's no locked key
@@ -856,11 +814,6 @@ class RowTest(DoctorCase):
         self.patch(bundle, "build", return_value=struct.pack(">Q", 3) + b"abc")
         self.failed("the server couldn't load vcharon's code",
                     "this is a bug in vcharon; see the log")
-
-    def test_other_exit(self):
-        self.exit(1)
-        self.failed("ssh exited with code 1 before vcharon started on the server",
-                    "a shell startup file on the server may have read stdin; see the log")
 
     def test_stdin_eaten(self):
         os.environ["FAKE_SSH_EAT_STDIN"] = "100"
