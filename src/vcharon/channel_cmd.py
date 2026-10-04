@@ -73,16 +73,37 @@ def project_of(cwd):
     worktree's .git file), a .svn directory or a .hg directory: a checkout's root (SVN 1.7 and
     later keep one .svn, at the root); cwd's own name when there's none. In Python, never by
     running git, svn or hg."""
+    return os.path.basename(project_folder(cwd))
+
+
+def project_folder(cwd):
+    """The folder whose name project_of gives: the checkout's root, else cwd itself."""
     folder = os.path.abspath(cwd)
     while True:
         if (os.path.isdir(os.path.join(folder, ".git"))
                 or os.path.isfile(os.path.join(folder, ".git"))
                 or any(os.path.isdir(os.path.join(folder, mark)) for mark in (".svn", ".hg"))):
-            return os.path.basename(folder)
+            return folder
         up = os.path.dirname(folder)
         if up == folder:
-            return os.path.basename(os.path.abspath(cwd))
+            return os.path.abspath(cwd)
         folder = up
+
+
+def check_not_home(cwd=None):
+    """Refused when the folder that would name a new member is the home folder (the user's own
+    folder, or a home kept in git for its dotfiles): its name is the OS user name, which then
+    lands in the member's name, its folder and every ID, and no channel file may hold one
+    (DESIGN, "Member names")."""
+    folder = project_folder(cwd or os.getcwd())
+    try:
+        is_home = os.path.samefile(folder, platform.home())
+    except OSError:
+        return
+    if is_home:
+        raise VCharonError("config", "the project's name would come from your home folder %s, "
+                           "whose name is your user name: give --project" % folder,
+                           hint="for example: --project web")
 
 
 def clean_project(text):
@@ -267,7 +288,13 @@ def read_record(channel, name):
             or doc["name"] != name
             or not all(isinstance(doc[k], str) for k in ("leader", "remote", "machine"))
             or not isinstance(doc["ssh"], (str, type(None)))):
-        raise VCharonError("config", "the record %s has another shape" % path, hint=hint)
+        # an older vcharon's layout, or a hand edit. Every command of the channel reads every
+        # record of it (find), so the record has to go first; a rejoin then writes a new one
+        raise VCharonError("config", "the record %s has another shape" % path,
+                           hint="ask your user: this record is from an older vcharon, or was "
+                           "edited; they remove it, then run vcharon join %s --server ALIAS "
+                           "--rejoin (or --local, for a channel on this machine) with the "
+                           "--project and --role you joined with" % channel)
     return doc
 
 
@@ -397,8 +424,10 @@ def hold_watcher(snapshot, refusal):
 def drop_held(lk, path):
     """Deletes the lock file path, whose lock lk this process holds, and releases it; True if
     the file went. Best effort, never raising: the command is done either way. POSIX deletes it
-    while still holding it, so no one takes it in between; Windows can't delete an open file,
-    so it releases first, and a watcher opening it at that instant keeps it."""
+    first, then releases: that doesn't keep everyone out, since a process that opened the file
+    just before the delete takes the lock of the deleted file once it is released, while a
+    later one makes and locks a new file at the path. Windows can't delete an open file, so it
+    releases first, and a watcher opening it at that instant keeps it."""
     removed = False
     if os.name != "nt":
         with contextlib.suppress(OSError):
@@ -592,6 +621,8 @@ def main(args, run):
         if record is not None:
             name = record["name"]
         else:
+            if args.project is None:
+                check_not_home()
             name = member_parts(cfg, project, args.role)[0]
             # a role forgotten, or one too many: said, never refused (only its step 1)
             for other in records(args.channel):
@@ -715,6 +746,26 @@ def _another_server(record, server, channel):
                                "pass --role R to join from here as another member")
 
 
+def _stale(found, name, record):
+    """Why record, of name, is a membership of an earlier channel of that name than the listed
+    one (found), or None. A member that never ran leave after a close keeps its record and
+    local tree; reused, the new channel would get the old MEMBER.md's leader:, a numbering
+    that clashes, and a down that deletes the box's copy of the old channel."""
+    if name not in found["members"]:
+        return "has no folder %s (the channel was made again, or the folder removed)" % name
+    if found["leaders"] and record["leader"] not in found["leaders"]:
+        return ("is led by %s, not %s (the channel was made again)"
+                % (", ".join(found["leaders"]), record["leader"]))
+    return None
+
+
+def _stale_refusal(channel, name, record, what, verb):
+    return channels.refused(
+        "your join record of %s as %s is of an earlier channel: %s" % (channel, name, what),
+        "run vcharon leave %s %s (it posts nothing, and removes this machine's files of that "
+        "membership), then %s again" % (channel, name_flags(channel, name, record), verb))
+
+
 def create_limits(args):
     """The limits create writes into CHANNEL.md: --max-mb, --max-files and --max-entry-kb
     (each checked against charter.BOUNDS by the parser), else the defaults. An entry file
@@ -749,6 +800,11 @@ def _create_held(args, cfg, name, log, say, take):
         # before any claim: a client-id file that can't be read or made stops here
         args.fields["claimer"] = platform.claimer(args.channel)
         _another_server(record, server, channel)
+        if record is not None and _find(server.list(), channel, server.where) is None:
+            # the claim below refuses a channel that exists, so with none there the record is
+            # left from one that is gone; with one there, the claim's own refusal says so
+            raise _stale_refusal(channel, name, record, "%s is gone from %s"
+                                 % (channel, server.where), "create")
         say("vcharon: create %s  as %s on %s" % (channel, name, server.where))
         got = server.claim(channel, name, True)
         made = []
@@ -922,6 +978,10 @@ def _join_held(args, cfg, name, log, say, take):
             snapshot = watcher_snapshot(None, section, name)
         take(snapshot, lambda: _live_session(name, channel))
         _another_server(record, server, channel)
+        stale = _stale(found, name, record) if record is not None else None
+        if stale is not None:
+            raise _stale_refusal(channel, name, record, "%s on %s %s"
+                                 % (channel, server.where, stale), "join")
         # 3. one mkdir
         got = server.claim(channel, name, False)
         rejoin = got["existed"]
@@ -1218,7 +1278,15 @@ def _pull_own(server, remote_text, name, own, log, say):
 
 def _print_entries(tree, name, leader, channel, say):
     """The entries already in the other members' folders addressed to name, or to @all from
-    the leader's."""
+    the leader's. An entry whose ID names another member is one line, `WARN entry <id> in
+    <folder>/: not its folder's`, as the watcher's (DESIGN, "Trust and access"), and one with
+    no ID is left out, as the watcher leaves it. Every line goes through pathrules.printable:
+    the text is other members'."""
+    raw = say
+
+    def say(line):
+        raw(pathrules.printable(line))
+
     shown = 0
     try:
         folders = sorted(os.listdir(tree))
@@ -1236,6 +1304,10 @@ def _print_entries(tree, name, leader, channel, say):
                 continue
             for e in found:
                 if "@" + name not in e.to and not (entries.ALL in e.to and folder == leader):
+                    continue
+                if e.name != folder:
+                    if e.name is not None:
+                        say("WARN entry %s in %s/: not its folder's" % (e.id, folder))
                     continue
                 if not shown:
                     say("entries for %s already in %s:" % (name, channel))
@@ -1272,12 +1344,16 @@ def _leave(args, cfg, record, log, say, close):
     section = "%s.%s" % (channel, name)
     leads = record["leader"] == name
     if close and not leads:
+        # text, not a command: a member leaves only after the leader's CLOSED
         raise channels.refused("only the leader closes %s, and that is %s"
                                % (channel, record["leader"]),
-                               "vcharon leave %s %s" % (channel, name_flags(channel, name, record)))
+                               "members leave after the leader's CLOSED; how: vcharon guide end")
     if not close and leads:
+        # text, not a command: a close run as printed would delete the channel with no CLOSED
+        # and before the members' DONE
         raise channels.refused("you lead %s: close it instead" % channel,
-                               "vcharon close %s %s" % (channel, name_flags(channel, name, record)))
+                               "a leader ends the channel with CLOSED to @all after every "
+                               "member's DONE, then a close; how: vcharon guide end")
     # before anything on the server changes: a held lock can't leave a half-closed channel.
     # The watcher's lock stays held to the end, so no watcher starts during the command; the
     # removal releases it just before it deletes the lock file
@@ -1320,13 +1396,30 @@ def _leave_held(args, cfg, record, log, say, close, watcher, snapshot):
                 say("  closed %s: %d files and folders deleted" % (channel, done["deleted"]))
             gone = True
         else:
-            gone = _find(server.list(), channel, server.where) is None
-            if gone:
-                # a local member's server is this machine
-                say("  note    %s is gone %s" % (channel, "on the server" if record["ssh"]
-                                                 else "on this machine"))
+            found = _find(server.list(), channel, server.where)
+            # a local member's server is this machine
+            where = "on the server" if record["ssh"] else "on this machine"
+            stale = _stale(found, name, record) if found is not None else None
+            gone = found is None or stale is not None
+            if found is None:
+                say("  note    %s is gone %s" % (channel, where))
+            elif stale is not None:
+                # the own folder gone there (or a channel made again): a LEAVE would go
+                # nowhere, and a sync fails on it, so the removal comes at once
+                say("  note    %s %s %s" % (channel, where, stale))
     if not close and not gone:
+        from . import cli
         own = _own_of(cfg, record, section)
+        if own is not None and cli._missing(os.path.join(own, entries.MEMBER_FILE)):
+            if record["ssh"] is not None:
+                # this machine lost the folder: a LEAVE can't be posted into it, and the sync
+                # refuses an own folder without MEMBER.md once up has sent it; a rejoin brings
+                # it back
+                raise VCharonError("not_found", "your own folder %s has no %s on this machine"
+                                   % (own, entries.MEMBER_FILE),
+                                   rejoin_hint(channel, record["ssh"], name))
+            say("  note    %s has no %s: no LEAVE posted" % (own, entries.MEMBER_FILE))
+            own = None
         # a leave whose run failed and is tried again posts no second LEAVE
         if own is not None and not _left_already(own, name):
             entries.post(os.path.join(own, "RESULTS.md"), own, name, "LEAVE",

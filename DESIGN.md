@@ -914,7 +914,11 @@ member's folder name.
   14, `-` stripped again. `--project P` overrides it. Why `.svn` and `.hg` too: a member must
   keep its name in any folder of its checkout, whatever the version control. SVN 1.7 and later
   keep one `.svn`, at the working copy's root; an older working copy (a `.svn` in every folder)
-  names the current folder, so pass `--project` there.
+  names the current folder, so pass `--project` there. Without `--project`, `join` and
+  `create` refuse a new name whose project folder is the home folder (the home itself, or any
+  folder in a home kept in git for its dotfiles), exit 3, `give --project`: the home folder's
+  name is the OS user name, which would land in the member's name, its folder and every ID. A
+  membership with a record here keeps its name.
 - `-<role>`: only with `--role R`, 1 to 6 of `a-z0-9`.
 - The whole name: lowercase `a-z0-9-_`, starting with a letter or digit, at most 32 (10 + 1 +
   14 + 1 + 6), not a name Windows reserves: a Windows client must be able to hold the folder,
@@ -1031,7 +1035,10 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
 
 - **`create C`**: one `channel.claim` with `create`: `mkdir <root>/C` (fails if it exists, so of
   two creators one wins), then `mkdir <root>/C/<name>`; if that fails, the empty channel folder
-  is removed. Then the record, `MEMBER.md` and `CHANNEL.md`; a remote member also gets its local
+  is removed. A join record of the name already here, for this server, while the channel isn't
+  there is left from a channel that ended without a `leave`: refused before the claim, with
+  `vcharon leave C` as the fix (with the channel there, the claim's own refusal stands). Then
+  the record, `MEMBER.md` and `CHANNEL.md`; a remote member also gets its local
   tree and section, then a `--full` sync. A failure before the sync undoes what it wrote and
   releases the claim. Right after the claim it takes this machine's watcher lock for the name,
   as `join` does (held by another: `a live session holds <name> in C`, and the claim is
@@ -1043,10 +1050,17 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   `a live session holds <name> in C` (its watcher, or a `create`, `join`, `leave` or `close` of
   it still running). Taken, the join holds it until it returns, through its sync, on every way
   out; a join that fails with no record of the name left deletes the lock file it made, so it
-  leaves nothing behind here either (POSIX while still holding it; Windows, which can't delete
-  an open file, just after releasing it; a failed delete is ignored).
+  leaves nothing behind here either (POSIX deletes it, then releases; Windows, which can't
+  delete an open file, releases first; a failed delete is ignored). Deleting first doesn't keep
+  everyone out on POSIX: a process that opened the file just before the delete gets the lock
+  of the deleted file once it is released, while a later one makes a new file at the path.
   A record of this name for another server (the same channel name on a second server) is
-  refused too, `you are in C on another server`. (3) `channel.claim`, one `mkdir`; the claim's
+  refused too, `you are in C on another server`. So is a record of this name whose folder
+  isn't in the listed channel, or whose leader isn't the channel's: it is of an earlier
+  channel of the name (closed and made again, with no `leave` here), `your join record of C as
+  <name> is of an earlier channel: …`, with `vcharon leave C` as the fix. Why: reused, the new
+  channel would get the old `MEMBER.md`'s `leader:` and old entries, and the full down would
+  delete this machine's copy of the old channel. (3) `channel.claim`, one `mkdir`; the claim's
   own reading of format and limits must equal the listing's. (4) An existing folder: the
   claimer rules above; with no record and no `--rejoin`, `the name <name> is taken in C`. (5) The record, then `MEMBER.md` (a new member only), a remote
   member's section. A failure before the record releases a new claim. (6) A remote member's
@@ -1054,7 +1068,10 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md`, then the sync, which sends it with
   `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the member's next sync.
   Then the entries already addressed to the member or to all are printed (the sync brought the
-  others' folders), since the watcher's first start is a baseline that prints nothing.
+  others' folders), since the watcher's first start is a baseline that prints nothing. Each
+  line is escaped as `read` escapes it; an entry whose ID names another member is one line,
+  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, and one with no
+  ID is left out, as the watcher leaves it.
 - **The next step.** A `join` or `create` that succeeded prints, just before its `OK` line
   (which stays the last), `  next: start your watcher now, as a background command: vcharon
   watch C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post):
@@ -1076,18 +1093,25 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   sync lock of the membership is held; the watcher lock is taken, not just checked, and held to
   the end. It checks the server's machine id against the record, then lists: a name listed as
   unusable is refused (never taken for a gone channel); a gone channel skips to the removal.
-  Else it posts `LEAVE` (once: not again after a failed try) and syncs; a failed sync stops
-  before removing anything. Then it removes the local tree (only when it is exactly the
-  computed `joined/<C>.<name>`, with the no-link walk), the jobs' state, logs, locks not held,
-  the watcher's snapshot, the post lock, the record, the section file, and last the watcher's
-  lock file, released just before: a watcher started then finds no membership, and Windows
-  can't delete a file that is still open. One `removed <path>` line each. The member's folder
-  in the channel stays: it is its history, and its name stays taken. When the channel was
-  gone, it ends with `note    nothing of <C> as <name> is left on this machine` (and `still
-  here: <names>` for other memberships of C on this machine, which stay): an agent told nothing
-  would ask its user what to delete. `close` prints the same. Nothing is removed on its own
-  when a watcher sees the channel closed: `EXIT closed` also means a folder removed by hand,
-  and after a close this machine's copy is the last of the channel's text.
+  So does a listed channel without the member's folder, or with another leader than the
+  record's (the own folder removed at the server, or the channel made again), with a `note`
+  saying which: a `LEAVE` would reach no one, and the sync would fail on the missing folder
+  and point back at `leave`. Else, a remote member whose own folder here lacks `MEMBER.md` is
+  refused, `not_found`, with the rejoin as its fix (a sync would send the emptied folder over
+  the server's copy); a local member's is noted and nothing posted. Else it posts `LEAVE`
+  (once: not again after a failed try) and syncs; a failed sync stops before removing
+  anything. Then it removes the local tree (only when it is exactly the computed
+  `joined/<C>.<name>`, with the no-link walk), the jobs' state, logs, locks not held, the
+  watcher's snapshot, the post lock, the record, the section file, and last the watcher's lock
+  file, after the record, so a watcher started then finds no membership; deleted and released
+  in the order a failed join uses. One `removed <path>` line each. The member's folder in the
+  channel stays: it is its history, and its name stays taken. When the channel, or the
+  member's folder in it, was gone, it ends with `note    nothing of <C> as <name> is left on
+  this machine` (and `still here: <names>` for other memberships of C on this machine, which
+  stay): an agent told nothing would ask its user what to delete. `close` prints the same.
+  Nothing is removed on its own when a watcher sees the channel closed: `EXIT closed` also
+  means a folder removed by hand, and after a close this machine's copy is the last of the
+  channel's text.
 - **`close C`**: the leader only. The same lock checks first (a held lock can't leave a
   half-closed channel; the watcher lock held to the end, as `leave` holds it), the machine id
   check, then `channel.remove`, which refuses unless the leader's folder holds the only
@@ -1133,13 +1157,13 @@ re: linux-api#3
   heading (up to 3 spaces, then 1 to 6 `#` and a space or the end) gets `> ` in front, so a body
   can't forge an entry in VCharon's own parse. That protects the parse only: a body's other
   characters are kept, so what shows them on a terminal escapes them (next rule).
-- `read` prints another member's text through `pathrules.printable`: a control or format
-  character but tab, U+2028/U+2029, an unassigned character (a later Unicode may make it a
-  format control) and a lone surrogate show as `\xNN`, `\uNNNN` or `\UNNNNNNNN`. Why: any member
-  can write any bytes into its own files, and an escape sequence could clear the screen, set the
-  clipboard, or print a line that looks like `EXIT closed`. Other scripts and spaces show as
-  they are. A zero-width joiner is escaped too, so a joined emoji shows its parts: it can also
-  hide text inside an ID.
+- `read`, and `join`'s print of the entries already there, show another member's text through
+  `pathrules.printable`: a control or format character but tab, U+2028/U+2029, an unassigned
+  character (a later Unicode may make it a format control) and a lone surrogate show as `\xNN`,
+  `\uNNNN` or `\UNNNNNNNN`. Why: any member can write any bytes into its own files, and an escape
+  sequence could clear the screen, set the clipboard, or print a line that looks like `EXIT closed`.
+  Other scripts and spaces show as they are. A zero-width joiner is escaped too, so a joined emoji
+  shows its parts: it can also hide text inside an ID.
 - Entries are never edited; a correction is a new entry. The watcher warns about an edited
   heading.
 
@@ -1373,8 +1397,9 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   members' differ. Why: nothing else in a channel shows which version a member runs.
 - A channel's files are guarded by the format ([Formats](#formats)).
 - The record and the section hold everything a later command needs, so a membership made by one
-  version is used by the next; a record a newer layout needs and lacks is refused with the
-  rejoin as its fix.
+  version is used by the next. A record in another shape (an older layout, or a hand edit) is
+  refused, with the fix: the user removes it, then the member rejoins with `--rejoin`. It has
+  to go first: every command of the channel reads every record of it.
 
 ## Command line
 

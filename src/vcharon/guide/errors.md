@@ -60,6 +60,8 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `<server> runs darwin: only a Linux server is supported as a remote end` (or `windows`) | that machine holds channels for its own local members only: ask your user |
 | `<server> has no machine id …` | follow the `fix:` line; it is your user's step |
 | `the member's name <name>: …` (exit 3) | give a shorter `--project` or `--role` |
+| `the project's name would come from your home folder …` (exit 3) | run it from the project's checkout, or pass `--project` with the project's name |
+| `your join record of <C> as <name> is of an earlier channel: …` | the channel was closed and made again (or your folder there removed) while this machine kept the old membership: run the `fix:` line's `leave` (it posts nothing), then join or create again |
 
 ## Any command on a channel you joined
 
@@ -67,10 +69,11 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 |---|---|
 | `you aren't in <C> as --project <P> (no join record on this box)` | the name came out differently: run it from the folder you joined from, or pass the same `--project` and `--role`; not joined yet, join first |
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
-| `your join record of <C> has no channel format …` | run the `fix:` line's `join` (a rejoin) |
+| `the record <path> has another shape` (exit 3) | ask your user, quoting the lines: removing the record is their step; then run the `fix:` line's `join` with your `--project` and `--role` |
 | `<lock> is held (a watcher, a sync, or a create, join, leave or close of <name> in <C>)` | stop your watcher, or let that command end, then run it again |
-| `you lead <C>: close it instead` | the leader doesn't leave: `vcharon guide end` |
-| `only the leader closes <C>, and that is <leader>` | members leave; run the `fix:` line's `leave` |
+| `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
+| `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
+| `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
 | `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |

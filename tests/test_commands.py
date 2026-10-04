@@ -540,6 +540,11 @@ class FixRoundTripTest(ChannelCase):
         self.lines("leave", "game", "--project", "ui", code=1)
         self.use_box("mac")
         self.lines("close", "game", "--role", "b", code=1)
+        # a record in another shape
+        broken = channel_cmd.record_path("game", "x")
+        write_tree(os.path.dirname(broken), {os.path.basename(broken): b"{}"})
+        self.lines("sync", "game", "--role", "b", code=3)
+        os.remove(broken)
         # a sync that fails after a join, a create, a leave
         with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
             self.lines("join", "game", "--server", "fake-dest", "--role", "c", code=4)
@@ -581,7 +586,7 @@ class FixRoundTripTest(ChannelCase):
         # what the cases above printed: each command (twice for reset_hint's)
         self.assertGreaterEqual(n, 20, self.seen)
         verbs = {argv[0] for text in self.seen for argv in commands(text)}
-        self.assertEqual(verbs, {"post", "join", "list", "close", "leave", "sync", "read", "key",
+        self.assertEqual(verbs, {"post", "join", "list", "guide", "leave", "sync", "read", "key",
                                  "setup"}, self.seen)
         self.assertEqual(len([t for t in self.seen if "--takeover" in t]), 2, self.seen)
 
@@ -608,12 +613,21 @@ class FixRoundTripTest(ChannelCase):
 FLAGS = "--project web --role b"
 HINTS = {
     "channel_cmd.py": [
-        # the closed channel's (CHANNEL_GONE_HINT), and close's for a member
+        # the closed channel's (CHANNEL_GONE_HINT)
         ("vcharon leave %s %s", ("game", FLAGS)),
-        ("vcharon leave %s %s", ("game", FLAGS)),
+        # close's for a member, and leave's for the leader: text, never the command itself
+        ("members leave after the leader's CLOSED; how: vcharon guide end", ()),
+        ("a leader ends the channel with CLOSED to @all after every member's DONE, then a "
+         "close; how: vcharon guide end", ()),
+        # a join record of an earlier channel of the name
+        ("run vcharon leave %s %s (it posts nothing, and removes this machine's files of that "
+         "membership), then %s again", ("game", FLAGS, "join")),
+        # a join record in another shape
+        ("ask your user: this record is from an older vcharon, or was edited; they remove it, "
+         "then run vcharon join %s --server ALIAS --rejoin (or --local, for a channel on this "
+         "machine) with the --project and --role you joined with", ("game",)),
         ("join it first, with --server ALIAS (or --local on the machine that holds the "
          "channel): vcharon join %s --server ALIAS %s", ("game", FLAGS)),
-        ("vcharon close %s %s", ("game", FLAGS)),
         ("vcharon: the sync failed; %s is created: run vcharon sync %s --full %s again",
          ("game", "game", FLAGS)),
         ("vcharon list %s", ("--server dev",)),

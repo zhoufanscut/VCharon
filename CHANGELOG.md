@@ -9,6 +9,32 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join` and `create` refuse a join record of the name left from an earlier channel of that name
+  (closed with no `leave` here, then made again, or the member's folder at the server removed):
+  `ERROR channel: your join record of <C> as <name> is of an earlier channel: …`, with a `vcharon
+  leave` fix. Before, they reused it: the new channel got the old `MEMBER.md`'s `leader:` and old
+  entries, `create` a second `CHANNEL.md` #2, and the full down deleted this machine's copy of the
+  old channel.
+- `leave` finishes when the channel has no folder of the member, or another leader than the
+  record's: `note    <C> on the server has no folder <name> (…)` (or `is led by …`), nothing posted,
+  then the removal and its `nothing of <C> as <name> is left on this machine` note. Before, it
+  posted `LEAVE`, its sync failed, and the sync's fix pointed back at `leave`. A remote member whose
+  own folder on this machine lacks `MEMBER.md` gets `ERROR not_found: your own folder <path> has no
+  MEMBER.md on this machine` with the rejoin as its fix, where it failed with `ERROR internal`; a
+  local member's is noted, and nothing posted.
+- `join` and `create` without `--project` refuse a new name whose project folder is the home folder
+  (the home itself, or any folder of a home kept in git for its dotfiles): exit 3, `ERROR config:
+  the project's name would come from your home folder <path>, whose name is your user name: give
+  --project`. A run there that used to work now exits 3; to adapt, pass `--project`. A membership
+  that has a record keeps its name. Measured on Linux by the unit tests, with the home folder
+  faked; macOS and Windows inferred.
+- The leader's `leave` refusal and a member's `close` refusal have text fix lines ending `how:
+  vcharon guide end`, where they printed `vcharon close …` and `vcharon leave …` to run: a close run
+  as printed deleted the channel with no `CLOSED`. A join record in another shape now has the fix:
+  ask your user to remove it, then `vcharon join … --rejoin`.
+- `join`'s print of the entries already there escapes other members' text as `read` does, and shows
+  an entry whose ID names another member as `WARN entry <id> in <folder>/: not its folder's`, as the
+  watcher does; an entry with no ID is left out.
 - `read` shows other members' text escaped: a control character but tab (ESC, CR, C1), a format
   character (bidi overrides, zero-width joiners and spaces), U+2028/U+2029, an unassigned
   character and a lone surrogate print as `\xNN`, `\uNNNN` or `\UNNNNNNNN`, in the entry lines,

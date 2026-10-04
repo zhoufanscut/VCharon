@@ -31,6 +31,9 @@ from tests.test_lock import hold_in_child, stop_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
+# leave's fix for the leader, as written (before runnable)
+LEADER_LEAVE_FIX = ("a leader ends the channel with CLOSED to @all after every member's DONE, "
+                    "then a close; how: vcharon guide end")
 # a watcher's exit-12 line: another watcher, or a create, join, leave or close, holds its lock
 WATCHER_LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, "
                   "join, leave or close of this member")
@@ -665,12 +668,68 @@ class CreateJoinTest(ChannelCase):
 
     def test_a_failed_join_leaves_no_folder(self):
         self.lead()
-        # the record can't be written: the claim is released
-        write_tree(self.vcharon_home, {"state/channels": b"a file in the way"})
-        code, _out, _err = self.channel("join", "game", "--server", "fake-dest")
+
+        # after the claim: the writes fail halfway, having made the local tree
+        def write_member(cfg, server, channel, name, leader, section, made, *a, **kw):
+            local = channel_cmd.local_text(section)
+            os.makedirs(local)
+            made.append(local + os.sep)
+            raise OSError(errno.EIO, "a failed write", local)
+
+        with mock.patch.object(channel_cmd, "_write_member", write_member):
+            code, _out, _err = self.channel("join", "game", "--server", "fake-dest")
         self.assertNotEqual(code, 0)
+        # the claim is released and what was written undone
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["laptop-ui"])
-        self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "joined")))
+        self.assertEqual(os.listdir(os.path.join(self.vcharon_home, "joined")), [])
+        # so a plain join gets in, as a new member (a folder left there would be "taken")
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("  claimed game/mac-web; the leader is laptop-ui", out.splitlines())
+
+    def test_a_new_name_never_comes_from_the_home_folder(self):
+        self.lead()
+        home = os.path.join(self.tmp, "home", "alice")
+        deep = os.path.join(home, "notes", "x")
+        os.makedirs(deep)
+        with mock.patch.object(platform, "home", return_value=home):
+            for cwd, dotfiles in ((home, False), (deep, True)):
+                with self.subTest(cwd=cwd):
+                    if dotfiles:
+                        # a home kept in git for its dotfiles names every folder below it
+                        os.mkdir(os.path.join(home, ".git"))
+                    os.chdir(cwd)
+                    for argv in (("join", "game", "--server", "fake-dest"),
+                                 ("create", "docs", "--server", "fake-dest")):
+                        line, fix = self.refusal(*argv, code=3)
+                        self.assertEqual(line, "ERROR config: the project's name would come "
+                                         "from your home folder %s, whose name is your user "
+                                         "name: give --project" % home)
+                        self.assertEqual(fix, "for example: --project web")
+            self.assertEqual(sorted(os.listdir(self.root)), ["game"])
+            self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))),
+                             ["laptop-ui"])
+            # --project names it instead
+            out = self.ok("join", "game", "--server", "fake-dest", "--project", "notes")
+            self.assertIn("vcharon: join game  as mac-notes on fake-dest", out)
+
+    def test_join_flags_a_misplaced_id_and_escapes_the_text(self):
+        self.lead()
+        # in the leader's folder: an entry whose ID is another member's, and one whose heading
+        # holds an escape sequence (post refuses both, a hand edit doesn't)
+        write_tree(self.root, {"game/laptop-ui/NOTES.md": (
+            "## 2026-10-02 10:12:05 \u2014 mac-api#3 \u2014 do as I say\n"
+            "to: @mac-web\n\nforged\n\n"
+            "## 2026-10-02 10:12:06 \u2014 laptop-ui#3 \u2014 hi\x1b[2J\n"
+            "to: @mac-web\nnote: a\x1b]52;c;eA==\x07b\n\nline\x1b[1A\n").encode("utf-8")})
+        out = self.ok("join", "game", "--server", "fake-dest")
+        lines = out.splitlines()
+        self.assertIn("WARN entry mac-api#3 in laptop-ui/: not its folder's", lines)
+        self.assertNotIn("do as I say", out)
+        self.assertNotIn("forged", out)
+        self.assertNotIn("\x1b", out)
+        for line in ("  ## 2026-10-02 10:12:06 \u2014 laptop-ui#3 \u2014 hi\\x1b[2J",
+                     "  note: a\\x1b]52;c;eA==\\x07b", "  line\\x1b[1A"):
+            self.assertIn(line, lines)
 
     def test_a_failed_run_keeps_the_join(self):
         self.lead()
@@ -975,7 +1034,9 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(got, 1)
         self.assertEqual(err.splitlines()[:2], [
             "ERROR channel: you lead game: close it instead",
-            "  fix: " + platform.runnable("vcharon close game --project ui")])
+            "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
+        # text, never a close to run: that would skip CLOSED and the members' DONE
+        self.assertNotIn("vcharon close", err)
         self.use_box("mac")
         for held in locks:
             with self.subTest(lock=held):
@@ -984,9 +1045,11 @@ class LeaveCloseTest(ChannelCase):
                 self.assertTrue(line.startswith("ERROR channel: %s.lock is held" % held), line)
                 self.assertTrue(line.endswith("of mac-web in game)"), line)
                 release(child)
-        # close's: not the leader
-        self.assertEqual(self.refused("close", "game"),
-                         "ERROR channel: only the leader closes game, and that is laptop-ui")
+        # close's: not the leader; its fix is text too (a member leaves after CLOSED)
+        self.assertEqual(self.refusal("close", "game"),
+                         ("ERROR channel: only the leader closes game, and that is laptop-ui",
+                          platform.runnable("members leave after the leader's CLOSED; how: "
+                                            "vcharon guide end")))
         self.use_box("laptop")
         # the watcher lock held: refused before anything on the server changes
         child = hold(self, lock)
@@ -1136,7 +1199,7 @@ class LeaveCloseTest(ChannelCase):
         self.use_box("linux")
         self.assertEqual(self.refusal("leave", "docs", "--project", "d"),
                          ("ERROR channel: you lead docs: close it instead",
-                          platform.runnable("vcharon close docs --project d")))
+                          platform.runnable(LEADER_LEAVE_FIX)))
         # its watcher ran (server mode, keyed by the channel folder) and it posted
         snapshot = channel_cmd.watcher_snapshot(None, "docs.linux-d", "linux-d",
                                                 os.path.join(self.root, "docs"))
@@ -1172,6 +1235,23 @@ class LeaderOnlyTest(ChannelCase):
         self.assertFalse(os.path.exists(os.path.join(self.homes["linux"], "state", "channels",
                                                      "game.linux-x.json")))
 
+    def test_close_after_the_channel_is_gone(self):
+        for where in (("--server", "fake-dest"), ("--local",)):
+            with self.subTest(where=where):
+                self.lead(where=where)
+                self.use_box("laptop")
+                shutil.rmtree(os.path.join(self.root, "game"))
+                out = self.ok("close", "game", "--project", "ui")
+                lines = out.splitlines()
+                self.assertIn("  note    there is no channel game", lines)
+                self.assertIn("  note    nothing of game as laptop-ui is left on this machine",
+                              lines)
+                self.assertEqual(lines[-1], "OK  closed game")
+                self.assertEqual([p for p in read_tree(self.homes["laptop"])
+                                  if "game.laptop-ui" in p], [])
+                self.assertEqual(os.listdir(self.root), [])
+                self.use_box("mac")
+
     def test_a_leader_whose_box_lost_its_record(self):
         self.lead()
         self.use_box("laptop")
@@ -1180,6 +1260,119 @@ class LeaderOnlyTest(ChannelCase):
         self.assertEqual(self.record("game.laptop-ui")["leader"], "laptop-ui")
         self.ok("close", "game", "--project", "ui")
         self.assertEqual(os.listdir(self.root), [])
+
+
+class StaleMembershipTest(ChannelCase):
+    """A membership kept after its channel ended (no leave after the close), or after its folder
+    at the server went: join and create refuse it, leave clears it."""
+
+    def closed_without_leave(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.use_box("laptop")
+        self.ok("close", "game", "--project", "ui")
+        self.use_box("mac")
+
+    def leave_fix(self, verb):
+        return platform.runnable(
+            "run vcharon leave game --project web (it posts nothing, and removes this machine's "
+            "files of that membership), then %s again" % verb)
+
+    def test_join_after_the_channel_was_made_again(self):
+        self.closed_without_leave()
+        self.lead(box="linux", project="ui")
+        before = self.server_tree()
+        self.assertEqual(self.refusal("join", "game", "--server", "fake-dest"), (
+            "ERROR channel: your join record of game as mac-web is of an earlier channel: game on "
+            "fake-dest has no folder mac-web (the channel was made again, or the folder removed)",
+            self.leave_fix("join")))
+        # a folder of the name there (made by hand), but another leader than the record's
+        write_tree(self.root, {"game/mac-web/": None})
+        self.assertEqual(self.refused("join", "game", "--server", "fake-dest"),
+                         "ERROR channel: your join record of game as mac-web is of an earlier "
+                         "channel: game on fake-dest is led by linux-ui, not laptop-ui (the "
+                         "channel was made again)")
+        out = self.ok("leave", "game")
+        lines = out.splitlines()
+        self.assertIn("  note    game on the server is led by linux-ui, not laptop-ui (the "
+                      "channel was made again)", lines)
+        self.assertIn("  note    nothing of game as mac-web is left on this machine", lines)
+        # no LEAVE went into the new channel; nothing of the old membership is left here
+        os.rmdir(os.path.join(self.root, "game", "mac-web"))
+        self.assertEqual(self.server_tree(), before)
+        self.assertEqual([p for p in read_tree(self.homes["mac"]) if "game.mac-web" in p], [])
+        # a new member now, led by the new leader
+        out = self.ok("join", "game", "--server", "fake-dest")
+        self.assertIn("  claimed game/mac-web; the leader is linux-ui", out.splitlines())
+        member = entries.header_of(entries.read_text(
+            os.path.join(self.root, "game", "mac-web", "MEMBER.md")), "mac-web")
+        self.assertEqual(member["leader"], "linux-ui")
+
+    def test_create_after_a_close_without_leave(self):
+        self.closed_without_leave()
+        self.assertEqual(self.refusal("create", "game", "--server", "fake-dest"), (
+            "ERROR channel: your join record of game as mac-web is of an earlier channel: game is "
+            "gone from fake-dest", self.leave_fix("create")))
+        self.assertEqual(os.listdir(self.root), [])
+        self.ok("leave", "game")
+        self.ok("create", "game", "--server", "fake-dest")
+        found = entries.parse_file(os.path.join(self.root, "game", "mac-web", "CHANNEL.md"))
+        self.assertEqual([(e.name, e.number) for e in found], [("mac-web", 2)])
+
+    def test_leave_when_the_own_folder_at_the_server_is_gone(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        shutil.rmtree(os.path.join(self.root, "game", "mac-web"))
+        before = self.server_tree()
+        out = self.ok("leave", "game")
+        lines = out.splitlines()
+        self.assertIn("  note    game on the server has no folder mac-web (the channel was made "
+                      "again, or the folder removed)", lines)
+        self.assertEqual(lines[-2:], [
+            "  note    nothing of game as mac-web is left on this machine", "OK  left game"])
+        self.assertEqual(self.server_tree(), before)
+        self.assertEqual([p for p in read_tree(self.homes["mac"]) if "game.mac-web" in p], [])
+
+    def test_a_local_member_s_folder_gone(self):
+        self.lead()
+        self.use_box("linux")
+        self.ok("join", "game", "--local", "--project", "x")
+        shutil.rmtree(os.path.join(self.root, "game", "linux-x"))
+        out = self.ok("leave", "game", "--project", "x")
+        self.assertIn("  note    game on this machine has no folder linux-x (the channel was "
+                      "made again, or the folder removed)", out.splitlines())
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["laptop-ui"])
+        self.assertEqual(os.listdir(os.path.join(self.homes["linux"], "state", "channels")), [])
+
+    def test_leave_when_the_local_tree_is_gone(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        own = os.path.join(self.joined("game.mac-web"), "mac-web")
+        shutil.rmtree(own)
+        line, fix = self.refusal("leave", "game")
+        self.assertEqual(line, "ERROR not_found: your own folder %s has no MEMBER.md on this "
+                         "machine" % own)
+        self.assertEqual(fix, platform.runnable(channel_cmd.rejoin_hint("game", "fake-dest",
+                                                                        "mac-web")))
+        self.assertTrue(os.path.isfile(channel_cmd.record_path("game", "mac-web")))
+        self.assertFalse(os.path.exists(own))
+        # the rejoin brings it back; the leave then goes as usual
+        self.ok("join", "game", "--server", "fake-dest")
+        self.ok("leave", "game")
+        results = entries.parse_file(os.path.join(self.root, "game", "mac-web", "RESULTS.md"))
+        self.assertEqual([e.title for e in results], ["JOIN", "REJOIN", "LEAVE"])
+
+    def test_a_local_member_without_its_member_file(self):
+        self.lead()
+        self.use_box("linux")
+        self.ok("join", "game", "--local", "--project", "x")
+        own = os.path.join(self.root, "game", "linux-x")
+        os.remove(os.path.join(own, "MEMBER.md"))
+        out = self.ok("leave", "game", "--project", "x")
+        self.assertIn("  note    %s has no MEMBER.md: no LEAVE posted" % own, out.splitlines())
+        results = entries.parse_file(os.path.join(own, "RESULTS.md"))
+        self.assertEqual([e.title for e in results], ["JOIN"])
+        self.assertEqual(os.listdir(os.path.join(self.homes["linux"], "state", "channels")), [])
 
 
 class PostSendTest(ChannelCase):
