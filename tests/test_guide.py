@@ -273,8 +273,9 @@ class TrustLineTest(ChannelCase):
 # A tag is found after "_" too, as in a test's name, so it is bounded by letters and digits
 # only. A lowercase one may take a letter after its number, but the file type m4a isn't one;
 # a V tag stops at a ".", so a version number isn't one. A regex match variable named "m" and a
-# digit, or grep's -m and a digit, match too: list such a line in ALLOWED. A numbered test name is a plan's item
-# number: unittest sorts by name, so the number orders nothing a test can rely on.
+# digit, or grep's -m and a digit, match too: list such a line in ALLOWED. A numbered test name
+# is a plan's item number: unittest sorts by name, so the number orders nothing a test can rely
+# on.
 HISTORY = re.compile("|".join([
     r"(?<![A-Za-z0-9])M[0-9]+[a-z]?(?![A-Za-z0-9])",
     r"(?<![A-Za-z0-9])m[0-9]+[a-z]?(?![A-Za-z0-9])(?<!m4a)",

@@ -863,13 +863,6 @@ from      = local:path
 from.path = {local}/b
 to        = remote:dir
 to.path   = inbox_b
-
-[c]
-ssh       = other-dest
-from      = local:path
-from.path = {local}/c
-to        = remote:dir
-to.path   = inbox_c
 """
 
 # a pull on a's destination; {path} is under the server's home
@@ -904,14 +897,14 @@ SUMMARY_FAILED = r"\AFAILED  %s  \(\d+\.\d s\)\Z"
 
 
 class MultiJobTest(FakeSshCase):
-    """The sync's runner with several jobs: one connection per run of jobs with one
-    session key, per-job blocks, logs and states, the summary line and the exit code."""
+    """The sync's runner with several jobs: one connection, per-job blocks, logs and
+    states, the summary line and the exit code."""
 
     def setUp(self):
         FakeSshCase.setUp(self)
         util.use_test_jobs(self)
         self.local = os.path.join(self.tmp, "local")
-        for name in "abc":
+        for name in "ab":
             write_tree(os.path.join(self.local, name), {name + ".txt": name.encode()})
             os.mkdir(os.path.join(self.home, "inbox_" + name))
         self.ssh_log = os.path.join(self.tmp, "ssh.log")
@@ -993,31 +986,6 @@ class MultiJobTest(FakeSshCase):
                          ["vcharon: a  %s/a -> fake-dest:inbox_a  (full)" % self.local,
                           "vcharon: b  %s/b -> fake-dest:inbox_b  (full)" % self.local])
 
-    def test_session_keys(self):
-        # another destination, or the same one with other settings, is another connection;
-        # the order given is kept, never regrouped
-        self.config(MULTI, "compress = yes\n")
-        for argv, dests in ((["a", "c"], ["fake-dest", "other-dest"]),
-                            (["c", "a", "b"], ["other-dest", "fake-dest"]),
-                            (["a", "c", "b"], ["fake-dest", "other-dest", "fake-dest"])):
-            with self.subTest(argv=argv):
-                os.environ["FAKE_SSH_ARGV_LOG"] = self.ssh_log = os.path.join(
-                    self.tmp, "ssh-%s.log" % "".join(argv))
-                code, out, err = self.run_jobs(*argv)
-                self.assertEqual(code, 0, err)
-                self.assertEqual(self.dests(), dests)
-                self.assertEqual([l.split()[1] for l in out.splitlines()
-                                  if l.startswith("vcharon: ")], argv)
-        # the compress = yes at the end belongs to c; now give it to b instead: a and b
-        # then have one destination and different settings
-        text = MULTI.replace("to.path   = inbox_b\n", "to.path   = inbox_b\ncompress  = yes\n")
-        self.config(text)
-        os.environ["FAKE_SSH_ARGV_LOG"] = self.ssh_log = os.path.join(self.tmp, "ssh-ab.log")
-        self.assertEqual(self.run_jobs("a", "b")[0], 0)
-        self.assertEqual(self.dests(), ["fake-dest", "fake-dest"])
-        self.assertEqual(cli.session_key(cli.config.load().jobs["a"])[0],
-                         cli.session_key(cli.config.load().jobs["b"])[0])
-
     def test_busy_second_job(self):
         held = state.lock("b")
         self.addCleanup(held.release)
@@ -1044,22 +1012,6 @@ class MultiJobTest(FakeSshCase):
         self.assertEqual(self.dests(), [])
         self.assertEqual(self.job_log("a"), "")
         self.assertFalse(os.path.exists(state.path("a")))
-
-    def test_unknown_second_job(self):
-        code, _out, err = self.run_jobs("a", "nope")
-        self.assertEqual(code, 3)
-        self.assertTrue(err.startswith("ERROR config: no channel section nope"), err)
-        self.assertEqual(self.dests(), [])
-
-    def test_a_job_named_twice(self):
-        for argv, first in ((["a", "a"], "ERROR config: a is named twice"),
-                            (["a", "b", "A"], "ERROR config: a and A name the same job")):
-            with self.subTest(argv=argv):
-                code, out, err = self.run_jobs(*argv)
-                self.assertEqual(code, 3)
-                self.assertEqual(err.splitlines()[:2], [first, "  fix: name each job once"])
-                self.assertEqual(out, "")
-        self.assertEqual(self.dests(), [])
 
     def test_a_failed_job_doesnt_stop_the_next(self):
         # p's source is missing on the server: the helper refuses its plan, and stays in step;
@@ -1089,16 +1041,21 @@ class MultiJobTest(FakeSshCase):
         self.assert_locks_free("p", "q", "a")
 
     def test_exit_code_is_the_first_failure(self):
-        # b's state is for another config (exit 3); c can't connect: its own group (exit 4)
+        # b's state is for another config (exit 3); a's inbox is gone (exit 1)
         os.makedirs(os.path.dirname(state.path("b")), exist_ok=True)
         with open(state.path("b"), "w", encoding="utf-8") as f:
             f.write("{}")
-        os.environ["FAKE_SSH_EXIT"] = "255"
-        code, out, err = self.run_jobs("b", "c")
-        self.assertEqual(code, 3)
-        self.assertRegex(out.splitlines()[-1], SUMMARY_FAILED % "2 of 2 jobs failed")
-        self.assertEqual([l.split(": ")[:2] for l in err.splitlines() if l.startswith("ERROR")],
-                         [["ERROR b", "state_mismatch"], ["ERROR c", "connect"]])
+        shutil.rmtree(os.path.join(self.home, "inbox_a"))
+        for argv, code, errors in ((("b", "a"), 3, [["ERROR b", "state_mismatch"],
+                                                    ["ERROR a", "not_found"]]),
+                                   (("a", "b"), 1, [["ERROR a", "not_found"],
+                                                    ["ERROR b", "state_mismatch"]])):
+            with self.subTest(argv=argv):
+                got, out, err = self.run_jobs(*argv)
+                self.assertEqual(got, code, err)
+                self.assertRegex(out.splitlines()[-1], SUMMARY_FAILED % "2 of 2 jobs failed")
+                self.assertEqual([l.split(": ")[:2] for l in err.splitlines()
+                                  if l.startswith("ERROR")], errors)
 
     def test_the_error_line_names_the_failing_job(self):
         # with several jobs the console's ERROR line says which failed; one job's line,
@@ -1121,37 +1078,29 @@ class MultiJobTest(FakeSshCase):
                   if "  error  " in line]
         self.assertEqual([line for line in logged if "can't be read" in line], [message] * 2)
         self.assertNotIn("b: state_mismatch", self.job_log("b"))
-        # an error no single job owns keeps its text
-        code, _out, err = self.run_jobs("a", "nope")
-        self.assertEqual(code, 3)
-        self.assertEqual(err.splitlines()[0], "ERROR config: no channel section nope in %s"
-                         % os.path.join(self.vcharon_home, "channels.d"))
 
-    def test_a_broken_connection_skips_the_rest_of_its_group(self):
+    def test_a_broken_connection_skips_the_rest(self):
         for how, first_error in (("lost", "ERROR a: lost: "), ("protocol", "ERROR a: protocol: ")):
             with self.subTest(how=how):
                 os.environ["FAKE_SSH_ARGV_LOG"] = self.ssh_log = os.path.join(
                     self.tmp, "ssh-%s.log" % how)
                 with with_helper("HOW = %r\n" % how + BREAKS):
-                    code, out, err = self.run_jobs("a", "b", "c")
+                    code, out, err = self.run_jobs("a", "b")
                 self.assertEqual(code, 1)
                 lines = out.splitlines()
                 self.assertEqual(lines[:2], ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local,
                                              "vcharon: b  skipped: the connection to fake-dest "
                                              "broke"])
-                self.assertEqual(lines[2], "vcharon: c  %s/c -> other-dest:inbox_c" % self.local)
-                self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 3 jobs failed, 1 skipped")
+                self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 2 jobs failed, 1 skipped")
                 self.assertTrue(err.startswith(first_error), err)
-                self.assertEqual(self.dests(), ["fake-dest", "other-dest"])
-                self.assertEqual(self.inbox("c"), {"c.txt": b"c"})
+                self.assertEqual(self.dests(), ["fake-dest"])
                 self.assertEqual(self.inbox("b"), {})
                 self.assertFalse(os.path.exists(state.path("b")))
                 self.assertIn("vcharon: b  skipped: the connection to fake-dest broke",
                               self.job_log("b"))
-                self.assert_locks_free("a", "b", "c")
-                os.remove(state.path("c"))
+                self.assert_locks_free("a", "b")
 
-    def test_a_connect_failure_skips_its_group(self):
+    def test_a_connect_failure_skips_the_rest(self):
         os.environ["FAKE_SSH_EXIT"] = "255"
         code, out, _err = self.run_jobs("a", "b")
         self.assertEqual(code, 4)
@@ -1168,29 +1117,13 @@ class MultiJobTest(FakeSshCase):
             raise KeyboardInterrupt
 
         with mock.patch.object(engine.Engine, "run", interrupted):
-            code, out, err = self.run_jobs("a", "b", "c")
+            code, out, err = self.run_jobs("a", "b")
         self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
         self.assertEqual(calls, ["inbox_a"])
         self.assertEqual(out.splitlines(), ["vcharon: a  %s/a -> fake-dest:inbox_a" % self.local])
         self.assertIn("  error  interrupted", self.job_log("a"))
         self.assertEqual(self.dests(), ["fake-dest"])
-        self.assert_locks_free("a", "b", "c")
-
-    def test_each_destination_its_own_machine_id(self):
-        ids = {"fake-dest": "11" * 16, "other-dest": "22" * 16}
-        real = ssh.Session.open
-
-        def opened(session):
-            # fake ssh hands this to the helper it starts
-            os.environ["VCHARON_TEST_MACHINE_ID"] = ids[session.dest]
-            return real(session)
-
-        with mock.patch.object(ssh.Session, "open", opened):
-            code, _out, err = self.run_jobs("a", "c")
-        self.assertEqual(code, 0, err)
-        for name, dest in (("a", "fake-dest"), ("c", "other-dest")):
-            with open(state.path(name), encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["sink"]["machine"], ids[dest])
+        self.assert_locks_free("a", "b")
 
     def test_no_machine_id_fails_every_job_on_it(self):
         with with_helper(NO_MACHINE):
@@ -1273,14 +1206,15 @@ class MultiJobTest(FakeSshCase):
         bad = ("def job_reset(h, call_id, args):\n    h.ok(call_id, {'x': 1})\n\n"
                "_real.HANDLERS['job.reset'] = job_reset\n")
         with with_helper(bad):
-            code, out, err = self.run_jobs("a", "b", "d", "c")
+            code, out, err = self.run_jobs("a", "b", "d")
         self.assertEqual(code, 1)
         lines = out.splitlines()
         self.assertIn("vcharon: d  skipped: the connection to fake-dest broke", lines)
-        self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 4 jobs failed, 1 skipped")
+        self.assertRegex(lines[-1], SUMMARY_FAILED % "1 of 3 jobs failed, 1 skipped")
         self.assertTrue(err.startswith("ERROR b: protocol: a malformed job.reset result"), err)
-        self.assertEqual(self.dests(), ["fake-dest", "other-dest"])
-        self.assertEqual(self.inbox("c"), {"c.txt": b"c"})
+        self.assertEqual(self.dests(), ["fake-dest"])
+        self.assertEqual(self.inbox("a"), {"a.txt": b"a"})
+        self.assertEqual(self.inbox("d"), {})
 
     def test_proxy_warnings_go_to_the_jobs_own_log(self):
         # b's sink.commit fails without saying what it did: the warning is b's, though a
@@ -1377,10 +1311,6 @@ class RepeatTest(FakeSshCase):
                 self.assertEqual(err.splitlines()[:2],
                                  ["ERROR config: --repeat doesn't go with %s" % what,
                                   "  fix: leave one of them out"])
-        code, out, err = self.run_jobs("a", "c", "--repeat", "2")
-        self.assertEqual((code, out), (3, ""))
-        self.assertTrue(err.startswith("ERROR config: --repeat needs jobs that share one "
-                                       "connection\n"), err)
         for value in ("0", "301", "x", "1.5", "²", ""):
             with self.subTest(value=value):
                 code, out, err = self.run_cli("sync", "mb", "--repeat", value)
@@ -1388,7 +1318,7 @@ class RepeatTest(FakeSshCase):
                 self.assertTrue(err.startswith("ERROR config: argument --repeat: must be a "
                                                "whole number of seconds, 1 to 300"), err)
         self.assertEqual(self.dests(), [])
-        self.assert_locks_free("a", "b", "c")
+        self.assert_locks_free("a", "b")
 
     def test_rounds_on_one_session(self):
         resets = []
@@ -1952,17 +1882,6 @@ class MailboxTest(FakeSshCase):
                 self.assertNotIn("mac", state.load("mb.windows.down").source["sent"])
                 self.assertIn("mac", self.left_out_lines()[-1])
 
-    def test_a_top_level_file_in_sent_is_dropped_not_deleted(self):
-        # "todo" is a valid writer's name, but sent recorded a file: dropped, not deleted
-        self.ok(*SYNC)
-        write_tree(self.local, {"todo": b"t"})
-        st = os.stat(os.path.join(self.local, "todo"))
-        self.edit_down_sent(lambda sent: sent.update(todo=[st.st_size, st.st_mtime, False]))
-        lines = self.ok(*SYNC)
-        self.assertFalse(any(line.startswith("  delete") for line in lines), lines)
-        self.assertEqual(read_tree(self.local)["todo"], b"t")
-        self.assertNotIn("todo", state.load("mb.windows.down").source["sent"])
-
     def test_a_gone_writer_folder_without_its_own_entry_in_sent(self):
         # sent holds mac/x.md but not mac: a valid writer's name gone from the server is
         # that writer's folder going, and the client's copy follows
@@ -2234,21 +2153,6 @@ class MailboxTest(FakeSshCase):
         lines = self.ok(*SYNC)
         self.assertIn("notes.md", read_tree(self.local))
 
-    def test_a_writer_folder_that_was_sent_as_a_file(self):
-        # sent as a top-level file by an older version, now another writer's folder: a kind change,
-        # a delete and a put, as for any path
-        self.ok(*SYNC)
-        write_tree(self.local, {"mac": b"old"})
-        st = os.stat(os.path.join(self.local, "mac"))
-        with open(state.path("mb.windows.down"), encoding="utf-8") as f:
-            raw = json.load(f)
-        raw["source"]["sent"]["mac"] = [st.st_size, st.st_mtime, False]
-        with open(state.path("mb.windows.down"), "w", encoding="utf-8") as f:
-            json.dump(raw, f)
-        write_tree(self.server, {"mac/hello.md": b"hi"})
-        self.ok(*SYNC)
-        self.assertEqual(read_tree(os.path.join(self.local, "mac")), {"hello.md": b"hi"})
-
     def test_a_closed_channel(self):
         # The channel's folder gone (closed) fails both jobs with not_found,
         # whose fix line says to leave, never "create it"; nothing is made at the server, even
@@ -2268,16 +2172,13 @@ class MailboxTest(FakeSshCase):
             self.assertNotIn(stage.ROOT_HINT, err)
             self.assertFalse(os.path.exists(self.server))
 
-    def test_one_job_alone_and_twice(self):
+    def test_one_job_alone(self):
         shutil.rmtree(self.local)
         lines = self.jobs_ok("mb.windows.down")
         self.assertEqual(lines[0], "vcharon: mb.windows.down  fake-dest:vcharon_mailbox -> %s"
                          % self.local)
         self.assertEqual(len(lines), 3)
         self.assertTrue(os.path.isdir(self.own))
-        code, _out, err = self.run_jobs("mb.windows", "mb.windows.up")
-        self.assertEqual(code, 3)
-        self.assertEqual(err.splitlines()[0], "ERROR config: mb.windows.up is named twice")
 
     def test_reset_and_doctor_scope(self):
         self.ok(*SYNC)

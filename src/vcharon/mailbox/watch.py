@@ -87,9 +87,9 @@ their folder ("loose"), so each is told once. It holds the warnings shown too: a
 prints them again right after the watching line, and only a new one counts. It holds the ERROR
 line shown and its fix line, and the keys of the errors that counted in the failing streak: a
 restart whose first round fails with the saved text prints it again without counting it, so a
-blocked client isn't woken in a loop. A version-1 snapshot (before channels) is a fresh start, noted. With
---until-change, a round whose save failed ends the watch with EXIT error (exit 11). A lock on it
-keeps a second watcher of the same membership from starting (exit 12).
+blocked client isn't woken in a loop. With --until-change, a round whose save failed ends the
+watch with EXIT error (exit 11). A lock on it keeps a second watcher of the same membership from
+starting (exit 12).
 """
 
 from __future__ import annotations
@@ -503,7 +503,8 @@ def snapshot_path(root, me, job=None):
     else:
         # normcase(realpath), as the post lock: two spellings of one folder (a link, and on
         # Windows another case) get one lock, so exit 12 and leave's and close's lock checks see
-        # every watcher of it. On Linux with no links the name is as before.
+        # every watcher of it. Keep the name: it is v0.1.0's, so a change would lose saved
+        # snapshots, and a running watcher's lock.
         key = _root_key(root)
         digest = hashlib.sha256(os.fsencode(key)).hexdigest()[:12]
         name = "mailbox-watch-dir-%s-%s.json" % (me, digest)
@@ -533,10 +534,6 @@ def load_snapshot(path, root, me):
         doc = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return (None, None, "it isn't JSON") + nothing
-    if isinstance(doc, dict) and doc.get("version") == 1 and _int(doc["version"]):
-        # a version-1 snapshot knows files, not entries, and no channel was ever watched
-        # with one
-        return (None, None, "it is from before channels (version 1): a fresh start") + nothing
     if not _snapshot_shape(doc):
         return (None, None, "it has another shape") + nothing
     # by the key snapshot_path names it with, not as typed: a restart under another spelling
@@ -546,7 +543,7 @@ def load_snapshot(path, root, me):
     if doc["me"] != me:
         return (None, None, "it is for the member %s" % doc["me"]) + nothing
     return ({k: (v[0], v[1]) for k, v in doc["files"].items()}, doc["saved"], None,
-            list(doc.get("warnings", [])), doc.get("error"), list(doc.get("counted") or []),
+            list(doc["warnings"]), doc.get("error"), list(doc.get("counted") or []),
             Marks(doc["seen"], doc["heads"], doc["loose"]), doc.get("fix"))
 
 
@@ -555,11 +552,11 @@ def _int(v):
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-_SNAPSHOT_KEYS = {"version", "root", "me", "saved", "files", "seen", "heads", "loose"}
+_SNAPSHOT_KEYS = {"version", "root", "me", "saved", "files", "warnings", "seen", "heads",
+                  "loose"}
 # keys a snapshot may lack: "error" and "counted" are written only while a round fails, "fix"
-# only while its error has one; "warnings" is always written, and read as none when it's
-# missing
-_SNAPSHOT_OPTIONAL = {"warnings", "error", "counted", "fix"}
+# only while its error has one
+_SNAPSHOT_OPTIONAL = {"error", "counted", "fix"}
 _HEX = re.compile(r"\A[0-9a-f]{%d}\Z" % HEAD_HEX)
 
 
@@ -588,8 +585,7 @@ def _snapshot_shape(doc):
             and isinstance(doc.get("fix"), (str, type(None)))
             and (doc.get("counted") is None or _strings(doc["counted"]))):
         return False
-    if not (isinstance(doc.get("warnings", []), list)
-            and all(isinstance(w, str) for w in doc.get("warnings", []))):
+    if not _strings(doc["warnings"]):
         return False
     if not (_int(doc["version"]) and doc["version"] == SNAPSHOT_VERSION):
         return False

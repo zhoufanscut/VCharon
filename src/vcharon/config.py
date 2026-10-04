@@ -74,11 +74,11 @@ class Job:
 
 @dataclasses.dataclass
 class Skipped:
-    """A section vcharon goes on without: a channels.d/ file that is broken or
-    clashes, or a retired mailbox section in vcharon.ini. Only a command that names it fails, with
-    its error; vcharon doctor lists it, every other command logs it."""
+    """A section vcharon goes on without: a channels.d/ file that is broken or clashes (or
+    channels.d/ itself, when it can't be listed). Only a command that names it fails, with its
+    error; vcharon doctor lists it, every other command logs it."""
 
-    where: str            # channels.d/<file>, or vcharon.ini [<section>]
+    where: str            # channels.d/<file>, or channels.d
     error: VCharonError     # code config; its message names where
     names: tuple          # the section and its jobs: what a command may name it by
 
@@ -107,7 +107,7 @@ class Config:
     mailboxes: dict = dataclasses.field(default_factory=dict)
     # [vcharon] box: this box's name in channel members' names, or None: the OS's (box_name)
     box: str = None
-    # [Skipped], vcharon.ini's first, then channels.d/'s in name order
+    # [Skipped], channels.d/'s in name order
     skipped: list = dataclasses.field(default_factory=list)
 
     @property
@@ -167,8 +167,6 @@ MAILBOX_NAME_MAX = 64 - len(".down")
 BOX_MAX = 10
 # next to the config file: one channel section per file
 CHANNELS_DIR = "channels.d"
-RETIRED = ("[%s] is a mailbox section, which %s doesn't hold: delete it (channel sections live "
-           "in channels.d/ next to it)")
 
 
 def job_name_problem(name):
@@ -204,8 +202,8 @@ def load():
         box = None
         if parser.has_section("vcharon"):
             box = _read_vcharon(parser, name, hint, settings)
-        jobs, mailboxes, folded, skipped = _read_jobs(parser, name, hint, settings, path)
-        cfg = Config(path, True, settings, jobs, mailboxes, box, skipped)
+        jobs, folded = _read_jobs(parser, name, hint, settings)
+        cfg = Config(path, True, settings, jobs, box=box)
     _read_channels(cfg, folded)
     return cfg
 
@@ -463,16 +461,11 @@ def _setting(settings, key, value, where, hint):
     return True
 
 
-def _read_jobs(parser, name, hint, settings, path):
-    """The sections besides [vcharon]; (name -> Job, mailbox sections, the folded names taken,
-    [Skipped]). The config file holds no jobs of its own: a section here with mailbox keys is
-    the retired fixed mailbox, skipped with its names still taken; any other section is
-    refused. Channel sections live in channels.d/."""
-    jobs = {}
-    mailboxes = {}
-    skipped = []
-    # folded name -> the section that has it, or "[S] makes S.up" for a derived job
-    folded = {}
+def _read_jobs(parser, name, hint, settings):
+    """The sections besides [vcharon]: (name -> Job, the folded names taken). The config file
+    holds no jobs of its own, so any other section is refused, and both are empty; channel
+    sections live in channels.d/. The engine's tests replace it to add jobs of their own
+    (tests/util.py, use_test_jobs)."""
     for section in parser.sections():
         if section == "vcharon":
             continue
@@ -480,31 +473,10 @@ def _read_jobs(parser, name, hint, settings, path):
         if section.casefold() == "vcharon":
             raise VCharonError("config", "%s [%s]: the global section is spelled [vcharon]"
                                % (name, section), hint=hint)
-        if not any(key.startswith("mailbox.") for key in parser.options(section)):
-            raise VCharonError("config", "%s [%s]: %s holds only [vcharon]; a channel's section "
-                               "goes in %s, which vcharon join writes"
-                               % (name, section, name, CHANNELS_DIR), hint=hint)
-        problem = job_name_problem(section)
-        if problem:
-            raise VCharonError("config", "%s [%s]: %s" % (name, section, problem), hint=hint)
-        # Windows file names ignore case, and the job's files are named after it.
-        other = folded.get(section.casefold())
-        if other is not None:
-            raise VCharonError("config", "%s [%s]: the same name as %s when case is ignored"
-                               % (name, section, other), hint=hint)
-        folded[section.casefold()] = "[%s]" % section
-        names = (section,) + tuple(section + suffix for suffix in MAILBOX_JOBS)
-        for job_name in names[1:]:
-            other = folded.get(job_name.casefold())
-            if other is not None:
-                raise VCharonError("config", "%s [%s]: its job %s has the same name as %s when "
-                                   "case is ignored" % (name, section, job_name, other),
-                                   hint=hint)
-            folded[job_name.casefold()] = "the job %s of [%s]" % (job_name, section)
-        # Skipped, not fatal: a box that still has its [mailbox] keeps its channels running.
-        skipped.append(Skipped("%s [%s]" % (name, section),
-                               VCharonError("config", RETIRED % (section, name), hint=hint), names))
-    return jobs, mailboxes, folded, skipped
+        raise VCharonError("config", "%s [%s]: %s holds only [vcharon]; a channel's section "
+                           "goes in %s, which vcharon join writes"
+                           % (name, section, name, CHANNELS_DIR), hint=hint)
+    return {}, {}
 
 
 def channels_dir(config_path):

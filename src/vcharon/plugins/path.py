@@ -589,7 +589,7 @@ class Source(plugin.Source):
                 name = parts[0]
                 out = tops.get(name)
                 if out is None:
-                    out = tops[name] = self._top_dropped(name, sent, walked)
+                    out = tops[name] = self._top_dropped(name, walked)
                 if out:
                     continue
             if top is not None:
@@ -614,18 +614,17 @@ class Source(plugin.Source):
                 kept[path] = value
         return kept
 
-    def _top_dropped(self, name, sent, walked):
+    def _top_dropped(self, name, walked):
         """Whether a mailbox's down drops the sent paths under the top-level name (never
-        deleting them). Kept by the walk: no, it's another writer's folder (one that was sent
-        as a file then becomes a delete and a put, as any kind change). Met by the walk but
-        left out: yes, whatever sent says, so a writer's folder the server turned into a
-        symlink or a file deletes nothing here. Gone from the source: by its name, and by
-        its kind as sent (a top-level file in an older state is dropped, not deleted)."""
+        deleting them). Kept by the walk: no, it's another writer's folder. Met by the walk
+        but left out: yes, whatever sent says, so a writer's folder the server turned into a
+        symlink or a file deletes nothing here. Gone from the source: by its name (down sends
+        only folders at the top)."""
         if name in walked:
             return False
         if name in self._top_names:
             return True
-        return self._top_left_out(name, sent.get(name, "d") == "d")
+        return self._top_left_out(name, True)
 
     def _since(self, sent, walked, files, single, top, abs_path, full):
         """The entries of a run with a state, their

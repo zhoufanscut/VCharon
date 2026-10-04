@@ -987,17 +987,11 @@ class PostSendTest(ChannelCase):
 
 
 class SkippedTest(ChannelCase):
-    """channels.d/ files that are broken, and the retired [mailbox], through the commands."""
+    """channels.d/ files that are broken, through the commands."""
 
     PUSH = textwrap.dedent("""\
         [vcharon]
         box = mac
-
-        [mailbox]
-        ssh            = fake-dest
-        mailbox.me     = windows
-        mailbox.local  = ~/m
-        mailbox.remote = m
 
         [push]
         ssh       = fake-dest
@@ -1026,21 +1020,10 @@ class SkippedTest(ChannelCase):
         code, _out, err = self.run_jobs("push")
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
-        log = self.vcharon_log()
-        self.assertIn("skipped vcharon.ini [mailbox]: [mailbox] is a mailbox section, which "
-                      "vcharon.ini doesn't hold: delete it (channel sections live in "
-                      "channels.d/ next to it)", log)
         self.assertIn("skipped channels.d/game.mac-x.ini: [game.mac-x]: holds only a channel "
-                      "section, with mailbox keys", log)
+                      "section, with mailbox keys", self.vcharon_log())
 
     def test_naming_one_fails_with_its_error(self):
-        for name in ("mailbox", "mailbox.up"):
-            with self.subTest(name=name):
-                code, _out, err = self.run_jobs(name)
-                self.assertEqual(code, 3)
-                self.assertEqual(err.splitlines()[0], "ERROR config: [mailbox] is a mailbox "
-                                 "section, which vcharon.ini doesn't hold: delete it (channel "
-                                 "sections live in channels.d/ next to it)")
         code, _out, err = self.run_jobs("game.mac-x.down")
         self.assertEqual(code, 3)
         self.assertTrue(err.startswith("ERROR config: channels.d/game.mac-x.ini [game.mac-x]: "
@@ -1061,9 +1044,8 @@ class SkippedTest(ChannelCase):
         code, out, _err = self.run_cli("doctor")
         self.assertEqual(code, 0, out)
         warns = [" ".join(l.split()) for l in out.splitlines() if l.startswith("  warn  config")]
-        self.assertEqual([w.split(":")[0] for w in warns], [
-            "warn config skipped vcharon.ini [mailbox]",
-            "warn config skipped channels.d/game.mac-x.ini"])
+        self.assertEqual([w.split(":")[0] for w in warns],
+                         ["warn config skipped channels.d/game.mac-x.ini"])
 
 
 class ReviewTest(ChannelCase):
@@ -1232,16 +1214,6 @@ class ReviewTest(ChannelCase):
         _code, out, err = self.run_cli("sync", "game", "--role", "b")
         self.assertIn(" fix: %s\n" % platform.runnable(
             channel_cmd.CHANNEL_GONE_HINT % ("game", "--project web --role b")), err)
-        # an old record without the parts: a placeholder, never flags for another name
-        path = channel_cmd.record_path("game", "mac-web-b")
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        del doc["project"], doc["role"]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f)
-        self.assertEqual(channel_cmd.read_record("game", "mac-web-b")["name"], "mac-web-b")
-        self.assertEqual(channel_cmd.name_flags("game", "mac-web-b"),
-                         "<the --project and --role that make mac-web-b>")
 
     # --- leave: the server checked first, one entry ---
 

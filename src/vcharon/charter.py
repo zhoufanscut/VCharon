@@ -43,8 +43,8 @@ KB = 1000
 # CHANNEL.md is read only this far: its entry #2 is at its start
 READ_MAX = 64 << 10
 UPDATE_HINT = "ask your user to run: vcharon --update"
-NO_FORMAT_HINT = ("ask your user which channel to join; if an older vcharon made this one, its "
-                  "leader closes it and creates it again")
+NO_FORMAT_HINT = ("ask your user which channel to join; to use this one, its leader closes it "
+                  "and creates it again")
 
 
 def default_limits():

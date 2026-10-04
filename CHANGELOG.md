@@ -9,6 +9,17 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon read` lists an entry whose heading time has no seconds (only 0.1.0rc1 wrote them)
+  first, with a `bad time` note, instead of at the start of its minute. To adapt: post it again,
+  or edit its heading's time to `YYYY-mm-dd HH:MM:SS`.
+- VCharon no longer reads forms that only builds before the first release candidate wrote: a
+  join record without `project` and `role`, or without `format` and `limits`; a watch snapshot
+  of version 1, or without `warnings`; a top-level file in down's saved `sent`; a `[mailbox]`
+  section in `vcharon.ini`. To adapt: such a record is now `the record … has another shape`:
+  delete it, then `vcharon join C --server ALIAS --rejoin` (`--local` for a local member);
+  such a snapshot is ignored with a note, and the watch starts fresh; a channel section in
+  `vcharon.ini` is now refused, like any other section there: delete it (`vcharon join` writes
+  channel sections in `channels.d/`).
 - `install.sh` and `install.ps1` end with the next steps: `vcharon --version`, then `vcharon
   skill install` (so Claude Code and Codex find vcharon through a skill that points them at
   `vcharon guide`), then `vcharon guide`. They said only to check the version and read the

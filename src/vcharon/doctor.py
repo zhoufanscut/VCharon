@@ -214,7 +214,7 @@ def _config(rep, cfg, err, no_scope):
     else:
         rep.check("ok", "config", "%s: %s" % (cfg.path, _counted(len(cfg.jobs), "job")),
                   note=note)
-    # a broken or clashing channels.d/ file, a retired [mailbox]: the other jobs still run
+    # a broken or clashing channels.d/ file: the other jobs still run
     for skip in cfg.skipped:
         rep.check("warn", "config", skip.line, skip.error.hint)
 

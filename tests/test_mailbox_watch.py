@@ -387,9 +387,6 @@ class SnapshotTest(WatchCase):
 
         bad_size = dict(good["files"])
         bad_size["mac/x"] = [True, 1]
-        v1 = dict(good, version=1)
-        for key in ("seen", "heads", "loose"):
-            del v1[key]
         less = dict(good)
         del less["loose"]
         for data, why in ((b"{", "it isn't JSON"), (b"\xff", "it isn't JSON"),
@@ -406,12 +403,7 @@ class SnapshotTest(WatchCase):
                           (other(heads={"mac#1": "xyz"}), "it has another shape"),
                           (other(loose=[1]), "it has another shape"),
                           (other(root="/elsewhere"), "it is for /elsewhere"),
-                          (other(me="mac"), "it is for the member mac"),
-                          # a snapshot from before channels, whatever else it holds
-                          (json.dumps(v1).encode(), "it is from before channels (version 1): "
-                                                    "a fresh start"),
-                          (other(version=1), "it is from before channels (version 1): a "
-                                             "fresh start")):
+                          (other(me="mac"), "it is for the member mac")):
             with self.subTest(why=why, data=data[:30]):
                 with open(path, "wb") as f:
                     f.write(data)
@@ -760,28 +752,18 @@ class WarnTest(WatchCase):
         code, lines = self.run_dir(rounds=1)
         self.assertEqual(lines[1:], ["WARN " + text, "WARN cleared: " + text])
 
-    @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
-    def test_a_snapshot_without_warnings(self):
-        # no "warnings" key (version 2 always writes it now): usable; what
-        # holds now is shown in its first round
-        write_tree(self.tree, {"debian/STEPS.md": b"s", "Debian/": None})
-        files = watch.scan(self.tree, "debian")
+    def test_a_snapshot_with_bad_warnings(self):
+        # "warnings" missing, or not a list of strings: another shape
         os.makedirs(os.path.dirname(self.state()), exist_ok=True)
-        with open(self.state(), "w", encoding="utf-8") as f:
-            json.dump({"version": 2, "root": self.tree, "me": "debian", "saved": "then",
-                       "files": {k: list(v) for k, v in files.items()}, "seen": {},
-                       "heads": {}, "loose": []}, f)
-        _code, lines = self.run_dir(rounds=1)
-        self.assertEqual(lines, [watching(self.tree, 0, ", since then"),
-                                 "WARN Debian/ at the top isn't a writer's folder: clients "
-                                 "leave it out"])
-        # a "warnings" that isn't a list of strings is another shape
-        with open(self.state(), "w", encoding="utf-8") as f:
-            json.dump({"version": 2, "root": self.tree, "me": "debian", "saved": "then",
-                       "files": {}, "warnings": [1], "seen": {}, "heads": {}, "loose": []}, f)
-        _code, lines = self.run_dir(rounds=0)
-        self.assertEqual(lines[0], "note: ignoring the saved snapshot %s: it has another "
-                                   "shape" % self.state())
+        doc = {"version": 2, "root": self.tree, "me": "debian", "saved": "then", "files": {},
+               "seen": {}, "heads": {}, "loose": []}
+        for bad in ({}, {"warnings": [1]}):
+            with self.subTest(bad=bad):
+                with open(self.state(), "w", encoding="utf-8") as f:
+                    json.dump(dict(doc, **bad), f)
+                _code, lines = self.run_dir(rounds=0)
+                self.assertEqual(lines[0], "note: ignoring the saved snapshot %s: it has "
+                                           "another shape" % self.state())
 
     def test_client_mode_warns_nothing(self):
         sync_args = ClientModeTest.write_config(self)
@@ -1128,13 +1110,10 @@ class UntilChangeTest(WatchCase):
                                        "ERROR connect: x", "ok again"])
 
     def test_a_snapshot_without_the_error(self):
-        # saved before the error was kept, or with none pending: usable, as one with no error
+        # saved with no error pending: usable, as one with no error
         path = self.saved_error(None)
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
-        del doc["warnings"]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f)
         loaded = watch.load_snapshot(path, self.tree, "windows")
         self.assertEqual(loaded[:6], ({}, "then", None, [], None, []))
         self.assertEqual(loaded[6].doc(), {"seen": {}, "heads": {}, "loose": []})
@@ -2131,7 +2110,8 @@ class EntriesTest(WatchCase):
         from vcharon import channel_cmd
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
                                   "leader": "windows", "ssh": None, "remote": self.tree,
-                                  "machine": util.TEST_MACHINE_ID, **util.record_format()})
+                                  "machine": util.TEST_MACHINE_ID, "project": "p",
+                                  "role": None, **util.record_format()})
         write_tree(self.tree, {"debian/CHANNEL.md": b"# CHANNEL\n"})
 
         def posted():
@@ -2238,20 +2218,6 @@ class EntriesTest(WatchCase):
         code, lines = self.run_mac(lambda: write_tree(self.tree, {"windows/q.patch": b"q"}),
                                    lambda: None, until_change=True, max_minutes=25)
         self.assertEqual((code, lines[1:]), (0, ["new windows/q.patch"]))
-
-    def test_a_version_1_snapshot_is_a_fresh_start(self):
-        self.post("windows", 2, "two", to="@mac")
-        files = watch.scan(self.tree, "mac")
-        os.makedirs(os.path.dirname(self.state(me="mac")), exist_ok=True)
-        with open(self.state(me="mac"), "w", encoding="utf-8") as f:
-            json.dump({"version": 1, "root": self.tree, "me": "mac", "saved": "then",
-                       "files": {}, "warnings": []}, f)
-        _code, lines = self.run_mac(lambda: None)
-        # its files would have made every entry new: a baseline instead
-        self.assertEqual(lines, ["note: ignoring the saved snapshot %s: it is from before "
-                                 "channels (version 1): a fresh start" % self.state(me="mac"),
-                                 watching(self.tree, len(files))])
-        self.assertEqual(self.snapshot()["version"], 2)
 
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                      "POSIX modes, not root")

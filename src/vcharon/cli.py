@@ -422,13 +422,12 @@ def _usage(message, hint):
 
 # --- a membership's commands: whoami, post, read, watch, sync ---
 
-def _membership(args, cfg):
+def _membership(args):
     """(the record of the membership args mean, the flags that find it again): DESIGN,
     "Which membership"."""
-    record = channel_cmd.membership(cfg, args.channel, args.project, args.role)
-    project = record.get("project") or channel_cmd.project_part(args.project)
-    role = record.get("role") if "project" in record else args.role
-    return record, ["--project", project] + (["--role", role] if role else [])
+    record = channel_cmd.membership(args.channel, args.project, args.role)
+    role = record["role"]
+    return record, ["--project", record["project"]] + (["--role", role] if role else [])
 
 
 def _section(record):
@@ -452,8 +451,8 @@ def _member_doc(cfg, record):
         # the section is gone; where it would be
         tree = plugin.Ctx("local").resolve(channel_cmd.local_text(_section(record)),
                                            "mailbox.local")
-    return {"channel": record["channel"], "name": name, "project": record.get("project"),
-            "role": record.get("role"), "leader": record["leader"],
+    return {"channel": record["channel"], "name": name, "project": record["project"],
+            "role": record["role"], "leader": record["leader"],
             "leads": record["leader"] == name,
             "mode": "local" if record["ssh"] is None else "remote", "server": record["ssh"],
             "folder": os.path.join(tree, name), "tree": tree}
@@ -473,7 +472,7 @@ def _whoami(args, run):
     cfg = load_config()
     box = {"box": cfg.box_name, "box_source": cfg.box_source}
     if args.channel is not None:
-        record, _ = _membership(args, cfg)
+        record, _ = _membership(args)
         doc = _member_doc(cfg, record)
         if args.json:
             return _print_json(dict(doc, **box))
@@ -485,8 +484,7 @@ def _whoami(args, run):
     project = channel_cmd.project_part(args.project)
     name = channel_cmd.member_name(cfg, project, args.role)
     mine = [r for r in channel_cmd.records()
-            if r.get("project") == project and (args.role is None
-                                                or r.get("role") == args.role)]
+            if r["project"] == project and (args.role is None or r["role"] == args.role)]
     doc = dict(box, project=project, role=args.role, name=name,
                channels=[_member_doc(cfg, r) for r in mine])
     if args.json:
@@ -546,7 +544,7 @@ def _post(args, run):
         raise _usage("no --body, and stdin is a terminal", "give --body TEXT, or the body on "
                      "stdin: a file, or a quoted heredoc (<<'EOF')")
     cfg = load_config()
-    record, flags = _membership(args, cfg)
+    record, flags = _membership(args)
     if args.no_sync and record["ssh"] is None:
         raise _usage("--no-sync is for a remote member; you are a local member of %s"
                      % args.channel, "leave out --no-sync")
@@ -605,7 +603,7 @@ def _read(args, run):
     """vcharon read C [--json]: read_mod's view of the channel's tree on this box."""
     watch_mod.utf8_output()
     cfg = load_config()
-    record, _ = _membership(args, cfg)
+    record, _ = _membership(args)
     limits = channel_cmd.channel_limits(record)
     tree, synced = _tree(cfg, record)
     # a local member reads the other folders where they are: one over the limit is left out,
@@ -647,8 +645,9 @@ def _watch(args, run):
     if args.max_errors is not None and not args.until_change:
         raise _usage("--max-errors needs --until-change", "add --until-change, or leave out "
                      "--max-errors")
-    cfg = load_config()
-    record, flags = _membership(args, cfg)
+    # a config vcharon can't read refuses the watch, as it does every other command
+    load_config()
+    record, flags = _membership(args)
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
@@ -681,7 +680,7 @@ def _sync(args, run):
                 raise _usage("--reset doesn't go with %s" % flag, "run the reset on its own, "
                              "then sync")
     cfg = load_config()
-    record, flags = _membership(args, cfg)
+    record, flags = _membership(args)
     channel_cmd.channel_limits(record)
     if record["ssh"] is None:
         raise channel_cmd.channels.refused(
@@ -1246,8 +1245,8 @@ class _JobRun:
 
 
 class _Conn:
-    """The connection of one group of jobs: opened by the first job that needs it, closed
-    after the group's last job, or as soon as it breaks."""
+    """The connection a sync's jobs share: opened by the first job that needs it, closed
+    after the last job, or as soon as it breaks."""
 
     def __init__(self):
         self.session = None
@@ -1256,60 +1255,22 @@ class _Conn:
         # the server's machine id and OS, from the hello
         self.machine = None
         self.os = None
-        # the error that broke it; the group's other jobs are then skipped
+        # the error that broke it; the later jobs are then skipped
         self.broke = None
         # sync --repeat's install.Watchdog
         self.watchdog = None
 
 
-def session_key(job):
-    """Jobs next to each other with the same key share one connection: the destination
-    as written, and every [vcharon] setting, each of which the ssh command or the Session
-    reads."""
-    return (job.ssh, dataclasses.astuple(job.settings))
-
-
-def _groups(todo):
-    """The jobs in the order given, cut where the session key changes; never reordered."""
-    groups = []
-    for jr in todo:
-        if groups and session_key(groups[-1][-1].job) == session_key(jr.job):
-            groups[-1].append(jr)
-        else:
-            groups.append([jr])
-    return groups
-
-
-def _named_once(names):
-    """A usage error if a job is named twice. Case is ignored: job names are unique that way
-    (DESIGN, "Channel sections")."""
-    seen = {}
-    for name in names:
-        other = seen.get(name.casefold())
-        if other is not None:
-            what = ("%s is named twice" % pathrules.show(name) if other == name
-                    else "%s and %s name the same job" % (pathrules.show(other),
-                                                          pathrules.show(name)))
-            raise VCharonError("config", what, hint="name each job once")
-        seen[name.casefold()] = name
-
-
 def _run_job(args, run):
-    """The jobs of a sync: the arguments, every job's
-    config and plugins, the logs, every lock, then each job in the order given; the jobs
-    next to each other with one session key share one connection. One job prints and logs
-    exactly as ever; several end with a summary line."""
+    """The jobs of a sync: the arguments, every job's config and plugins, the logs, every
+    lock, then each job in the order given, all on one connection (a sync runs one section,
+    whose jobs share a destination). One job prints and logs exactly as ever; several end
+    with a summary line."""
     started = time.monotonic()
     if args.repeat is not None:
         _repeat_flags(args, run)
-    _named_once(args.job)
     cfg = load_config()
     jobs = [job for name in args.job for job in _jobs_named(cfg, name)]
-    # a mailbox section and one of its jobs
-    _named_once([job.name for job in jobs])
-    if args.repeat is not None and len({session_key(job) for job in jobs}) > 1:
-        raise VCharonError("config", "--repeat needs jobs that share one connection",
-                           hint="run the jobs of each connection in a --repeat of their own")
     # Every usage, config, option and capability error fails before anything else: one bad
     # job, and none runs.
     for job in jobs:
@@ -1356,17 +1317,16 @@ def _run_job(args, run):
                             other.log.info("not run: %s" % e.message)
                 raise
         mark = started
-        for group in _groups(todo):
-            conn = _Conn()
-            with contextlib.ExitStack() as stack:
-                for i, jr in enumerate(group):
-                    if conn.broke is not None:
-                        _skip(jr, conn)
-                        continue
-                    run.log = jr.log
-                    jr.started = mark
-                    _one_of_group(args, jr, conn, stack, last=i == len(group) - 1)
-                    mark = time.monotonic()
+        conn = _Conn()
+        with contextlib.ExitStack() as stack:
+            for i, jr in enumerate(todo):
+                if conn.broke is not None:
+                    _skip(jr, conn)
+                    continue
+                run.log = jr.log
+                jr.started = mark
+                _one_job(args, jr, conn, stack, last=i == len(todo) - 1)
+                mark = time.monotonic()
     finally:
         for lock in locks:
             lock.release()
@@ -1386,8 +1346,8 @@ def _run_job(args, run):
 
 
 def _skip(jr, conn):
-    """A job whose connection broke under an earlier job of its group: one line, and the
-    exit code of the failure that broke it."""
+    """A job whose connection broke under an earlier job: one line, and the exit code of the
+    failure that broke it."""
     line = "vcharon: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
     _say(line)
     jr.log.info(line)
@@ -1610,8 +1570,8 @@ def _still_usable(session, err):
     return session.usable
 
 
-def _one_of_group(args, jr, conn, stack, last):
-    """Runs one job, closes the connection when no later job of the group will use it, and
+def _one_job(args, jr, conn, stack, last):
+    """Runs one job, closes the connection when no later job will use it, and
     only then prints how the job ended, as a one-job run always has."""
     error = trace = None
     try:
@@ -1655,7 +1615,7 @@ def _one_of_group(args, jr, conn, stack, last):
 
 
 def _session(conn, stack, jr):
-    """The group's session: opened by the first job that needs it, whose log gets the
+    """The sync's session: opened by the first job that needs it, whose log gets the
     session's own lines. A later job logs where they are, and starts with job.reset: the
     helper then holds nothing of the job before it."""
     if conn.session is None:
@@ -1788,7 +1748,7 @@ def _mismatch(e, name):
 
 
 def _run_one(args, jr, conn, stack):
-    """One job: its state, its header line, the group's session, the engine, the state
+    """One job: its state, its header line, the sync's session, the engine, the state
     saved. Returns (engine, done); done is None for a dry run."""
     job, log, shown = jr.job, jr.log, jr.shown
     name = job.name

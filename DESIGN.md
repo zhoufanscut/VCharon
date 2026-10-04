@@ -770,9 +770,8 @@ Read with `configparser`:
 | `run_timeout` | 0 | one sync (one round with `--repeat`), in seconds; 0 is no limit |
 | `compress` | no | pass `-C` to ssh |
 
-- Unknown keys are errors, so a typo fails loudly. Any other section in `vcharon.ini` is refused;
-  one with `mailbox.*` keys is skipped with a message that it belongs in `channels.d/`, so the
-  user's other channels keep running.
+- Unknown keys are errors, so a typo fails loudly. Any other section in `vcharon.ini` is refused:
+  channel sections live in `channels.d/`.
 - `vcharon setup` writes the file when it's missing, with a commented `# box = <os>` line;
   `setup --box NAME` edits `[vcharon]`'s box line in place, line by line, never through
   configparser, which would drop the comments. Every other line, the BOM, CRLF line ends, the
@@ -954,8 +953,7 @@ so a record can't share a name with a job's state file:
 
 - `remote`: the section's `mailbox.remote` text (remote member), or the channel folder's
   absolute path (local member). `machine`: the server's (or this machine's) id from the claim.
-- `project` and `role` rebuild the name for `fix:` lines; a record without them is matched by the
-  name this box would build.
+- `project` and `role` rebuild the name for `fix:` lines.
 - `format` and `limits` are the channel's, stored at `join`/`create` ([Formats](#formats)).
 - Written through a temp file and `os.replace`. A record that can't be read is an error, never a
   guess: VCharon never guesses which server a membership is on.
@@ -1049,10 +1047,9 @@ re: linux-api#3
 
 - The heading holds the poster's local time to the second (`YYYY-mm-dd HH:MM:SS`, no zone), its ID
   `<name>#<n>`, and the title. Why seconds: the entries of one minute can then be ordered as they
-  came, and members can see how long an answer took. Readers also take a time to the minute
-  (`YYYY-mm-dd HH:MM`), what 0.1.0rc1 wrote; it counts as the minute's start. The lines after it, up
-  to the first blank line, are the header: `to:` (one or more `@<name>`, or `@all`), then `re:`
-  (optional), then any other `key: value`.
+  came, and members can see how long an answer took. A time without seconds is a bad time to
+  `read`. The lines after it, up to the first blank line, are the header: `to:` (one or more
+  `@<name>`, or `@all`), then `re:` (optional), then any other `key: value`.
 - `<n>` is one more than the largest `<name>#<n>` in any heading of any `.md` file of the own
   folder (headings only, never bodies). IDs are unique per channel because names are.
 - `MEMBER.md` holds #1 and `CHANNEL.md` the leader's #2; VCharon writes both, and `post` refuses
@@ -1118,9 +1115,11 @@ with `MEMBER.md`'s entry #1 fields ([Member names](#member-names)), entries as
 
 - Format 1 is fixed by 0.1.0. Seconds in the heading came after 0.1.0rc1 and stayed format 1:
   0.1.0rc1 was a pre-release, and nothing of a channel is lost or written wrong by it. Its `read`
-  lists such an entry first, with a `bad time` note, so its `read --last N` leaves it out of its
-  N (measured against its code); its `watch` tells the entry and its numbering counts it (from
-  the code). Members of one channel update together from a release candidate.
+  lists an entry with seconds first, with a `bad time` note, so its `read --last N` leaves it out
+  of its N (measured against its code); `read` now does the same with an entry 0.1.0rc1 wrote,
+  whose time has no seconds. `watch` and the numbering never read the time, so they tell and
+  count such entries in both (from the code). Members of one channel update together from a
+  release candidate.
 
 - Where it's read: a remote member can't read `CHANNEL.md` before its first pull, so the helper's
   `channel.list` and `channel.claim` replies carry `format` and `limits`, read at the server; a
@@ -1130,8 +1129,7 @@ with `MEMBER.md`'s entry #1 fields ([Member names](#member-names)), entries as
   channel's format never changes while it exists, so the record stays right.
 - Same or older: go on, reading the old layout. Newer: refused, `C uses format N; this vcharon
   reads up to M`, `fix: ask your user to run: vcharon --update` (an agent never updates the
-  binary itself). No `format:` line: not a VCharon channel, refused. A record without a format is
-  refused with the rejoin as its fix, which writes one.
+  binary itself). No `format:` line: not a VCharon channel, refused.
 - **Bumping**: raise `charter.FORMAT` only for a change an older VCharon would misread, never for
   a new optional field an older one can ignore. Add the new format's description here, under
   this one. A format change is a minor version at least ([Stable](#stable)).

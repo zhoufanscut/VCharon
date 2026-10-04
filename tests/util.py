@@ -225,7 +225,7 @@ def record_format(limits=None):
 _REAL_READ_JOBS = config._read_jobs
 
 
-def _read_jobs_with_test_jobs(parser, name, hint, settings, path):
+def _read_jobs_with_test_jobs(parser, name, hint, settings):
     """config._read_jobs, where a section with ssh, from and to (and no mailbox keys) is also
     a job, in file order. The config file holds no jobs of its own; the engine's tests use
     these to drive the sync's runner (FakeSshCase.run_jobs) with jobs a channel section
@@ -254,10 +254,8 @@ def _read_jobs_with_test_jobs(parser, name, hint, settings, path):
                                    values["from"], values["to"])
         folded[section.casefold()] = "[%s]" % section
         parser.remove_section(section)
-    more, mailboxes, more_folded, skipped = _REAL_READ_JOBS(parser, name, hint, settings, path)
-    jobs.update(more)
-    folded.update(more_folded)
-    return jobs, mailboxes, folded, skipped
+    _REAL_READ_JOBS(parser, name, hint, settings)
+    return jobs, folded
 
 
 def use_test_jobs(case):

@@ -364,6 +364,14 @@ class MailboxTest(MailboxCase):
                                  file="con.windows.ini")
         # a section name Windows reserves names no job
         self.assertIn("con.windows is a reserved name on Windows", e.message)
+        # a file named by hand: the job name's rule comes first
+        for section in ("_a.windows", "a b.windows", "a" * 57 + ".windows"):
+            with self.subTest(section=section):
+                e = self.channel_refused(MAILBOX.replace("ch.windows", section),
+                                         file=section + ".ini")
+                self.assertEqual(e.message, "channels.d/%s.ini [%s]: a job name has only "
+                                 "letters, digits, '.', '_' and '-', starts with a letter or "
+                                 "digit, and is at most 64 characters long" % (section, section))
         # the section is named <channel>.<mailbox.me>
         for section in ("windows", "ch.mac", "ch.x.windows", "Ch.windows"):
             with self.subTest(section=section):
@@ -559,24 +567,6 @@ class ChannelsDirTest(MailboxCase):
         self.assertFalse(cfg.exists)
         self.assertEqual(list(cfg.jobs), ["ch.windows.up", "ch.windows.down"])
 
-    def test_a_retired_mailbox_in_vcharon_ini(self):
-        fixed = ("[mailbox]\nssh = devbox\nmailbox.me = windows\nmailbox.local = ~/m\n"
-                 "mailbox.remote = m\n")
-        cfg = self.load(VCHARON + fixed)
-        self.assertEqual(list(cfg.jobs), [])
-        self.assertEqual(cfg.mailboxes, {})
-        message = ("[mailbox] is a mailbox section, which vcharon.ini doesn't hold: delete it "
-                   "(channel sections live in channels.d/ next to it)")
-        self.assertEqual([s.line for s in cfg.skipped],
-                         ["skipped vcharon.ini [mailbox]: " + message])
-        for name in ("mailbox", "mailbox.up", "mailbox.down"):
-            self.assertEqual(cfg.skipped_for(name).error.message, message)
-                # broken as well: still only skipped, whatever it holds
-        cfg = self.load(VCHARON + "[mailbox]\nmailbox.bogus = 1\n")
-        self.assertEqual(list(cfg.jobs), [])
-        # its names stay taken in vcharon.ini
-        self.refused(fixed + fixed.replace("[mailbox]", "[Mailbox.Up]"), "same name")
-
     def test_box(self):
         for box in ("mac", "win", "linux", "laptop", "x" * 10, "a_b-c"):
             with self.subTest(box=box):
@@ -611,11 +601,6 @@ class TextWithBoxTest(unittest.TestCase):
                 self.assertEqual(config.text_with_box(before, "mac"), after)
 
 
-# a retired fixed mailbox's section, with mailbox keys: the only section besides [vcharon] that
-# vcharon.ini still takes (skipped, its names taken)
-RETIRED = "[%s]\nssh = devbox\nmailbox.me = windows\nmailbox.local = ~/m\nmailbox.remote = m\n"
-
-
 class VCharonIniSectionsTest(MailboxCase):
     """The checks of vcharon.ini's own sections, besides [vcharon]."""
 
@@ -628,56 +613,15 @@ class VCharonIniSectionsTest(MailboxCase):
                                             "channel's section goes in channels.d, which vcharon "
                                             "join writes" % name)
                 self.assertEqual(e.hint, "fix %s" % self.path)
+        # a channel's section too: they live in channels.d
+        e = self.refused(VCHARON + "[mailbox]\nssh = devbox\nmailbox.me = windows\n")
+        self.assertTrue(e.message.startswith("vcharon.ini [mailbox]: vcharon.ini holds only "
+                                             "[vcharon]; "), e.message)
 
     def test_the_global_section_spelling(self):
-        for text in ("[VCharon]\nidle_timeout = 60\n", RETIRED % "VCHARON"):
-            with self.subTest(text=text):
-                e = self.refused(text)
-                section = text.split("]")[0][1:]
-                self.assertEqual(e.message, "vcharon.ini [%s]: the global section is spelled "
-                                            "[vcharon]" % section)
-
-    def test_section_names(self):
-        for name in ("1a", "a.b_c-d", "x" * 64, "Game"):
-            with self.subTest(name=name):
-                cfg = self.load(RETIRED % name)
-                self.assertEqual([s.where for s in cfg.skipped], ["vcharon.ini [%s]" % name])
-        for name in (".a", "-a", "a b", "ä", "x" * 65, "CON", "nul.txt", "com1", "a/b", "_a"):
-            with self.subTest(name=name):
-                e = self.refused(RETIRED % name, "vcharon.ini [%s]: " % name)
-                self.assertEqual(e.hint, "fix %s" % self.path)
-        e = self.refused(RETIRED % "CON")
-        self.assertEqual(e.message, "vcharon.ini [CON]: CON is a reserved name on Windows")
-        e = self.refused(RETIRED % "a b")
-        self.assertEqual(e.message, "vcharon.ini [a b]: a job name has only letters, digits, '.', "
-                                    "'_' and '-', starts with a letter or digit, and is at most "
-                                    "64 characters long")
-
-    def test_case_folded_clashes(self):
-        e = self.refused(RETIRED % "game" + RETIRED % "Game")
-        self.assertEqual(e.message, "vcharon.ini [Game]: the same name as [game] when case is "
-                                    "ignored")
-        # a section named as another one's job
-        e = self.refused(RETIRED % "game" + RETIRED % "Game.Up")
-        self.assertEqual(e.message, "vcharon.ini [Game.Up]: the same name as the job game.up of "
-                                    "[game] when case is ignored")
-        # a section whose job is named as an earlier section
-        e = self.refused(RETIRED % "game.down" + RETIRED % "Game")
-        self.assertEqual(e.message, "vcharon.ini [Game]: its job Game.down has the same name as "
-                                    "[game.down] when case is ignored")
-
-    def test_a_clash_with_a_channels_d_file(self):
-        # vcharon.ini's names are taken first: the channels.d/ file is skipped too
-        for name in ("ch.windows.up", "CH.WINDOWS.DOWN", "Ch.Windows", "ch.windows"):
-            with self.subTest(name=name):
-                cfg = self.load_channel(MAILBOX, RETIRED % name)
-                self.assertEqual(list(cfg.jobs), [])
-                self.assertEqual([s.where for s in cfg.skipped],
-                                 ["vcharon.ini [%s]" % name, "channels.d/ch.windows.ini"])
-                e = cfg.skipped[1].error
-                self.assertEqual(e.message, "%s: %s has the same name as [%s] when case is "
-                                            "ignored" % (WHERE, name.lower(), name))
-                self.assertEqual(e.code, "config")
+        e = self.refused("[VCharon]\nidle_timeout = 60\n")
+        self.assertEqual(e.message, "vcharon.ini [VCharon]: the global section is spelled "
+                                    "[vcharon]")
 
 
 if __name__ == "__main__":

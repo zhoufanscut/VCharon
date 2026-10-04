@@ -226,29 +226,6 @@ class FormatTest(ChannelCase):
         self.assertEqual(got, {"game": (1, LIMITS), "new": (3, LIMITS),
                                "old": (None, LIMITS)})
 
-    def test_a_record_without_a_format(self):
-        # a record written before formats were kept: every command that uses the channel
-        # refuses it, with the rejoin as its fix; the rejoin writes them
-        self.lead()
-        self.ok("join", "game", "--server", "fake-dest")
-        path = channel_cmd.record_path("game", "mac-web")
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        del doc["format"], doc["limits"]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f)
-        want = ("ERROR channel: your join record of game has no channel format: an older "
-                "vcharon wrote it",
-                platform.runnable("vcharon join game --server fake-dest --project web (a "
-                                  "rejoin) writes it"))
-        for argv in (("post", "game", "--to", "@laptop-ui", "--title", "t", "--body", "b"),
-                     ("read", "game"), ("watch", "game", "--until-change"), ("sync", "game")):
-            with self.subTest(argv=argv[0]):
-                self.assertEqual(self.refusal(*argv), want)
-        self.ok("join", "game", "--server", "fake-dest")
-        self.assertEqual(self.record("game.mac-web")["format"], 1)
-        self.ok("read", "game")
-
     def test_a_newer_format_in_the_record(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
@@ -259,7 +236,7 @@ class FormatTest(ChannelCase):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(doc, f)
         for argv in (("post", "game", "--to", "@laptop-ui", "--title", "t", "--body", "b"),
-                     ("read", "game"), ("sync", "game")):
+                     ("read", "game"), ("watch", "game", "--until-change"), ("sync", "game")):
             with self.subTest(argv=argv[0]):
                 self.assertEqual(self.refusal(*argv), (
                     "ERROR channel: game uses format 2; this vcharon reads up to 1",

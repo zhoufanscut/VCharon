@@ -34,13 +34,11 @@ from .log import Log
 from .proto import VCharonError
 
 RECORD_VERSION = 1
-RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine")
-# the parts that rebuild the name, and find the membership again (DESIGN, "Which
-# membership"); a record from an older vcharon may have neither, and is read as before.
-# format and limits: the channel's (charter), from the list reply at join or create's own; a
-# record without them is read, but the commands that use the channel refuse it until a rejoin
-# writes them
-RECORD_OPTIONAL = ("project", "role", "format", "limits")
+# project and role: the parts that rebuild the name, and find the membership again (DESIGN,
+# "Which membership"). format and limits: the channel's (charter), from the list reply at join
+# or create's own
+RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine", "project",
+               "role", "format", "limits")
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
@@ -121,16 +119,15 @@ def project_part(project=None, cwd=None):
 
 def name_flags(channel, name, record=None):
     """The flags that find name's membership in a vcharon command: --project P [--role R], from
-    the record. A record without them (an older vcharon's), or none at all,
-    gets a placeholder that says so, never flags that would build another name."""
+    the record. No record gets a placeholder that says so, never flags that would build
+    another name."""
     if record is None:
         try:
             record = read_record(channel, name)
         except VCharonError:
             record = None
-    if record is not None and isinstance(record.get("project"), str):
-        role = record.get("role")
-        return "--project %s%s" % (record["project"], " --role %s" % role if role else "")
+    if record is not None:
+        return flags(record["project"], record["role"])
     return "<the --project and --role that make %s>" % name
 
 
@@ -179,22 +176,16 @@ def flags(project, role):
     return "--project %s%s" % (project, " --role %s" % role if role else "")
 
 
-def _is(record, project, role, cfg):
-    """Whether record is the membership of (its channel, project, role). A record without
-    its project and role (an older vcharon's) is matched by the name this box
-    would build."""
-    if isinstance(record.get("project"), str):
-        return record["project"] == project and (record.get("role") or None) == role
-    if cfg is None:
-        return False
-    return record["name"] == "%s-%s" % (cfg.box_name, project) + ("-%s" % role if role else "")
+def _is(record, project, role):
+    """Whether record is the membership of (its channel, project, role)."""
+    return record["project"] == project and (record["role"] or None) == role
 
 
-def find(cfg, channel, project, role):
+def find(channel, project, role):
     """The record of (channel, project, role) on this box, or None (DESIGN, "Which
     membership", step 1). join and create look here before they build a new name, so a box
     renamed after a join still finds the name it joined with."""
-    mine = [r for r in records(channel) if _is(r, project, role, cfg)]
+    mine = [r for r in records(channel) if _is(r, project, role)]
     if len(mine) > 1:
         raise channels.refused("%d records on this box are for %s %s: %s"
                                % (len(mine), channel, flags(project, role),
@@ -203,7 +194,7 @@ def find(cfg, channel, project, role):
     return mine[0] if mine else None
 
 
-def membership(cfg, channel, project=None, role=None):
+def membership(channel, project=None, role=None):
     """The record of the membership a command means, from the channel, the project
     (--project, else the current directory's) and the role (--role; none means the role-less
     membership): the three steps of (DESIGN, "Which membership"). Refused, with a fix line, when
@@ -211,20 +202,20 @@ def membership(cfg, channel, project=None, role=None):
     check_channel(channel)
     check_role(role)
     project = project_part(project)
-    record = find(cfg, channel, project, role)
+    record = find(channel, project, role)
     if record is not None:
         return record
     if role is None:
         roles = sorted(r["role"] for r in records(channel)
-                       if r.get("project") == project and r.get("role"))
+                       if r["project"] == project and r["role"])
         if roles:
             raise channels.refused("you are in %s from %s only with a role"
                                    % (channel, project),
                                    "pass %s" % " or ".join("--role %s" % r for r in roles))
-    others = [r for r in records(channel) if isinstance(r.get("project"), str)]
+    others = records(channel)
     if others:
         hint = ("pass the --project and --role you joined with: %s"
-                % "; ".join(flags(r["project"], r.get("role")) for r in others))
+                % "; ".join(flags(r["project"], r["role"]) for r in others))
     else:
         hint = ("join it first, with --server ALIAS (or --local on the machine that holds the "
                 "channel): vcharon join %s --server ALIAS %s" % (channel, flags(project, role)))
@@ -256,11 +247,11 @@ def read_record(channel, name):
     except (OSError, ValueError) as e:
         raise VCharonError("config", "the record %s can't be read: %s" % (path, e), hint=hint)
     if (not isinstance(doc, dict)
-            or sorted(k for k in doc if k not in RECORD_OPTIONAL) != sorted(RECORD_KEYS)
-            or not isinstance(doc.get("project", ""), str)
-            or not isinstance(doc.get("role"), (str, type(None)))
-            or not isinstance(doc.get("format", 1), int) or isinstance(doc.get("format"), bool)
-            or not isinstance(doc.get("limits", {}), dict)
+            or sorted(doc) != sorted(RECORD_KEYS)
+            or not isinstance(doc["project"], str)
+            or not isinstance(doc["role"], (str, type(None)))
+            or not isinstance(doc["format"], int) or isinstance(doc["format"], bool)
+            or not isinstance(doc["limits"], dict)
             or doc["version"] != RECORD_VERSION or doc["channel"] != channel
             or doc["name"] != name
             or not all(isinstance(doc[k], str) for k in ("leader", "remote", "machine"))
@@ -271,15 +262,11 @@ def read_record(channel, name):
 
 def channel_limits(record):
     """The channel's limits from its join record, after the format check (charter.check):
-    post, read, watch and sync run it first. A record from before formats were kept is
-    refused: a rejoin writes them."""
+    post, read, watch and sync run it first."""
     channel = record["channel"]
     where = "--local" if record["ssh"] is None else "--server %s" % record["ssh"]
     rejoin = ("vcharon join %s %s %s (a rejoin) writes it"
               % (channel, where, name_flags(channel, record["name"], record)))
-    if "format" not in record:
-        raise channels.refused("your join record of %s has no channel format: an older "
-                               "vcharon wrote it" % channel, rejoin)
     return charter.check(channel, record, limits_hint=rejoin)
 
 
@@ -303,7 +290,7 @@ def _write_atomic(path, data, temp):
 
 def write_record(doc):
     path = record_path(doc["channel"], doc["name"])
-    data = json.dumps({k: doc[k] for k in RECORD_KEYS + RECORD_OPTIONAL if k in doc},
+    data = json.dumps({k: doc[k] for k in RECORD_KEYS},
                       ensure_ascii=False,
                       indent=1).encode("utf-8") + b"\n"
     fd, temp = tempfile.mkstemp(dir=_made(records_dir()), prefix=".", suffix=".tmp")
@@ -521,16 +508,16 @@ def main(args, run):
         project = project_part(args.project)
         # a membership this box has already keeps the name it joined with (DESIGN, "Which
         # membership")
-        record = find(cfg, args.channel, project, args.role)
+        record = find(args.channel, project, args.role)
         if record is not None:
             name = record["name"]
         else:
             name = member_parts(cfg, project, args.role)[0]
             # a role forgotten, or one too many: said, never refused (only its step 1)
             for other in records(args.channel):
-                if other.get("project") == project and (other.get("role") or None) != args.role:
+                if other["project"] == project and (other["role"] or None) != args.role:
                     say("note: you also hold %s here as %s" % (
-                        args.channel, "--role %s" % other["role"] if other.get("role")
+                        args.channel, "--role %s" % other["role"] if other["role"]
                         else "the member without a role"))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}
@@ -547,7 +534,7 @@ def main(args, run):
         if args.command == "create":
             return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
-    record = membership(cfg, args.channel, args.project, args.role)
+    record = membership(args.channel, args.project, args.role)
     return _leave(args, cfg, record, log, say, close=args.command == "close")
 
 

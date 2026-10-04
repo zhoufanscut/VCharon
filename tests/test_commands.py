@@ -118,21 +118,6 @@ class IdentityTest(ChannelCase):
                          "ERROR channel: the channel game already exists")
         self.assertFalse(os.path.exists(os.path.join(self.root, "game", "lap-ui")))
 
-    def test_a_record_from_before_the_project_field(self):
-        # matched by the name this box builds
-        self.lead()
-        self.ok("join", "game", "--server", "fake-dest")
-        path = channel_cmd.record_path("game", "mac-web")
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        del doc["project"], doc["role"]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(doc, f)
-        self.assertEqual(self.name_of(), "mac-web")
-        self.assertEqual(self.refusal("sync", "game", "--role", "b")[0],
-                         "ERROR channel: you aren't in game as --project web --role b (no join "
-                         "record on this box)")
-
     def test_two_records_for_one_membership(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")

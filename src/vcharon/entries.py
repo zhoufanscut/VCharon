@@ -28,7 +28,7 @@ from .proto import VCharonError
 # the heading's time: local, to the second, so readers can order the entries of one minute and
 # members can see how long an answer took
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-# a heading's time to the minute: what a release candidate before seconds wrote, still read
+# a time to the minute: vcharon list's "newest", and read's minute in its notes
 MINUTE_FORMAT = "%Y-%m-%d %H:%M"
 MEMBER_FILE = "MEMBER.md"
 CHANNEL_FILE = "CHANNEL.md"
@@ -189,15 +189,12 @@ def minute_stamp(t):
 
 
 def parse_time(text):
-    """(a naive local datetime, whether it has seconds) of a heading's time text, either form;
-    None when it is neither."""
-    for fmt, seconds in ((TIME_FORMAT, True), (MINUTE_FORMAT, False)):
-        try:
-            # headings carry local time with no zone
-            return datetime.datetime.strptime(text, fmt), seconds  # noqa: DTZ007
-        except (TypeError, ValueError):
-            continue
-    return None
+    """A naive local datetime of a heading's time text (TIME_FORMAT); None when it isn't one."""
+    try:
+        # headings carry local time with no zone
+        return datetime.datetime.strptime(text, TIME_FORMAT)  # noqa: DTZ007
+    except (TypeError, ValueError):
+        return None
 
 
 # --- the own folder and its numbers ---

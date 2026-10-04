@@ -23,6 +23,8 @@ READ = ["read", "mb", "--project", "p"]
 # this box's clock for every view here: naive local time, as read._now() gives
 NOW = datetime.datetime(2026, 10, 2, 12, 0, 30)  # noqa: DTZ001
 MINUTE = "2026-10-02 10:12"
+# a heading's time in that minute
+WHEN = MINUTE + ":00"
 
 # a channel section, in channels.d/ next to vcharon.ini, as test_mailbox_watch.py's
 MAILBOX = """
@@ -35,7 +37,7 @@ mailbox.remote = ~/.local/state/vcharon/channels/mb
 """
 
 
-def entry(eid, title="t", when=MINUTE, to="@all", re_=None, extra=(), body=""):
+def entry(eid, title="t", when=WHEN, to="@all", re_=None, extra=(), body=""):
     """One entry's text, as vcharon post writes it; eid None for a heading without one."""
     head = "## %s — %s — %s" % (when, eid, title) if eid else "## %s — %s" % (when, title)
     lines = ["", head, "to: " + to] + (["re: " + re_] if re_ else []) + list(extra)
@@ -101,7 +103,7 @@ class OrderTest(ViewCase):
         self.assertEqual(self.ids(lines), ["mac-a#9", "mac-a#10", "a-win#3", "a-win#4",
                                            "mac-a#11"])
         self.assertEqual(lines[3], "%s  a-win#3  @all  re mac-a#10  answer  (a-win/R.md)"
-                         % MINUTE)
+                         % WHEN)
         self.assertEqual(self.notes(lines), [])
 
     def test_ties_by_name_then_number(self):
@@ -111,9 +113,9 @@ class OrderTest(ViewCase):
         self.assertEqual(self.ids(self.view()), ["a-y#5", "b-x#2", "w#9", "w#10"])
 
     def test_across_minutes_time_wins(self):
-        write_tree(self.tree, {"aa/R.md": md(entry("aa#2", when="2026-10-02 10:11",
+        write_tree(self.tree, {"aa/R.md": md(entry("aa#2", when="2026-10-02 10:11:00",
                                                    re_="bb#1")),
-                               "bb/R.md": md(entry("bb#1", when="2026-10-02 10:12"))})
+                               "bb/R.md": md(entry("bb#1", when="2026-10-02 10:12:00"))})
         lines = self.view()
         self.assertEqual(self.ids(lines), ["aa#2", "bb#1"])
         self.assertEqual(self.notes(lines),
@@ -125,8 +127,8 @@ class OrderTest(ViewCase):
             "aa/R.md": md(entry("aa#1"), entry("aa#2", re_="bb#2")),
             "cc/R.md": md(entry("cc#1", re_="cc#1")),
             # another minute keeps its re: edges
-            "dd/R.md": md(entry("dd#1", when="2026-10-02 10:13", re_="ee#1")),
-            "ee/R.md": md(entry("ee#1", when="2026-10-02 10:13")),
+            "dd/R.md": md(entry("dd#1", when="2026-10-02 10:13:00", re_="ee#1")),
+            "ee/R.md": md(entry("ee#1", when="2026-10-02 10:13:00")),
         })
         lines = self.view()
         # the cycle aa#2 > bb#2 > bb#1 > aa#2: number edges only there
@@ -136,16 +138,14 @@ class OrderTest(ViewCase):
                                              "goes by number only" % MINUTE])
 
     def test_seconds_order_one_minute(self):
-        # arrival order within the minute, whatever the names; an older heading without
-        # seconds counts as the minute's start
+        # arrival order within the minute, whatever the names
         write_tree(self.tree, {
             "aa/R.md": md(entry("aa#2", when=MINUTE + ":50")),
             "bb/R.md": md(entry("bb#1", when=MINUTE + ":05")),
-            "cc/R.md": md(entry("cc#1", when=MINUTE + ":05"), entry("cc#2", when=MINUTE)),
+            "cc/R.md": md(entry("cc#1", when=MINUTE + ":05")),
         })
         lines = self.view()
-        # cc#2 comes after cc#1: one member's numbers keep their order, seconds or none
-        self.assertEqual(self.ids(lines), ["bb#1", "cc#1", "cc#2", "aa#2"])
+        self.assertEqual(self.ids(lines), ["bb#1", "cc#1", "aa#2"])
         self.assertEqual(lines[1], "%s:05  bb#1  @all  t  (bb/R.md)" % MINUTE)
         self.assertEqual(self.notes(lines), [])
 
@@ -173,31 +173,34 @@ class OrderTest(ViewCase):
 
     def test_missing_bad_and_future_times(self):
         write_tree(self.tree, {"aa/R.md": md(
-            entry("aa#1", when="2026-10-02 09:00"),
+            entry("aa#1", when="2026-10-02 09:00:00"),
             entry("aa#2", when=""),
             entry("aa#3", when="yesterday"),
             # this box's current minute is no note; the next one is
-            entry("aa#4", when="2026-10-02 12:00"),
-            entry("aa#5", when="2026-10-02 12:01"))})
+            entry("aa#4", when="2026-10-02 12:00:00"),
+            entry("aa#5", when="2026-10-02 12:01:00"),
+            # a time without seconds is a bad one
+            entry("aa#6", when=MINUTE))})
         lines = self.view()
-        self.assertEqual(self.ids(lines), ["aa#2", "aa#3", "aa#1", "aa#4", "aa#5"])
+        self.assertEqual(self.ids(lines), ["aa#2", "aa#3", "aa#6", "aa#1", "aa#4", "aa#5"])
         self.assertEqual(lines[1], "-  aa#2  @all  t  (aa/R.md)")
         self.assertEqual(self.notes(lines), [
             "note: aa#2 has no time: listed first",
             "note: aa#3 has a bad time 'yesterday': listed first",
-            "note: aa#5 is stamped after now (2026-10-02 12:01)"])
+            "note: aa#6 has a bad time '%s': listed first" % MINUTE,
+            "note: aa#5 is stamped after now (2026-10-02 12:01:00)"])
 
 
 class PlacedTest(ViewCase):
     def test_unplaced_entries(self):
         write_tree(self.tree, {
-            "aa/A.md": md(entry("aa#1"), entry(None, "no id here", when="2026-10-02 10:00")),
-            "aa/B.md": md(entry("aa#1", "copy", when="2026-10-02 10:00"), entry("aa#2")),
+            "aa/A.md": md(entry("aa#1"), entry(None, "no id here", when="2026-10-02 10:00:00")),
+            "aa/B.md": md(entry("aa#1", "copy", when="2026-10-02 10:00:00"), entry("aa#2")),
             "bb/R.md": md(entry("aa#3", "forged", re_="aa#2"), entry("bb#1", re_="aa#3")),
         })
         lines = self.view()
         self.assertEqual(self.ids(lines), ["-", "aa#1", "aa#1", "aa#2", "aa#3", "bb#1"])
-        self.assertIn("2026-10-02 10:00  aa#1  @all  copy  (aa/B.md)", lines)
+        self.assertIn("2026-10-02 10:00:00  aa#1  @all  copy  (aa/B.md)", lines)
         self.assertEqual(self.notes(lines), [
             "note: aa/A.md line 6: no ID",
             "note: aa#1 again in aa/B.md: the one in aa/A.md is ordered",
@@ -243,11 +246,11 @@ class OutputTest(ViewCase):
     def setUp(self):
         ViewCase.setUp(self)
         write_tree(self.tree, {"aa/R.md": md(
-            entry("aa#1", "one", when="2026-10-02 10:00"),
-            entry("aa#2", "two", when="2026-10-02 10:01", to="@bb @cc", re_="bb#1",
+            entry("aa#1", "one", when="2026-10-02 10:00:00"),
+            entry("aa#2", "two", when="2026-10-02 10:01:00", to="@bb @cc", re_="bb#1",
                   extra=["kind: steps"], body="line 1\n\n> # quoted"),
-            entry("aa#3", "three", when="2026-10-02 10:02")),
-            "bb/R.md": md(entry("bb#1", "b", when="2026-10-02 09:00"))})
+            entry("aa#3", "three", when="2026-10-02 10:02:00")),
+            "bb/R.md": md(entry("bb#1", "b", when="2026-10-02 09:00:00"))})
 
     def test_last(self):
         lines = self.view("--last", "2")
@@ -257,12 +260,12 @@ class OutputTest(ViewCase):
     def test_full(self):
         lines = self.view("--full", "--last", "2")
         self.assertEqual(lines[1:], [
-            "2026-10-02 10:01  aa#2  @bb @cc  re bb#1  two  (aa/R.md)",
+            "2026-10-02 10:01:00  aa#2  @bb @cc  re bb#1  two  (aa/R.md)",
             "    kind: steps",
             "    line 1",
             "",
             "    > # quoted",
-            "2026-10-02 10:02  aa#3  @all  three  (aa/R.md)"])
+            "2026-10-02 10:02:00  aa#3  @all  three  (aa/R.md)"])
 
     def test_json(self):
         code, lines, err = self.main("--json", "--last", "2")
@@ -273,10 +276,10 @@ class OutputTest(ViewCase):
             "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
             "count": 4, "notes": [],
             "entries": [
-                {"time": "2026-10-02 10:01", "id": "aa#2", "name": "aa", "number": 2,
+                {"time": "2026-10-02 10:01:00", "id": "aa#2", "name": "aa", "number": 2,
                  "to": ["@bb", "@cc"], "re": "bb#1", "title": "two", "file": "aa/R.md",
                  "header": None, "body": None},
-                {"time": "2026-10-02 10:02", "id": "aa#3", "name": "aa", "number": 3,
+                {"time": "2026-10-02 10:02:00", "id": "aa#3", "name": "aa", "number": 3,
                  "to": ["@all"], "re": None, "title": "three", "file": "aa/R.md",
                  "header": None, "body": None}]})
         doc = json.loads(self.main("--json", "--full", "--last", "2")[1][0])

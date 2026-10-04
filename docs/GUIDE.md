@@ -566,7 +566,7 @@ The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 | `<C> on <server> isn't usable as a channel (…)` | ask your user |
 | `another machine holds <name> in <C>` | another machine with your box joined first: ask your user to give this machine its own box (`vcharon setup --box NAME`), then join again. The `fix:` line's `--rejoin --takeover` only if your user confirms this machine made that folder |
 | `<C> uses format <n>; this vcharon reads up to <m>` | the channel is newer than your vcharon: ask your user to update it |
-| `<C> has no format: line in its CHANNEL.md …` | an older vcharon made it: ask your user; its leader closes it and creates it again |
+| `<C> has no format: line in its CHANNEL.md …` | vcharon didn't make it: ask your user; to use it, its leader closes it and creates it again |
 | `<server> runs darwin: only a Linux server is supported as a remote end` (or `windows`) | that machine holds channels for its own local members only: ask your user |
 | `<server> has no machine id …` | follow the `fix:` line; it is your user's step |
 | `the member's name <name>: …` (exit 3) | give a shorter `--project` or `--role` |

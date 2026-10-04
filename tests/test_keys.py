@@ -375,9 +375,10 @@ class KeyTest(KeyCase):
         self.assertFalse(any("-v" in argv for argv in self.ssh_runs()))
 
     def test_host_of(self):
-        for dest, host in (("devbox", "devbox"), ("me@host", "host"), ("ssh://me@host:2222", "host"),
-                           ("me@[fe80::1]", "fe80::1"), ("ssh://[fe80::1]:22", "fe80::1"),
-                           ("ssh://host", "host"), ("a@b@host", "host")):
+        for dest, host in (("devbox", "devbox"), ("me@host", "host"),
+                           ("ssh://me@host:2222", "host"), ("me@[fe80::1]", "fe80::1"),
+                           ("ssh://[fe80::1]:22", "fe80::1"), ("ssh://host", "host"),
+                           ("a@b@host", "host")):
             self.assertEqual(keys.host_of(dest), host, dest)
 
 
