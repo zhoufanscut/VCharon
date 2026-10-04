@@ -1087,7 +1087,7 @@ class ReviewTest(ChannelCase):
         self.srv_before = read_tree(self.srv_own)
         self.assertEqual(sorted(self.srv_before), ["MEMBER.md", "RESULTS.md", "work.patch"])
 
-    # --- blockers 1 and 2: the rejoin pull ---
+    # --- the rejoin pull ---
 
     def test_a_failed_pull_leaves_no_own_folder(self):
         self.member()
@@ -1243,7 +1243,7 @@ class ReviewTest(ChannelCase):
         self.assertEqual(channel_cmd.name_flags("game", "mac-web-b"),
                          "<the --project and --role that make mac-web-b>")
 
-    # --- warnings 3, 4, 7, 8 ---
+    # --- leave: the server checked first, one entry ---
 
     def test_leave_checks_the_server_first(self):
         self.member()
@@ -1300,7 +1300,7 @@ class ReviewTest(ChannelCase):
         titles = [e.title for e in entries.parse_file(os.path.join(self.srv_own, "RESULTS.md"))]
         self.assertEqual(titles.count("LEAVE"), 1)
 
-    # --- warning 6, note 9 ---
+    # --- another member's copy, the lock, removing a folder in use ---
 
     def test_post_into_another_members_copy(self):
         # the command line posts into the member's own folder only; post() itself still
@@ -1414,7 +1414,7 @@ class ReviewTest(ChannelCase):
         self.assertEqual(cm.exception.hint, "check the owner and permissions of %s" % path)
         self.assertEqual(read_tree(self.root), before)
 
-    # --- cases that kill mutants other tests let survive ---
+    # --- create, join, leave and remove at their edges ---
 
     def test_remove_refuses_a_non_leader(self):
         write_tree(self.root, {"game/lead/CHANNEL.md": b"c", "game/a/MEMBER.md": b"m"})

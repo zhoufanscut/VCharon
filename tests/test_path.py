@@ -545,7 +545,7 @@ class PathCases:
         with src.open(1) as f:
             self.assertEqual(f.read(), b"bb")
 
-    def test_1_nothing_changed(self):
+    def test_nothing_changed(self):
         write_tree(self.src, {"a/b.txt": b"bb", "c.txt": b"c", "e/": None})
         state = self.state_of()
         src, p = self.planned(state)
@@ -555,7 +555,7 @@ class PathCases:
                 src.open(index)
             self.assertEqual(cm.exception.code, "internal")
 
-    def test_2_only_what_changed(self):
+    def test_only_what_changed(self):
         write_tree(self.src, {"size.txt": b"1", "mtime.txt": b"m", "exec.sh": b"x",
                               "same.txt": b"s", "d/in.txt": b"i"})
         for rel in ("size.txt", "mtime.txt", "exec.sh", "same.txt", "d/in.txt"):
@@ -584,7 +584,7 @@ class PathCases:
         with src.open(index["size.txt"]) as f:
             self.assertEqual(f.read(), b"22")
 
-    def test_2_revert_is_sent_again(self):
+    def test_revert_is_sent_again(self):
         # svn revert writes the old bytes back, with a new mtime
         write_tree(self.src, {"r.txt": b"original"})
         os.utime(self.at("r.txt"), (MTIME, MTIME))
@@ -761,7 +761,7 @@ class PathCases:
 
     # --- prune ---
 
-    def test_5_prune(self):
+    def test_prune(self):
         write_tree(self.src, {"keep.txt": b"k", "gone.txt": b"g", "d/gone.txt": b"g",
                               "old/": None})
         state = self.state_of(prune="yes")
@@ -779,7 +779,7 @@ class PathCases:
         _src, p = self.planned(state)
         self.assertEqual((p.entries, p.state), ([], state))
 
-    def test_5_kind_changes(self):
+    def test_kind_changes(self):
         write_tree(self.src, {"a/x": b"x", "b": b"file"})
         state = self.state_of()
         shutil.rmtree(self.at("a"))
@@ -803,7 +803,7 @@ class PathCases:
         self.assertEqual(paths(p), ["a", "b", "b/y"])
         self.assertEqual(p.state["sent"]["a/x"], state["sent"]["a/x"])
 
-    def test_6_excluded_paths_are_never_deleted(self):
+    def test_excluded_paths_are_never_deleted(self):
         write_tree(self.src, {"x.log": b"l", "build/o.bin": b"o", "build/sub/p.bin": b"p",
                               "keep.txt": b"k"})
         state = self.state_of()
@@ -826,7 +826,7 @@ class PathCases:
                                      delete("src/docs/b.txt", why="gone from the source")])
         self.assertEqual(sorted(p.state["sent"]), ["src", "src/keep.txt"])
 
-    def test_6_excluded_stale_spelling_is_never_deleted(self):
+    def test_excluded_stale_spelling_is_never_deleted(self):
         # sent holds Foo.cpp, a stale spelling of foo.cpp, which is excluded now: on a sink that
         # folds names, a delete of Foo.cpp would remove the excluded foo.cpp
         write_tree(self.src, {"foo.cpp": b"live", "keep.txt": b"k", "build/x.o": b"o",
@@ -842,7 +842,7 @@ class PathCases:
                          [("put", "docs"), ("delete", "Docs")])
         self.assertEqual(p.state, {"sent": {"keep.txt": keep, "docs": "d"}})
 
-    def test_6_folded_patterns_leave_walked_paths_alone(self):
+    def test_folded_patterns_leave_walked_paths_alone(self):
         # the walk's own rule decides what it lists; case counts (except on Windows), so
         # README.md is sent despite readme.md, and must not be sent again on every run
         if WINDOWS:
@@ -853,7 +853,7 @@ class PathCases:
         _src, p = self.planned(state, prune="yes", exclude="readme.md")
         self.assertEqual((p.entries, p.state), ([], state))
 
-    def test_6_empty_source(self):
+    def test_empty_source(self):
         write_tree(self.src, {"a.txt": b"a", "d/b.txt": b"b"})
         state = self.state_of()
         shutil.rmtree(self.src)
@@ -881,7 +881,7 @@ class PathCases:
         self.assertEqual(self.planned({}, prune="yes", exclude="*.log",
                                       symlinks="skip")[1].entries, [])
 
-    def test_6_empty_source_with_keep_name(self):
+    def test_empty_source_with_keep_name(self):
         write_tree(self.src, {"a.txt": b"a"})
         state = self.state_of(keep_name="yes")
         os.remove(self.at("a.txt"))
@@ -901,7 +901,7 @@ class PathCases:
 
     # --- state_after: never lists what a failed commit removed ---
 
-    def test_9_state_after(self):
+    def test_state_after(self):
         write_tree(self.src, {"a/1": b"1", "old": b"o", "gone": b"g", "x.log": b"l",
                               "b/2": b"2"})
         state = self.state_of()
@@ -930,7 +930,7 @@ class PathCases:
         self.assertEqual([(e.op, e.path) for e in next_p.entries],
                          [("put", "a/1"), ("put", "b/2"), ("delete", "old")])
 
-    def test_9_state_after_a_kind_change_not_reached(self):
+    def test_state_after_a_kind_change_not_reached(self):
         write_tree(self.src, {"k/x": b"x"})
         state = self.state_of()
         shutil.rmtree(self.at("k"))
@@ -947,7 +947,7 @@ class PathCases:
         # had it got through the delete of k too, nothing would be left
         self.assertEqual(src.state_after([], ["k/x", "k"]), {"sent": {}})
 
-    def test_9_unwritten_partner_is_planned_again(self):
+    def test_unwritten_partner_is_planned_again(self):
         # [put foo.cpp (a partner), delete Foo.cpp]: on NTFS or APFS the delete removed
         # foo.cpp too, and the commit failed before it wrote foo.cpp again
         write_tree(self.src, {"foo.cpp": b"v2"})
@@ -996,7 +996,7 @@ class PathCases:
 
     @unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"),
                          "needs svn and svnadmin")
-    def test_2_real_svn_revert(self):
+    def test_real_svn_revert(self):
         repo = os.path.join(self.tmp, "repo")
         svn = ["svn", "--config-dir", os.path.join(self.tmp, "svn-config"), "--non-interactive"]
 

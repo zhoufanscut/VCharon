@@ -190,7 +190,7 @@ class RunTest(FakeSshCase):
             eng.run(**kw)
         return cm.exception
 
-    # 1: a tree with Chinese names and names with spaces, byte-identical, both ways
+    # a tree with Chinese names and names with spaces, byte-identical, both ways
 
     def tree(self, direction):
         src, dst = self.setup_run(direction, TREE)
@@ -219,13 +219,13 @@ class RunTest(FakeSshCase):
         # the source is as it was
         self.assertEqual(spec_under("src", read_tree(src)), spec_under("src", TREE))
 
-    def test_1_tree_push(self):
+    def test_tree_push(self):
         self.tree("push")
 
-    def test_1_tree_pull(self):
+    def test_tree_pull(self):
         self.tree("pull")
 
-    # 2: a 200 MB file, the tracemalloc peaks under 64 MiB on both ends
+    # a 200 MB file, the tracemalloc peaks under 64 MiB on both ends
 
     def big(self, direction):
         src_base, dst_base = self.ends(direction)
@@ -251,13 +251,13 @@ class RunTest(FakeSshCase):
         self.assertLess(helper_peak, 64 * MIB)
         self.assertEqual(self.stage_dirs(), [])
 
-    def test_2_big_file_push(self):
+    def test_big_file_push(self):
         self.big("push")
 
-    def test_2_big_file_pull(self):
+    def test_big_file_pull(self):
         self.big("pull")
 
-    # 3: 10,000 small files in 100 directories, in the same round trips as 3 files
+    # 10,000 small files in 100 directories, in the same round trips as 3 files
 
     def many(self, direction, count, dirs):
         spec = {"d%03d/f%05d.txt" % (i % dirs, i): b"file %d\n" % i for i in range(count)}
@@ -280,13 +280,13 @@ class RunTest(FakeSshCase):
         self.many(direction, 3, 3)
         self.assertEqual(self.calls, calls)
 
-    def test_3_many_files_push(self):
+    def test_many_files_push(self):
         self.many_both("push")
 
-    def test_3_many_files_pull(self):
+    def test_many_files_pull(self):
         self.many_both("pull")
 
-    # 4: a dry run changes nothing
+    # a dry run changes nothing
 
     def dry_run(self, direction):
         src, dst = self.setup_run(direction, TREE)
@@ -311,13 +311,13 @@ class RunTest(FakeSshCase):
         self.assertIsNone(eng.run(dry_run=True))
         self.assertFalse(os.path.exists(new))
 
-    def test_4_dry_run_push(self):
+    def test_dry_run_push(self):
         self.dry_run("push")
 
-    def test_4_dry_run_pull(self):
+    def test_dry_run_pull(self):
         self.dry_run("pull")
 
-    # 5: the helper killed mid-transfer leaves the root as it was, apart from its stage dir
+    # the helper killed mid-transfer leaves the root as it was, apart from its stage dir
 
     def killed(self, direction):
         src, dst = self.setup_run(direction, {"a.txt": b"a"})
@@ -340,13 +340,13 @@ class RunTest(FakeSshCase):
             self.assertEqual(after, before)
             self.assertEqual(self.stage_dirs(), [])
 
-    def test_5_helper_killed_push(self):
+    def test_helper_killed_push(self):
         self.killed("push")
 
-    def test_5_helper_killed_pull(self):
+    def test_helper_killed_pull(self):
         self.killed("pull")
 
-    # 6: an unreadable subdirectory fails the plan, and no bytes move
+    # an unreadable subdirectory fails the plan, and no bytes move
 
     def unreadable(self, direction):
         if os.geteuid() == 0:
@@ -364,14 +364,14 @@ class RunTest(FakeSshCase):
         self.assertNotIn("sink.check", self.calls)
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_6_unreadable_subdirectory_push(self):
+    def test_unreadable_subdirectory_push(self):
         self.unreadable("push")
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_6_unreadable_subdirectory_pull(self):
+    def test_unreadable_subdirectory_pull(self):
         self.unreadable("pull")
 
-    # 7: a FIFO or a symlink swapped in after the plan isn't followed
+    # a FIFO or a symlink swapped in after the plan isn't followed
 
     def swapped(self, direction, how, stops):
         src, dst = self.setup_run(direction, {"a/f.txt": b"inside", "b.txt": b"inside too",
@@ -423,14 +423,14 @@ class RunTest(FakeSshCase):
                         shutil.rmtree(os.path.join(base, name), ignore_errors=True)
 
     @unittest.skipUnless(POSIX, "needs symlinks and FIFOs")
-    def test_7_swapped_after_the_plan_push(self):
+    def test_swapped_after_the_plan_push(self):
         self.swaps("push")
 
     @unittest.skipUnless(POSIX, "needs symlinks and FIFOs")
-    def test_7_swapped_after_the_plan_pull(self):
+    def test_swapped_after_the_plan_pull(self):
         self.swaps("pull")
 
-    # 8: a commit that fails partway reports what it wrote
+    # a commit that fails partway reports what it wrote
 
     def commit_fails(self, direction):
         src, dst = self.setup_run(direction, {"a.txt": b"a", "b.txt": b"b", "c.txt": b"c"})
@@ -451,10 +451,10 @@ class RunTest(FakeSshCase):
                                           "src/b.txt/inner/": None})
         self.assertEqual(self.stage_dirs(), [])
 
-    def test_8_commit_fails_partway_push(self):
+    def test_commit_fails_partway_push(self):
         self.commit_fails("push")
 
-    def test_8_commit_fails_partway_pull(self):
+    def test_commit_fails_partway_pull(self):
         self.commit_fails("pull")
 
     # directories only: nothing to stream, and the commit still runs
@@ -471,15 +471,15 @@ class RunTest(FakeSshCase):
                                       "pull": ["source.plan"]}[direction])
         self.assertEqual(self.stage_dirs(), [])
 
-    def test_9_dirs_only_push(self):
+    def test_dirs_only_push(self):
         self.dirs_only("push")
 
-    def test_9_dirs_only_pull(self):
+    def test_dirs_only_pull(self):
         self.dirs_only("pull")
 
-    # 10: the helper checks every call
+    # the helper checks every call
 
-    def test_10_helper_call_checks(self):
+    def test_helper_call_checks(self):
         write_tree(os.path.join(self.home, "src"), {"d/f": b"f"})
         good = {"plugin": "path", "options": {"path": "src"}, "state": None, "full": False}
         plan_first = [("source.plan", good, {})]
@@ -539,7 +539,7 @@ class RunTest(FakeSshCase):
                 # the helper stops after a protocol error
                 self.assertEqual(s.ssh_exit, 3)
 
-    def test_10_helper_removes_its_stage_dir_when_it_exits(self):
+    def test_helper_removes_its_stage_dir_when_it_exits(self):
         # after bye, and at end of file, without any sink.abort
         dst = os.path.join(self.home, "dst")
         os.mkdir(dst)
@@ -642,7 +642,7 @@ class RunTest(FakeSshCase):
         self.assertEqual(read_tree(dst), read_tree(src))
         self.assertEqual(self.stage_dirs(), [])
 
-    def test_10_bad_options_keep_the_session(self):
+    def test_bad_options_keep_the_session(self):
         write_tree(os.path.join(self.home, "src"), {"f": b"f"})
         s = self.session()
         s.open()
@@ -661,7 +661,7 @@ class RunTest(FakeSshCase):
 
     # a plan over the message limit: too_big, and the session stays in step
 
-    def test_10_plan_too_big_pull(self):
+    def test_plan_too_big_pull(self):
         src = os.path.join(self.home, "src")
         write_tree(src, {"f%03d.txt" % i: b"x" for i in range(300)})
         dst = os.path.join(self.local, "dst")
@@ -677,7 +677,7 @@ class RunTest(FakeSshCase):
         self.assertEqual(eng.session.echo(b"still in step"), b"still in step")
         self.assertEqual(read_tree(dst), {})
 
-    def test_10_plan_too_big_push(self):
+    def test_plan_too_big_push(self):
         src, dst = self.setup_run("push", {"f%03d.txt" % i: b"x" for i in range(300)})
         eng = self.engine(*self.sides("push", src, dst))
         with mock.patch.object(proto, "MAX_JSON", 8192):
@@ -689,10 +689,10 @@ class RunTest(FakeSshCase):
         self.assertEqual(eng.session.echo(b"still in step"), b"still in step")
         self.assertEqual(read_tree(dst), {})
 
-    # 11: no fd leak in the controller
+    # no fd leak in the controller
 
     @unittest.skipUnless(os.path.isdir("/dev/fd"), "needs /dev/fd")
-    def test_11_no_fd_leak(self):
+    def test_no_fd_leak(self):
         before = fd_count()
         for direction in ("push", "pull"):
             src, dst = self.setup_run(direction, TREE)
@@ -751,7 +751,7 @@ class RunTest(FakeSshCase):
             if POSIX:
                 self.assertEqual(bool(a.st_mode & 0o100), bool(b.st_mode & 0o100), rel)
 
-    # item 1: a second run with nothing changed plans nothing and moves no file bytes
+    # a second run with nothing changed plans nothing and moves no file bytes
 
     def nothing_changed(self, direction):
         src, dst = self.setup_run(direction, TREE)
@@ -766,13 +766,13 @@ class RunTest(FakeSshCase):
         self.assertEqual(self.snapshot(dst), before)
         self.assertEqual(self.stage_dirs(), [])
 
-    def test_m4_1_nothing_changed_push(self):
+    def test_nothing_changed_push(self):
         self.nothing_changed("push")
 
-    def test_m4_1_nothing_changed_pull(self):
+    def test_nothing_changed_pull(self):
         self.nothing_changed("pull")
 
-    # item 2: a file whose size, mtime or execute bit changed is sent again, and so is one that
+    # a file whose size, mtime or execute bit changed is sent again, and so is one that
     # a revert restored
 
     def only_changes(self, direction):
@@ -795,13 +795,13 @@ class RunTest(FakeSshCase):
         self.assertEqual(self.moved(eng), want)
         self.assert_same_files(src, dst)
 
-    def test_m4_2_only_changes_are_sent_push(self):
+    def test_only_changes_are_sent_push(self):
         self.only_changes("push")
 
-    def test_m4_2_only_changes_are_sent_pull(self):
+    def test_only_changes_are_sent_pull(self):
         self.only_changes("pull")
 
-    # item 3: a first --full run onto a copy sends only what differs, and gives the rest the
+    # a first --full run onto a copy sends only what differs, and gives the rest the
     # source's mtime
 
     def full_onto_a_copy(self, direction):
@@ -831,13 +831,13 @@ class RunTest(FakeSshCase):
         eng = self.job_run(direction, src, dst, self.state_of(eng))
         self.assertEqual(eng.plan.entries, [])
 
-    def test_m4_3_full_onto_a_copy_push(self):
+    def test_full_onto_a_copy_push(self):
         self.full_onto_a_copy("push")
 
-    def test_m4_3_full_onto_a_copy_pull(self):
+    def test_full_onto_a_copy_pull(self):
         self.full_onto_a_copy("pull")
 
-    # item 4: --full repairs a file edited or removed at the target
+    # --full repairs a file edited or removed at the target
 
     def full_repairs(self, direction):
         spec = {"edited.txt": b"12345", "truncated.txt": b"abcdef", "removed.txt": b"r",
@@ -854,13 +854,13 @@ class RunTest(FakeSshCase):
         self.assert_same_files(src, dst)
         self.assertEqual(self.state_of(eng), state)
 
-    def test_m4_4_full_repairs_push(self):
+    def test_full_repairs_push(self):
         self.full_repairs("push")
 
-    def test_m4_4_full_repairs_pull(self):
+    def test_full_repairs_pull(self):
         self.full_repairs("pull")
 
-    # item 5: prune deletes only paths it sent, and never a directory that holds others' files
+    # prune deletes only paths it sent, and never a directory that holds others' files
 
     def prune_only_sent(self, direction):
         spec = {"keep.txt": b"k", "gone.txt": b"g", "d/gone.txt": b"g", "d2/x.txt": b"x"}
@@ -882,13 +882,13 @@ class RunTest(FakeSshCase):
                                           "d2/mine.txt": b"m"})
         self.assertEqual(eng.plan.state, {"sent": {"keep.txt": state["sent"]["keep.txt"]}})
 
-    def test_m4_5_prune_deletes_only_what_it_sent_push(self):
+    def test_prune_deletes_only_what_it_sent_push(self):
         self.prune_only_sent("push")
 
-    def test_m4_5_prune_deletes_only_what_it_sent_pull(self):
+    def test_prune_deletes_only_what_it_sent_pull(self):
         self.prune_only_sent("pull")
 
-    # items 9 and 10: a commit that fails partway saves only what state_after returns, and a
+    # a commit that fails partway saves only what state_after returns, and a
     # run after it reaches the right result
 
     def failed_commit(self, direction):
@@ -921,17 +921,17 @@ class RunTest(FakeSshCase):
         self.assertEqual(self.stage_dirs(), [])
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_9_10_failed_commit_push(self):
+    def test_a_failed_commit_saves_what_it_wrote_push(self):
         self.failed_commit("push")
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_9_10_failed_commit_pull(self):
+    def test_a_failed_commit_saves_what_it_wrote_pull(self):
         self.failed_commit("pull")
 
     # a failed commit's state never lists what it removed
 
     def restored_after_a_failed_prune(self, direction):
-        # probe p8: x.txt goes to the trash, a commit deletes it at the target and then fails;
+        # x.txt goes to the trash, a commit deletes it at the target and then fails;
         # x.txt comes back with its old bytes and mtime, and must be sent again
         if os.geteuid() == 0:
             self.skipTest("root can write in a read-only directory")
@@ -959,11 +959,11 @@ class RunTest(FakeSshCase):
         self.assert_same_files(src, dst)
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_restored_after_a_failed_prune_push(self):
+    def test_restored_after_a_failed_prune_push(self):
         self.restored_after_a_failed_prune("push")
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_restored_after_a_failed_prune_pull(self):
+    def test_restored_after_a_failed_prune_pull(self):
         self.restored_after_a_failed_prune("pull")
 
     def failed_delete_phase(self, direction):
@@ -999,11 +999,11 @@ class RunTest(FakeSshCase):
         self.assertEqual(read_tree(dst), read_tree(src))
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_failed_delete_phase_push(self):
+    def test_failed_delete_phase_push(self):
         self.failed_delete_phase("push")
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_failed_delete_phase_pull(self):
+    def test_failed_delete_phase_pull(self):
         self.failed_delete_phase("pull")
 
     def case_rename_then_failure(self, direction):
@@ -1033,14 +1033,14 @@ class RunTest(FakeSshCase):
         self.assertEqual(read_tree(dst), read_tree(src))
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_case_rename_then_a_failed_commit_push(self):
+    def test_case_rename_then_a_failed_commit_push(self):
         self.case_rename_then_failure("push")
 
     @unittest.skipUnless(POSIX, "needs POSIX modes")
-    def test_m4_case_rename_then_a_failed_commit_pull(self):
+    def test_case_rename_then_a_failed_commit_pull(self):
         self.case_rename_then_failure("pull")
 
-    def test_m4_no_state_after_without_a_state(self):
+    def test_no_state_after_without_a_state(self):
         # a one-off pull keeps no state: a failed commit asks for none
         src, dst = self.setup_run("pull", {"a.txt": b"a", "b.txt": b"b"})
 
@@ -1054,7 +1054,7 @@ class RunTest(FakeSshCase):
         self.assertNotIn("source.state_after", self.calls)
         self.assertIsNone(eng.state_after)
 
-    def test_m4_push_check_leaves_the_state_out(self):
+    def test_push_check_leaves_the_state_out(self):
         # the sink never reads it, and it holds every path sent so far
         src, dst = self.setup_run("push", {"a/b.txt": b"b", "c.txt": b"c"})
         state = self.state_of(self.job_run("push", src, dst, {}))
@@ -1070,7 +1070,7 @@ class RunTest(FakeSshCase):
 
     # the engine refuses a have that names anything but a hashed file put
 
-    def test_m4_lying_sink(self):
+    def test_lying_sink(self):
         src, dst = self.setup_run("push", {"d/f.txt": b"f"})
         write_tree(dst, {"d/f.txt": b"f"})
         before = self.snapshot(dst)

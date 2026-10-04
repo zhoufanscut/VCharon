@@ -2156,7 +2156,7 @@ class EntriesTest(WatchCase):
         self.assertEqual(self.said()[1:], ["to all: debian#2 — from debian  (debian/RESULTS.md)",
                                            "note: @all from mac, not the leader: ignored"])
 
-    def test_8_before_7(self):
+    def test_a_later_entry_can_come_a_round_first(self):
         # two files, and one run moves them in name order: #3 can come a round before #2
         def three():
             self.post("windows", 3, "three", to="@mac", file="B.md")

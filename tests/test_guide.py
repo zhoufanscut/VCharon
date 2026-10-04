@@ -268,9 +268,20 @@ class TrustLineTest(ChannelCase):
 
 # A milestone name, a review tag or a pointer into a plan or a review: build history, which
 # belongs in commit messages and the changelog, never in the code, its tests or the docs that
-# describe it now. Two phrases are built from parts, so this file doesn't match itself.
+# describe it now. Two phrases, and the allowed name below, are built from parts, so this file
+# doesn't match itself.
+# A tag is found after "_" too, as in a test's name, so it is bounded by letters and digits
+# only. A lowercase one may take a letter after its number, but the file type m4a isn't one;
+# a V tag stops at a ".", so a version number isn't one. A regex match variable named "m" and a
+# digit, or grep's -m and a digit, match too: list such a line in ALLOWED. A numbered test name is a plan's item
+# number: unittest sorts by name, so the number orders nothing a test can rely on.
 HISTORY = re.compile("|".join([
-    r"\bM[0-9]+[a-z]?\b",
+    r"(?<![A-Za-z0-9])M[0-9]+[a-z]?(?![A-Za-z0-9])",
+    r"(?<![A-Za-z0-9])m[0-9]+[a-z]?(?![A-Za-z0-9])(?<!m4a)",
+    r"(?<![A-Za-z0-9.])V[0-9]+[a-z]?(?![A-Za-z0-9.])",
+    r"(?i:\bprobes? [a-z]?[0-9]+\b)",
+    r"(?i:\b(blockers?|warnings?|items?|notes?|nits?|findings?) #?[0-9]+\b)",
+    r"\bdef test_[0-9]+_",
     r"(?i:\b(re-)?review)('s)? [A-Z][0-9]",
     r"(?i:\breview pass [0-9])",
     r"(?i:\bdecisions? [0-9]+(-[0-9]+)? of\b)",
@@ -278,8 +289,11 @@ HISTORY = re.compile("|".join([
     r"(?i:\bas " + r"built\b)",
 ]))
 # (file, the matched text) pairs that aren't history, such as a chip's name in
-# a macOS note; empty while nothing needs one
-ALLOWED = set()
+# a macOS note
+ALLOWED = {
+    # 300 s is the time the test is about, not an item number
+    ("tests/test_mailbox_watch.py", "def test_" + "300_"),
+}
 SCANNED = ("src", "tests", "README.md", "DESIGN.md")
 
 

@@ -776,7 +776,7 @@ class DistroTest(DoctorCase):
 
 
 class RowTest(DoctorCase):
-    """Item 1: one case per row of (DESIGN, "Failures before the helper runs"), each a FAIL on the
+    """One case per row of (DESIGN, "Failures before the helper runs"), each a FAIL on the
     fake-dest line with its message and fix, exit 1, and the destination's later checks skipped."""
 
     def failed(self, message, fix, *argv):

@@ -455,9 +455,9 @@ class JobTest(FakeSshCase):
                                      "  put     3 files, 2 dirs (1.2 kB), 3 already there"])
         self.assertEqual(self.ok("push")[1], "  nothing to do")
 
-    # item 7: a fingerprint, identity or sink mismatch is refused
+    # a fingerprint, identity or sink mismatch is refused
 
-    def test_7_config_changed(self):
+    def test_config_changed(self):
         self.ok("push")
         before = self.state_bytes()
         self.no_ssh()
@@ -477,7 +477,7 @@ class JobTest(FakeSshCase):
                           "idle_timeout = 60\n")
         self.assertEqual(self.ok("push")[1], "  nothing to do")
 
-    def test_7_pull_from_another_server(self):
+    def test_pull_from_another_server(self):
         back = os.path.join(self.local, "back")
         self.pull_job(back)
         self.ok("pull")
@@ -499,7 +499,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(read_tree(back), before)
         self.assertEqual(out, ["vcharon: pull  fake-dest:outbox -> %s" % back])
 
-    def test_7_push_to_another_server(self):
+    def test_push_to_another_server(self):
         self.ok("push")
         os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
         write_tree(self.src, {"new.txt": b"n"})
@@ -514,7 +514,7 @@ class JobTest(FakeSshCase):
         self.assertNotIn("new.txt", read_tree(self.inbox))
 
     @unittest.skipUnless(os.name == "posix", "needs symlinks")
-    def test_7_local_root_moved(self):
+    def test_local_root_moved(self):
         first, second = os.path.join(self.local, "r1"), os.path.join(self.local, "r2")
         os.makedirs(second)
         link = os.path.join(self.local, "link")
@@ -534,7 +534,7 @@ class JobTest(FakeSshCase):
                          % (os.path.realpath(first), os.path.realpath(second)))
         self.assertEqual(read_tree(second), {})
 
-    def test_7_malformed_state_file(self):
+    def test_malformed_state_file(self):
         self.ok("push")
         with open(state.path("push"), "wb") as f:
             f.write(b"{broken")
@@ -567,9 +567,9 @@ class JobTest(FakeSshCase):
         self.assertEqual(out.splitlines()[-1], "removed %s" % state.path("push"))
         self.assertEqual(self.ok("push")[1], "  put     3 files, 2 dirs (1.2 kB)")
 
-    # item 8: a second concurrent run exits with 2
+    # a second concurrent run exits with 2
 
-    def test_8_busy(self):
+    def test_busy(self):
         held = state.lock("push")
         self.addCleanup(held.release)
         _out, err = self.failed(2, "push")
@@ -582,7 +582,7 @@ class JobTest(FakeSshCase):
         held.release()
         self.ok("push")
 
-    def test_8_busy_in_another_process(self):
+    def test_busy_in_another_process(self):
         # the lock is the OS's: a second vcharon process sees it (DESIGN, "Lock")
         self.lock_is_free()
         child = hold_in_child(os.path.join(self.vcharon_home, "state", "push.lock"))
@@ -614,9 +614,10 @@ class JobTest(FakeSshCase):
         self.assertRegex(lines[-1], OK_LINE % (0, 1))
         self.assertEqual(read_tree(back), {"sub/": None, "sub/mine.txt": b"m"})
 
-    # item 6 through the CLI: prune keeps excluded files, and refuses an emptied source
+    # prune keeps excluded files and refuses an emptied source (test_path pins these in the
+    # plugin: test_prune, test_excluded_paths_are_never_deleted); here, through the CLI
 
-    def test_6_prune_pull(self):
+    def test_prune_pull(self):
         back = os.path.join(self.local, "back")
         os.makedirs(back)
         outbox = os.path.join(self.home, "outbox")
@@ -726,10 +727,10 @@ class JobTest(FakeSshCase):
             self.assertFalse(os.path.exists(state.path("push")))
             self.assertEqual(read_tree(self.inbox), {})
 
-    # items 9 and 10: a commit that fails partway saves what it wrote; the next run finishes
+    # a commit that fails partway saves what it wrote; the next run finishes
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX modes")
-    def test_9_10_failed_commit(self):
+    def test_a_failed_commit_saves_what_it_wrote_push(self):
         if os.geteuid() == 0:
             self.skipTest("root can write in a read-only directory")
         self.ok("push")
@@ -753,7 +754,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(read_tree(self.inbox), read_tree(self.src))
 
     @unittest.skipUnless(os.name == "posix", "needs POSIX modes")
-    def test_9_10_failed_commit_pull(self):
+    def test_a_failed_commit_saves_what_it_wrote_pull(self):
         if os.geteuid() == 0:
             self.skipTest("root can write in a read-only directory")
         back = os.path.join(self.local, "back")
@@ -1951,7 +1952,7 @@ class MailboxTest(FakeSshCase):
                 self.assertNotIn("mac", state.load("mb.windows.down").source["sent"])
                 self.assertIn("mac", self.left_out_lines()[-1])
 
-    def test_a_top_level_file_sent_before_m9_and_gone(self):
+    def test_a_top_level_file_in_sent_is_dropped_not_deleted(self):
         # "todo" is a valid writer's name, but sent recorded a file: dropped, not deleted
         self.ok(*SYNC)
         write_tree(self.local, {"todo": b"t"})
