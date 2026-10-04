@@ -9,6 +9,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `install.sh` takes at most 200 MB of binary out of the archive, as `install.ps1` and
+  `--update` already did: a bigger `vcharon` member fails with `error: the vcharon in <archive>
+  is over 200000000 bytes; nothing was installed`. With a published `.sha256` and no
+  `sha256sum` or `shasum`, it now tries `openssl dgst -sha256`, and with none of the three it
+  fails (`error: no sha256sum, shasum or openssl here to check <archive>.sha256; …`, then the
+  pipx line) where it used to warn and install unchecked. Measured on Linux under sh (bash) and
+  dash against a local fake release; macOS inferred (its `head -c`, `wc -c` and `openssl dgst
+  -r` are expected to behave the same, not run there).
 - A relative `VCHARON_HOME` is now refused with `ERROR config: VCHARON_HOME is '<value>', not
   an absolute folder` (exit 3) and the fix `set VCHARON_HOME to a full path, such as
   /tmp/vc/home`; `~` in it is expanded. It used to follow the current folder, so records landed

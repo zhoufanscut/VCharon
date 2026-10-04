@@ -1703,10 +1703,14 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   `VCHARON_INSTALL_VERSION_TIMEOUT` and `VCHARON_INSTALL_KILL_GRACE` (whole seconds; anything
   else gets the default) are for the same tests: they shorten the waits for a hung binary.
   `install.sh` writes only the archive member's bytes (`tar -O`, so a link member gives an empty
-  file, which fails the version check), gives that check 60 s (without `timeout(1)`: TERM, then
-  KILL after 5 s), and cleans up on INT, TERM and HUP. `install.ps1` stops a binary that overruns
-  the 60 s, and its child, best effort; its two moves are retried 5 times 0.5 s apart, a stop
-  between them puts the old binary back, and its work folder is kept while no binary is in place.
+  file, which fails the version check), reads at most one byte over the 200 MB through `head -c`
+  and fails if it got it (it lists the member first: sh has no pipefail to report tar's failure
+  through the pipe), hashes with `sha256sum`, `shasum` or `openssl`, whichever is found first,
+  and fails when none is (a published checksum is never skipped), gives the version check 60 s
+  (without `timeout(1)`: TERM, then KILL after 5 s), and cleans up on INT, TERM and HUP.
+  `install.ps1` stops a binary that overruns the 60 s, and its child, best effort; its two moves
+  are retried 5 times 0.5 s apart, a stop between them puts the old binary back, and its work
+  folder is kept while no binary is in place.
   `install.sh` is tested under sh and dash against a local fake release, and both installers run
   against a fake release in each release build ([Releases](#releases)); neither has run against
   GitHub yet.

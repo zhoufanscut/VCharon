@@ -23,6 +23,8 @@ from tests.util import TESTS_DIR
 INSTALL_SH = os.path.join(os.path.dirname(TESTS_DIR), "install.sh")
 TAG = "v9.9.9"
 ASSET = "vcharon-linux-x64.tar.gz"
+# install.sh's MAX_BINARY, as install.ps1 and vcharon --update cap the binary
+MAX_BINARY = 200_000_000
 
 
 def fake_binary(version="9.9.9"):
@@ -31,10 +33,22 @@ def fake_binary(version="9.9.9"):
             % version).encode()
 
 
+class _Zeros(io.RawIOBase):
+    """A file of zero bytes that is never stored: a big archive member costs no memory."""
+
+    def readable(self):
+        return True
+
+    def readinto(self, b):
+        b[:] = bytes(len(b))
+        return len(b)
+
+
 def tarball(members):
-    """A .tar.gz of {name: bytes}, each executable; a str value makes a symlink to it."""
+    """A .tar.gz of {name: bytes}, each executable; a str value makes a symlink to it, an int
+    a file of that many zero bytes."""
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=1) as tar:
         for name, data in members.items():
             info = tarfile.TarInfo(name)
             if isinstance(data, str):
@@ -42,8 +56,12 @@ def tarball(members):
                 info.linkname = data
                 tar.addfile(info)
                 continue
-            info.size = len(data)
             info.mode = 0o755
+            if isinstance(data, int):
+                info.size = data
+                tar.addfile(info, _Zeros())
+                continue
+            info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
     return buf.getvalue()
 
@@ -132,11 +150,19 @@ class InstallShTest(unittest.TestCase):
                 "TMPDIR": self.tmp}
 
     def install(self, path_has_bin=False, env=None):
-        # found on this PATH: the child's may be cut down
-        ran = subprocess.run([shutil.which(self.shell), INSTALL_SH],
-                             env=env or self.env(path_has_bin),
-                             capture_output=True, timeout=60, check=False)
-        return ran.returncode, ran.stdout.decode(), ran.stderr.decode()
+        # found on this PATH: the child's may be cut down. A session of its own: sleeps()
+        # counts only the processes it started, never another test's or program's.
+        with subprocess.Popen([shutil.which(self.shell), INSTALL_SH],
+                              env=env or self.env(path_has_bin), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, start_new_session=True) as child:
+            self.session = child.pid
+            try:
+                out, err = child.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate()
+                raise
+        return child.returncode, out.decode(), err.decode()
 
     @property
     def dest(self):
@@ -219,13 +245,77 @@ class InstallShTest(unittest.TestCase):
                       % ASSET, err)
         self.assert_nothing_installed()
 
-    def test_a_link_named_vcharon_installs_nothing(self):
-        # tar -O writes a member's bytes only: a symlink gives an empty file, which won't run
-        archive = tarball({"vcharon": "/bin/sh", "LICENSE": b"MIT\n"})
-        self.release()
+    def publish(self, archive):
+        """Serve this archive, with its right checksum, in place of release()'s."""
         self.server.files["/download/%s/%s" % (TAG, ASSET)] = archive
         self.server.files["/download/%s/%s.sha256" % (TAG, ASSET)] = (
             "%s  %s\n" % (hashlib.sha256(archive).hexdigest(), ASSET)).encode()
+
+    def test_a_binary_over_200_mb_installs_nothing(self):
+        # zeros compress to about 0.2 MB: the cap is on what comes out, not the download
+        self.release()
+        self.publish(tarball({"vcharon": MAX_BINARY + 1, "LICENSE": b"MIT\n"}))
+        code, _, err = self.install()
+        self.assertEqual(code, 1)
+        self.assertIn("error: the vcharon in %s is over %d bytes; nothing was installed"
+                      % (ASSET, MAX_BINARY), err)
+        self.assert_nothing_installed()
+
+    def test_an_archive_without_vcharon_installs_nothing(self):
+        # sh has no pipefail: the member is looked for before the capped extraction
+        self.release()
+        self.publish(tarball({"bin/vcharon": fake_binary(), "LICENSE": b"MIT\n"}))
+        code, _, err = self.install()
+        self.assertEqual(code, 1)
+        self.assertIn("error: %s holds no vcharon" % ASSET, err)
+        self.assert_nothing_installed()
+
+    def tools_path(self, without=()):
+        """A PATH of the tools install.sh uses (timeout(1) among them), less these names."""
+        tools = os.path.join(self.shims, "some-tools")
+        os.mkdir(tools)
+        for name in ("curl", "tar", "gzip", "sha256sum", "shasum", "openssl", "awk", "sed",
+                     "grep", "head", "wc", "tr", "mktemp", "rm", "mkdir", "cp", "chmod", "mv",
+                     "cat", "sleep", "timeout"):
+            found = shutil.which(name)
+            if found and name not in without:
+                os.symlink(found, os.path.join(tools, name))
+        for name in without:
+            self.assertFalse(os.path.exists(os.path.join(tools, name)))
+        return self.shims + os.pathsep + tools
+
+    def test_a_published_checksum_with_no_tool_to_check_it_installs_nothing(self):
+        # never "not checked" when the release has one: only a 404 goes on unchecked
+        self.release()
+        env = dict(self.env(), PATH=self.tools_path(("sha256sum", "shasum", "openssl")))
+        code, _, err = self.install(env=env)
+        self.assertEqual(code, 1)
+        self.assertIn("error: no sha256sum, shasum or openssl here to check %s.sha256;"
+                      " nothing was installed." % ASSET, err)
+        self.assertIn("\n  pipx install git+https://github.com/zhoufanscut/VCharon\n", err)
+        self.assert_nothing_installed()
+
+    @unittest.skipUnless(shutil.which("openssl"), "needs openssl")
+    def test_openssl_checks_the_checksum_when_nothing_else_can(self):
+        # the mismatch first: it must find nothing installed
+        for sums, code in (("wrong", 1), ("right", 0)):
+            with self.subTest(sums=sums):
+                shutil.rmtree(os.path.join(self.shims, "some-tools"), True)
+                self.release(sums=sums)
+                env = dict(self.env(), PATH=self.tools_path(("sha256sum", "shasum")))
+                got, out, err = self.install(env=env)
+                self.assertEqual(got, code, out + err)
+                if code:
+                    self.assertIn("error: checksum mismatch for %s" % ASSET, err)
+                    self.assert_nothing_installed()
+                else:
+                    self.assertEqual(err, "")
+                    self.assertTrue(os.path.isfile(self.dest))
+
+    def test_a_link_named_vcharon_installs_nothing(self):
+        # tar -O writes a member's bytes only: a symlink gives an empty file, which won't run
+        self.release()
+        self.publish(tarball({"vcharon": "/bin/sh", "LICENSE": b"MIT\n"}))
         code, _, err = self.install()
         self.assertEqual(code, 1)
         self.assertIn("the downloaded binary didn't run here", err)
@@ -260,7 +350,7 @@ class InstallShTest(unittest.TestCase):
         tools = os.path.join(self.shims, "tools")
         os.mkdir(tools)
         for name in ("curl", "tar", "gzip", "sha256sum", "shasum", "awk", "sed", "grep", "head",
-                     "mktemp", "rm", "mkdir", "cp", "chmod", "mv", "cat", "sleep"):
+                     "wc", "tr", "mktemp", "rm", "mkdir", "cp", "chmod", "mv", "cat", "sleep"):
             found = shutil.which(name)
             if found:
                 os.symlink(found, os.path.join(tools, name))
@@ -268,24 +358,54 @@ class InstallShTest(unittest.TestCase):
         return self.shims + os.pathsep + tools
 
     def sleeps(self, seconds):
-        """The running `sleep <seconds>` processes (Linux /proc only)."""
+        """The running `sleep <seconds>` processes the last install() started (Linux /proc
+        only): those in its session, which outlives the installer itself."""
         found = []
         for pid in os.listdir("/proc"):
             if pid.isdigit():
                 try:
                     with open("/proc/%s/cmdline" % pid, "rb") as f:
                         argv = f.read().split(b"\0")
+                    with open("/proc/%s/stat" % pid, "rb") as f:
+                        stat_line = f.read()
                 except OSError:
+                    continue
+                # the fields after the command name, which is in parentheses and may hold
+                # spaces or parentheses itself; the session id is the stat's 6th field
+                fields = stat_line[stat_line.rfind(b")") + 1:].split()
+                if len(fields) < 4 or int(fields[3]) != self.session:
                     continue
                 if argv[:2] == [b"sleep", str(seconds).encode()] or \
                         argv[:2] == [shutil.which("sleep").encode(), str(seconds).encode()]:
                     found.append(pid)
         return found
 
+    def other_sleeper(self, seconds):
+        """A `sleep <seconds>` loop outside the installer, as any program on the machine
+        may run, stopped when the test ends."""
+        loop = subprocess.Popen(["sh", "-c", "while :; do sleep %d; done" % seconds],
+                                start_new_session=True)
+
+        def stop():
+            os.killpg(loop.pid, signal.SIGKILL)
+            loop.wait()
+        self.addCleanup(stop)
+        # its first sleep running: the count below would see it without the session filter
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                with open("/proc/%d/task/%d/children" % (loop.pid, loop.pid)) as f:
+                    if f.read().split():
+                        return
+            except OSError:
+                pass
+            time.sleep(0.05)
+
     @unittest.skipUnless(os.path.isdir("/proc"), "counts processes through /proc")
     def test_without_timeout_a_quick_binary_leaves_no_sleeper(self):
         self.release()
         env = dict(self.env(), PATH=self.no_timeout_path(), VCHARON_INSTALL_VERSION_TIMEOUT="47")
+        self.other_sleeper(47)
         code, out, err = self.install(env=env)
         self.assertEqual((code, err), (0, ""), out)
         time.sleep(0.3)
@@ -299,6 +419,7 @@ class InstallShTest(unittest.TestCase):
         # a timeout of 2, not 1: the hung binary's own `sleep 1`s aren't the watcher's
         env = dict(self.env(), PATH=self.no_timeout_path(), VCHARON_INSTALL_VERSION_TIMEOUT="2",
                    VCHARON_INSTALL_KILL_GRACE="1")
+        self.other_sleeper(2)
         started = time.monotonic()
         code, _, err = self.install(env=env)
         self.assertEqual(code, 1)

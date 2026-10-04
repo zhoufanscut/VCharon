@@ -19,6 +19,9 @@ VERSION_TIMEOUT="${VCHARON_INSTALL_VERSION_TIMEOUT:-60}"
 # without timeout(1): the seconds between TERM and KILL of a binary that hangs (the
 # installer's tests shorten it too)
 KILL_GRACE="${VCHARON_INSTALL_KILL_GRACE:-5}"
+# the most binary taken out of the archive, as install.ps1 and vcharon --update take: a
+# damaged or hostile archive can't fill the disk
+MAX_BINARY=200000000
 # a value that isn't a whole number of seconds gets the default: under set -e a failed sleep
 # would end the watcher before its KILL, and a hung binary would hang the install
 case ${VERSION_TIMEOUT} in ''|*[!0-9]*) VERSION_TIMEOUT=60 ;; esac
@@ -61,11 +64,15 @@ local_or_https() {
   esac
 }
 
+# "$1"'s sha256 in hex, or nothing when no tool here computes one. openssl is the last
+# resort: a minimal system may lack coreutils' sha256sum and Perl's shasum.
 sha256_of() {
   if command -v sha256sum > /dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
   elif command -v shasum > /dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v openssl > /dev/null 2>&1; then
+    openssl dgst -sha256 -r "$1" | awk '{print tolower($1)}'
   fi
 }
 
@@ -180,8 +187,14 @@ main() {
       esac
       [ "${#EXPECTED}" -eq 64 ] || die "${TARBALL}.sha256 holds no sha256"
       ACTUAL="$(sha256_of "${WORK_DIR}/${TARBALL}")"
+      # a published checksum is always checked: no tool to check it is a failure, not a
+      # warning
       if [ -z "${ACTUAL}" ]; then
-        echo "warning: no sha256sum or shasum here; the checksum is not checked" >&2
+        echo "error: no sha256sum, shasum or openssl here to check ${TARBALL}.sha256;" \
+          "nothing was installed. Install one of them (sha256sum is in coreutils), or install" \
+          "with pipx:" >&2
+        echo "${PIPX_LINE}" >&2
+        exit 1
       elif [ "${ACTUAL}" != "${EXPECTED}" ]; then
         die "checksum mismatch for ${TARBALL}: expected ${EXPECTED}, got ${ACTUAL};" \
           "nothing was installed"
@@ -196,10 +209,17 @@ main() {
   esac
 
   # Only the binary, never the whole archive, and only its bytes: a link member named
-  # vcharon writes nothing here, and the --version check below fails.
+  # vcharon writes nothing here, and the --version check below fails. The member is looked
+  # for first because sh has no pipefail: the pipe's status below is head's, not tar's. One
+  # byte over the cap is read, so a binary of exactly MAX_BINARY bytes passes.
   echo "Extracting ..."
-  tar -xzOf "${WORK_DIR}/${TARBALL}" "${BIN_NAME}" > "${WORK_DIR}/${BIN_NAME}" \
+  tar -tzf "${WORK_DIR}/${TARBALL}" 2>/dev/null | grep -qx "${BIN_NAME}" \
     || die "${TARBALL} holds no ${BIN_NAME}"
+  tar -xzOf "${WORK_DIR}/${TARBALL}" "${BIN_NAME}" \
+    | head -c "$((MAX_BINARY + 1))" > "${WORK_DIR}/${BIN_NAME}"
+  SIZE="$(wc -c < "${WORK_DIR}/${BIN_NAME}" | tr -d ' ')"
+  [ "${SIZE}" -le "${MAX_BINARY}" ] \
+    || die "the ${BIN_NAME} in ${TARBALL} is over ${MAX_BINARY} bytes; nothing was installed"
   chmod +x "${WORK_DIR}/${BIN_NAME}"
 
   # the binary must run here and be the release's version; a Linux older than the build
