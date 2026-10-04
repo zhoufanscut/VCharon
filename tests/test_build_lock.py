@@ -53,7 +53,9 @@ class BuildLockTest(unittest.TestCase):
         with open(os.path.join(ROOT, "pyproject.toml"), "rb") as f:
             build = tomllib.load(f)["project"]["optional-dependencies"]["build"]
         lock = _lock()
-        self.assertTrue(build)
+        # both pins must be in the extra; the loop alone would pass with one dropped
+        names = {_norm(r.partition("==")[0]) for r in build}
+        self.assertLessEqual({"pyinstaller", "pyinstaller-hooks-contrib"}, names)
         for req in build:
             name, _, version = req.partition("==")
             self.assertTrue(version, "the build extra pins exactly: %s" % req)

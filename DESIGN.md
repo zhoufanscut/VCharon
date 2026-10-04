@@ -1774,9 +1774,10 @@ maintainer asks before tagging.
   PowerShell 5.1 (`powershell.exe`), what `irm | iex` runs in by default, whose branches (TLS
   1.2) pwsh never takes; it is a replace too, over the pwsh install. The replace runs leave a
   file outside the install folder, which must still be there: proof the earlier install was
-  kept, not wiped for a fresh one. Not run by any check: `install.ps1`'s 60 s download timeout
-  and the 5.1 `WebException` branch of its HTTP status reader. `install.ps1` also adds its
-  folder to the user's PATH, so on Windows the check runs only where `CI` is set.
+  kept, not wiped for a fresh one. Not run by any check: `install.ps1`'s stop of a binary whose
+  `--version` runs past 60 s, and the 5.1 `WebException` branch of its HTTP status reader.
+  `install.ps1` also adds its folder to the user's PATH, so on Windows the check runs only where
+  `CI` is set.
 - **The build's inputs are pinned**, so a release is built from what was checked, not from what
   was newest that day. The actions are at commit SHAs (a tag can be moved; the publish job holds
   a write token), with the version in a comment, which Dependabot bumps weekly as pull requests
@@ -1788,6 +1789,8 @@ maintainer asks before tagging.
   lock serves all three runners: hashes cover every file of a release, so each OS's pip finds
   its own wheel. The `build` extra pins PyInstaller and its hooks package to the same versions
   (`tests/test_build_lock.py`), so a hand build matches. No ruff: the release runs no lint.
+  That test checks the lock's shape only; whether it resolves on each OS (every dependency
+  pinned, every hash right, a wheel for each runner) is proven only by a release build, at a tag.
 - **One job publishes**, after all three builds: it takes their assets, checks there are exactly
   the nine and that each checksum holds, and runs `gh release create`. A version with a
   pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
