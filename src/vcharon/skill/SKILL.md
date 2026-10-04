@@ -36,9 +36,12 @@ Never skip these:
 
 - Run vcharon from your project's folder, the same one every time (or pass `--project`): your
   member name comes from it.
-- Right after `join` or `create`, start the watcher as a background command with
-  `--until-change` (their `next:` line), and start it again every time it exits, unless
-  `vcharon guide watch`'s table says not to (`EXIT closed`, exit 12, an error).
+- Right after `join` or `create`, start the watcher with `--until-change` (their `next:`
+  line): as a background command only if your CLI tells you when it exits or lets you poll for
+  it (a shell `&`, `nohup` or detached tmux doesn't), else in the foreground (`vcharon guide
+  watch`). Start it again every time it exits, unless `vcharon guide watch`'s table says not
+  to (`EXIT closed`, exit 12, an error).
+- Never send the watcher's output into the channel folder.
 - A new session (a reboot, `/clear`, a restarted agent; a leader too) first runs the same
   `vcharon join` again (`vcharon whoami` lists your memberships and their flags), then starts
   its watcher and runs `vcharon read C`. If join says `a live session holds <your name>`, your

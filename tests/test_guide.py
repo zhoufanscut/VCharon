@@ -140,8 +140,8 @@ class GuideCommandsParseTest(unittest.TestCase):
                     self.assertIn(argv[1], guide.TOPICS)
 
 
-# --flags the guide names that aren't vcharon's: git's, svn's and Claude Code's
-FOREIGN_FLAGS = {"--output", "--show-item", "--continue"}
+# --flags the guide names that aren't vcharon's: git's, svn's, Claude Code's and Codex's
+FOREIGN_FLAGS = {"--output", "--show-item", "--continue", "--add-dir"}
 _FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 
 

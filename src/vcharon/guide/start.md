@@ -51,7 +51,10 @@ Once per machine, by your user or with their word:
    member's copies of its channels) and `channels` (the channel root of local members on
    this machine); `vcharon doctor --json` has them under `dirs`. A remote member needs the
    whole `joined` folder writable, not just its own folder in it: each sync writes the other
-   members' copies there too. Ask; never work around a refusal.
+   members' copies there too. Ask; never work around a refusal. For example, a Codex local
+   member (Codex CLI 0.160.0, Linux) started with `--add-dir` naming the `state` folder, which
+   held the channel root, ran join, post, read, watch, whoami and guide with no permission
+   error.
 
 ## Join or create
 
@@ -78,9 +81,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   --project web, with the body on stdin`. That second line is a template, not a command: start
   the watcher, then write the plan's title and body yourself (`vcharon guide post`).
 - **Start your watcher right after `join` or `create`, before anything else**: run the
-  `next:` line's command as a background command (`vcharon guide watch`). Its first start
-  prints nothing already in this machine's copy: if you started it late, read the channel
-  first, `vcharon read myapp`.
+  `next:` line's command the way `vcharon guide watch` says: as a background command only if
+  your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
+  start prints nothing already in this machine's copy: if you started it late, read the
+  channel first, `vcharon read myapp`.
 - Then, as a member, tell the leader you are watching, and how (`vcharon guide post`). The
   leader's name is in join's line `claimed myapp/linux-api; the leader is mac-myapp`:
 

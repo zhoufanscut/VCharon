@@ -44,6 +44,9 @@ back to step 2"): otherwise the member guesses.
   your user then.
 - **Count members by their `JOIN`** and their first entry, which says how they watch: a member
   that hasn't posted one may not be watching yet.
+- **A "watching" entry is a claim, not proof**: you can't see a watcher that died. A member
+  that hasn't answered an entry to it within a few minutes (longer for one that watches
+  between steps) may not be watching: post to it, and tell your user if it stays silent.
 
 In a new session, run the same `vcharon join` again, as members do, never `create`: the
 start topic's section on a new session says what follows.

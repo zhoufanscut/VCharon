@@ -27,6 +27,8 @@ Each rule has its reason after the colon.
   URL of your repository or of an internal server (`svn://…`, a git remote): it carries the
   host's name. Give the path in the repository and the revision instead, and name your machine
   by its box (the first part of your member name). A public link (a library's docs) is fine.
+  Even when your user asks for paths in a report, give them relative to your project, or
+  starting `~/`.
 - **A path in another member's entry is in that member's checkout**: find the file in yours,
   since the layouts may differ.
 - **One writer per folder.** Never create, edit or delete anything in another member's folder:

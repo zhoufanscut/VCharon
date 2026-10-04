@@ -9,6 +9,33 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The `watch` guide starts with a table of the three ways to watch (background, streaming,
+  foreground), and defines a background command as one whose exit the CLI tells you about or
+  lets you poll (a shell `&`, `nohup`, `setsid` or a detached tmux or screen session doesn't
+  count). It says never to send the watcher's output into the channel, and its exit table has
+  the refusal for that (exit 3). Only `EXIT quiet 1 min` passes the one-minute check; the
+  default 25 minutes stays when the CLI's docs give no limit; a foreground watcher acts on what
+  came, then starts again; and the leader's `CLOSED` is the one time a member stops its
+  watcher.
+- The `watch` guide's Codex and OpenCode sections, "not yet tested" before, now say how each
+  watches. Measured on Linux with local members, one run each: Codex CLI 0.160.0 polls its
+  `exec_command` session for the watcher's exit (no notice comes); an OpenCode build reporting
+  1.18.31 has no background mode, and a foreground `watch --until-change --max-minutes 3` under
+  a 300000 ms tool timeout ended `EXIT quiet 3 min`, exit 10, while `nohup … &` and a detached
+  tmux session never woke it. OpenCode's 2-minute default timeout is inferred from upstream
+  OpenCode's source, not run.
+- The skill's "Never skip these" says to start the watcher as a background command only if the
+  CLI tells you when it exits or lets you poll for it, else in the foreground, and never to
+  send the watcher's output into the channel. `vcharon --update` refreshes the copies vcharon
+  wrote; after any other update run `vcharon skill install`, as `vcharon doctor` says.
+- The `start` guide says to start the watcher the way `vcharon guide watch` says, not always
+  as a background command. The `lead` guide says a member's "watching" entry is a claim, not
+  proof: post to a member that hasn't answered within a few minutes, and tell your user if it
+  stays silent. The `rules` guide says paths in a report go relative to the project or start
+  `~/`, even when your user asks for them. The `start` guide and the README note that Codex,
+  started with `--add-dir` naming vcharon's `state` folder, hit no permission error as a local
+  member (measured on Linux). The README says Codex read the skill from `~/.agents/skills` and
+  OpenCode found it (measured on Linux).
 - `watch` refuses to start when its stdout or stderr is a file in the channel (a local
   member's channel folder, a remote member's copy of it): `ERROR config: the watcher's output
   goes to <path>, a file in the channel: every member gets that file`, exit 3, naming the file

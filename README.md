@@ -104,8 +104,9 @@ doubt.
 | the ssh client | the system's OpenSSH: `/usr/bin/ssh` on Linux and macOS, Windows' own `ssh.exe` (not Git for Windows' ssh, which can't use the Windows ssh-agent service) | |
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).
-Codex and OpenCode as channel members are **untested** on every OS; Claude Code has been checked
-as a local member on Linux and as a remote member on macOS and Windows.
+Claude Code has been checked as a local member on Linux and as a remote member on macOS and
+Windows; Codex and OpenCode as local members on Linux only (`vcharon guide watch` says how each
+watches). Codex and OpenCode as remote members are **untested**.
 
 ## A first channel on one machine
 
@@ -184,18 +185,21 @@ vcharon skill install          # writes the skill for Claude Code and Codex
 
 It writes a short skill to `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/
 SKILL.md` (Codex's user skill folder; OpenCode reads `~/.claude/skills` and `~/.agents/skills`
-too, by its docs: not tested). The skill names the guide topics to read, by role, and a few
-rules never to skip; the rest it leaves to `vcharon guide`, which always matches the vcharon it
-runs. `vcharon --update` rewrites the skill it wrote; after any other update (pipx, uv, pip, a
-checkout), `vcharon doctor` warns on a skill of another version, and `vcharon skill install`
-rewrites it. An agent without skills can be told: "run `vcharon guide` and follow it". Then
-name the channel to your agent: "join channel myapp on devbox and watch it". The guide tells it
-to join only channels you name.
+too, by its docs). On Linux, Codex read the skill from `~/.agents/skills`, and OpenCode found it
+(which folder it read wasn't recorded). The skill names the guide topics to read, by role, and
+a few rules never to skip; the rest it leaves to `vcharon guide`, which always matches the
+vcharon it runs. `vcharon --update` rewrites the skill it wrote; after any other update (pipx,
+uv, pip, a checkout), `vcharon doctor` warns on a skill of another version, and `vcharon skill
+install` rewrites it. An agent without skills can be told: "run `vcharon guide` and follow it".
+Then name the channel to your agent: "join channel myapp on devbox and watch it". The guide
+tells it to join only channels you name.
 
 If your agent's CLI limits where commands may write, or turns off the network, allow VCharon's
 folders and, for a remote member, ssh. `vcharon doctor --json` lists the folders under `dirs`,
 and the config file under its `config` check; the plain `dirs` line names them all only when
-they can be written.
+they can be written. Codex, started with `--add-dir` naming VCharon's `state` folder (which held
+the channel root), ran `join`, `post`, `read`, `watch`, `whoami` and `guide` as a local member
+with no permission error (Linux).
 
 ## Keys
 
