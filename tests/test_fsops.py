@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import shutil
@@ -257,14 +258,23 @@ class ResolveRootTest(unittest.TestCase):
         self.link("chain", "abs")
         self.link("up", "real/sub/..")
         self.link("dangling", "nowhere/deeper")
+        # "link/.." goes up from the link's target, not back to the link's folder
         cases = ["real", "abs", "abs/sub", "rel", "chain/sub", "up", "up/sub/../sub",
                  "missing", "missing/a/b", "abs/missing/c", "dangling", "dangling/x",
-                 "file/x", "./real/./sub", "real/../abs"]
+                 "file/x", "./real/./sub", "real/../abs", "rel/..", "chain/..", "rel/../.."]
         for rel in cases:
             path = os.path.join(self.tmp, rel)
             with self.subTest(rel=rel):
                 self.assertEqual(fsops.resolve_root(path), os.path.realpath(path))
         self.assertEqual(fsops.resolve_root("/"), "/")
+
+    def test_relative_same_as_realpath(self):
+        self.link("rel", "real/sub")
+        self.enterContext(mock.patch.object(os, "getcwd", return_value=self.tmp))
+        for rel in ("real", "rel/..", "./rel/../sub"):
+            with self.subTest(rel=rel):
+                self.assertEqual(fsops.resolve_root(rel),
+                                 os.path.realpath(os.path.join(self.tmp, rel)))
 
     def test_root_owned_links(self):
         # macOS: /var and /tmp are root's links to /private/...
@@ -567,6 +577,57 @@ class PathDirTest(HandleCases, unittest.TestCase):
                 b.mkdir("new")
         self.assertEqual(cm.exception.code, "unsafe_path")
         self.assertEqual(read_tree(self.outside), {"x/": None, "x/y.txt": b"y", "z.txt": b"z"})
+
+    def held_steps(self, stack, failures, winerror):
+        """The root opened on a fresh tree, with Windows' code path taken (names joined by
+        os.path.join, which this OS can open), os.replace, os.unlink and os.rmdir failing
+        failures times with winerror, and time.sleep counted."""
+        shutil.rmtree(self.root)
+        write_tree(self.root, {"new": b"n", "old": b"o", "gone": b"g", "dir/": None})
+        root = self.open_root()
+        real = {"replace": os.replace, "unlink": os.unlink, "rmdir": os.rmdir}
+        calls = []
+
+        def flaky(name):
+            def fn(*args):
+                calls.append(name)
+                if calls.count(name) <= failures:
+                    raise os_error(errno.EACCES, winerror)
+                return real[name](*args)
+            return fn
+
+        for name in real:
+            stack.enter_context(mock.patch.object(fsops.os, name, flaky(name)))
+        stack.enter_context(mock.patch.object(fsops, "WINDOWS", True))
+        stack.enter_context(mock.patch.object(root, "join",
+                                              lambda name: os.path.join(self.root, name)))
+        sleep = stack.enter_context(mock.patch.object(fsops.time, "sleep"))
+        return root, calls, sleep
+
+    def test_held_target_retried_on_windows(self):
+        # replacing or deleting a file another program has open gives access denied (5), not
+        # only a sharing violation (32): both are a hold that passes
+        for winerror in (5, 32):
+            with self.subTest(winerror=winerror), contextlib.ExitStack() as stack:
+                root, calls, sleep = self.held_steps(stack, 2, winerror)
+                root.move_in(root, "new", "old")
+                root.unlink("gone")
+                root.rmdir("dir")
+                self.assertEqual(calls, ["replace"] * 3 + ["unlink"] * 3 + ["rmdir"] * 3)
+                self.assertEqual(sleep.call_count, 6)
+                self.assertEqual(read_tree(self.root), {"old": b"n"})
+
+    def test_held_target_gives_up_on_windows(self):
+        for winerror, code in ((5, "permission"), (32, "in_use")):
+            with self.subTest(winerror=winerror), contextlib.ExitStack() as stack:
+                root, calls, sleep = self.held_steps(stack, 10, winerror)
+                for step, args in ((root.move_in, (root, "new", "old")),
+                                   (root.unlink, ("gone",)), (root.rmdir, ("dir",))):
+                    with self.assertRaises(OSError) as cm:
+                        step(*args)
+                    self.assertEqual(fsops.error(cm.exception, "old").code, code)
+                self.assertEqual(calls, ["replace"] * 4 + ["unlink"] * 4 + ["rmdir"] * 4)
+                self.assertEqual(sleep.call_count, 9)
 
 
 def _gone(pid, seconds=5):

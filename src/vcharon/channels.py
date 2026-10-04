@@ -395,11 +395,6 @@ def release(root, channel, name, tick=_no_tick):
 
 # --- channel.remove ---
 
-# Windows errors of a rename blocked by a process that holds the folder: access denied (5,
-# measured), a sharing violation (32)
-HELD_CODES = (5, 32)
-
-
 def remove(root, channel, name, tick=_no_tick):
     """Closes a channel for its leader name: refused unless <channel>/<name>/CHANNEL.md exists
     and is the only CHANNEL.md, and every entry at the channel's top is a member's folder.
@@ -448,9 +443,9 @@ def remove(root, channel, name, tick=_no_tick):
         # sharing violation, is kept for open files; not seen. The retry (about 1 s) can't
         # outlast a real hold, so that refusal gets its own fix.
         try:
-            fsops.retry_in_use(top.rename, channel, closed, codes=HELD_CODES)
+            fsops.retry_in_use(top.rename, channel, closed, codes=fsops.HELD_CODES)
         except OSError as e:
-            if getattr(e, "winerror", None) not in HELD_CODES:
+            if getattr(e, "winerror", None) not in fsops.HELD_CODES:
                 raise
             raise _held(e, os.path.join(root, channel))
         try:
@@ -468,9 +463,9 @@ def remove(root, channel, name, tick=_no_tick):
 
 
 def _held(e, path):
-    """close's rename refused because something holds the folder (HELD_CODES): fsops.error's
-    line, with a fix that names what can hold it. Only for this rename: elsewhere the generic
-    fix stays."""
+    """close's rename refused because something holds the folder (fsops.HELD_CODES):
+    fsops.error's line, with a fix that names what can hold it. Only for this rename: elsewhere
+    the generic fix stays."""
     err = fsops.error(e, path)
     return VCharonError(err.code, err.message,
                         "something has a file or its current folder inside %s (a shell, an "

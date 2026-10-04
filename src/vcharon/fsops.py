@@ -36,6 +36,11 @@ TOO_LONG_HINT = "rename it at the source, or pick a shorter root"
 RETRIES = 3
 RETRY_DELAY = 0.2
 
+# Windows errors of a step blocked by another process holding the path: access denied (5; seen
+# for a folder held open, and expected for a file replaced or deleted while a program has it open
+# without FILE_SHARE_DELETE, as Python opens files), a sharing violation (32)
+HELD_CODES = (5, 32)
+
 
 # A reparse tag with this bit is a name surrogate: a junction or a directory symlink.
 NAME_SURROGATE = 0x20000000
@@ -115,7 +120,10 @@ def resolve_root(path):
     another user's /tmp/drop -> ~/.ssh would redirect the run."""
     if WINDOWS:
         return os.path.realpath(path)
-    path = os.path.abspath(path)
+    # not abspath: it would drop "link/.." as text, where realpath and the kernel go up from
+    # the link's target
+    if not path.startswith("/"):
+        path = os.path.join(os.getcwd(), path)
     euid = os.geteuid()
     # parts still to walk, the next one last
     todo = [p for p in reversed(path.split("/")) if p]
@@ -552,14 +560,14 @@ class PathDir(_Dir):
         path = self.join(name)
         if WINDOWS:
             self._clear_read_only(path)
-            retry_in_use(os.unlink, path)
+            retry_in_use(os.unlink, path, codes=HELD_CODES)
         else:
             os.unlink(path)
 
     def rmdir(self, name):
         self.recheck()
         if WINDOWS:
-            retry_in_use(os.rmdir, self.join(name))
+            retry_in_use(os.rmdir, self.join(name), codes=HELD_CODES)
         else:
             os.rmdir(self.join(name))
 
@@ -573,7 +581,7 @@ class PathDir(_Dir):
             if st is not None and kind(st) == DIR:
                 raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), dst)
             self._clear_read_only(dst)
-            retry_in_use(os.replace, src, dst)
+            retry_in_use(os.replace, src, dst, codes=HELD_CODES)
         else:
             os.rename(src, dst)
 

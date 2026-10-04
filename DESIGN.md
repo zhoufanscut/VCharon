@@ -626,7 +626,8 @@ Every receiver:
 - the root may be a symlink, resolved once at the start. On POSIX every symlink on the way must
   be owned by you or root (`unsafe_dir`), else another user could plant one into your files.
   VCharon resolves it itself: `realpath` reads links in user space, where the kernel's
-  `protected_symlinks` never sees them;
+  `protected_symlinks` never sees them. It resolves to what `realpath` gives: a `..` after a
+  link goes up from the link's target, as the kernel does, not back to the link's folder;
 - a folder the plan needs must not exist as a file (`kind_change`) unless the plan deletes it;
 - no existing folder under the root is on another file system: a move there would fail halfway
   through a commit;
@@ -673,8 +674,10 @@ default. Linux receiver: no folding.
   unlink, rmdir and mkdir. A folder swapped for a symlink after the check makes that step fail.
 - On Windows, which has no `dir_fd`, every parent is checked for reparse points right before each
   step: it narrows the race without closing it. A read-only file is made writable before it is
-  replaced or deleted; a sharing violation is retried 3 times, 0.2 s apart (virus scanners
-  briefly hold new files), then is `in_use`; access denied is `permission`.
+  replaced or deleted. A sharing violation and access denied are both retried 3 times, 0.2 s
+  apart, then are `in_use` and `permission`: virus scanners briefly hold new files, and a file
+  another program has open without delete sharing (as Python opens files) gives access denied
+  when it is replaced or deleted.
 - A failed commit stops, removes the stage dir and reports what it did; nothing is undone.
   Running again is safe: puts overwrite, deleting a missing path does nothing, and the state never
   records more than is at the target.
