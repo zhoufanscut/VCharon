@@ -302,6 +302,28 @@ class KeyTest(KeyCase):
                       out)
         self.assertEqual(self.adds(), [])
 
+    def test_a_key_that_isnt_a_file_here(self):
+        # neither a file here nor the agent's (a token's key, say): nothing vcharon can unlock
+        self.logs_in(accepts('"c@h"'))
+        out, _err = self.key_cli("fake-dest")
+        self.assertEqual(out[2:4], ['  key     "c@h" (RSA): ssh logs in with it; nothing to unlock',
+                                    "  test    ok: vcharon logs in to fake-dest with no prompt"])
+        self.assertEqual(self.adds(), [])
+
+    def test_an_accepted_key_that_doesnt_log_in(self):
+        # the server accepts the key, yet the login fails, and it isn't a locked file:
+        # unlocking can't help
+        for name, accepted, shown in (("not a file", accepts('"c@h"'), '"c@h"'),
+                                      ("the agent's file", accepts(self.key, "agent"),
+                                       self.key)):
+            with self.subTest(name):
+                os.environ.update(FAKE_SSH_STDERR=accepted + "\n" + DENIED, FAKE_SSH_EXIT="255")
+                out, err = self.key_cli("fake-dest", code=4)
+                self.assertEqual(err[:2], ["ERROR connect: ssh couldn't log in to fake-dest "
+                                           "with %s" % shown, "  fix: see the log"])
+                self.assertFalse(any(line.startswith("  test") for line in out))
+                self.assertEqual(self.adds(), [])
+
     def test_logs_in_without_a_key(self):
         out, _err = self.key_cli("fake-dest")
         self.assertIn("  key     none: fake-dest logs in without a key", out)

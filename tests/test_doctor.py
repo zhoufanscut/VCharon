@@ -550,6 +550,32 @@ class DoctorTest(DoctorCase):
                       self.of(lines, "push"))
         self.assertFalse(os.path.exists(os.path.join(self.home, "new")))
 
+    def test_echo_differs(self):
+        # the only check that the connection is binary-safe; the destination's checks end there
+        real = ssh.Session.echo
+
+        def echo(session, data):
+            back = real(session, data)
+            return back[:9] + bytes([back[9] ^ 1]) + back[10:]
+
+        self.patch(ssh.Session, "echo", new=echo)
+        lines = self.doctor(code=1)
+        self.assertEqual(self.of(lines, "fake-dest")[-1], ("FAIL", "the echo came back different"))
+        at = lines.index("  FAIL  fake-dest  the echo came back different")
+        self.assertEqual(lines[at + 1], "                   fix: see the log; the connection "
+                         "isn't binary-safe")
+        self.assertNotIn(("ok", "from.path %s: a directory" % os.path.join(self.home, "outbox")),
+                         self.of(lines, "pull"))
+
+    def test_ssh_version_fails(self):
+        # ssh starts but its -V fails: a FAIL of its own, with the install fix
+        os.environ["FAKE_SSH_V_EXIT"] = "2"
+        lines = self.doctor(code=1)
+        why = "%s -V didn't work (exit 2)" % platform.default_ssh_path()
+        self.assertEqual(self.of(lines, "ssh"), [("FAIL", why)])
+        at = lines.index("  FAIL  ssh        " + why)
+        self.assertEqual(lines[at + 1], "                   fix: " + ssh.START_HINT)
+
     def test_bad_option(self):
         text = CONFIG.format(src=self.src, dst=self.dst).replace("to.path   = inbox",
                                                                   "to.path   = inbox\nto.nope = 1")

@@ -1,6 +1,7 @@
 """Stands in for ssh in tests: runs the bootstrap line with this Python and relays its bytes."""
 
-# -V as the only argument prints a version line to stderr and exits 0, as ssh -V does.
+# -V as the only argument prints a version line to stderr and exits 0, as ssh -V does, or
+# exits FAKE_SSH_V_EXIT when that is set (an ssh that can't run).
 # Otherwise it ignores every argument except the last one, which must match
 # (\S+) -I -c '([^']*)'; if not, it prints an error and exits 2. Environment knobs, in the
 # order it applies them:
@@ -73,6 +74,8 @@ def relay_stdin(child_stdin):
 def main():
     argv = sys.argv[1:]
     if argv == ["-V"]:
+        if os.environ.get("FAKE_SSH_V_EXIT"):
+            return int(os.environ["FAKE_SSH_V_EXIT"])
         sys.stderr.write("OpenSSH_fake 1.0, for vcharon's tests\n")
         return 0
     m = re.fullmatch(r"(\S+) -I -c '([^']*)'", argv[-1]) if argv else None

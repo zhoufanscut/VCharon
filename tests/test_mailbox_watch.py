@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -1452,6 +1454,14 @@ class ClientModeTest(WatchCase):
                              (1, "ERROR vcharon sync of mailbox didn't finish within 900 s",
                               None))
 
+    def test_a_vcharon_run_that_cant_start(self):
+        # --no-stream: a sync that can't be started is that round's error, not a crash
+        missing = FileNotFoundError(2, "No such file or directory")
+        with mock.patch.object(watch.subprocess, "run", side_effect=missing):
+            self.assertEqual(watch.run_sync("mailbox", ["mb"]),
+                             (1, "ERROR couldn't start vcharon: No such file or directory",
+                              None))
+
 
 # A stand-in for the streaming child, `vcharon sync C --repeat <every>`: it does the
 # actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
@@ -1526,10 +1536,12 @@ class StreamTest(WatchCase):
 
     def watch(self, *children, clock=None, steps=None, **kw):
         """watch_job, streaming every 2 s, over the children: (exit code, the lines without
-        their time). steps: with clock, the seconds each round moves the clock on."""
+        their time). steps: with clock, the seconds each round moves the clock on. timer: the
+        limits' clock, clock unless given."""
         self.children = [list(c) for c in children]
         self.procs = []
         clock = clock or Clock()
+        timer = kw.pop("timer", clock)
         lines = []
         real = watch.Stream.next_round
 
@@ -1546,7 +1558,7 @@ class StreamTest(WatchCase):
         kw.setdefault("max_minutes", 25)
         with mock.patch.object(watch.Stream, "next_round", next_round):
             code = watch.watch_job("mb.windows", self.sync_args, 2, out=lines.append, sleep=sleep,
-                                   clock=clock, timer=clock, stream=True, spawn=self.spawn,
+                                   clock=clock, timer=timer, stream=True, spawn=self.spawn,
                                    **kw)
         return code, self.said(lines)
 
@@ -1699,6 +1711,57 @@ class StreamTest(WatchCase):
             [["out", "ROUND 0"]], rounds=3)
         self.assertEqual(lines[1:], [lost, "  fix: run again", "ok again"])
         self.assertEqual(self.slept, [2])
+
+    def test_a_child_is_stuck_after_run_timeout_and_one_wait(self):
+        # the limit itself: a line can take RUN_TIMEOUT plus one wait between rounds
+        limit = watch.RUN_TIMEOUT + 2
+        times = iter([0, limit - 0.1, limit])
+        lines = mock.Mock(get=mock.Mock(side_effect=queue.Empty))
+        fake = types.SimpleNamespace(_lines=lines, timer=lambda: next(times), every=2)
+        self.assertIs(watch.Stream._next_line(fake), watch._STUCK)
+        self.assertEqual(list(times), [])
+
+    def test_a_silent_child_is_stopped_and_started_again(self):
+        # no round within 900 s plus --every (DESIGN, "The watcher in a channel"): the child
+        # is stuck, so it is stopped, the round is an error, and a new child starts after the
+        # first wait of the backoff. The timer jumps 451 s a reading while the first child
+        # runs, so the limit passes in two of _next_line's 0.5 s waits, not 900 real seconds.
+        clock = Clock()
+        readings = []
+
+        def timer():
+            readings.append(clock.t)
+            if len(readings) > 20:
+                raise AssertionError("the silent child was never stopped")
+            if len(self.spawned) == 1:
+                clock.t += 451
+            return clock.t
+
+        code, lines = self.watch([], [["out", "ROUND 0"]], clock=clock, rounds=2,
+                                 max_minutes=None, timer=timer)
+        self.assertEqual((code, lines[1:]), (0, [
+            "ERROR vcharon sync of mb.windows didn't finish within 900 s", "ok again"]))
+        self.assertEqual(self.slept, [2])
+        self.assertEqual(len(self.spawned), 2)
+        self.assert_all_stopped()
+        # stopped by the end of its stdin, as on every way out, not killed
+        self.assertEqual(self.procs[0].returncode, 0)
+
+    def test_a_child_that_cant_start(self):
+        # spawn's OSError is that round's error line; the next start waits the backoff
+        def spawn(argv, env):
+            if not self.spawned:
+                self.spawned.append((argv, env))
+                raise FileNotFoundError(2, "No such file or directory")
+            return StreamTest.spawn(self, argv, env)
+
+        self.spawn = spawn
+        code, lines = self.watch([["out", "ROUND 0"]], rounds=2)
+        self.assertEqual((code, lines[1:]), (0, [
+            "ERROR couldn't start vcharon: No such file or directory", "ok again"]))
+        self.assertEqual(self.slept, [2])
+        self.assertEqual(len(self.procs), 1)
+        self.assert_all_stopped()
 
     def test_max_minutes_during_the_wait(self):
         connect = "ERROR mb.windows.up: connect: no"

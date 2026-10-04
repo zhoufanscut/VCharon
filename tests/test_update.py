@@ -39,6 +39,7 @@ import vcharon
 from vcharon import charter, cli, install, platform, update
 from vcharon.mailbox import watch
 
+from tests import pack
 from tests.util import FakeSshCase
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -826,6 +827,35 @@ class ApplyTest(UpdateCase):
 class SmokeArgvTest(unittest.TestCase):
     def test_the_binary_itself(self):
         self.assertEqual(update.smoke_argv("/x/vcharon.new"), ["/x/vcharon.new", "--version"])
+
+
+class PackedReleaseTest(UpdateCase):
+    """The assets tests/pack.py makes for a release, as --update downloads them: the release
+    workflow packs with pack.py and the updater reads with update.py, so a change to either
+    alone must fail here, not in a user's update."""
+
+    def test_packed_assets_install(self):
+        for asset, archive, windows in ((ASSET, TARBALL, False), (WIN_ASSET, ZIP, True)):
+            with self.subTest(archive=archive):
+                dist = os.path.join(self.tmp, "dist-" + asset)
+                out = os.path.join(self.tmp, "out-" + asset)
+                os.mkdir(dist)
+                with open(os.path.join(dist, "vcharon.exe" if windows else "vcharon"),
+                          "wb") as f:
+                    f.write(fake_binary())
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pack.main([dist, asset, out])
+                url = "https://example.invalid/%s" % archive
+                self.serve(Net({url: read(os.path.join(out, archive)),
+                                url + ".sha256": read(os.path.join(out, archive + ".sha256"))}))
+                self.patch(update, "platform_asset", return_value=asset)
+                release = update.Release("v9.9.9", "9.9.9", "u", "",
+                                         {archive: url, archive + ".sha256": url + ".sha256"})
+                result = update.apply_update(release, self.inst, windows=windows)
+                self.assertEqual(result, update.UpdateResult(self.target, "9.9.9", True))
+                self.assertEqual(read(self.target), fake_binary())
+                with open(self.target, "wb") as f:
+                    f.write(OLD)
 
 
 # --- Windows: the zip and the rename ---

@@ -17,6 +17,7 @@ from unittest import mock
 
 from vcharon import fsops, pathrules, plan, plugin
 from vcharon.plan import delete, put_dir, put_file
+from vcharon.plugins import path as path_plugin
 from vcharon.proto import VCharonError
 
 from tests.util import fd_count, unblock_fifo, write_tree
@@ -1032,6 +1033,20 @@ class FdPathSourceTest(PathCases, unittest.TestCase):
 
 class PathPathSourceTest(PathCases, unittest.TestCase):
     impl = "path"
+
+
+class ReadErrorTest(unittest.TestCase):
+    def test_a_file_another_program_holds(self):
+        # Windows' sharing and lock violations (winerror 32, 33) come with errno EACCES:
+        # another program has the file open, which its permissions can't fix
+        for winerror in (32, 33):
+            with self.subTest(winerror=winerror):
+                e = PermissionError(errno.EACCES, "in use")
+                e.winerror = winerror
+                got = path_plugin._read_error(e, "secret")
+                self.assertEqual((got.code, got.message, got.hint), (
+                    "in_use", "secret: another program has it open",
+                    "close that program, then run again"))
 
 
 class PathDoctorTest(unittest.TestCase):

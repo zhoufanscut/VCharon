@@ -519,7 +519,12 @@ class SessionTest(FakeSshCase):
         self.assertIn("return 1 / 0", err.detail)
         self.assert_echoes(s)
         self.assertTrue(s.usable)
+        # a handler's error isn't the helper's: it still ends cleanly at bye
+        s.close()
+        self.assertEqual(s.ssh_exit, 0)
         # not a call: the helper answers with "id": null and stops, out of step
+        s = self.session()
+        s.open()
         s.send_json({"t": "bogus"})
         err = self.failure(s.echo, b"x")
         self.assertEqual(err.code, "protocol")

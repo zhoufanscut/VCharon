@@ -7,6 +7,8 @@ import io
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -328,6 +330,19 @@ class JobTest(ViewCase):
             % os.path.join(self.home, "channels.d"),
             "  fix: join the channel again, with the --project and --role you joined with: it "
             "writes the section"])
+
+
+class ConsoleTest(ViewCase):
+    def test_utf8_whatever_the_console(self):
+        # a console whose code page can't hold ñ (PYTHONIOENCODING stands in for Windows' 936):
+        # vcharon read as its own process, as an agent runs it
+        write_tree(self.tree, {"aa/R.md": md(entry("aa#1", "mañana"))})
+        ran = subprocess.run([sys.executable, "-P", "-m", "vcharon"] + READ,
+                             env=dict(os.environ, PYTHONIOENCODING="gbk"),
+                             capture_output=True, timeout=60, check=False)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout.decode("utf-8").splitlines()[1:],
+                         ["%s  aa#1  @all  mañana  (aa/R.md)" % WHEN])
 
 
 if __name__ == "__main__":

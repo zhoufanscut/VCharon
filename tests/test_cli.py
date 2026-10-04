@@ -164,6 +164,27 @@ class CliTest(FakeSshCase):
         with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             self.assertIn("Traceback (most recent call last):", f.read())
 
+    def test_ping_echo_differs(self):
+        # the only check that the connection is binary-safe: a flipped byte, a short echo
+        real = ssh.Session.echo
+        for name, alter, at, received in (
+                ("flipped", lambda b: b[:300] + bytes([b[300] ^ 1]) + b[301:], 300, 1048832),
+                ("short", lambda b: b[:-5], 1048827, 1048827)):
+            with self.subTest(name):
+                def echo(session, data, alter=alter):
+                    return alter(real(session, data))
+
+                with mock.patch.object(ssh.Session, "echo", echo):
+                    code, out, err = self.run_cli("ping", "fake-dest")
+                self.assertEqual(code, 1, err)
+                lines = err.splitlines()
+                self.assertEqual(lines[:2], [
+                    "ERROR protocol: the echo came back different: 1048832 bytes sent, %d "
+                    "received, first difference at byte %d" % (received, at),
+                    "  fix: see the log; the connection isn't binary-safe"])
+                self.assertNotIn("  echo ", out)
+                self.assertNotIn("OK", out)
+
     def test_usage_errors_exit_3(self):
         for argv in ([], ["nope"], ["ping"], ["ping", "a", "b"], ["ping", "-x", "host"],
                      ["ping", "--", "-oProxyCommand=x"], ["ping", "bad host"]):
@@ -1279,6 +1300,21 @@ class RepeatTest(FakeSshCase):
         self.assertIn("ssh exited with code 0", a)
         self.assertEqual(self.inbox("a"), {"a.txt": b"a"})
         self.assertEqual(self.inbox("b"), {"b.txt": b"b"})
+        self.assert_locks_free("a", "b")
+
+    def test_a_closed_stdout_ends_the_command(self):
+        # stdout's reader gone mid-job is the whole command's end, not job a's internal error:
+        # no ERROR line, no ROUND line, b never runs, a's lock is freed
+        ran = []
+
+        def gone(args, jr, conn, stack):
+            ran.append(jr.name)
+            raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+        with mock.patch.object(cli, "_run_one", gone):
+            code, lines, err, _waits = self.repeat("a", "b", between=[lambda: None])
+        self.assertEqual((code, lines, err, ran), (1, [], "", ["a"]))
+        self.assertIn("stdout closed: [Errno 32] Broken pipe", self.job_log("a"))
         self.assert_locks_free("a", "b")
 
     def code_file(self):
