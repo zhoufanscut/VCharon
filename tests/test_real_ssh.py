@@ -16,6 +16,7 @@ from unittest import mock
 
 from vcharon import cli, doctor, platform
 
+import tests
 from tests.util import read_tree, use_test_jobs, write_tree
 
 DEST = os.environ.get("VCHARON_TEST_SSH")
@@ -30,9 +31,11 @@ class RealSshTest(unittest.TestCase):
     def setUp(self):
         tmp = self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
-        # the suite's sandbox is off here (the real home's ~/.ssh is needed), so the local
-        # channel root, which doctor lists, goes in the temp folder too
+        # the real home's ~/.ssh holds the key and known_hosts, so HOME leaves the suite's
+        # sandbox for this test; vcharon's own folders and the local channel root, which
+        # doctor lists, stay in the temp folder
         patcher = mock.patch.dict(os.environ, {
+            "HOME": tests.REAL_HOME, "USERPROFILE": tests.REAL_HOME,
             "VCHARON_HOME": tmp, "VCHARON_CHANNELS_ROOT": os.path.join(tmp, "channels")})
         patcher.start()
         self.addCleanup(patcher.stop)

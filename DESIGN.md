@@ -1840,7 +1840,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   whole suite, in `os.environ` itself, so no test can undo it, and every child inherits it; the
   functions that name VCharon's folders fail on a path under the real home. Why: a test that
   loses its own environment must not reach the user's real config and channels. So a test never
-  calls `mock.patch.stopall()`.
+  calls `mock.patch.stopall()`. It drops the shell's `VCHARON_HOME` and `VCHARON_CHANNELS_ROOT`
+  too, so their defaults fall in the temp folder. Why: a developer exports them for hand runs,
+  and a test that forgets its own would write into that scratch folder. Nothing in the shell
+  turns the sandbox off: the real-ssh tests point HOME back at the real home (its `~/.ssh`) in
+  their own `setUp` only.
 - The controller takes the ssh command as an argument list, so tests replace `[<ssh_path>]` with
   `[sys.executable, "tests/fake_ssh.py"]` on every OS. The fake ssh runs the bootstrap with
   `sys.executable -I -c`, relays stdin and stdout as ssh does, sets HOME and the test machine

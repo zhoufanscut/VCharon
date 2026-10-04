@@ -53,9 +53,11 @@ VCharon writes config, state, logs and channels under your home. A test or a han
 reach the real ones: they may hold live channels.
 
 - **The suite** is sandboxed by `tests/__init__.py`: HOME and the OS's config and state folders
-  point into a temp folder for the whole run, and the functions that name VCharon's folders fail
-  on a path under the real home. So **never call `mock.patch.stopall()`** in a test: it would also
-  stop the test helpers' own environment patches. Stop only your own patcher.
+  point into a temp folder for the whole run, the shell's `VCHARON_HOME` and
+  `VCHARON_CHANNELS_ROOT` (a hand run's, below) are dropped, and the functions that name
+  VCharon's folders fail on a path under the real home. So **never call
+  `mock.patch.stopall()`** in a test: it would also stop the test helpers' own environment
+  patches. Stop only your own patcher.
 - **A hand run** goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
   `joined` folders, and `VCHARON_CHANNELS_ROOT` the channel root (which doesn't follow
   `VCHARON_HOME`); both work on every OS:

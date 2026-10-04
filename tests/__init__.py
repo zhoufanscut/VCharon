@@ -4,9 +4,11 @@ A sandbox for the whole suite, set when this package is imported, before any tes
 the OS's config and state folders point into a temp folder, removed at exit, so a test that
 loses its own environment (a patcher stopped too early) still can't reach the user's real
 folders. It's set in os.environ itself, not through a patcher, so no test
-can undo it, and every child a test starts inherits it. VCHARON_HOME and VCHARON_CHANNELS_ROOT
-are each test's own to set. Not with VCHARON_TEST_SSH: the real-ssh tests need the real home
-(its ~/.ssh).
+can undo it, and every child a test starts inherits it. The shell's VCHARON_HOME and
+VCHARON_CHANNELS_ROOT are dropped, so their defaults fall in the sandbox too: a developer's
+hand-run scratch folder is no test's to write. A test sets them for itself. The sandbox is on
+for every run; the real-ssh tests point HOME back at the real home (its ~/.ssh) for their own
+length only.
 
 Then a guard: the functions that name vcharon's folders raise an AssertionError for a path
 under the real home that isn't under the temp folder (on Windows the temp folder is under the
@@ -30,16 +32,17 @@ if os.environ.get("CI"):
 REAL_HOME = os.path.normcase(os.path.realpath(os.path.expanduser("~")))
 TEMP = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
 
-if not os.environ.get("VCHARON_TEST_SSH"):
-    _sandbox = tempfile.mkdtemp(prefix="vcharon-suite-")
-    atexit.register(shutil.rmtree, _sandbox, True)
-    _home = os.path.join(_sandbox, "home")
-    os.makedirs(_home)
-    os.environ.update(HOME=_home, USERPROFILE=_home,
-                      XDG_CONFIG_HOME=os.path.join(_home, ".config"),
-                      XDG_STATE_HOME=os.path.join(_home, ".local", "state"),
-                      APPDATA=os.path.join(_home, "AppData", "Roaming"),
-                      LOCALAPPDATA=os.path.join(_home, "AppData", "Local"))
+_sandbox = tempfile.mkdtemp(prefix="vcharon-suite-")
+atexit.register(shutil.rmtree, _sandbox, True)
+_home = os.path.join(_sandbox, "home")
+os.makedirs(_home)
+os.environ.update(HOME=_home, USERPROFILE=_home,
+                  XDG_CONFIG_HOME=os.path.join(_home, ".config"),
+                  XDG_STATE_HOME=os.path.join(_home, ".local", "state"),
+                  APPDATA=os.path.join(_home, "AppData", "Roaming"),
+                  LOCALAPPDATA=os.path.join(_home, "AppData", "Local"))
+for _name in ("VCHARON_HOME", "VCHARON_CHANNELS_ROOT"):
+    os.environ.pop(_name, None)
 
 from vcharon import channels, platform, skill
 

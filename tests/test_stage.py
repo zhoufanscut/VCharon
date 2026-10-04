@@ -553,6 +553,24 @@ class StagerCases:
         self.assertEqual(set(stage_dirs(self.root)), left - {PREFIX + "live"})
         self.assertEqual(read_tree(self.outside), {"z.txt": b"z", "b/": None})
 
+    def test_stale_stage_dir_you_own_goes(self):
+        # the twin of the test below: the same dir, owned by you, is removed
+        write_tree(self.root, {PREFIX + "mine/0": b"staged"})
+        self.backdate(PREFIX + "mine")
+        _checked, done = self.run_plan(*fputs({"n": b"n"}))
+        self.assertEqual(done.notes, [])
+        self.assertEqual(stage_dirs(self.root), [])
+
+    @unittest.skipUnless(POSIX, "Windows has no owner uid")
+    def test_stale_stage_dir_of_another_user_is_kept(self):
+        write_tree(self.root, {PREFIX + "theirs/0": b"staged"})
+        self.backdate(PREFIX + "theirs")
+        patch_stats(self, self.path(PREFIX + "theirs"), st_uid=os.geteuid() + 1)
+        _checked, done = self.run_plan(*fputs({"n": b"n"}))
+        self.assertEqual(done.notes, [])
+        self.assertEqual(stage_dirs(self.root), [PREFIX + "theirs"])
+        self.assertEqual(read_tree(self.path(PREFIX + "theirs")), {"0": b"staged"})
+
     @unittest.skipUnless(POSIX, "needs POSIX modes")
     def test_stale_stage_dir_that_cant_go(self):
         stuck = self.path(PREFIX + "stuck")

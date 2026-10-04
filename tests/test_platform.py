@@ -8,6 +8,7 @@ import os
 import shutil
 import site
 import struct
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -17,6 +18,8 @@ from unittest import mock
 
 from vcharon import platform
 from vcharon.proto import VCharonError
+
+import tests
 
 
 def on(osn, **env):
@@ -700,6 +703,36 @@ class SelfTest(unittest.TestCase):
         command = platform.self_command()
         self.assertTrue(command == "vcharon" or command.endswith(" -P -m vcharon"), command)
         self.assertEqual(platform.runnable("vcharon sync a"), command + " sync a")
+
+
+class SandboxTest(unittest.TestCase):
+    """tests/__init__.py's sandbox (DESIGN, "Tests")."""
+
+    def test_the_guard_refuses_the_real_home(self):
+        real = {"VCHARON_HOME": os.path.join(tests.REAL_HOME, "vc")}
+        with (mock.patch.dict(os.environ, real),
+              self.assertRaisesRegex(AssertionError, "reached the real home")):
+            platform.config_path()
+
+    def test_the_shell_cant_turn_it_off_or_aim_it(self):
+        # a developer's exported hand-run folders, and a real-ssh destination, in the
+        # environment the suite starts from
+        scratch = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, scratch, True)
+        env = dict(os.environ, HOME=scratch, USERPROFILE=scratch,
+                   VCHARON_HOME=os.path.join(scratch, "vh"),
+                   VCHARON_CHANNELS_ROOT=os.path.join(scratch, "channels"),
+                   VCHARON_TEST_SSH="devbox")
+        code = ("import os, tests\n"
+                "for name in ('VCHARON_HOME', 'VCHARON_CHANNELS_ROOT', 'HOME', 'USERPROFILE'):\n"
+                "    print(os.environ.get(name))\n")
+        top = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out = subprocess.run([sys.executable, "-c", code], cwd=top, env=env, timeout=60,
+                             capture_output=True, text=True, check=True).stdout.splitlines()
+        self.assertEqual(out[:2], ["None", "None"])
+        for home in out[2:]:
+            self.assertTrue(os.path.basename(os.path.dirname(home)).startswith("vcharon-suite-"),
+                            out)
 
 
 if __name__ == "__main__":
