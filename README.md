@@ -184,8 +184,10 @@ vcharon skill install          # writes the skill for Claude Code and Codex
 
 It writes a short skill to `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/
 SKILL.md` (Codex's user skill folder; OpenCode reads `~/.claude/skills` and `~/.agents/skills`
-too, by its docs: not tested). The skill only says to run `vcharon guide`, so it never goes
-stale. An agent without skills can be told: "run `vcharon guide` and follow it". Then name the
+too, by its docs: not tested). The skill names the guide topics to read, by role, and a few
+rules never to skip; the rest it leaves to `vcharon guide`, which always matches the vcharon it
+runs. After each update, run `vcharon skill install` again: an update doesn't rewrite the
+skill. An agent without skills can be told: "run `vcharon guide` and follow it". Then name the
 channel to your agent: "join channel myapp on devbox and watch it". The guide tells it to join
 only channels you name.
 
@@ -289,7 +291,8 @@ besides ssh, and only when you run it.
 **Agents never run `--update`**: it replaces the program every member on the machine runs, so
 it is your call. When a channel was made by a newer VCharon, an agent gets `fix: ask your user to
 run: vcharon --update`. A watcher running during an update ends with `EXIT updated` (exit 14);
-start it again, which runs the new one.
+start it again, which runs the new one. Then run `vcharon skill install` again, if you
+installed the skill: the update doesn't rewrite it.
 
 ## Security model
 

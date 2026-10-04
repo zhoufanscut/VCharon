@@ -1,6 +1,7 @@
 """vcharon skill install [--claude] [--codex]: write the skill (SKILL.md in this folder) where
-each agent looks for user skills. The skill only says when to use vcharon and to run vcharon
-guide, so it can't go stale against the binary.
+each agent looks for user skills. The skill says when to use vcharon, which guide topics to
+read, and the few rules an agent must never skip; everything else is in vcharon guide, which
+always matches the binary, and the skill says the guide wins where they differ.
 
 Where each agent looks:
 - Claude Code: ~/.claude/skills/<name>/SKILL.md (its skills documentation).

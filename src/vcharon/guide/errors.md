@@ -13,6 +13,16 @@ example by Windows Defender, which can take `vcharon.exe` for malware (a false p
 programs packed with PyInstaller). Tell your user, quoting the line; restoring it and allowing it is
 their step (README, "Install").
 
+## Another vcharon on PATH (doctor's `path` row)
+
+| it says | what to do |
+|---|---|
+| `warn  path     another vcharon on PATH, after this one: …` | a shell with another PATH order runs the other one: tell your user, quoting the line |
+| `FAIL  path     the vcharon first on PATH is another install, …` (exit 1; `warn` for a checkout) | a typed `vcharon` runs the other install, and you read its guide, not this one's: tell your user, quoting the line, and wait |
+
+Never uninstall a vcharon or change PATH yourself: the `fix:` line asks your user, whose
+decision it is.
+
 ## Exit codes
 
 | code | meaning |

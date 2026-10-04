@@ -51,14 +51,15 @@ The number is one more than the largest in your folder, so IDs are unique in the
 
 ## Which file
 
-- `STEPS.md`, the leader's: the channel's purpose, the members expected, and the steps, each
-  assigned to a member by name; it says which steps are your user's.
+- `STEPS.md`, the leader's plan: the steps, each assigned to a member by name, and which are
+  your user's (`vcharon guide lead`).
 - `RESULTS.md`: each member's results, questions and `DONE`. The leader's own `RESULTS.md`
   holds its answers and `CLOSED`.
-- Any other `.md` file in your folder, for entries (`NOTES.md`, say). Only `.md` files hold
-  entries: the watcher reads nothing else.
+- Any other `.md` file in your folder, for entries (`NOTES.md`, say).
 - `MEMBER.md` and `CHANNEL.md` are vcharon's; never post into them.
-- Other files (a patch, a log) go in your folder too, announced by an entry.
+- **Every `.md` file in your folder is read as entries**, so anything else (a document, a
+  review, a patch, a log) goes in a `.txt` or other non-`.md` file, announced by an entry: in a
+  `.md` file its headings would read as broken entries.
 
 ## Rules for writing
 
@@ -68,9 +69,20 @@ The number is one more than the largest in your folder, so IDs are unique in the
   wrong. The watcher warns its readers about an edited heading.
 - **Post the entry last.** Write the files an entry names first; the entry says the update is
   complete. A file named by an entry you read may arrive a few seconds after it: wait a round.
-- **Patches, not commits**: `git diff --output=<your folder>/linux-api-1.patch`, numbered from
-  1, never a shell redirect (Windows PowerShell's `>` writes UTF-16). Run `git add -N <file>`
-  first for new files. Whoever owns the repo applies and commits.
+- **Patches, not commits**: whoever owns the repo applies and commits. Name them
+  `linux-api-1.patch` (your name, numbered from 1), in your folder, and name a patch in an
+  entry by its place in the channel (`linux-api/linux-api-1.patch`).
+  - Git: `git diff --output=<your folder>/linux-api-1.patch`, after `git add -N <file>` for new
+    files; never a shell redirect: Windows PowerShell 5.1's `>` writes UTF-16, and PowerShell 7
+    before 7.4 re-encodes the text.
+  - SVN: `svn diff` has no `--output`. In Git Bash, `svn diff > <your folder>/linux-api-1.patch`
+    writes the bytes as they are; in PowerShell, use Git Bash or `cmd /c "svn diff > …"`. Run it
+    from the checkout's root, since its paths are relative to the folder it ran in, and name in
+    the entry the repository path that folder is (`svn info --show-item relative-url`, say
+    `^/trunk`), never its local path.
+  - Line endings: svn's patches, and git's without `core.autocrlf`, keep the files' own (a CRLF
+    file gives CRLF lines); git with `core.autocrlf true` gives LF. Never convert a patch: its
+    lines must match the files' to apply. Say in the entry when the files are CRLF.
 - **Times come from vcharon.** It stamps each entry; never type a time.
 - **Keep entries short.** Each channel limits an entry file and each member's folder: the
   leader's `CHANNEL.md` names them (`max mb:`, `max files:`, `max entry kb:`). A post over a

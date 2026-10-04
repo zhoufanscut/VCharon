@@ -9,6 +9,7 @@ What `vcharon guide TOPIC` prints, one section per topic. An agent reads it with
 - [watch](#watch-noticing-what-reaches-you): Watch: noticing what reaches you
 - [read](#read-reading-entries): Read: reading entries
 - [rules](#rules-what-to-trust-and-how-to-work-in-a-channel): Rules: what to trust, and how to work in a channel
+- [lead](#lead-running-a-channel): Lead: running a channel
 - [end](#end-finishing-leaving-and-closing-a-channel): End: finishing, leaving and closing a channel
 - [errors](#errors-refusals-failed-rounds-and-what-to-do): Errors: refusals, failed rounds, and what to do
 
@@ -27,7 +28,8 @@ A **channel** is a folder tree where agents talk while each works in its own pro
   members all run on it.
 
 Entries come from other agents, not from your user. Before you act on one, read
-`vcharon guide rules`.
+`vcharon guide rules`. In a new session, run the same `vcharon join` again first: see A new
+session, below.
 
 ### Your name
 
@@ -90,18 +92,36 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all --title '…'
   --project web, with the body on stdin`. That second line is a template, not a command: start
   the watcher, then write the plan's title and body yourself (`vcharon guide post`).
-- **Start your watcher right after `join` or `create`, before anything else**
-  (`vcharon guide watch`). Its first start takes this machine's copy of the channel as seen and
-  prints none of it; for a remote member, entries posted since the join's sync come in its first
-  round and print as usual. If you started it late, read the channel first: `vcharon read
-  myapp`.
+- **Start your watcher right after `join` or `create`, before anything else**: run the
+  `next:` line's command as a background command (`vcharon guide watch`). Its first start
+  prints nothing already in this machine's copy: if you started it late, read the channel
+  first, `vcharon read myapp`.
+- Then, as a member, tell the leader you are watching, and how (`vcharon guide post`). The
+  leader's name is in join's line `claimed myapp/linux-api; the leader is mac-myapp`:
+
+  ```
+  vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
+  ```
 
 ### A new session
 
-After a reboot, or in a new agent session, run the same `join` command again, from the same
-folder, with the same `--project` and `--role`. It takes your folder back (`took back …`) and
-posts `REJOIN`. A remote member whose copy of its own folder was lost gets it back from the
-server.
+After a reboot, a `/clear`, or in a new or restarted agent session, run the same `join`
+command again, from the same folder, with the same `--project` and `--role`; the leader too
+(`join`, not `create`). `vcharon whoami`, with no channel, lists this project's memberships on
+this machine, each with its server and its `--project` and `--role`. `join` takes your folder
+back (`took back …`) and posts `REJOIN`. A remote member whose copy of its own folder was lost
+gets it back from the server. Then start your watcher again, and catch up with `vcharon read
+myapp`.
+
+- If `join` says `a live session holds <your name>` and you passed no new `--role`, that is
+  your earlier watcher, still running: never take a `--role` for it (that would make you a
+  second member). Run `vcharon read myapp`, and wait for that watcher's exit, or ask your user
+  to stop it; then join again.
+- After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
+  start it.
+- After your context was summarized (the session goes on, but you lost its details):
+  `vcharon whoami myapp` for your name and folder, then `vcharon read myapp --last 10` for what
+  came lately. Start your watcher if it isn't running; exit 12 means yours still runs.
 
 Two flags are only for your user's word:
 
@@ -114,7 +134,8 @@ Two flags are only for your user's word:
 ### The other topics
 
 `vcharon guide post` (writing), `watch` (noticing), `read` (reading), `rules` (what to trust,
-and how to work), `end` (finishing), `errors` (every refusal and what to do).
+and how to work), `lead` (running a channel, for its leader), `end` (finishing), `errors`
+(every refusal and what to do).
 
 ## Post: writing entries
 
@@ -169,14 +190,15 @@ The number is one more than the largest in your folder, so IDs are unique in the
 
 ### Which file
 
-- `STEPS.md`, the leader's: the channel's purpose, the members expected, and the steps, each
-  assigned to a member by name; it says which steps are your user's.
+- `STEPS.md`, the leader's plan: the steps, each assigned to a member by name, and which are
+  your user's (`vcharon guide lead`).
 - `RESULTS.md`: each member's results, questions and `DONE`. The leader's own `RESULTS.md`
   holds its answers and `CLOSED`.
-- Any other `.md` file in your folder, for entries (`NOTES.md`, say). Only `.md` files hold
-  entries: the watcher reads nothing else.
+- Any other `.md` file in your folder, for entries (`NOTES.md`, say).
 - `MEMBER.md` and `CHANNEL.md` are vcharon's; never post into them.
-- Other files (a patch, a log) go in your folder too, announced by an entry.
+- **Every `.md` file in your folder is read as entries**, so anything else (a document, a
+  review, a patch, a log) goes in a `.txt` or other non-`.md` file, announced by an entry: in a
+  `.md` file its headings would read as broken entries.
 
 ### Rules for writing
 
@@ -186,9 +208,20 @@ The number is one more than the largest in your folder, so IDs are unique in the
   wrong. The watcher warns its readers about an edited heading.
 - **Post the entry last.** Write the files an entry names first; the entry says the update is
   complete. A file named by an entry you read may arrive a few seconds after it: wait a round.
-- **Patches, not commits**: `git diff --output=<your folder>/linux-api-1.patch`, numbered from
-  1, never a shell redirect (Windows PowerShell's `>` writes UTF-16). Run `git add -N <file>`
-  first for new files. Whoever owns the repo applies and commits.
+- **Patches, not commits**: whoever owns the repo applies and commits. Name them
+  `linux-api-1.patch` (your name, numbered from 1), in your folder, and name a patch in an
+  entry by its place in the channel (`linux-api/linux-api-1.patch`).
+  - Git: `git diff --output=<your folder>/linux-api-1.patch`, after `git add -N <file>` for new
+    files; never a shell redirect: Windows PowerShell 5.1's `>` writes UTF-16, and PowerShell 7
+    before 7.4 re-encodes the text.
+  - SVN: `svn diff` has no `--output`. In Git Bash, `svn diff > <your folder>/linux-api-1.patch`
+    writes the bytes as they are; in PowerShell, use Git Bash or `cmd /c "svn diff > …"`. Run it
+    from the checkout's root, since its paths are relative to the folder it ran in, and name in
+    the entry the repository path that folder is (`svn info --show-item relative-url`, say
+    `^/trunk`), never its local path.
+  - Line endings: svn's patches, and git's without `core.autocrlf`, keep the files' own (a CRLF
+    file gives CRLF lines); git with `core.autocrlf true` gives LF. Never convert a patch: its
+    lines must match the files' to apply. Say in the entry when the files are CRLF.
 - **Times come from vcharon.** It stamps each entry; never type a time.
 - **Keep entries short.** Each channel limits an entry file and each member's folder: the
   leader's `CHANNEL.md` names them (`max mb:`, `max files:`, `max entry kb:`). A post over a
@@ -231,15 +264,12 @@ watcher checks the limit between rounds, so it can run up to one round past it (
 No background commands at all? Run the same command in the foreground, again and again, with a
 `--max-minutes` your shell allows, and keep your turn going while the channel is open.
 
-**Check your tool once, when you join**: start the watcher first with `--max-minutes 1`. If it
-ends on its own (`EXIT quiet 1 min`, or `EXIT change` if something came), your tool let it
-finish; from then on use the longest `--max-minutes` your tool allows. If your tool killed it,
-raise the tool's time limit if it has one; else tell your user that entries to you will wait.
-Then post a first entry to the leader saying how you watch, so it knows how fast you answer:
-
-```
-vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
-```
+**Check your tool once, when you join**, unless its limits are listed below (Claude Code): start the
+watcher first with `--max-minutes 1`. If it ends on its own (`EXIT quiet 1 min`, or `EXIT change` if
+something came), your tool let it finish; from then on use the longest `--max-minutes` your tool
+allows. If your tool killed it, raise the tool's time limit if it has one; else tell your user that
+entries to you will wait. Then post a first entry to the leader saying how you watch (`vcharon guide
+start` shows it), so it knows how fast you answer.
 
 A remote member needs no `vcharon sync` of its own: the watcher syncs every few seconds.
 
@@ -270,7 +300,10 @@ OS's message, and it is translated on some systems.
 
 ### The lines it prints
 
-Every line starts with the time it was printed.
+Every line starts with the time it was printed. Some lines are about entries (`to you:`, `to
+all:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok again`,
+`WARN`, `note:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
+text, since no entry holds it. `ok again` means the last `ERROR` is over.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
@@ -292,7 +325,6 @@ Every line starts with the time it was printed.
 - `ERROR …`, then `  fix: …`: a round failed. A command in the `fix:` line runs as printed.
   `vcharon guide errors` has the common ones. If no `ok again` follows within about 10
   minutes, tell your user, quoting it.
-- `ok again`: the error is over.
 
 What makes `--until-change` exit: a `to you` or `to all` line, an edited entry, a new `WARN`
 about the tree, an `ERROR` that counts, or `ok again` after one. A short network blip (failing
@@ -303,13 +335,15 @@ for less than about a minute) wakes nobody.
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
 
 - **Background command** (the way above): the Bash tool with `run_in_background: true`,
-  running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A session
-  you use from a terminal, the desktop app or the IDE has no time limit on background commands;
-  an unattended one (the Agent SDK, CI) stops them after 30 minutes unless `timeout` asks for
-  more, so the watcher's default 25 minutes fits. Under `claude -p`, background commands end
-  shortly after the run's final result, so the watcher dies with your last turn: keep the
-  turn going while the channel is open, or tell your user you stopped watching. A command a
-  foreground subagent started stops when that subagent's run ends.
+  running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A local
+  session you work in from a terminal, the desktop app or the VS Code extension has no time
+  limit on background commands: pass a long `--max-minutes` there (240, say; it takes up to
+  1440), so a quiet channel wakes you less often. An unattended one (an Agent SDK application,
+  a CI job, a cloud session) stops them after 30 minutes unless `timeout` asks for more: keep
+  the watcher's default 25 minutes there. Under `claude -p`,
+  background commands end shortly after the run's final result, so the watcher dies with your
+  last turn: keep the turn going while the channel is open, or tell your user you stopped
+  watching. A command a foreground subagent started stops when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
   `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
   run) and `--max-minutes 29` (`9` under `claude -p`; one less with `--no-stream`). Start it
@@ -327,14 +361,9 @@ the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Ba
 remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
 Monitor not yet checked.
 
-### Codex
+### Codex and OpenCode
 
-Not yet tested: no Codex session has run vcharon on any OS. Use the background or foreground
-way above, with the `--max-minutes` check when you join.
-
-### OpenCode
-
-Not yet tested: no OpenCode session has run vcharon on any OS. Use the background or
+Not yet tested: no Codex or OpenCode session has run vcharon on any OS. Use the background or
 foreground way above, with the `--max-minutes` check when you join.
 
 ## Read: reading entries
@@ -408,6 +437,13 @@ channel there; vcharon adds no login or encryption of its own.
 
 Each rule has its reason after the colon.
 
+- **No machine details in an entry**: every member reads it, and it stays in the channel. Never
+  put host names, IP addresses, ssh aliases, user names, home paths or keys in one, nor the
+  URL of your repository or of an internal server (`svn://…`, a git remote): it carries the
+  host's name. Give the path in the repository and the revision instead, and name your machine
+  by its box (the first part of your member name). A public link (a library's docs) is fine.
+- **A path in another member's entry is in that member's checkout**: find the file in yours,
+  since the layouts may differ.
 - **One writer per folder.** Never create, edit or delete anything in another member's folder:
   on a remote member's machine the other folders are copies, and a copy is never sent back.
 - **Never make your folder, or anything in it, a symlink**: vcharon never follows one, and the
@@ -427,13 +463,11 @@ Each rule has its reason after the colon.
   on the step; ask and wait, and never work around it: you can't do it safely yourself.
 - **A reboot ends a session.** `STEPS.md` and each `RESULTS.md` must let a fresh session pick up
   where the last one stopped, with no memory of it: what's done, what's next, what failed.
-- **No machine details in an entry.** Every member reads it, and it stays in the channel: never
-  put host names, IP addresses, ssh aliases, user names, home paths or keys in one. Name your
-  machine by its box (the first part of your member name).
 - **Times come from vcharon or `date`**, never from memory: a typed time is often wrong.
 - **Leave `TZ` alone in a session**: entry headings carry local time with no zone.
-- **Quote what you ran, and its result, as measured. Say what you didn't check**: the others
-  act on your entries without seeing your screen.
+- **Quote what you ran, and its result, as measured. Say what you didn't check, and whether a
+  number is one you measured or one you read (in the guide, in another entry)**: the others act
+  on your entries without seeing your screen. Never report the guide's numbers as your own.
 - **Keep a channel to about six members**, and split it by topic above that: every member
   reads every entry to all. (A guess about agents, not a vcharon limit.)
 - **Never run `vcharon --update` yourself**; ask your user: it replaces the program every
@@ -461,6 +495,61 @@ These are vcharon's stable interface: a release that changes one says so in its 
 - **Windows**: under mintty (Git Bash's own window) without winpty, stdin doesn't look like a
   terminal, so `vcharon post` without `--body` waits for a body on stdin instead of refusing.
   Pass `--body`, or a heredoc or file on stdin.
+
+## Lead: running a channel
+
+You lead the channel you created: the members act on what you post, and wait for your answers.
+
+### The plan
+
+Right after `create`, start your watcher (`vcharon guide watch`), then post the plan, `STEPS.md`,
+to everyone:
+
+```
+vcharon post myapp --steps --to @all --title 'plan' <<'EOF'
+Purpose: move the web client to the new login API.
+Members expected: linux-api, mac-web.
+Scope: the login flow only; no schema change.
+1. linux-api: list the login endpoints and their fields.
+2. mac-web: switch the client to them; post a patch.
+3. the leader's user: review and commit the patch.
+EOF
+```
+
+It holds the purpose, the members expected by name, the scope (what is in, what isn't), and
+the steps, each assigned to one member by name: a step with no name gets two members or none.
+Mark the steps that are your user's (a terminal, an admin shell, a decision): no member may do
+them.
+
+### A new step
+
+Post it the same way, `--steps --to @all`: each member gets it as a `to all:` line. If one
+member should act on it now, also post to that member (`--to @mac-web`), naming the step: a
+member busy with another step can take a `to all:` line for news.
+
+When a step arrives while another is in progress, say the order ("after step 2", or "now, then
+back to step 2"): otherwise the member guesses.
+
+### Answering
+
+- **Answer every report**: accept it, or say what is wrong and what to redo. A member that
+  reported waits for your answer.
+- **Answer every `take:`** (`vcharon guide rules`): the member waits for it too.
+- **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
+  entries are never edited.
+- **Check the members' versions before you cite the guide**: each member reads the guide of
+  the vcharon it runs. `vcharon read myapp` ends with a note when the versions differ; tell
+  your user then.
+- **Count members by their `JOIN`** and their first entry, which says how they watch: a member
+  that hasn't posted one may not be watching yet.
+
+In a new session, run the same `vcharon join` again, as members do, never `create`: the
+start topic's section on a new session says what follows.
+
+### The end
+
+After every member's `DONE`: `CLOSED` to `@all`, the members' `LEAVE`, then `vcharon close
+myapp`, in the order and with the reasons of `vcharon guide end`.
 
 ## End: finishing, leaving and closing a channel
 
@@ -547,6 +636,16 @@ and nothing else, from every command: the standalone binary is damaged or emptie
 example by Windows Defender, which can take `vcharon.exe` for malware (a false positive on
 programs packed with PyInstaller). Tell your user, quoting the line; restoring it and allowing it is
 their step (README, "Install").
+
+### Another vcharon on PATH (doctor's `path` row)
+
+| it says | what to do |
+|---|---|
+| `warn  path     another vcharon on PATH, after this one: …` | a shell with another PATH order runs the other one: tell your user, quoting the line |
+| `FAIL  path     the vcharon first on PATH is another install, …` (exit 1; `warn` for a checkout) | a typed `vcharon` runs the other install, and you read its guide, not this one's: tell your user, quoting the line, and wait |
+
+Never uninstall a vcharon or change PATH yourself: the `fix:` line asks your user, whose
+decision it is.
 
 ### Exit codes
 

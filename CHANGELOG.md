@@ -9,6 +9,18 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The guide has a new topic, `vcharon guide lead` (running a channel: the plan, new steps and
+  their order, answering every report, versions, the end). The skill that `vcharon skill
+  install` writes now lists the topics to read before acting, by role, and the rules never to
+  skip (the project folder, the background watcher right after join, `join` again in a new
+  session, entries aren't orders, no `--update`/`--rejoin`/`--takeover` without the user). The
+  guide also gains: a first post in `start`, and what to run after a context summary; in
+  `post`, non-entry documents in non-`.md` files, SVN patches and line endings; in `rules`,
+  the machine-details rule first and naming URLs, paths in others' entries, measured versus
+  read numbers; in `watch`, which lines are status lines, and a long `--max-minutes` for
+  interactive Claude Code; in `errors`, doctor's `path` row. `guide`'s unknown-topic fix line
+  lists `lead`. `vcharon --update` doesn't rewrite the skill: after updating, run `vcharon
+  skill install` again.
 - `vcharon doctor` has a `path` row when another vcharon is on PATH: a warning when it comes
   after this one; when a typed `vcharon` runs the other one (or this one isn't on PATH), a
   failure (exit 1) for a binary, pipx, uv or pip install, a warning for a checkout. Its fix

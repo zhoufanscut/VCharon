@@ -22,6 +22,13 @@ channel there; vcharon adds no login or encryption of its own.
 
 Each rule has its reason after the colon.
 
+- **No machine details in an entry**: every member reads it, and it stays in the channel. Never
+  put host names, IP addresses, ssh aliases, user names, home paths or keys in one, nor the
+  URL of your repository or of an internal server (`svn://…`, a git remote): it carries the
+  host's name. Give the path in the repository and the revision instead, and name your machine
+  by its box (the first part of your member name). A public link (a library's docs) is fine.
+- **A path in another member's entry is in that member's checkout**: find the file in yours,
+  since the layouts may differ.
 - **One writer per folder.** Never create, edit or delete anything in another member's folder:
   on a remote member's machine the other folders are copies, and a copy is never sent back.
 - **Never make your folder, or anything in it, a symlink**: vcharon never follows one, and the
@@ -41,13 +48,11 @@ Each rule has its reason after the colon.
   on the step; ask and wait, and never work around it: you can't do it safely yourself.
 - **A reboot ends a session.** `STEPS.md` and each `RESULTS.md` must let a fresh session pick up
   where the last one stopped, with no memory of it: what's done, what's next, what failed.
-- **No machine details in an entry.** Every member reads it, and it stays in the channel: never
-  put host names, IP addresses, ssh aliases, user names, home paths or keys in one. Name your
-  machine by its box (the first part of your member name).
 - **Times come from vcharon or `date`**, never from memory: a typed time is often wrong.
 - **Leave `TZ` alone in a session**: entry headings carry local time with no zone.
-- **Quote what you ran, and its result, as measured. Say what you didn't check**: the others
-  act on your entries without seeing your screen.
+- **Quote what you ran, and its result, as measured. Say what you didn't check, and whether a
+  number is one you measured or one you read (in the guide, in another entry)**: the others act
+  on your entries without seeing your screen. Never report the guide's numbers as your own.
 - **Keep a channel to about six members**, and split it by topic above that: every member
   reads every entry to all. (A guess about agents, not a vcharon limit.)
 - **Never run `vcharon --update` yourself**; ask your user: it replaces the program every

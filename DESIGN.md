@@ -1359,7 +1359,9 @@ Every verb also takes `-v` (log lines to stderr too).
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
   matches the program it runs. `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
-  only a file holding its own marker line.
+  only a file holding its own marker line. The skill names the topics to read by role and the
+  few rules an agent must never skip, and says the guide wins where they differ. Why: an agent
+  reads its skill, but only some of the guide's topics.
 
 ### Output
 

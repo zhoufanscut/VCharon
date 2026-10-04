@@ -650,7 +650,7 @@ HINTS = {
          "errors", ("removes or renames it",))],
     "guide/__init__.py": [
         ("the topics are %s and %s: vcharon guide %s",
-         ("start, post, watch, read, rules, end", "errors", "start")),
+         ("start, post, watch, read, rules, lead, end", "errors", "start")),
         ("vcharon %s: the agent guide. Read a topic with vcharon guide TOPIC:", None),
         ("What `vcharon guide TOPIC` prints, one section per topic. An agent reads it with "
          "`vcharon guide`, which always matches the vcharon it runs.", None)],

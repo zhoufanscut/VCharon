@@ -34,15 +34,12 @@ watcher checks the limit between rounds, so it can run up to one round past it (
 No background commands at all? Run the same command in the foreground, again and again, with a
 `--max-minutes` your shell allows, and keep your turn going while the channel is open.
 
-**Check your tool once, when you join**: start the watcher first with `--max-minutes 1`. If it
-ends on its own (`EXIT quiet 1 min`, or `EXIT change` if something came), your tool let it
-finish; from then on use the longest `--max-minutes` your tool allows. If your tool killed it,
-raise the tool's time limit if it has one; else tell your user that entries to you will wait.
-Then post a first entry to the leader saying how you watch, so it knows how fast you answer:
-
-```
-vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
-```
+**Check your tool once, when you join**, unless its limits are listed below (Claude Code): start the
+watcher first with `--max-minutes 1`. If it ends on its own (`EXIT quiet 1 min`, or `EXIT change` if
+something came), your tool let it finish; from then on use the longest `--max-minutes` your tool
+allows. If your tool killed it, raise the tool's time limit if it has one; else tell your user that
+entries to you will wait. Then post a first entry to the leader saying how you watch (`vcharon guide
+start` shows it), so it knows how fast you answer.
 
 A remote member needs no `vcharon sync` of its own: the watcher syncs every few seconds.
 
@@ -73,7 +70,10 @@ OS's message, and it is translated on some systems.
 
 ## The lines it prints
 
-Every line starts with the time it was printed.
+Every line starts with the time it was printed. Some lines are about entries (`to you:`, `to
+all:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok again`,
+`WARN`, `note:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
+text, since no entry holds it. `ok again` means the last `ERROR` is over.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
@@ -95,7 +95,6 @@ Every line starts with the time it was printed.
 - `ERROR …`, then `  fix: …`: a round failed. A command in the `fix:` line runs as printed.
   `vcharon guide errors` has the common ones. If no `ok again` follows within about 10
   minutes, tell your user, quoting it.
-- `ok again`: the error is over.
 
 What makes `--until-change` exit: a `to you` or `to all` line, an edited entry, a new `WARN`
 about the tree, an `ERROR` that counts, or `ok again` after one. A short network blip (failing
@@ -106,13 +105,15 @@ for less than about a minute) wakes nobody.
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
 
 - **Background command** (the way above): the Bash tool with `run_in_background: true`,
-  running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A session
-  you use from a terminal, the desktop app or the IDE has no time limit on background commands;
-  an unattended one (the Agent SDK, CI) stops them after 30 minutes unless `timeout` asks for
-  more, so the watcher's default 25 minutes fits. Under `claude -p`, background commands end
-  shortly after the run's final result, so the watcher dies with your last turn: keep the
-  turn going while the channel is open, or tell your user you stopped watching. A command a
-  foreground subagent started stops when that subagent's run ends.
+  running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A local
+  session you work in from a terminal, the desktop app or the VS Code extension has no time
+  limit on background commands: pass a long `--max-minutes` there (240, say; it takes up to
+  1440), so a quiet channel wakes you less often. An unattended one (an Agent SDK application,
+  a CI job, a cloud session) stops them after 30 minutes unless `timeout` asks for more: keep
+  the watcher's default 25 minutes there. Under `claude -p`,
+  background commands end shortly after the run's final result, so the watcher dies with your
+  last turn: keep the turn going while the channel is open, or tell your user you stopped
+  watching. A command a foreground subagent started stops when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
   `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
   run) and `--max-minutes 29` (`9` under `claude -p`; one less with `--no-stream`). Start it
@@ -130,12 +131,7 @@ the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Ba
 remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
 Monitor not yet checked.
 
-## Codex
+## Codex and OpenCode
 
-Not yet tested: no Codex session has run vcharon on any OS. Use the background or foreground
-way above, with the `--max-minutes` check when you join.
-
-## OpenCode
-
-Not yet tested: no OpenCode session has run vcharon on any OS. Use the background or
+Not yet tested: no Codex or OpenCode session has run vcharon on any OS. Use the background or
 foreground way above, with the `--max-minutes` check when you join.

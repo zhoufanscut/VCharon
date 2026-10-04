@@ -47,8 +47,8 @@ class GuideCommandTest(FakeSshCase):
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR config: there is no guide topic 'bogus'")
         self.assertEqual(lines[1], platform.runnable(
-            "  fix: the topics are start, post, watch, read, rules, end and errors: vcharon "
-            "guide start"))
+            "  fix: the topics are start, post, watch, read, rules, lead, end and errors: "
+            "vcharon guide start"))
         self.assertEqual(len(lines), 2, err)
 
 
@@ -140,8 +140,8 @@ class GuideCommandsParseTest(unittest.TestCase):
                     self.assertIn(argv[1], guide.TOPICS)
 
 
-# --flags the guide names that aren't vcharon's: git's
-FOREIGN_FLAGS = {"--output"}
+# --flags the guide names that aren't vcharon's: git's, svn's and Claude Code's
+FOREIGN_FLAGS = {"--output", "--show-item", "--continue"}
 _FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 
 
@@ -162,8 +162,9 @@ class GuideFlagsTest(unittest.TestCase):
     def test_every_flag_in_the_guide_exists(self):
         known = parser_flags()
         self.assertLessEqual({"--server", "--until-change", "--codex", "--takeover"}, known)
-        for topic in guide.TOPICS:
-            for flag in sorted(set(_FLAG.findall(guide.text(topic)))):
+        texts = [(topic, guide.text(topic)) for topic in guide.TOPICS]
+        for topic, text in texts + [("SKILL.md", skill.text())]:
+            for flag in sorted(set(_FLAG.findall(text))):
                 with self.subTest(topic=topic, flag=flag):
                     self.assertTrue(flag in known or flag in FOREIGN_FLAGS, flag)
 
@@ -239,9 +240,10 @@ class SkillInstallTest(FakeSshCase):
         text = skill.text()
         self.assertTrue(text.startswith("---\nname: vcharon\ndescription: "), text[:60])
         self.assertIn(skill.MARKER, text.splitlines())
-        # short: it points at the guide, and doesn't repeat it
+        # short: it points at the guide, and repeats only the topics to read and the rules
+        # never to skip
         self.assertIn("vcharon guide", text)
-        self.assertLess(len(text.splitlines()), 40)
+        self.assertLess(len(text.splitlines()), 70)
 
 
 class TrustLineTest(ChannelCase):
