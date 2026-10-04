@@ -1134,11 +1134,12 @@ re: linux-api#3
   can't forge an entry in VCharon's own parse. That protects the parse only: a body's other
   characters are kept, so what shows them on a terminal escapes them (next rule).
 - `read` prints another member's text through `pathrules.printable`: a control or format
-  character but tab, U+2028/U+2029 and a lone surrogate show as `\xNN`, `\uNNNN` or
-  `\UNNNNNNNN`. Why: any member can write any bytes into its own files, and an escape sequence
-  could clear the screen, set the clipboard, or print a line that looks like `EXIT closed`.
-  Other scripts and spaces show as they are. A zero-width joiner is escaped too, so a joined
-  emoji shows its parts: it can also hide text inside an ID.
+  character but tab, U+2028/U+2029, an unassigned character (a later Unicode may make it a
+  format control) and a lone surrogate show as `\xNN`, `\uNNNN` or `\UNNNNNNNN`. Why: any member
+  can write any bytes into its own files, and an escape sequence could clear the screen, set the
+  clipboard, or print a line that looks like `EXIT closed`. Other scripts and spaces show as
+  they are. A zero-width joiner is escaped too, so a joined emoji shows its parts: it can also
+  hide text inside an ID.
 - Entries are never edited; a correction is a new entry. The watcher warns about an edited
   heading.
 
@@ -1157,16 +1158,17 @@ re: linux-api#3
   `@name` when it is a member's folder in the tree, and refused otherwise, with the members'
   names: without the `@` it is more likely a typo than a member not synced yet. `--re` drops an
   `@` in front of the ID.
-- A remote member's post then runs the section's up job in the same process (`--no-sync`
-  skips it), so the entry reaches the server without waiting for a watcher. It prints `sent to
+- A remote member's post then runs the section's up job in the same process (`--no-sync` skips
+  it), so the entry reaches the server without waiting for a watcher. It prints `sent to
   <server>`; when the job's lock is held (the watcher's round) a `note:`, since that round or
   the next sends it; any other failure a `WARN not sent to <server>: <error>` and a `fix:` line
   on stderr. The post's exit is 0 in all three: the entry is written. The fix says the watcher
-  or the next sync sends it only when that can be true: a connection failure (`connect`,
-  `timeout`, `lost`, the helper not starting) or an error with no fix. Any other (a closed
-  channel, a name the server refuses, `state_mismatch`) prints the up job's own fix after `the
-  entry is saved in your folder, but no sync sends it until:`, since every later sync fails the
-  same way. The up job's lock never waits, so a post can't deadlock with a watcher.
+  or the next sync sends it only when that can be true: a short-lived failure (the connection's
+  `connect`, `timeout`, `lost` or the helper not starting; `vanished`, a file changed during the
+  run; `aborted`) or an error with no fix. Any other (a closed channel, a name the server
+  refuses, `state_mismatch`) prints the up job's own fix after `the entry is saved in your
+  folder, but no sync sends it until:`, since every later sync fails the same way. The up job's
+  lock never waits, so a post can't deadlock with a watcher.
 - The whole new file goes to a `.vcharon-stage-` temp file in the same folder, then replaces it
   in one step: a reader or a sync sees the old file or the new one, never half. On Windows the
   replace fails while another program holds the file (a sync uploading it); it is tried again

@@ -589,8 +589,17 @@ def _check_tree(record, tree, synced):
     leave command, as the watcher refuses it. A rejoin can't bring it back, and reading or
     posting into nothing would only say "no such file". A remote member's copy stays until
     its leave."""
-    if synced or os.path.isdir(tree):
+    if synced:
         return
+    # only a folder that isn't there is gone, as the watcher decides: a stat refused for
+    # another reason (a parent's permissions) is that error, never the leave fix
+    try:
+        os.stat(tree)
+        return
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        raise fsops.error(e, tree) from None
     channel, name = record["channel"], record["name"]
     raise VCharonError("not_found", "the channel folder %s is gone" % tree,
                        channel_cmd.CHANNEL_GONE_HINT
@@ -608,8 +617,9 @@ def _send_post(channel, record, flags):
     """A remote member's post goes to the server at once: its section's up job, in this
     process, its sync lines kept back. The entry is written already, so nothing here fails the
     post: a running watcher's round holds the job's lock and sends it itself (a note), and any
-    other failure is a WARN with its error. A connection's failure (or one with no fix) says
-    the entry waits for the next sync; any other, such as a closed channel or a name the
+    other failure is a WARN with its error. A short-lived failure (watch_mod.RETRY_KEYS: the
+    connection, a file changed during the run, an aborted run) or one with no fix says the
+    entry waits for the next sync; any other, such as a closed channel or a name the
     server refuses, gives the job's own fix, since no later sync gets past it."""
     job = _section(record) + ".up"
     run = _Run()
@@ -628,11 +638,17 @@ def _send_post(channel, record, flags):
     print("WARN not sent to %s: %s" % (record["ssh"], line.removeprefix("ERROR ")),
           file=sys.stderr)
     log = None
-    if fix is None or watch_mod.error_key(line) == watch_mod.TRANSPORT:
+    if fix is not None:
+        # parse_failure puts the job's log after its fix, on a line of its own, or makes a
+        # fix that only names the log when the error has none
+        fix, _, log = fix.partition(watch_mod.LOG_SEP)
+        if fix.startswith(watch_mod.LOG_ONLY_FIX):
+            fix, log = None, fix[len(watch_mod.LOG_ONLY_FIX):]
+    # the short-lived errors (the connection, a file changed during the run, an aborted run)
+    # go away by themselves, so the next sync sends the entry
+    if fix is None or watch_mod.error_key(line) in watch_mod.RETRY_KEYS:
         fix = SEND_LATER_HINT % " ".join([channel] + flags)
     else:
-        # parse_failure puts the job's log after its fix, on a line of its own
-        fix, _, log = fix.partition(watch_mod.LOG_SEP)
         fix = SEND_BLOCKED_HINT % fix
     print(platform.runnable(fix), file=sys.stderr)
     if log:

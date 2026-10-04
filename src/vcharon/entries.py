@@ -177,7 +177,8 @@ def build(when, name, number, title, to, re_=None, header=(), body=""):
     for value in [title] + [v for _, v in header] + ([re_] if re_ else []):
         problem = one_line_problem(value)
         if problem:
-            raise VCharonError("config", "a heading or header value is one line: %s" % problem)
+            raise VCharonError("config", "a heading or header value is one line of plain text: %s"
+                               % problem)
     lines = ["", "## %s%s%s#%d%s%s" % (when, DASH, name, number, DASH, title),
              "to: %s" % " ".join(to)]
     if re_:
@@ -388,7 +389,7 @@ def set_header(path, own, name, number, key, value, wait=LOCK_WAIT):
     append's. Refused when path has no such entry. wait: lock's (0: one try, busy at once)."""
     problem = one_line_problem(value)
     if problem:
-        raise VCharonError("config", "a header value is one line: %s" % problem)
+        raise VCharonError("config", "a header value is one line of plain text: %s" % problem)
     folder = os.path.dirname(os.path.abspath(path))
     with lock(own, wait=wait):
         if not _is_file(path):

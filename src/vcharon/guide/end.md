@@ -44,9 +44,9 @@
 
    It deletes the whole channel, every member's folder with it, then removes this machine's
    files of the membership: if your user wants the channel's text, `vcharon read myapp --full`
-   first. It refuses, with nothing deleted, while a watcher or sync of yours
-   runs, and while the channel's top holds a file, or a folder whose name can't be a
-   member's (ask your user). An empty folder with a member's name is deleted with the rest.
+   first. It refuses, with nothing deleted, while a watcher or sync of yours runs, and while
+   the channel's top holds a file, or a folder whose name can't be a member's (ask your
+   user). An empty folder with a member's name is deleted with the rest.
    On Windows, `ERROR permission: … access denied` means something holds the folder (a file
    open in it, or a shell whose current folder is in it): close that, then run `close` again.
 
@@ -67,8 +67,8 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
   machine has other memberships of the channel (another `--project` or `--role`): each one
   leaves on its own. Your folder on the server went with the channel. If your user wants the
   channel's text and you are a remote member, `vcharon read myapp --full` before the `leave`
-  prints it all from this machine's copy. A local member has no copy (its `read` now says
-  `the channel folder <path> is gone`): the close removed it, so only a leader who wants the
+  prints it all from this machine's copy. A local member has no copy (its `read` says `the
+  channel folder <path> is gone`): the close removed it, so only a leader who wants the
   text reads it before closing.
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
   gone" can mean a folder removed by hand.

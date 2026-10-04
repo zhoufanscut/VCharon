@@ -4,8 +4,10 @@ commands."""
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -18,7 +20,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import channel_cmd, channels, config, entries, platform, state
+from vcharon import channel_cmd, channels, cli, config, entries, platform, state
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -1263,6 +1265,47 @@ class PostSendTest(ChannelCase):
             "  log: " + os.path.join(os.environ["VCHARON_HOME"], "logs", "game.mac-web.up.log")])
         self.assertNotIn("your watcher sends it", err)
 
+    def test_a_short_lived_failure_waits_for_the_next_sync(self):
+        # a file changed during the send, or an aborted run: the next round sends the entry,
+        # so the fix never makes "run again" or the log's pointer a condition for sending
+        later = platform.runnable(
+            "  fix: the entry is saved in your folder; your watcher sends it, or once the "
+            "server answers, run: vcharon sync game --project web")
+        for error in (VCharonError("vanished", "x changed while it was being listed",
+                                   "run again"),
+                      VCharonError("aborted", "the run stopped")):
+            with self.subTest(code=error.code), \
+                    mock.patch("vcharon.cli.run_jobs", side_effect=error):
+                code, out, err = self.post()
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len(out.splitlines()), 1)
+                lines = err.splitlines()
+                self.assertTrue(lines[0].startswith("WARN not sent to fake-dest: %s: "
+                                                    % error.code), lines)
+                self.assertIn(later, lines)
+                self.assertNotIn("no sync sends it", err)
+                self.assertNotIn("log has the rest", err)
+
+    def test_an_error_with_only_a_log_waits_for_the_next_sync(self):
+        # an error with no fix of its own but a log: the later-send fix, and the log on its own
+        # line, never the log's pointer as a condition for sending
+        log = os.path.join(self.tmp, "game.mac-web.up.log")
+
+        def failed(_fn, _run):
+            print("ERROR aborted: the run stopped\n  log: " + log, file=sys.stderr)
+            return 1
+
+        record = {"channel": "game", "name": "mac-web", "ssh": "fake-dest"}
+        err = io.StringIO()
+        with mock.patch("vcharon.cli._guarded", failed), contextlib.redirect_stderr(err):
+            cli._send_post("game", record, ["--project", "web"])
+        self.assertEqual(err.getvalue().splitlines(), [
+            "WARN not sent to fake-dest: aborted: the run stopped",
+            platform.runnable("  fix: the entry is saved in your folder; your watcher sends it, "
+                              "or once the server answers, run: vcharon sync game --project "
+                              "web"),
+            "  log: " + log])
+
     def test_a_local_member_after_the_close(self):
         # the leader closed the channel: its folder is gone, and only a leave helps
         self.lead("local", where=("--local",), box="pc")
@@ -1278,6 +1321,26 @@ class PostSendTest(ChannelCase):
                     "ERROR not_found: the channel folder %s is gone" % gone,
                     platform.runnable(channel_cmd.CHANNEL_GONE_HINT
                                       % ("local", "--project web"))))
+
+    @unittest.skipIf(os.name == "nt", "a folder's search permission is POSIX's")
+    def test_a_local_member_s_unsearchable_parent_is_not_gone(self):
+        # only a channel folder that isn't there is gone: a parent the stat can't search is
+        # its own error, never the leave fix that would drop the membership
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root searches any folder")
+        self.lead("local", where=("--local",), box="pc")
+        self.ok("join", "local", "--local")
+        os.chmod(self.root, 0o600)
+        try:
+            for argv in (["read", "local"],
+                         ["post", "local", "--to", "@pc-ui", "--title", "t", "--body", "b"]):
+                with self.subTest(argv=argv):
+                    line, fix = self.refusal(*argv)
+                    self.assertTrue(line.startswith("ERROR permission: "), line)
+                    self.assertNotIn("is gone", line)
+                    self.assertNotIn("leave", fix or "")
+        finally:
+            os.chmod(self.root, 0o700)
 
     def test_a_local_member_has_nothing_to_send(self):
         self.lead("local", where=("--local",), box="pc")

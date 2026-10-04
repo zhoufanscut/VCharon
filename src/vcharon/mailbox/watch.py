@@ -130,6 +130,8 @@ LOG = "  log: "
 # between a fix's text and its log path, in the fix that run_sync returns and the snapshot
 # keeps; status() prints them as two lines
 LOG_SEP = "\n"
+# the fix parse_failure makes for an error that has a log but no fix of its own
+LOG_ONLY_FIX = "the job's log has the rest: "
 # A round's sync has its own timeouts; this only keeps a stuck one from stopping the watch.
 RUN_TIMEOUT = 900
 # a remote member's default seconds between rounds: streaming, and with --no-stream
@@ -1065,7 +1067,7 @@ def parse_failure(code, lines, job):
                 elif after.startswith(LOG) and log is None:
                     log = after[len(LOG):].strip() or None
             if log is not None:
-                fix = fix + LOG_SEP + log if fix else "the job's log has the rest: " + log
+                fix = fix + LOG_SEP + log if fix else LOG_ONLY_FIX + log
             return code, line.strip(), fix
     for line in lines:
         if line.strip():

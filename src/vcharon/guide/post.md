@@ -13,12 +13,12 @@ It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`
 member's post then sends your folder to the server at once and prints `sent to devbox`; while
 your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
 the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
-server can't be reached, the fix says the entry goes with your watcher or the next `vcharon
-sync`. Any other error (the channel closed, a name the server refuses) blocks every later sync
-too: the fix says `no sync sends it until:` and what to do (`vcharon guide errors`). With the
-server down, that WARN comes only after ssh's connect timeout (10 s, or up to 30 s if the login
-hangs). `--no-sync` writes the entry without sending it: use it while the server is slow or
-offline.
+server can't be reached (or a file changed during the send), the fix says the entry goes with
+your watcher or the next `vcharon sync`. Any other error (the channel closed, a name the server
+refuses) blocks every later sync too: the fix says `no sync sends it until:` and what to do
+(`vcharon guide errors`). With the server down, that WARN comes only after ssh's connect timeout
+(10 s, or up to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use
+it while the server is slow or offline.
 
 ## The flags
 

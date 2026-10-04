@@ -73,7 +73,9 @@ class PrintableTest(unittest.TestCase):
                            ("\x7f\x85\x9b", "\\x7f\\x85\\x9b"),
                            ("\u202emac#1", "\\u202emac#1"), ("a\u2028b\u2029", "a\\u2028b\\u2029"),
                            ("mac\u200d-web", "mac\\u200d-web"), ("\ufeff", "\\ufeff"),
-                           ("\udcff", "\\udcff"), ("\U000e0001", "\\U000e0001")):
+                           ("\udcff", "\\udcff"), ("\U000e0001", "\\U000e0001"),
+                           # unassigned: a later Unicode may make one a format control
+                           ("a\u0378b", "a\\u0378b"), ("\U0010ffff", "\\U0010ffff")):
             with self.subTest(raw=raw):
                 self.assertEqual(pathrules.printable(raw), shown)
 

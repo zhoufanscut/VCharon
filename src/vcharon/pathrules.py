@@ -46,9 +46,10 @@ def show(path):
 
 
 # the categories printable() lets through although str.isprintable() refuses them: spaces
-# other than " " (U+3000 in CJK text), private-use and unassigned characters. None of them
-# moves the cursor, reorders text or ends a line.
-_SHOWN_AS_IS = frozenset(["Zs", "Co", "Cn"])
+# other than " " (U+3000 in CJK text) and private-use characters. Neither moves the cursor,
+# reorders text or ends a line. Unassigned characters (Cn) are escaped: a later Unicode may
+# make one a format control, and with no glyph, escaping one costs the reader nothing.
+_SHOWN_AS_IS = frozenset(["Zs", "Co"])
 
 
 def printable(text):
@@ -56,7 +57,8 @@ def printable(text):
     control character but tab (C0, DEL, C1: ESC starts the sequences that clear the screen
     or set the clipboard, CR moves back over a line), every format character (Cf: bidi
     overrides that reorder a line, zero-width joiners and spaces that hide text inside an ID;
-    a joined emoji shows its joiner escaped), U+2028/U+2029 and lone surrogates, escaped as
+    a joined emoji shows its joiner escaped), U+2028/U+2029, unassigned characters and lone
+    surrogates, escaped as
     \\xNN, \\uNNNN or \\UNNNNNNNN. A backslash already in the text stays, so the form is for
     reading, not for turning back. Everything else, other scripts included, is unchanged."""
     if text.isprintable():
