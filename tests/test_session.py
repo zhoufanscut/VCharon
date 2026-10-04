@@ -341,6 +341,18 @@ class SessionTest(FakeSshCase):
         self.assertEqual((err.code, err.exit_code), ("timeout", 1))
         self.assertEqual(err.message, "the run passed run_timeout (2 s)")
 
+    def test_timeout_hint_at_the_cap(self):
+        # a setting already at the cap can't be raised, so the hint doesn't say to
+        from vcharon.config import MAX_TIMEOUT
+        s = self.session(idle_timeout=MAX_TIMEOUT, run_timeout=MAX_TIMEOUT)
+        s._killed = "idle"
+        self.assertEqual(s._end_error().hint, "check the network")
+        s._killed = "run"
+        self.assertEqual(s._end_error().hint, "see the log, then run again")
+        s = self.session(idle_timeout=MAX_TIMEOUT - 1, run_timeout=MAX_TIMEOUT - 1)
+        s._killed = "run"
+        self.assertEqual(s._end_error().hint, "raise run_timeout")
+
     def test_run_timeout_stops_between_rounds(self):
         # sync --repeat's wait between rounds: past run_timeout, and not killed
         s = self.session(idle_timeout=60, run_timeout=2)

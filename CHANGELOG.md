@@ -17,11 +17,12 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   `idle_timeout`, `run_timeout`, in `[vcharon]` or a channel section) now stop at 86400 s; a
   larger value is a `config` error naming the key, where before ssh refused every run with
   `invalid time value.`, or doctor and `vcharon key` failed as `internal`. Their messages now
-  give the range (`1 to 86400`, `30 to 86400`, `0 to 86400`) instead of `N or more`. To adapt:
-  set `VCHARON_HOME` to an absolute folder and keep timeouts at a day or less. Measured on
-  Linux: ssh's `invalid time value.` for a `ConnectTimeout` of 2^31, `communicate()`'s
-  `OverflowError` at 2147484 s, and the new refusals (a hand run and tests). Windows, where the
-  fix's example is `C:\vc\home` and a path needs a drive, is inferred.
+  give the range (`1 to 86400`, `30 to 86400`, `0 to 86400`) instead of `N or more`, and a
+  timeout at the cap no longer advises raising it (`check the network`, `see the log, then run
+  again`). To adapt: set `VCHARON_HOME` to an absolute folder and keep timeouts at a day or
+  less. Measured on Linux: ssh's `invalid time value.` for a `ConnectTimeout` of 2^31,
+  `communicate()`'s `OverflowError` at 2147484 s, and the new refusals (a hand run and tests).
+  Windows, where the fix's example is `C:\vc\home` and a path needs a drive, is inferred.
 - On Windows, a commit that replaces or deletes a file, or removes a folder, retries access
   denied (winerror 5) 3 times, 0.2 s apart, as it already did a sharing violation, before it
   reports `permission`: a file another program has open, such as a `vcharon read` overlapping a

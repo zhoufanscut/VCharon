@@ -749,12 +749,18 @@ class Session:
 
     def _end_error(self):
         s = self.settings
+        # config imports this module, so it can't be imported at the top
+        from .config import MAX_TIMEOUT
+        # at the cap, raising the setting would be refused, so don't advise it
         if self._killed == "idle":
             return VCharonError("timeout", "nothing moved for %d s" % s.idle_timeout,
-                                hint="check the network, or raise idle_timeout")
+                                hint="check the network" + (", or raise idle_timeout"
+                                                            if s.idle_timeout < MAX_TIMEOUT
+                                                            else ""))
         if self._killed == "run":
             return VCharonError("timeout", "the run passed run_timeout (%d s)" % s.run_timeout,
-                                hint="raise run_timeout")
+                                hint="raise run_timeout" if s.run_timeout < MAX_TIMEOUT
+                                else "see the log, then run again")
         try:
             rc = "ssh exit %d" % self._proc.wait(2)
         except subprocess.TimeoutExpired:
