@@ -7,10 +7,32 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.2.1 — 2026-10-05
 
-- A release's notes on GitHub are now its CHANGELOG entry and a line pointing at the install
-  steps and the full CHANGELOG, written by the release workflow; 0.2.0's said only where to look.
+Fixes from a channel run with Codex and OpenCode as members, the first for both: a watcher
+whose output an agent sent into the channel is refused, the guide says how each of the three
+kinds of CLI watches, and an installed skill from another version is noted where agents look.
+The channel format is unchanged (`format: 1`): members on 0.1.0, 0.2.0 and 0.2.1 can share a
+channel.
+
+**Updating from 0.2.0:** `vcharon --update` also rewrites the skill copies `vcharon skill
+install` wrote (the skill's text changed). After any other way of updating, run `vcharon skill
+install`; join, create and the watcher now print a note saying so while a copy is stale.
+
+One change refuses what 0.2.0 accepted; its line says how to adapt ("To adapt"):
+
+- `watch` refuses to start when its stdout or stderr is a file in the channel (a local
+  member's channel folder, a remote member's copy of it): `ERROR config: the watcher's output
+  goes to <path>, a file in the channel: every member gets that file`, exit 3, naming the file
+  by its path in the channel, with a fix to send the output elsewhere and to delete that file
+  only if the redirect created it (a `>>` onto `RESULTS.md` is caught too). A pipe that ends in
+  a channel file (`| tee <channel>/x.log`, and likely PowerShell's `>` on a native program) is
+  not caught: the check sees only a file the watcher holds itself.
+  Before, a watcher started with `> <own folder>/vcharon-watch.log 2>&1 &` sent that file to
+  every member, with this machine's path in its first line, and each of its writes was a
+  `changed` line in the other watchers. To adapt: send a watcher's output outside the channel.
+  Measured on Linux (unit tests, and a hand run on a `--local` channel with `>` and `2>&1`);
+  macOS and Windows inferred (Windows fills `st_ino` through `os.lstat` and `os.fstat`).
 - `join`, `create` and the watcher's start print `note: your vcharon skill at <path> is from
   another version: vcharon skill install --claude` (`--codex`, or both) when a skill copy that
   `vcharon skill install` wrote holds another version's text, the same check as doctor's
@@ -51,18 +73,20 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   started with `--add-dir` naming vcharon's `state` folder, hit no permission error as a local
   member (measured on Linux). The README says Codex read the skill from `~/.agents/skills` and
   OpenCode found it (measured on Linux).
-- `watch` refuses to start when its stdout or stderr is a file in the channel (a local
-  member's channel folder, a remote member's copy of it): `ERROR config: the watcher's output
-  goes to <path>, a file in the channel: every member gets that file`, exit 3, naming the file
-  by its path in the channel, with a fix to send the output elsewhere and to delete that file
-  only if the redirect created it (a `>>` onto `RESULTS.md` is caught too). A pipe that ends in
-  a channel file (`| tee <channel>/x.log`, and likely PowerShell's `>` on a native program) is
-  not caught: the check sees only a file the watcher holds itself.
-  Before, a watcher started with `> <own folder>/vcharon-watch.log 2>&1 &` sent that file to
-  every member, with this machine's path in its first line, and each of its writes was a
-  `changed` line in the other watchers. To adapt: send a watcher's output outside the channel.
-  Measured on Linux (unit tests, and a hand run on a `--local` channel with `>` and `2>&1`);
-  macOS and Windows inferred (Windows fills `st_ino` through `os.lstat` and `os.fstat`).
+- A release's notes on GitHub are now its CHANGELOG entry and a line pointing at the install
+  steps and the full CHANGELOG, written by the release workflow; 0.2.0's said only where to look.
+
+### What was checked
+
+- Unit tests (1,331), with the server side run through a stand-in for ssh: the suite runs in
+  CI on Linux, macOS and Windows with Python 3.13 and 3.14, and this release is tagged on a
+  green run. **Measured** by CI.
+- A channel over real ssh in CI (`tests/ssh_flow.sh` and the real-ssh unit tests on the Ubuntu
+  runner as its own server): **measured** by CI.
+- The guide's Codex and OpenCode facts come from a real local channel on 0.2.0, on Linux:
+  **measured** there, as their lines say. Each other change's own check is in its line,
+  marked measured or inferred; Windows and macOS were run only through the unit tests in CI.
+- A real channel with this version's binaries: **not yet run.**
 
 ## 0.2.0 — 2026-10-04
 
