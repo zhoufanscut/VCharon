@@ -90,7 +90,7 @@ class FakeSshCase(unittest.TestCase):
     """A temp dir with a fake server home and a log file; ssh is fake_ssh.py."""
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.tmp = self.make_tmp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.home = os.path.join(self.tmp, "home")
         self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
@@ -120,6 +120,10 @@ class FakeSshCase(unittest.TestCase):
                                     lambda settings: [sys.executable, FAKE_SSH_ADD])
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def make_tmp(self):
+        """The test's own temp folder, new and empty; removed when the test ends."""
+        return tempfile.mkdtemp(prefix="vcharon-test-")
 
     def settings(self, **overrides):
         # Generous by default, so a busy machine can't fail the tests that aren't about time.

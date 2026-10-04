@@ -61,6 +61,57 @@ class ChannelCase(FakeSshCase):
         os.chdir(self.project)
         self.addCleanup(os.chdir, cwd)
 
+    # A class that sets TEMPLATE builds its channel once (from_template) and gives every test
+    # a copy. The files hold absolute paths into the temp folder (records, job state, logs),
+    # so each test of such a class gets the same temp folder path: a copy put back there
+    # reads as the build left it. The tests stay apart: each starts from a fresh copy.
+    TEMPLATE = False
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if cls.TEMPLATE:
+            # made again each time the class runs: a later run in the same process (tests of
+            # two classes named in turn) finds the last one's folder gone
+            cls._template_root = tempfile.mkdtemp(prefix="vcharon-class-")
+            cls._template = None
+            cls.addClassCleanup(shutil.rmtree, cls._template_root, True)
+
+    def make_tmp(self):
+        if not self.TEMPLATE:
+            return FakeSshCase.make_tmp(self)
+        tmp = os.path.join(self._template_root, "case")
+        shutil.rmtree(tmp, True)
+        if os.path.exists(tmp):
+            # never hand a test a folder that isn't new
+            left = [os.path.join(d, n) for d, dirs, files in os.walk(tmp) for n in dirs + files]
+            self.fail("the last test left files that can't be removed in %s: %s"
+                      % (tmp, ", ".join(left[:5]) or "the folder itself"))
+        os.mkdir(tmp)
+        return tmp
+
+    def from_template(self, build):
+        """build() in this class's first test, then keep a copy of the temp folder, the
+        environment and the boxes it left; every later test gets that copy in place of its
+        fresh setUp's, as if it had run build() itself."""
+        assert self.TEMPLATE, "from_template needs TEMPLATE = True on the class"
+        cls = type(self)
+        saved = os.path.join(cls._template_root, "template")
+        if cls._template is None:
+            build()
+            shutil.copytree(self.tmp, saved, symlinks=True)
+            cls._template = (dict(os.environ), dict(self.homes))
+            return
+        env, homes = cls._template
+        # out of the folder first: Windows can't remove the current directory
+        os.chdir(cls._template_root)
+        shutil.rmtree(self.tmp)
+        shutil.copytree(saved, self.tmp, symlinks=True)
+        os.environ.clear()
+        os.environ.update(env)
+        self.homes = dict(homes)
+        os.chdir(self.project)
+
     def use_box(self, box, home=None):
         """Switches to the box named box (a VCHARON_HOME of its own, made on first use)."""
         if box not in self.homes:
@@ -682,8 +733,13 @@ class LeaveCloseTest(ChannelCase):
     """leave and close: their refusals change nothing; their removal takes exactly the
     membership's own files on this box."""
 
+    TEMPLATE = True
+
     def setUp(self):
         ChannelCase.setUp(self)
+        self.from_template(self.two_members)
+
+    def two_members(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
         # a second member on the same box, in the same channel, and its run's files
@@ -909,11 +965,16 @@ class PostSendTest(ChannelCase):
     """A remote member's post goes to the server at once (its up job), unless --no-sync; a
     failed send never fails the post."""
 
+    TEMPLATE = True
+
     def setUp(self):
         ChannelCase.setUp(self)
+        self.from_template(self.joined_game)
+        self.srv = os.path.join(self.root, "game", "mac-web", "RESULTS.md")
+
+    def joined_game(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
-        self.srv = os.path.join(self.root, "game", "mac-web", "RESULTS.md")
 
     def post(self, *extra):
         return self.run_cli("post", "game", "--to", "@laptop-ui", "--title", "done", "--body",
@@ -1046,22 +1107,28 @@ class ReviewTest(ChannelCase):
     """Probes of the channel commands as tests, and tests that kill mutants of them that
     other tests let survive."""
 
+    TEMPLATE = True
+
     def member(self):
         """The leader laptop-ui (remote), and this box's member mac-web with three entries
-        and a patch, all sent."""
-        self.lead()
-        self.ok("join", "game", "--server", "fake-dest")
+        and a patch, all sent. Only as a test's first step: it may put back a copy of the
+        temp folder."""
         self.local = self.joined("game.mac-web")
         self.own = os.path.join(self.local, "mac-web")
+        self.from_template(self.build_member)
+        self.srv_own = os.path.join(self.root, "game", "mac-web")
+        self.srv_before = read_tree(self.srv_own)
+        self.assertEqual(sorted(self.srv_before), ["MEMBER.md", "RESULTS.md", "work.patch"])
+
+    def build_member(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
         for i in range(3):
             entries.post(os.path.join(self.own, "RESULTS.md"), self.own, "mac-web",
                          "step %d" % i, ["@laptop-ui"], body="b")
         with open(os.path.join(self.own, "work.patch"), "w") as f:
             f.write("patch")
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
-        self.srv_own = os.path.join(self.root, "game", "mac-web")
-        self.srv_before = read_tree(self.srv_own)
-        self.assertEqual(sorted(self.srv_before), ["MEMBER.md", "RESULTS.md", "work.patch"])
 
     # --- the rejoin pull ---
 
