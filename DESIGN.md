@@ -318,8 +318,11 @@ today. `vcharon key [<dest>] [--key FILE]` makes the unlock last, with each OS's
   when its own stdin is the null device. It reads only `debug1: Server accepts key:` lines, up to
   `Authenticated to`, decoding ssh's escapes.
 - It unlocks a key file the server accepts and the agent doesn't hold; does nothing for a key
-  the agent alone holds (a forwarded agent: nothing to unlock); and stops with the admin
-  commands when Windows' agent service is off, or with how to start an agent when Linux has none.
+  the agent alone holds (a forwarded agent: nothing to unlock); and stops before `ssh-add` when
+  no agent answers: with the admin commands when Windows' agent service is off, with how to start
+  an agent when Linux has none, and on macOS with "open a new Terminal window" (macOS starts an
+  agent for each login session; a stale `SSH_AUTH_SOCK`, as in a tmux server from an earlier
+  login, names none), since `ssh-add` would only fail and a passphrase hint wouldn't help.
 - macOS: after `ssh-add --apple-use-keychain` it prints the lines to put at the top of
   `~/.ssh/config` (`IgnoreUnknown UseKeychain`, then a `Host` block with `IdentityFile`,
   `UseKeychain yes`, `AddKeysToAgent yes`) and never edits the file itself.

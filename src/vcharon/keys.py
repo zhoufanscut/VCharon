@@ -21,6 +21,8 @@ ADMIN_HINT = ("once, in an admin PowerShell: Get-Service ssh-agent | Set-Service
               "Automatic; Start-Service ssh-agent")
 START_AGENT = 'eval "$(ssh-agent -s)"'
 APPLE_SSH = "/usr/bin/ssh"
+# macOS starts its agent for each login session and names it in SSH_AUTH_SOCK there
+MAC_AGENT_HINT = "open a new Terminal window, then run vcharon key again"
 
 
 def terminal():
@@ -144,6 +146,13 @@ def _tool(settings, key_file, agent, say, log):
     osn = platform.os_name()
     add = ssh.ssh_add_prefix(settings)
     if osn == "darwin":
+        if state == "none":
+            # ssh-add would only exit 2, and the passphrase hint after that never helps; for
+            # example a stale SSH_AUTH_SOCK in a tmux server started in an earlier login
+            sock = os.environ.get("SSH_AUTH_SOCK")
+            why = ("no agent answers at %s" % sock if sock
+                   else "there's no ssh agent here: SSH_AUTH_SOCK is unset")
+            raise VCharonError("config", why, hint=MAC_AGENT_HINT)
         if settings.ssh_path != APPLE_SSH:
             say("  warn    only Apple's ssh (%s) reads the Keychain; ssh_path is %s"
                 % (APPLE_SSH, settings.ssh_path))

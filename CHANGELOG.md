@@ -9,6 +9,12 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon key` on macOS stops before `ssh-add` when no agent answers (`ssh-add -l` exits 2,
+  say a stale `SSH_AUTH_SOCK` in tmux), as it already did on Linux and Windows: `ERROR config:
+  no agent answers at <socket>` (or `there's no ssh agent here: SSH_AUTH_SOCK is unset`), fix
+  `open a new Terminal window, then run vcharon key again`. It used to run `ssh-add
+  --apple-use-keychain` anyway and, when that failed, say to check the passphrase. Measured on
+  Linux with the OS faked as macOS and a fake `ssh-add`; not run on a Mac.
 - `create`, `join`, `leave` and `close` hold the member's watcher lock until they return, where
   join, leave and close used to check it once and create didn't look: a watcher started meanwhile
   exits 12 instead of syncing alongside them. Measured on Linux before the change: seven such

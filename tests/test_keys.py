@@ -143,6 +143,25 @@ class KeyTest(KeyCase):
         argument list, which is what keys.show_argv does for the OS these tests declare."""
         return shlex.join([sys.executable, FAKE_SSH_ADD] + list(rest))
 
+    def test_locked_macos_no_agent(self):
+        # ssh-add --apple-use-keychain would exit 2 and the passphrase hint wouldn't help
+        self.os_name("darwin")
+        self.locked()
+        self.agent(2)
+        fix = "  fix: " + platform.runnable("open a new Terminal window, then run vcharon key "
+                                            "again")
+        out, err = self.key_cli("fake-dest", code=3)
+        self.assertEqual(err[:2], ["ERROR config: there's no ssh agent here: SSH_AUTH_SOCK is "
+                                   "unset", fix])
+        self.assertIn("  agent   none: SSH_AUTH_SOCK is unset", out)
+        sock = os.path.join(self.tmp, "agent.sock")
+        os.environ["SSH_AUTH_SOCK"] = sock
+        out, err = self.key_cli("fake-dest", code=3)
+        self.assertEqual(err[:2], ["ERROR config: no agent answers at %s" % sock, fix])
+        self.assertIn("  agent   none: nothing answers at %s" % sock, out)
+        self.assertFalse(any(line.startswith("  run") for line in out))
+        self.assertEqual(self.adds(), [])
+
     def test_locked_macos_other_ssh(self):
         self.os_name("darwin")
         # any absolute path but Apple's; a host path, since ssh_path is checked as one
@@ -197,12 +216,12 @@ class KeyTest(KeyCase):
         os.mkdir(os.path.dirname(key))
         with open(key, "w") as f:
             f.write("k")
-        for osn, rc in (("darwin", None), ("linux", 0), ("windows", 1)):
+        # every row has an agent that answers, so each reaches ssh-add
+        for osn, rc in (("darwin", 1), ("linux", 0), ("windows", 1)):
             with self.subTest(osn=osn):
                 self.os_name(osn)
-                if rc is not None:
-                    os.environ["SSH_AUTH_SOCK"] = os.path.join(self.tmp, "agent.sock")
-                    self.agent(rc, "3072 SHA256:x other (RSA)\n" if rc == 0 else "")
+                os.environ["SSH_AUTH_SOCK"] = os.path.join(self.tmp, "agent.sock")
+                self.agent(rc, "3072 SHA256:x other (RSA)\n" if rc == 0 else "")
                 if os.path.exists(self.unlock):
                     os.remove(self.unlock)
                 if os.path.exists(self.add_log):

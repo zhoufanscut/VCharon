@@ -670,7 +670,8 @@ HINTS = {
         ("for example: vcharon key devbox", ()),
         ("vcharon key needs a terminal: ssh-add asks for your passphrase there", None),
         ("start one in this shell: %s, then run vcharon key again", ("eval $(ssh-agent)",)),
-        ("check the passphrase, then run vcharon key again", ())],
+        ("check the passphrase, then run vcharon key again", ()),
+        ("open a new Terminal window, then run vcharon key again", ())],
     "ssh.py": [("add your key to the server, or run: vcharon key %s", ("dev",))],
     "state.py": [("check the target, then run both: vcharon sync %s --reset %s %s ; vcharon "
                   "sync %s --full %s", ("game", "up", FLAGS, "game", FLAGS))],
