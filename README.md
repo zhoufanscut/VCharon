@@ -235,6 +235,12 @@ Host devbox
 takes the first value it finds; `IdentityFile` tells ssh which file to unlock from the Keychain
 after a reboot, when the agent is empty. Only Apple's `/usr/bin/ssh` reads the Keychain.
 
+When a key needs unlocking but no ssh agent answers (say a stale `SSH_AUTH_SOCK` inside a tmux
+started in an earlier login), `vcharon key` stops before `ssh-add` with `ERROR config: no agent
+answers at <socket>` (or `there's no ssh agent here: SSH_AUTH_SOCK is unset`) and the fix `open
+a new Terminal window, then run vcharon key again`. Checked on Linux with the OS faked as macOS,
+not on a Mac.
+
 **Windows.** Once, in a PowerShell run as administrator, make the ssh-agent service start with
 Windows:
 

@@ -451,7 +451,7 @@ Every error the user sees has one of these codes; the last column is the exit co
 | `timeout` | the watchdog stopped the run | 1 |
 | `lost` | the connection closed unexpectedly after the helper started | 1 |
 | `protocol` | a bad frame or message, or an unknown `fn` | 1 |
-| `not_found` | a source path or a sink root doesn't exist | 1 |
+| `not_found` | a source path or a sink root doesn't exist, or the root, or the nearest existing folder above a missing root, isn't a directory; no channel of the name; a local member's channel folder gone; a member's own folder gone; a remote member's own folder here without its `MEMBER.md`; a file gone during a run | 1 |
 | `unsafe_path` | a path breaks the receiver's rules; a source holds a symlink, a special file or a name that isn't UTF-8 | 1 |
 | `unsafe_dir` | a folder under the root isn't yours, or others can write to it | 1 |
 | `collision` | two paths become one on the receiver | 1 |
@@ -1984,8 +1984,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   A field may be added in a minor version; none is removed or changes meaning without a
   CHANGELOG line.
 - **The entry header**: `## <time> — <name>#<n> — <title>`, `<time>` as `YYYY-mm-dd HH:MM:SS`
-  (readers also take `YYYY-mm-dd HH:MM`), then `to:`, `re:`, and other `key: value` lines up to
-  the first blank line ([Entries](#entries)).
+  (a time without seconds is a bad time to `read`), then `to:`, `re:`, and other `key: value`
+  lines up to the first blank line ([Entries](#entries)).
 - **The channel files**: the layout ([Layout](#layout)); `MEMBER.md`'s #1 fields, `CHANNEL.md`'s
   #2 fields ([Formats](#formats)); `STEPS.md` (the leader's) and `RESULTS.md`; any `.md` file of
   a member's folder holds entries.
