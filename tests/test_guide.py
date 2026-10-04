@@ -169,6 +169,55 @@ class GuideFlagsTest(unittest.TestCase):
                     self.assertTrue(flag in known or flag in FOREIGN_FLAGS, flag)
 
 
+def synopsis():
+    """DESIGN's "Command line" block as {verb: its text}, the continuation lines joined; the
+    top-level flags (--version, --update) are under ''."""
+    with open(os.path.join(REPO, "DESIGN.md"), encoding="utf-8") as f:
+        text = f.read()
+    block = text.split("\n## Command line\n", 1)[1].split("```\n", 2)[1]
+    out, verb = {}, None
+    for line in block.splitlines():
+        m = re.match(r"  vcharon (\S+)", line)
+        if m:
+            verb = "" if m.group(1).startswith("--") else m.group(1)
+            out[verb] = out.get(verb, "") + " " + line
+        elif verb is not None and line.startswith("   "):
+            out[verb] += " " + line
+        else:
+            verb = None
+    return out
+
+
+def verb_flags(parser):
+    """The long option strings of a parser and of its actions' parsers, -h and -v left out:
+    every verb takes them, and the synopsis says so once."""
+    out, todo = set(), [parser]
+    while todo:
+        one = todo.pop()
+        for action in one._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                todo.extend(action.choices.values())
+            out.update(o for o in action.option_strings if o not in ("--help", "--verbose")
+                       and o.startswith("--"))
+    return out
+
+
+class SynopsisTest(unittest.TestCase):
+    # DESIGN, "Stable" names the synopsis as the flags' contract, so it must match the parser
+    def test_the_synopsis_matches_the_parser(self):
+        parser = cli._parser()
+        [verbs] = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+        want = {name: verb_flags(one) for name, one in verbs.choices.items()}
+        want[""] = {o for a in parser._actions for o in a.option_strings if o.startswith("--")
+                    and o != "--help"}
+        got = {verb: set(_FLAG.findall(text)) for verb, text in synopsis().items()}
+        self.assertEqual(sorted(got), sorted(want))
+        self.assertIn("--no-sync", got["post"])
+        for verb in sorted(want):
+            with self.subTest(verb=verb):
+                self.assertEqual(got[verb], want[verb])
+
+
 class SkillInstallTest(FakeSshCase):
     def setUp(self):
         FakeSshCase.setUp(self)

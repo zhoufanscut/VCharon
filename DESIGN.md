@@ -1353,8 +1353,8 @@ Channels
   vcharon whoami [C] [--project P] [--role R] [--json]
 
 Messages
-  vcharon post   C --to @NAME… --title TEXT [--re NAME#N] [--body TEXT] [--file NAME.md |
-                 --steps] [--project P] [--role R]
+  vcharon post   C --to @NAME… --title TEXT [--re NAME#N] [--body TEXT]
+                 [--file NAME.md | --steps] [--no-sync] [--project P] [--role R]
   vcharon read   C [--last N] [--full] [--project P] [--role R] [--json]
   vcharon watch  C [--until-change] [--every S] [--max-minutes M] [--fresh] [--no-stream]
                  [--max-errors N] [--project P] [--role R]
@@ -1913,8 +1913,12 @@ Later:
 - Separate server accounts per person: today one account holds the root, and anyone who can log
   in as it reads and writes every channel. Later: a root shared through a Unix group, with the
   permissions set by `create` and checked by `doctor`.
-- Many streaming watchers on one server: each holds an ssh connection, so ten or more members may
-  meet sshd's defaults (`MaxStartups 10:30:100`, `MaxSessions 10`). Inferred, not measured.
+- Many streaming watchers on one server: each holds an ssh connection and a helper of about
+  25 MB. Measured: 10, 20, 30 and 50 watchers started at once had 0, 3, 7 and at least 16
+  connections reset at start, each retried and was streaming within about 4 s, and 50 helpers
+  took about 1.2 GB. That sshd's `MaxStartups 10:30:100` caused the resets is inferred (the
+  server's log wasn't read). `MaxSessions 10` caps them only when `ssh_config` shares
+  connections (ControlMaster, never on Windows); not measured.
 - Old channels pile up: only `close` deletes. `list` showing each channel's age and size would
   make forgotten ones stand out.
 - Handing the leader role to another member: today the leader closes and the new one creates a

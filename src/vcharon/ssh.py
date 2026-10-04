@@ -160,8 +160,9 @@ START_HINT = "install the OpenSSH client, or set ssh_path in vcharon.ini"
 
 def probe_command(settings, dest):
     """A probe's ssh command with -v: BatchMode on, ControlMaster off, and the bootstrap line
-    as the remote command. With stdin at the null device the bootstrap reads an empty line,
-    runs nothing and exits 0."""
+    as the remote command. It runs through fsops.run, whose stdin is an empty pipe closed at
+    once, so the bootstrap reads an empty line, runs nothing and exits 0. Not the null device:
+    Win32-OpenSSH then never ends the remote side's input (DESIGN, "Keys without prompts")."""
     argv = ssh_command(settings, dest, probe=True)
     at = len(ssh_prefix(settings))
     return argv[:at] + ["-v"] + argv[at:]
