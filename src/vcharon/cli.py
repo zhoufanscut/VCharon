@@ -661,10 +661,15 @@ def _send_post(channel, record, flags):
         print(watch_mod.LOG + log, file=sys.stderr)
 
 
+# the short read's last line: it lists titles only, and agents in a channel run didn't find
+# how to see an entry's body. The same --last and membership flags, so it shows those entries
+READ_FULL_HINT = "  note: to see the bodies: vcharon read %s --full %s"
+
+
 def _read(args, run):
     """vcharon read C [--json]: read_mod's view of the channel's tree on this box."""
     cfg = load_config()
-    record, _ = _membership(args)
+    record, flags = _membership(args)
     limits = channel_cmd.channel_limits(record)
     tree, synced = _tree(cfg, record)
     _check_tree(record, tree, synced)
@@ -679,8 +684,10 @@ def _read(args, run):
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
                                      last=args.last, skip=skip, notes=notes)
         else:
+            last = ["--last", str(args.last)] if args.last else []
+            bodies = platform.runnable(READ_FULL_HINT % (args.channel, " ".join(last + flags)))
             shown = read_mod.view(tree, args.channel, synced=synced, full=args.full,
-                                  last=args.last, skip=skip, notes=notes)
+                                  last=args.last, skip=skip, notes=notes, bodies=bodies)
     except OSError as e:
         raise fsops.error(e, tree)
     if args.json:

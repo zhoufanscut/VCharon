@@ -9,6 +9,11 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon read C` without `--full` or `--json` ends, when it lists an entry, with a line on
+  how to see the bodies: `  note: to see the bodies: vcharon read C --full [--last N] --project P
+  [--role R]`. The `read` guide says so near its top. In a channel run, two agents (Codex,
+  OpenCode) didn't find how to see a body. `--json` is unchanged. Measured on Linux (unit
+  tests); inferred for macOS and Windows.
 - The `watch` guide says to stream where the CLI can: one watcher under a tool that hands over
   each line (Claude Code's `Monitor`) covers up to half an hour with no restart. Its Claude
   Code section prefers `Monitor`, which is now checked. Measured on Linux, Claude Code 2.1.289,

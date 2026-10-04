@@ -17,6 +17,10 @@ marks the folder. Lines, in this order:
                                    --full adds the header's other lines and the body, indented
                                    by 4. --last N: only the newest N
     note: <text>                   after the list, one line each (below)
+      note: to see the bodies: vcharon read <C> --full ...
+                                   last, without --full, when an entry is listed (cli.py's
+                                   READ_FULL_HINT, with the command's own --last and
+                                   membership flags)
 
 The order: an entry whose time is missing or doesn't parse (entries.TIME_FORMAT) comes first,
 in path order. The rest go by their minute. Within one minute one member's entries go by number
@@ -313,11 +317,13 @@ def _collect(root, now, skip=None, notes=()):
     return folders, ordered, notes, info
 
 
-def view(root, channel, synced=False, full=False, last=None, now=None, skip=None, notes=()):
+def view(root, channel, synced=False, full=False, last=None, now=None, skip=None, notes=(),
+         bodies=None):
     """The view's lines of the channel tree root, to print; OSError when the root can't be
     read (the caller names it with a code and a fix). Nothing is printed here, so an error
     writing stdout is never taken for one reading the tree. skip: read_tree's; notes: more
-    notes (a remote member's: the members its last pull left out)."""
+    notes (a remote member's: the members its last pull left out); bodies: the last line when
+    the list, without full, shows at least one entry (the caller's: how to see the bodies)."""
     folders, ordered, notes, _info = _collect(root, now, skip, notes)
     out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
                                       _counted(len(folders), "member", "members"), root,
@@ -326,6 +332,9 @@ def view(root, channel, synced=False, full=False, last=None, now=None, skip=None
     out += lines(shown, full)
     # a note holds IDs, times and paths from members' files too
     out += [pathrules.printable(note) for note in notes]
+    # the short form shows titles only: say how to see the bodies
+    if bodies is not None and shown and not full:
+        out.append(bodies)
     return out
 
 

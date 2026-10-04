@@ -1431,10 +1431,14 @@ reads: for a remote member it shows the local tree as of the last sync, and says
   its folder's, the first with that ID) takes part.
 - `note:` lines after the list: an unreadable folder or file, a left-out folder, an entry with no
   or a wrong-folder ID or a duplicate, a bad or future time, an answer stamped before its
-  question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle; last, when the
-  members' `MEMBER.md` give two or more `vcharon:` versions, `note: members' vcharon versions
-  differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a member without
-  the line as `unknown`. Quiet when fewer than two known versions differ.
+  question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle; last of them,
+  when the members' `MEMBER.md` give two or more `vcharon:` versions, `note: members' vcharon
+  versions differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a
+  member without the line as `unknown`. Quiet when fewer than two known versions differ.
+- Without `--full` or `--json`, when it lists an entry, the last line is `  note: the bodies:
+  vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the command
+  spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and agents in a
+  channel run didn't find how to see a body.
 - `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
   (null when missing).
 - The text lines escape other members' text ([Entries](#entries)); `--json` gives it as it is,

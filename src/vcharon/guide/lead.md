@@ -42,7 +42,7 @@ back to step 2"): otherwise the member guesses.
 - **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
   entries are never edited.
 - **Check the members' versions before you cite the guide**: each member reads the guide of
-  the vcharon it runs. `vcharon read myapp` ends with a note when the versions differ; tell
+  the vcharon it runs. `vcharon read myapp`'s notes include one when the versions differ; tell
   your user then.
 - **Count members by their `JOIN`** and their first entry, which says how they watch: a member
   that hasn't posted one may not be watching yet.

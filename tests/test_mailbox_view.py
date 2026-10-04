@@ -285,6 +285,23 @@ class OutputTest(ViewCase):
             "    > # quoted",
             "2026-10-02 10:02:00  aa#3  @all  three  (aa/R.md)"])
 
+    def test_bodies_line(self):
+        # the short form ends with how to see the bodies: the same --last and membership
+        hint = "  note: to see the bodies: vcharon read mb --full %s"
+        for argv, flags in (((), "--project p"), (("--last", "2"), "--last 2 --project p")):
+            with self.subTest(argv=argv):
+                lines = self.view(*argv)
+                self.assertEqual(lines[-1], platform.runnable(hint % flags))
+                self.assertEqual(len(lines), len(self.ids(lines)) + 2)
+        # never with --full (test_full has every line) or --json
+        self.assertNotIn("the bodies", "\n".join(self.view("--full")))
+        self.assertNotIn("the bodies", "\n".join(self.view("--json")))
+
+    def test_no_bodies_line_without_entries(self):
+        shutil.rmtree(self.tree)
+        write_tree(self.tree, {"aa/MEMBER.md": md(entry("aa#1", "member")), "bb/": None})
+        self.assertEqual(self.view(), ["mb: 0 entries from 2 members (%s)" % self.tree])
+
     def test_json(self):
         code, lines, err = self.main("--json", "--last", "2")
         self.assertEqual((code, err), (0, ""))
@@ -358,8 +375,8 @@ class VersionTest(ViewCase):
                                "bb/MEMBER.md": member("bb", "0.2.0rc1"),
                                "cc/MEMBER.md": member("cc"), "dd/": None})
         lines = self.view()
-        # after every other note: one per line, the last line
-        self.assertEqual(lines[-2:], [
+        # after every other note: one per line, the last before the bodies' line
+        self.assertEqual(lines[-3:-1], [
             "note: aa#2 answers zz#9, which isn't in the tree (not synced yet, or a typo)",
             "note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
             "bb 0.2.0rc1, cc unknown, dd unknown; their guides may differ"])
@@ -369,7 +386,7 @@ class VersionTest(ViewCase):
         self.assertEqual(doc["member_info"][0], {"name": "aa", "box": "mac", "os": None,
                                                  "agent": None, "project": "web",
                                                  "vcharon": "0.1.0"})
-        self.assertEqual(doc["notes"][-1], lines[-1].removeprefix("note: "))
+        self.assertEqual(doc["notes"][-1], lines[-2].removeprefix("note: "))
 
     def test_quiet_unless_two_known_versions_differ(self):
         for tree in ({"aa/MEMBER.md": member("aa", "0.1.0"), "bb/MEMBER.md": member("bb", "0.1.0"),
@@ -433,8 +450,9 @@ class ConsoleTest(ViewCase):
                              env=dict(os.environ, PYTHONIOENCODING="gbk"),
                              capture_output=True, timeout=60, check=False)
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertEqual(ran.stdout.decode("utf-8").splitlines()[1:],
-                         ["%s  aa#1  @all  mañana  (aa/R.md)" % WHEN])
+        shown = ran.stdout.decode("utf-8").splitlines()
+        self.assertEqual(shown[1:-1], ["%s  aa#1  @all  mañana  (aa/R.md)" % WHEN])
+        self.assertRegex(shown[-1], r"\A  note: to see the bodies: .* read mb --full --project p\Z")
 
 
 if __name__ == "__main__":

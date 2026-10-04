@@ -21,12 +21,14 @@ vcharon read myapp --json          # one JSON object: the channel, the members, 
 ```
 
 It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
-`re:` if any, the title, and the file:
+`re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says
+so, with the command to run:
 
 ```
 myapp: 2 entries from 2 members (<the channel's folder>)
 2026-10-02 10:12:05  mac-myapp#3  @linux-api  question about step 3  (mac-myapp/RESULTS.md)
 2026-10-02 10:14:40  linux-api#7  @mac-myapp  re mac-myapp#3  step 3 done  (linux-api/RESULTS.md)
+  note: to see the bodies: vcharon read myapp --full --project myapp
 ```
 
 `--full` adds each entry's other header lines and its body below its line, indented.
@@ -39,9 +41,9 @@ Use it to catch up (a watcher started late, a new session) and, as the leader, t
 channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
 and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before
 its question (the members' clocks differ), or a member's folder left out for being over the
-channel's limits. The last one, `note: members' vcharon versions differ …`, names each
-member's version (from its `MEMBER.md`, set at its join and each watcher start): members on
-different versions read different guides, so tell your user.
+channel's limits. The last of those, before the bodies line, `note: members' vcharon versions
+differ …`, names each member's version (from its `MEMBER.md`, set at its join and each watcher
+start): members on different versions read different guides, so tell your user.
 
 ## Times
 
