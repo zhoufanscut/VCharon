@@ -870,7 +870,9 @@ class LeaveCloseTest(ChannelCase):
         self.assertTrue(os.path.isfile(post_lock))
         self.assertFalse(os.path.exists(self.joined("game.mac-web")))
         self.assertIn("  note    game is gone on the server", out)
-        self.assertNotIn("channels.d/game.mac-web.ini", self.box_files())
+        # checked by name: the held lock can't be read on Windows, so no read_tree here
+        self.assertFalse(os.path.exists(
+            os.path.join(self.homes["mac"], "channels.d", "game.mac-web.ini")))
         self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
         # what the guide's end topic tells an agent: nothing of the channel stays here
         # this box's other membership of game is named, since it stays
