@@ -458,7 +458,7 @@ Every error the user sees has one of these codes; the last column is the exit co
 | `kind_change` | a put would replace a folder with a file, or the reverse | 1 |
 | `too_many_deletes` | the deletes would remove more than `max_deletes` | 1 |
 | `empty_source` | `prune` refused: the source is empty, but earlier runs sent files | 1 |
-| `channel` | a refused channel check: a name taken, a channel missing or already there, no or several leaders, not the leader, a lock held, a record for another server, a format or limit | 1 |
+| `channel` | a refused channel check: a name taken, a channel missing or already there, no or several leaders, not the leader, a lock held, a record for another server or of an earlier channel of the name, a format or limit | 1 |
 | `refused` | a file VCharon won't overwrite (`skill install`) | 1 |
 | `vanished` | a planned file was gone, or no longer a regular file, when read | 1 |
 | `in_use` | Windows: another program has the file open | 1 |

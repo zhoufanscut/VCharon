@@ -73,7 +73,7 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   character and a lone surrogate print as `\xNN`, `\uNNNN` or `\UNNNNNNNN`, in the entry lines,
   `--full`'s header and body lines, and the notes. Before, a member could put escape sequences
   in a title or body that cleared the reader's screen or printed a forged `EXIT closed` line.
-  `--json` is unchanged. The watcher and `list` are not covered by this line.
+  `--json` is unchanged. The watcher's escaping is its own line, above; `list` is not covered.
 - `post` refuses a `--title` holding a control or format character other than tab, exit 3,
   `ERROR config: --title: it holds a control or format character (…)`; a line break keeps its
   own text, `--title: it holds a line break (…)`, and an empty title is now `--title is empty`.
