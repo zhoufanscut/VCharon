@@ -1310,12 +1310,12 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     @all from <folders>, not the leader: ignored`;
   - `WARN entry <id> was edited` (a heading seen before with another text in the same file,
     once), `WARN entry <id> in <folder>/: not its folder's`;
-  - `note: duplicate entry <id> in <path>: the one in <file> stands`: of an ID in two files of
-    its folder, the copy first in path order stands, the one `read` orders; the other is
-    skipped, with this note once per file and run; it wakes nobody. Why not "edited": comparing
-    the two files' headings would warn again on every change to either file. A copy in a file
-    that sorts before the one seen first, or a copy left when that file is gone, takes over, and
-    its heading is compared with the one told: a retitled copy warns that it was edited, since
+  - `note: duplicate entry <id> in <path>: the one in <file> stands`: of an ID in two files of its
+    folder, the copy first in path order stands, the one `read` orders; the other is skipped, with
+    this note once per file and run; it wakes nobody. Why not "edited": comparing the two files'
+    headings would warn again on every change to either file. A copy in a file that sorts before the
+    one seen first, or the copy left when that file is gone or no longer holds the ID, takes over,
+    and its heading is compared with the one told: a retitled copy warns that it was edited, since
     it is what `read` now shows;
   - `new | changed | gone <path>` for files that aren't `.md` files in a member's folder: a
     patch or log is announced by an entry, and only entries wake;
@@ -1342,23 +1342,20 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays gone. Why
   its own code: `EXIT change` means "restart, then read", a closed channel means "don't restart;
   leave".
-- **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by
-  the channel folder's normalized real path: the files seen, the entry numbers seen per member
-  (every number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's
-  file and heading hash for the edit check (`[<path>, <hash>]`; an older snapshot's bare hash
-  is still read, its file taken from the next one seen), hashes of entries without an ID of
-  their folder, the warnings
-  shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's lines
-  are printed, so a crash may print a change twice but never loses one; written only when it
-  changed, so a quiet watch doesn't touch the disk, and a restart's first round that changes
-  nothing doesn't either. A restart goes on from it (`watching <dir>, <n> files in other
-  folders, since <time>`, the time of the last round that changed it) and prints what came
-  meanwhile; a saved error that
-  holds is printed again without counting, so a blocked member isn't woken in a loop. The first
-  start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote
-  member, this machine's copy as of its last sync), none of it printed; what the first round
-  brings prints and counts as in any round. A failed save with
-  `--until-change` ends the watch with `EXIT error`.
+- **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by the
+  channel folder's normalized real path: the files seen, the entry numbers seen per member (every
+  number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's file and
+  heading hash for the edit check (`[<path>, <hash>]`; an older snapshot's bare hash is still read,
+  its file taken from the next one seen), hashes of entries without an ID of their folder, the
+  warnings shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's
+  lines are printed, so a crash may print a change twice but never loses one; written only when it
+  changed, so a quiet watch doesn't touch the disk, and a restart's first round that changes nothing
+  doesn't either. A restart goes on from it (`watching <dir>, <n> files in other folders, since
+  <time>`, the time of the last round that changed it) and prints what came meanwhile; a saved error
+  that holds is printed again without counting, so a blocked member isn't woken in a loop. The first
+  start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote member,
+  this machine's copy as of its last sync), none of it printed; what the first round brings prints
+  and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT error`.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>), or a create, join, leave or close of this member`:
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it

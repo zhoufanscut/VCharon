@@ -1874,7 +1874,6 @@ class StreamTest(WatchCase):
                 ["err", "Fatal Python error: x"], ["exit", 134]]
         children = ([[["err", "ERROR config: no such file"], ["exit", 3]], loud] + [broken] * 4
                     + [[["out", "ROUND 0"], ["exit", 1]], [["out", "ROUND 0"], ["exit", 0]]])
-        # (the last child's exit 0 is one round more where an untold crash leaves one short)
         code, lines = self.watch(*children, rounds=10)
         self.assertEqual(code, 0)
         # the exit before any round is a step of its own, with stderr's line; a silent exit
@@ -2407,6 +2406,32 @@ class EntriesTest(WatchCase):
         self.assertEqual((code, lines[1:]), (0, ["WARN entry windows#2 was edited",
                                                  "EXIT change"]))
         self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/STEPS.md")
+
+    def test_a_copy_takes_over_when_the_heads_file_drops_the_id(self):
+        # the entry moved, retitled, into a file that sorts later while the first file stays:
+        # the copy left is checked for edits, and no note names the file that no longer holds it
+        self.post("windows", 2, "two", to="@mac", file="A.md")
+        self.run_mac(rounds=0)
+
+        def moved():
+            with open(os.path.join(self.tree, "windows", "A.md"), "wb") as f:
+                f.write(b"# RESULTS\n")
+            self.post("windows", 2, "two, moved", to="@mac", file="STEPS.md")
+
+        code, lines = self.run_mac(moved, rounds=2)
+        self.assertEqual((code, lines[1:]), (0, ["WARN entry windows#2 was edited"]))
+        self.assertEqual(self.snapshot()["heads"]["windows#2"][0], "windows/STEPS.md")
+
+        # its later retitles warn too
+        def retitle():
+            path = os.path.join(self.tree, "windows", "STEPS.md")
+            with open(path, "rb") as f:
+                text = f.read()
+            with open(path, "wb") as f:
+                f.write(text.replace(b"two, moved", b"two, moved again"))
+
+        code, lines = self.run_mac(retitle, rounds=2)
+        self.assertEqual((code, lines[1:]), (0, ["WARN entry windows#2 was edited"]))
 
     def test_a_title_is_escaped(self):
         # written by hand: post refuses such a title, a member's own files don't

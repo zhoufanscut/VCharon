@@ -449,7 +449,7 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
     member's is ignored, since any member can write anything into its own folder. present:
     every file in the tree now (None: all those the marks name); an ID's head in a file gone
-    from it gives way to the next copy seen."""
+    from it, or in a file that no longer holds the ID, gives way to the next copy seen."""
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -461,6 +461,12 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
         except OSError:
             told.unread.append(path)
             continue
+        # an entry moved out of its head's file into one that sorts later: the head lets go,
+        # so the copy left takes over and its heading is compared with the one told
+        held = {e.id for e in found if e.name == folder}
+        for i, h in marks.heads.items():
+            if h[0] == path and i not in held:
+                h[0] = None
         for e in found:
             head = _hex(e.heading)
             if e.name != folder:
@@ -476,6 +482,8 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
                                           % (e.id, folder))
                 continue
             known = marks.heads.get(e.id)
+            if known is not None and known[0] is None:
+                marks.dups.discard((e.id, path))
             if known is not None and known[0] is not None and known[0] != path:
                 # one ID in two files: the first in path order stands, the copy read orders;
                 # the other's heading is never compared with it, else every change to either
