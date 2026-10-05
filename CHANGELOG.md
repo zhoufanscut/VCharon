@@ -7,7 +7,19 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.2.2 — 2026-10-05
+
+Fixes from a simulated working day on one Linux machine: a leader in Claude Code and three local
+members (Claude Code, Codex CLI 0.160.0, OpenCode 1.18.31) ran two rounds of read-only steps and
+a feedback round. The watcher prints the `leave` command when the leader's `CLOSED` arrives,
+`read` says how to see the bodies, join and create say where the project part of a name came
+from, a sandbox-blocked write says so, and the guide gains a one-page `member` topic and
+prefers streaming where the CLI can. The channel format is unchanged (`format: 1`): members on
+0.1.0 through 0.2.2 can share a channel.
+
+**Updating from 0.2.1:** `vcharon --update` also rewrites the skill copies `vcharon skill
+install` wrote (the skill's text changed). After any other way of updating, run `vcharon skill
+install`; join, create and the watcher print a note while a copy is stale.
 
 - The guide has a new topic, `vcharon guide member`: a member's whole path on one page (join,
   the watcher for each CLI and the one-minute check, what to do while watching and on each exit,
@@ -104,6 +116,19 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   reported the same of its own tools.
 - The `lead` guide says to ask a question in an entry of its own, not inside a step: in a
   channel run, a member answered a question attached to its step only once it came alone.
+
+### What was checked
+
+- Unit tests (1,353), with the server side run through a stand-in for ssh: the suite runs in
+  CI on Linux, macOS and Windows with Python 3.13 and 3.14, and this release is tagged on a
+  green run. **Measured** by CI.
+- A channel over real ssh in CI (`tests/ssh_flow.sh` and the real-ssh unit tests on the Ubuntu
+  runner as its own server): **measured** by CI.
+- The facts behind the guide changes come from real local channels on 0.2.1, on Linux, as
+  their lines say (Monitor's timing, Codex's long poll probe, each agent's report on its own
+  tools); each other change's own check is in its line, marked measured or inferred. Windows
+  and macOS were run only through the unit tests in CI.
+- A real channel with this version's binaries: **not yet run.**
 
 ## 0.2.1 — 2026-10-05
 
