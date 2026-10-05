@@ -1522,7 +1522,7 @@ class ExitWithParentTest(unittest.TestCase):
     def test_a_blocked_write_cant_hold_the_exit(self):
         fake = FakeWaitWinapi()
         release = threading.Event()
-        parent = mock.Mock(handle=77)
+        parent = mock.Mock(handle=77, followed=False)
         with mock.patch.object(install, "_winapi", fake), \
                 mock.patch.object(install, "ORPHAN_WRITE_WAIT", 0.2):
             thread = install.follow(parent, release.wait)
@@ -1538,12 +1538,13 @@ class ExitWithParentTest(unittest.TestCase):
     def test_no_exit_when_the_wait_fails(self):
         for result in (OSError(6, "The handle is invalid"), 0x102):
             fake = FakeWaitWinapi(result)
-            parent = mock.Mock(handle=77)
+            parent = mock.Mock(handle=77, followed=False)
             with self.subTest(result=result), mock.patch.object(install, "_winapi", fake):
                 thread = install.follow(parent, never_called)
                 fake.gone.set()
                 thread.join(10)
                 self.assertFalse(thread.is_alive())
+                self.assertIs(parent.followed, False)
         self.assertEqual(self.exits, [])
 
     def test_nothing_without_a_handle(self):
@@ -1624,13 +1625,14 @@ class ExitWithParentTest(unittest.TestCase):
 
     def test_a_failed_wait_gives_the_check_back(self):
         fake = FakeWaitWinapi(OSError(6, "The handle is invalid"))
-        parent = mock.Mock(handle=77)
+        # a plain False, not a Mock's attribute: any Mock attribute is truthy
+        parent = mock.Mock(handle=77, followed=False)
         with mock.patch.object(install, "_winapi", fake):
             thread = install.follow(parent, never_called)
-            self.assertTrue(parent.followed)
+            self.assertIs(parent.followed, True)
             fake.gone.set()
             thread.join(10)
-        self.assertFalse(parent.followed)
+        self.assertIs(parent.followed, False)
 
     @unittest.skipUnless(os.name == "nt", "the real _winapi")
     def test_windows_ends_with_a_real_parent(self):

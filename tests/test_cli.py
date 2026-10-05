@@ -1364,12 +1364,14 @@ class RepeatTest(FakeSshCase):
 
     def test_an_orphan_at_the_top_of_a_round(self):
         # a binary whose bootloader parent was killed: exits on its own, locks freed. The
-        # parent is faked (OrphanTest has the real checks): on Windows a real one would wait on
-        # a real handle
+        # parent is faked (OrphanTest has the real checks); the Watchdog builds it here
+        # (run_jobs doesn't go through main). handle None: had exit_with_parent built it, no
+        # thread would follow it
         gone = []
 
         class Parent:
             pid = 4242
+            handle = None
             followed = False
 
             def gone(self):

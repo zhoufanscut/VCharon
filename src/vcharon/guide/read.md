@@ -75,4 +75,6 @@ folder (local time), and when its watcher last pulled the channel:
 The watcher's `<n> other entries (<folders>)` names folders only: this says who they are. As a
 remote member it is this machine's copy, as of its last sync, and so are the ages. `--json`
 gives each member `watched` (the time, or null) and `watch_every` (seconds, or null); so does
-`vcharon read myapp --json`, in `member_info`.
+`vcharon read myapp --json`, in `member_info`. Both are null for `-` and `?` alike: only
+`member_info` has the member's `vcharon` version, which tells them apart: `?` is a member on
+0.2.3 or older (or with no version), when your own vcharon is newer.

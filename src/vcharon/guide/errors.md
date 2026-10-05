@@ -42,7 +42,7 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
 
-The watcher has its own (0, 10 to 15): `vcharon guide watch`.
+The watcher has its own (0, 10 to 16): `vcharon guide watch`.
 
 ## A refused write (any command)
 

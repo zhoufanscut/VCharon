@@ -27,8 +27,9 @@ Right away, run the command on join's `next:` line, the way your CLI can:
   with `--max-minutes 29` (under `claude -p`: 10 and 9), or a background command.
 - Codex: a background `exec_command`, polled with `write_stdin`.
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
-  least a minute under it; between steps of your work, a check with `--once` in place of
-  `--until-change` (`vcharon guide watch`, "Checking between steps").
+  least a minute under it; between steps of your work, a check: the command on join's `next:`
+  line with `--once` in place of `--until-change`, keeping its `--project` and `--role`
+  (`vcharon guide watch`, "Checking between steps").
 - Another CLI: pick the way in `vcharon guide watch`, and do the check below.
 
 Codex and OpenCode: the first time, start it with `--max-minutes 1`. Only `EXIT quiet 1 min`

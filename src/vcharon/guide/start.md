@@ -90,10 +90,11 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `watch` takes the server from your join record.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
-  folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then
-  `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all --title '…'
-  --project web, with the body on stdin`. That second line is a template, not a command: start
-  the watcher, then write the plan's title and body yourself (`vcharon guide post`).
+  folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
+  agent other than Claude Code: then the first-time note), then `then post the plan (vcharon
+  guide post): vcharon post myapp --steps --to @all --title '…' --project web, with the body on
+  stdin`. The plan line is a template, not a command: start the watcher, then write the plan's
+  title and body yourself (`vcharon guide post`).
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first

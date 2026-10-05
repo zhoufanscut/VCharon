@@ -587,6 +587,8 @@ class SeenCacheTest(unittest.TestCase):
         self.assertTrue(self.save({"a": [0, "stream 2"]}, 1030))
         self.assertEqual(charter.load_seen("mb.mac"), {"a": (1030, 2)})
         os.utime(self.path, (1030, 1030))
+        # past the 30 s, a time a second off (the age's rounding) is still not a move
+        self.assertFalse(self.save({"a": [30, "stream 2"]}, 1061))
         # a new member, or a new pace: at once
         self.assertTrue(self.save({"a": [0, "stream 2"], "b": [5, "run 30"]}, 1031))
         os.utime(self.path, (1031, 1031))

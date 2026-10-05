@@ -1206,10 +1206,13 @@ def _once(w, step, updated=None, orphaned=None):
     return EXIT_NOTHING
 
 
-def _not_restored(w):
+def _not_restored(w, channel, flags):
     """A --once check whose start found no saved snapshot it could use (its note line says
-    why), though _need_snapshot found one before the lock (it changed in between): the start
-    took a baseline, so the round can't tell what came before it."""
+    why), though _need_snapshot found one under the lock (a read that failed only the second
+    time): the start took a baseline, so the round can't tell what came before it, and the next
+    check would find that baseline. So ONCE_BAD_FIX's line, as _need_snapshot's refusal
+    gives it."""
+    w.say(FIX + platform.runnable(ONCE_BAD_FIX % (channel, flags, channel, flags)))
     w.say("EXIT error")
     return EXIT_ERROR
 
@@ -1236,7 +1239,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
     WARN line. updated, orphaned: _loop's. once: a --once check (_once), refused (VCharonError)
-    with no saved snapshot. Returns the exit code. Refused (VCharonError) unless
+    with no usable saved snapshot. Returns the exit code. Refused (VCharonError) unless
     root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
     closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
@@ -1253,9 +1256,10 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         pass
     leader = server_leader(root, me)
     state = snapshot_path(root, me)
+    # only a check prints them (its refusal and fix lines)
+    flags = channel_cmd.name_flags(os.path.basename(root), me) if once else None
     if once:
-        _need_snapshot(state, root, me, os.path.basename(root),
-                       channel_cmd.name_flags(os.path.basename(root), me))
+        _need_snapshot(state, root, me, os.path.basename(root), flags)
     w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone,
                folder_limits=folder_limits,
                closing=closed_next(os.path.basename(root), me, leader))
@@ -1263,6 +1267,10 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     if lk is None:
         return EXIT_LOCKED
     try:
+        if once:
+            # again under the lock, where no writer can change it: one spoilt since the check
+            # above is refused before the start saves a baseline over it
+            _need_snapshot(state, root, me, os.path.basename(root), flags)
         at_once = w.start(fresh)
 
         def step():
@@ -1276,7 +1284,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
 
         if once:
             if not at_once:
-                return _not_restored(w)
+                return _not_restored(w, os.path.basename(root), flags)
             return _once(w, step, updated, orphaned)
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
                      max_errors, rounds, updated=updated, orphaned=orphaned)
@@ -1285,9 +1293,9 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
 
 
 def _need_snapshot(state, root, me, channel, flags):
-    """A --once check's refusal, before the lock and before a start could save a baseline over
-    it, when the snapshot state was never saved, or is there but can't be used for root and me
-    (load_snapshot's note)."""
+    """A --once check's refusal, before the lock (so a watcher holding it doesn't hide it) and
+    again under it, before a start could save a baseline over it, when the snapshot state was
+    never saved, or is there but can't be used for root and me (load_snapshot's note)."""
     files, _saved, note = load_snapshot(state, root, me)[:3]
     if files is not None:
         return
@@ -1795,7 +1803,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
     way. orphaned: _loop's. once: a --once check (_once): one sync, never streamed, capped at
-    ONCE_TIMEOUT; refused (VCharonError) with no saved snapshot. run: run_sync with the
+    ONCE_TIMEOUT; refused (VCharonError) with no usable saved snapshot. run: run_sync with the
     watcher's pace, unless a test gives one."""
     stream = stream and not once
     if run is None:
@@ -1804,8 +1812,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
                             timeout=ONCE_TIMEOUT if once else None)
     local, me, leader, channel = mailbox_of(job)
     state = snapshot_path(local, me, job)
+    flags = " ".join(sync_args[1:])
     if once:
-        _need_snapshot(state, local, me, sync_args[0], " ".join(sync_args[1:]))
+        _need_snapshot(state, local, me, sync_args[0], flags)
     closing = closed_next(channel, me, leader)
     # the members the pull left out for their size, as the sync saved them after its down:
     # a WARN each while it lasts, in both modes (a streaming sync prints no notes)
@@ -1818,10 +1827,14 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         return EXIT_LOCKED
     child = None
     try:
+        if once:
+            # again under the lock, where no writer can change it: one spoilt since the check
+            # above is refused before the start saves a baseline over it
+            _need_snapshot(state, local, me, sync_args[0], flags)
         # before the first run, so what it brings shows as new
         restored = w.start(fresh)
         if once and not restored:
-            return _not_restored(w)
+            return _not_restored(w, sync_args[0], flags)
         error_seconds = None
         # one value for the loop's limits and the child's deadline: the loop can't go round
         # again at the deadline

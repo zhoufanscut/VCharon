@@ -317,7 +317,9 @@ class LocalStampTest(WatchCase):
         self.assertFalse(os.path.lexists(self.stamp))
 
     def test_a_folder_outside_the_root_isnt_stamped(self):
+        # even with a channel of the same name and member there: the stamp would be that one's
         os.environ["VCHARON_CHANNELS_ROOT"] = os.path.join(self.tmp, "elsewhere")
+        write_tree(os.path.join(self.tmp, "elsewhere"), {"mb/debian/": None})
         watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
                         sleep=Rounds(lambda: None), rounds=1)
         self.assertFalse(os.path.lexists(os.path.join(self.tmp, "seen")))
@@ -3149,16 +3151,44 @@ class OnceTest(WatchCase):
             with open(self.state(), encoding="utf-8") as f:
                 self.assertEqual(f.read(), text)
 
-    def test_a_snapshot_spoilt_after_the_check(self):
-        # between the check and the lock: the start's baseline can't tell what came before
+    def test_a_snapshot_spoilt_before_the_lock(self):
+        # between the first check and the lock: checked again under it, so it is refused
+        # before the start saves a baseline over it
         self.baseline()
+        self.local_record(project="web")
+        taken = watch._locked
+
+        def spoil(w, state):
+            with open(state, "w", encoding="utf-8") as f:
+                f.write("{")
+            return taken(w, state)
+
+        with mock.patch.object(watch, "_locked", spoil), \
+                self.assertRaises(VCharonError) as cm:
+            self.once()
+        self.assertEqual(cm.exception.message, "--once can't use your watcher's saved snapshot "
+                         "%s: it isn't JSON" % self.state())
+        self.assertTrue(cm.exception.hint.startswith("run vcharon read mb --to-me"))
+        with open(self.state(), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{")
+        # and the lock was let go
+        watch.take_lock(self.state()).release()
+
+    def test_a_snapshot_spoilt_after_the_check(self):
+        # the start can't use it though both checks could: its baseline can't tell what came
+        # before, so the read fix comes before EXIT error
+        self.baseline()
+        self.local_record(project="web")
         with open(self.state(), "w", encoding="utf-8") as f:
             f.write("{")
         with mock.patch.object(watch, "_need_snapshot", lambda *a: None):
             code, lines = self.once()
         self.assertEqual(code, watch.EXIT_ERROR)
         self.assertTrue(lines[0].startswith("note: ignoring the saved snapshot "), lines)
-        self.assertEqual(lines[-1], "EXIT error")
+        self.assertEqual(lines[-2:], ["  fix: " + platform.runnable(
+            "run vcharon read mb --to-me --project web (what came to you may not all have been "
+            "printed), then vcharon watch mb --until-change --max-minutes 1 --project web (the "
+            "one-minute check)"), "EXIT error"])
 
     def test_another_watcher(self):
         self.baseline()
@@ -3253,6 +3283,41 @@ class OnceRemoteTest(WatchCase):
             "run vcharon read mb --to-me --project p (what came to you may not all have been "
             "printed), then vcharon watch mb --until-change --max-minutes 1 --project p (the "
             "one-minute check)"))
+
+    def test_a_snapshot_spoilt_before_the_lock(self):
+        # checked again under the lock: refused before the start saves a baseline over it
+        self.baseline()
+        state = self.state("windows", "mb.windows")
+        taken = watch._locked
+
+        def spoil(w, state):
+            with open(state, "w", encoding="utf-8") as f:
+                f.write("{")
+            return taken(w, state)
+
+        with mock.patch.object(watch, "_locked", spoil), \
+                self.assertRaises(VCharonError) as cm:
+            self.job([])
+        self.assertEqual(cm.exception.message, "--once can't use your watcher's saved snapshot "
+                         "%s: it isn't JSON" % state)
+        with open(state, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{")
+        watch.take_lock(state).release()
+
+    def test_a_snapshot_spoilt_after_the_check(self):
+        # the start can't use it though both checks could: no sync runs, and the read fix
+        # comes before EXIT error
+        self.baseline()
+        with open(self.state("windows", "mb.windows"), "w", encoding="utf-8") as f:
+            f.write("{")
+        with mock.patch.object(watch, "_need_snapshot", lambda *a: None):
+            code, lines = self.job([])
+        self.assertEqual(code, watch.EXIT_ERROR)
+        self.assertTrue(lines[0].startswith("note: ignoring the saved snapshot "), lines)
+        self.assertEqual(lines[-2:], ["  fix: " + platform.runnable(
+            "run vcharon read mb --to-me --project p (what came to you may not all have been "
+            "printed), then vcharon watch mb --until-change --max-minutes 1 --project p (the "
+            "one-minute check)"), "EXIT error"])
 
     def test_a_closed_channel(self):
         # the sync's fix is the closed channel's: EXIT closed (don't start it again), not
@@ -3647,13 +3712,15 @@ class UpdatedTest(WatchCase):
 
     def test_an_orphan_through_the_command_line(self):
         # a frozen binary whose bootloader parent went after the start; the log says why. The
-        # parent is faked (OrphanTest has its POSIX and Windows checks): on Windows a real one
-        # would wait on a real handle and never see this test's parent go
+        # parent is faked (OrphanTest has its POSIX and Windows checks), on Windows too, where
+        # exit_with_parent builds it: with no handle it starts no thread, so the round's check
+        # is what sees this test's parent go
         gone = []
         rounds = []
 
         class Parent:
             pid = 4242
+            handle = None
             followed = False
 
             def gone(self):

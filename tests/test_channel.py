@@ -3410,6 +3410,21 @@ class SeenTest(ChannelCase):
         self.ok("leave", "game")
         self.assertFalse(os.path.exists(charter.seen_path("game.mac-web")))
 
+    def test_a_servers_failed_stamp_is_logged(self):
+        # only logged: the down log is the one place it shows
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        os.makedirs(os.path.dirname(self.seen()), exist_ok=True)
+        with open(self.seen(), "wb") as f:
+            f.write(b"a file")
+        with mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
+            code, out, err = self.run_cli("sync", "game")
+        self.assertEqual((code, err), (0, ""), out)
+        with open(os.path.join(os.environ["VCHARON_HOME"], "logs", "game.mac-web.down.log"),
+                  encoding="utf-8") as f:
+            self.assertRegex(f.read(), r"  warn  the server couldn't give the members' "
+                                       r"last-watched times: stamping mac-web: ")
+
 
 class SeenRoundsTest(ChannelCase):
     """The stamps across a watcher's sync --repeat rounds, in a real child over the fake ssh,
@@ -3610,13 +3625,26 @@ class OnceProcessTest(ChannelCase):
         except FileNotFoundError:
             return
         for pid in pids:
+            # only a pid still running the fake ssh: one that ended may be reused by now
+            if FAKE_SSH.encode() not in self.command_line(pid):
+                continue
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+
+    @staticmethod
+    def command_line(pid):
+        """pid's command line, b"" once it has ended: /proc where there is one (Linux), else
+        ps (macOS has no /proc)."""
+        if os.path.isdir("/proc/self"):
             try:
                 with open("/proc/%d/cmdline" % pid, "rb") as f:
-                    if FAKE_SSH.encode() not in f.read():
-                        continue
-                os.kill(pid, 9)
-            except (FileNotFoundError, ProcessLookupError):
-                pass
+                    return f.read()
+            except FileNotFoundError:
+                return b""
+        return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True,
+                              check=False).stdout
 
     def env(self, **extra):
         env = dict(os.environ, PYTHONPATH=VCHARON_DIR, **extra)

@@ -1433,9 +1433,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     `leave` and `close` with the membership's other files.
   - How late is dead: a live watcher's stamp is at most 30 s plus one of its rounds old at the
     channel's machine (and the sync's own time), and a remote reader's copy lags by up to another
-    30 s plus its own round while its own watcher runs; else since its last pull. The guide's
-    rule: late past 2 × `--every` + 120 s. `--until-change` restarts and foreground runs make
-    gaps normal.
+    30 s plus its own round while its own watcher runs; else by up to 30 s more than the time
+    since its last pull. The guide's rule: late past 2 × `--every` + 120 s. `--until-change`
+    restarts and foreground runs make gaps normal.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
   own folder (in any case, on macOS and Windows), never stage files. It prints, each line
   starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
@@ -1502,8 +1502,11 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     be read, another root or member: the start's `note:` reasons), as `ERROR config: --once
     can't use your watcher's saved snapshot <path>: <why>`; its fix is `vcharon read C --to-me`
     (what came since the last look may not all have been printed), then the one-minute check.
-    Why: the same baseline would mark it all seen. One spoilt between that check and the lock
-    is found after the start's baseline: its `note:` line, then `EXIT error`.
+    Why: the same baseline would mark it all seen. The snapshot is checked before the lock (a
+    watcher holding it doesn't hide the refusal) and again under it, where no writer can change
+    it, so one spoilt in between is refused the same way. One the start still can't use (a read
+    that fails only the second time) gives its `note:` line, the same `fix:` line, then
+    `EXIT error`: its baseline is saved by then.
   - Never "nothing new" when the round can't tell: a sync that found the job busy (`ERROR busy:
     a sync of C is running (a post's, or one a stopped watcher left): nothing was synced`, its
     fix to run the check again after the next step) and an error that still holds (a network
@@ -1604,8 +1607,9 @@ says so.
   remote member's copy stays until its `leave`, so it can still read the channel then.
 - **`whoami C` lists the members** after who you are: each member folder of the tree read
   (a remote member's copy, said so: `members <n> (this box's copy, as of its last sync)`), with
-  `agent`, `box` and `os` from its `MEMBER.md` #1 (`?` for one it lacks), `(leader)` and
-  `(you)`, and the newest file's time in the folder, local, to the second (`-` for none);
+  `agent`, `box` and `os` from its `MEMBER.md` #1 (`?` for one it lacks; its `vcharon:` version
+  is read too, for the last-watched part below), `(leader)` and `(you)`, and the newest file's
+  time in the folder, local, to the second (`-` for none);
   `--json` gives them as `members`, null when the tree can't be listed (text: a `can't read`
   line, still exit 0, since who you are is shown). Why: the watcher's `<n> other entries
   (<folders>)` doesn't say who the folders are, and `list` needs the server. It reads nothing
@@ -1619,8 +1623,10 @@ says so.
   is not yet numbered past 0.2.3 writes 0.2.3 too.
   A remote member's are as of its last sync, as the rest of its list. `--json` gives each
   member `watched` (the time, local, to the second, or null) and `watch_every` (seconds, or
-  null), in `whoami C`'s `members` and `read`'s `member_info`. No verdict and no note in
-  `read`'s text: how late is too late depends on the pace, which the guide's lead topic gives.
+  null), in `whoami C`'s `members` and `read`'s `member_info`; both are null for `-` and `?`
+  alike, and only `member_info` carries the `vcharon` version that tells them apart. No
+  verdict and no note in `read`'s text: how late is too late depends on the pace, which the
+  guide's lead topic gives.
 
 ### Clocks
 
@@ -1903,8 +1909,9 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
 - **Orphans.** A one-file binary runs as two processes: the bootloader, and the Python child
   it starts. A signal the bootloader can't catch (SIGKILL; `TerminateProcess` on Windows) ends
   the bootloader alone; on POSIX the child runs on, holding the watcher's lock, and its unpack
-  folder stays (a Windows binary: the next bullet). Measured on Linux: after a SIGKILL of the bootloader, the child ran on until it was
-  stopped by hand. So in a binary, `watch` and `sync --repeat` note their parent at start
+  folder stays (a Windows binary: the next bullet). Measured on Linux: after a SIGKILL of the
+  bootloader, the child ran on until it was stopped by hand. So in a binary, `watch` and
+  `sync --repeat` note their parent at start
   (POSIX: the parent pid; Windows: a handle on the parent, opened with `SYNCHRONIZE`) and check
   it at the top of each round, after the update check: gone (POSIX: another parent pid, not
   only 1, since a subreaper may take the child), they log one line, print `EXIT orphaned` and

@@ -19,7 +19,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   `local 10`). Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`,
   `--every` or `--fresh`, before any watcher of the member saved a snapshot on this machine,
   and when the saved one can't be used (its fix: `vcharon read C --to-me`, then the one-minute
-  check). To adapt: nothing; the new code and line come only with `--once`. Checked on Linux
+  check). To adapt: nothing; the new code and line come only with `--once`. The skill's text
+  changed (its restart rule leaves `--once` out): `vcharon --update` rewrites the copies
+  `vcharon skill install` wrote; after any other way of updating, run `vcharon skill install`
+  (join, create and the watcher print a note while a copy is stale). Checked on Linux
   (measured): unit tests with fake syncs, and a hand run of a local member (a quiet check took
   0.12 s and exited 16; one after a post printed it and exited 0). Not run: a remote member's
   check over real ssh, macOS and Windows; the 60 s cap is a guess, not measured.

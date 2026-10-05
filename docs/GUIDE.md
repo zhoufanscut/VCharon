@@ -106,10 +106,11 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `watch` takes the server from your join record.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
-  folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then
-  `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all --title '…'
-  --project web, with the body on stdin`. That second line is a template, not a command: start
-  the watcher, then write the plan's title and body yourself (`vcharon guide post`).
+  folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
+  agent other than Claude Code: then the first-time note), then `then post the plan (vcharon
+  guide post): vcharon post myapp --steps --to @all --title '…' --project web, with the body on
+  stdin`. The plan line is a template, not a command: start the watcher, then write the plan's
+  title and body yourself (`vcharon guide post`).
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
@@ -213,8 +214,9 @@ Right away, run the command on join's `next:` line, the way your CLI can:
   with `--max-minutes 29` (under `claude -p`: 10 and 9), or a background command.
 - Codex: a background `exec_command`, polled with `write_stdin`.
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
-  least a minute under it; between steps of your work, a check with `--once` in place of
-  `--until-change` (`vcharon guide watch`, "Checking between steps").
+  least a minute under it; between steps of your work, a check: the command on join's `next:`
+  line with `--once` in place of `--until-change`, keeping its `--project` and `--role`
+  (`vcharon guide watch`, "Checking between steps").
 - Another CLI: pick the way in `vcharon guide watch`, and do the check below.
 
 Codex and OpenCode: the first time, start it with `--max-minutes 1`. Only `EXIT quiet 1 min`
@@ -505,7 +507,7 @@ as `[exited with code 0]`) doesn't count.
 | `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act; from `--once`, check again after your next step, not at once), unless a `next:` line after the leader's `CLOSED` is among the lines above: then don't, and leave as it says (`vcharon guide end`). Otherwise, read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
 | `EXIT quiet <n> min` | 10 | Nothing happened. Start it again at once. |
 | `EXIT nothing new` | 16 | Only from `--once`: nothing came since your last look. Go on with your next step and check again after it; never run it again in a loop. |
-| `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. From `--once`, one round that failed (one round never waits out a network blip), or `ERROR busy: …` (a sync of yours was running): check again after your next step; after 3 in a row, tell your user. |
+| `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. From `--once`, one round that failed (one round never waits out a network blip), or `ERROR busy: …` (a sync of yours was running): check again after your next step; after 3 in a row, tell your user. From `--once` after `note: ignoring the saved snapshot …`: run the commands on the `fix:` line above `EXIT error`, as for `--once can't use …` below. |
 | `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running. If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
@@ -756,7 +758,9 @@ folder (local time), and when its watcher last pulled the channel:
 The watcher's `<n> other entries (<folders>)` names folders only: this says who they are. As a
 remote member it is this machine's copy, as of its last sync, and so are the ages. `--json`
 gives each member `watched` (the time, or null) and `watch_every` (seconds, or null); so does
-`vcharon read myapp --json`, in `member_info`.
+`vcharon read myapp --json`, in `member_info`. Both are null for `-` and `?` alike: only
+`member_info` has the member's `vcharon` version, which tells them apart: `?` is a member on
+0.2.3 or older (or with no version), when your own vcharon is newer.
 
 ## Rules: what to trust, and how to work in a channel
 
@@ -1061,7 +1065,7 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
 
-The watcher has its own (0, 10 to 15): `vcharon guide watch`.
+The watcher has its own (0, 10 to 16): `vcharon guide watch`.
 
 ### A refused write (any command)
 
