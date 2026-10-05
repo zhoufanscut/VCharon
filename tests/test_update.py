@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -1428,6 +1429,259 @@ class OrphanTest(unittest.TestCase):
             "update.py:smoke_argv", "update.py:smoke_argv",
             # the installed binary's skill install, with the same environment
             "update.py:skill_argv", "update.py:skill_argv"]))
+
+
+class FakeWaitWinapi:
+    """_winapi's calls a Windows binary makes on its bootloader: the handle opened at start,
+    and a wait that ends when the test says the bootloader is gone."""
+
+    WAIT_OBJECT_0 = 0
+    WAIT_TIMEOUT = 258
+    INFINITE = 0xFFFFFFFF
+
+    def __init__(self, result=0):
+        self.opened = []
+        self.gone = threading.Event()
+        self.result = result
+
+    def OpenProcess(self, access, inherit, pid):
+        self.opened.append((access, inherit, pid))
+        return 77
+
+    def WaitForSingleObject(self, handle, ms):
+        if ms == 0:
+            return self.WAIT_OBJECT_0 if self.gone.is_set() else self.WAIT_TIMEOUT
+        assert (handle, ms) == (77, self.INFINITE)
+        self.gone.wait()
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+class ExitWithParentTest(unittest.TestCase):
+    """Every command of a Windows binary ends at once when its bootloader is gone: a kill of
+    the bootloader alone would leave it running with its locks."""
+
+    def setUp(self):
+        self.exits = []
+        self.exited = threading.Semaphore(0)
+
+        def fake_exit(code):
+            self.exits.append(code)
+            self.exited.release()
+
+        # os._exit would end the suite; the timer's call comes after the patch is gone, so the
+        # fake is what the timer holds, never a name looked up later
+        patcher = mock.patch.object(install, "_exit", fake_exit)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def wait_exits(self, n):
+        for _ in range(n):
+            self.assertTrue(self.exited.acquire(timeout=10), "no exit after %s" % self.exits)
+
+    def main(self, fake, frozen=True, osn="windows"):
+        """cli.main(["--version"]) as a binary on osn, with fake for _winapi; the run it
+        made. The thread it starts reads _winapi after the wait too: a test that ends that
+        wait keeps fake in place itself."""
+        runs = []
+        real_run = cli._Run
+
+        def make_run():
+            runs.append(real_run())
+            return runs[-1]
+
+        with mock.patch.object(platform, "is_frozen", return_value=frozen), \
+                mock.patch.object(platform, "os_name", return_value=osn), \
+                mock.patch.object(install, "_winapi", fake), \
+                mock.patch.object(install, "sweep_old", lambda *a: None), \
+                mock.patch.object(install.os, "getppid", lambda: 3100), \
+                mock.patch.object(cli, "_Run", make_run), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["--version"]), 0)
+        return runs[0]
+
+    def test_a_windows_binary_logs_and_exits_15_when_its_bootloader_goes(self):
+        fake = FakeWaitWinapi()
+        with mock.patch.object(install, "ORPHAN_WRITE_WAIT", 0.2), \
+                mock.patch.object(install, "_winapi", fake):
+            run = self.main(fake)
+            self.assertEqual(fake.opened, [(install.SYNCHRONIZE, False, 3100)])
+            self.assertEqual(run.parent.pid, 3100)
+            # the command ran and returned; the thread still waits
+            self.assertEqual(self.exits, [])
+            fake.gone.set()
+            # the thread's exit, then the timer's (os._exit would have ended it first)
+            self.wait_exits(2)
+        self.assertEqual(self.exits, [install.EXIT_ORPHANED] * 2)
+        with open(run.log.path, encoding="utf-8") as f:
+            last = f.read().splitlines()[-1]
+        self.assertIn("info  the process that started this one (pid 3100) is gone; exiting "
+                      "with 15", last)
+
+    def test_a_blocked_write_cant_hold_the_exit(self):
+        fake = FakeWaitWinapi()
+        release = threading.Event()
+        parent = mock.Mock(handle=77)
+        with mock.patch.object(install, "_winapi", fake), \
+                mock.patch.object(install, "ORPHAN_WRITE_WAIT", 0.2):
+            thread = install.follow(parent, release.wait)
+            # after the release, the thread exits again: through the fake, so before the
+            # patch is undone
+            self.addCleanup(thread.join, 10)
+            self.addCleanup(release.set)
+            fake.gone.set()
+            # on_gone never returns: the timer exits
+            self.wait_exits(1)
+        self.assertEqual(self.exits, [install.EXIT_ORPHANED])
+
+    def test_no_exit_when_the_wait_fails(self):
+        for result in (OSError(6, "The handle is invalid"), 0x102):
+            fake = FakeWaitWinapi(result)
+            parent = mock.Mock(handle=77)
+            with self.subTest(result=result), mock.patch.object(install, "_winapi", fake):
+                thread = install.follow(parent, never_called)
+                fake.gone.set()
+                thread.join(10)
+                self.assertFalse(thread.is_alive())
+        self.assertEqual(self.exits, [])
+
+    def test_nothing_without_a_handle(self):
+        class Refusing(FakeWaitWinapi):
+            def OpenProcess(self, access, inherit, pid):
+                raise PermissionError(5, "Access is denied")
+
+        with mock.patch.object(install, "follow", never_called):
+            run = self.main(Refusing())
+        self.assertIsNone(run.parent.handle)
+
+    def test_not_elsewhere(self):
+        for frozen, osn in ((True, "linux"), (True, "darwin"), (False, "windows")):
+            with self.subTest(frozen=frozen, os=osn), \
+                    mock.patch.object(install, "exit_with_parent", never_called):
+                run = self.main(FakeWaitWinapi(), frozen, osn)
+                self.assertIsNone(run.parent)
+
+    def test_the_watchdog_reuses_the_parent(self):
+        fake = FakeWaitWinapi()
+        with mock.patch.object(platform, "is_frozen", return_value=True), \
+                mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.object(install, "_winapi", fake), \
+                mock.patch.object(install.os, "getppid", lambda: 3100):
+            run = cli._Run()
+            run.parent = install.Parent()
+            dog = run.watch_code(lambda line: None)
+            self.assertIs(dog.parent, run.parent)
+            self.assertEqual(len(fake.opened), 1)
+            self.assertFalse(dog.orphaned())
+            fake.gone.set()
+            self.assertTrue(dog.orphaned())
+
+    def test_watch_and_repeat_print_exit_orphaned(self):
+        said = []
+        run = cli._Run()
+        parent = mock.Mock(pid=3100)
+        run.parent_gone(parent)
+        # any other command: the log line only
+        self.assertEqual(said, [])
+        with mock.patch.object(platform, "is_frozen", return_value=False):
+            run.watch_code(said.append)
+        run.parent_gone(parent)
+        self.assertEqual(said, ["EXIT orphaned"])
+
+    def test_a_bootloader_gone_before_main_stores_it(self):
+        fake = FakeWaitWinapi()
+        fake.gone.set()
+        real_follow = install.follow
+
+        def follow_to_the_end(parent, on_gone):
+            # the thread runs to its exit before main has the Parent
+            thread = real_follow(parent, on_gone)
+            thread.join(10)
+            return thread
+
+        with mock.patch.object(install, "ORPHAN_WRITE_WAIT", 0.2), \
+                mock.patch.object(install, "follow", follow_to_the_end):
+            run = self.main(fake)
+            self.wait_exits(2)
+        self.assertEqual(self.exits, [install.EXIT_ORPHANED] * 2)
+        with open(run.log.path, encoding="utf-8") as f:
+            last = f.read().splitlines()[-1]
+        self.assertIn("(pid 3100) is gone; exiting with 15", last)
+
+    def test_a_followed_parent_is_the_threads_to_report(self):
+        fake = FakeWaitWinapi()
+        with mock.patch.object(platform, "os_name", return_value="windows"), \
+                mock.patch.object(install, "_winapi", fake), \
+                mock.patch.object(install.os, "getppid", lambda: 3100):
+            parent = install.Parent()
+            dog = install.Watchdog(__file__, parent=parent)
+            fake.gone.set()
+            self.assertTrue(dog.orphaned())
+            # with the thread waiting, the round's check leaves the exit to it
+            parent.followed = True
+            self.assertFalse(dog.orphaned())
+
+    def test_a_failed_wait_gives_the_check_back(self):
+        fake = FakeWaitWinapi(OSError(6, "The handle is invalid"))
+        parent = mock.Mock(handle=77)
+        with mock.patch.object(install, "_winapi", fake):
+            thread = install.follow(parent, never_called)
+            self.assertTrue(parent.followed)
+            fake.gone.set()
+            thread.join(10)
+        self.assertFalse(parent.followed)
+
+    @unittest.skipUnless(os.name == "nt", "the real _winapi")
+    def test_windows_ends_with_a_real_parent(self):
+        import _winapi
+
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        pid_file = os.path.join(tmp, "pid")
+        marker = os.path.join(tmp, "gone")
+        # the child does what main does in a binary, then waits; its parent stands in for the
+        # bootloader, waiting on it
+        child = ("import os, sys, time\n"
+                 "from vcharon import install\n"
+                 "install.follow(install.Parent(), lambda: open(%r, 'w').close())\n"
+                 "with open(%r + '.part', 'w') as f:\n"
+                 "    f.write(str(os.getpid()))\n"
+                 "os.replace(%r + '.part', %r)\n"
+                 "time.sleep(120)\n" % (marker, pid_file, pid_file, pid_file))
+        stand_in = ("import subprocess, sys\n"
+                    "subprocess.run([sys.executable, '-c', %r])\n" % child)
+        env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(
+            os.path.abspath(install.__file__))))
+        # the base interpreter: a venv's python.exe is a launcher that starts the real one as
+        # its child, which would put a third process between the stand-in and the child
+        python = getattr(sys, "_base_executable", None) or sys.executable
+        parent = subprocess.Popen([python, "-c", stand_in], env=env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(parent.wait)
+        self.addCleanup(parent.kill)
+        deadline = time.monotonic() + 30
+        while not os.path.exists(pid_file):
+            self.assertLess(time.monotonic(), deadline, "the child never started")
+            time.sleep(0.05)
+        with open(pid_file, encoding="utf-8") as f:
+            pid = int(f.read())
+        # taken while the child runs: a check after it ended could find another process
+        # with its pid (and os.kill(pid, 0) would kill it on Windows)
+        # PROCESS_QUERY_LIMITED_INFORMATION for the exit code, PROCESS_TERMINATE for the
+        # cleanup of a child that didn't end
+        handle = _winapi.OpenProcess(install.SYNCHRONIZE | 0x1000 | 0x0001, False, pid)
+        self.addCleanup(_winapi.CloseHandle, handle)
+        try:
+            # the stand-in bootloader alone, as TerminateProcess does
+            parent.kill()
+            self.assertEqual(_winapi.WaitForSingleObject(handle, 10000),
+                             _winapi.WAIT_OBJECT_0)
+        finally:
+            if _winapi.WaitForSingleObject(handle, 0) != _winapi.WAIT_OBJECT_0:
+                _winapi.TerminateProcess(handle, 1)
+        self.assertEqual(_winapi.GetExitCodeProcess(handle), install.EXIT_ORPHANED)
+        self.assertTrue(os.path.exists(marker))
 
 
 class WatchdogTest(unittest.TestCase):

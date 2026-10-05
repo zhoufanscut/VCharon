@@ -7,6 +7,25 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- Windows binary: a vcharon process whose bootloader is killed now exits at once, with exit 15
+  and the orphaned log line (`EXIT orphaned` too, in `watch` and `sync --repeat`; given up
+  after 2 s if stdout blocks), so it no longer holds its locks. A Windows binary runs as two
+  processes, and `TerminateProcess` ends the outer one alone: from a watcher ending its sync
+  child, from a `--no-stream` round's timeout, or from a harness that stops a watcher by ending
+  its outer process (whether harnesses kill the whole tree on Windows wasn't checked).
+  Before, a watcher ended at its next round's check, and a plain `sync` (a `--no-stream`
+  round's) ran on holding the job's lock, so the following rounds were busy. Changes on a
+  normal stop: a streaming child still in a round 10 s after its watcher stops
+  (`--max-minutes`, `--until-change`, `EXIT updated`, Ctrl-C) is now ended mid-round, as
+  SIGTERM ends it on POSIX; before, it finished the round. Still so: the binary's unpack folder
+  (about 20 MB) stays in the temp folder at each such kill, and ssh under the ended process
+  ends on its own (at its stdin's end, or about 45 s on a dead link; inferred). POSIX, and
+  Python installs on any OS, are unchanged. Checked by unit tests with a stand-in `_winapi` on
+  Linux (measured); the test with the real `_winapi` and a Python stand-in bootloader runs only
+  on Windows, and was not run; a real Windows binary was not run.
+
 ## 0.2.3 — 2026-10-05
 
 Fixes from a simulated working day across two machines: a leader in Claude Code on Linux, two

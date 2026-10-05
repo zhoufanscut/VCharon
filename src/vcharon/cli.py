@@ -303,10 +303,13 @@ def main(argv=None):
     # code page, or a POSIX locale or PYTHONIOENCODING that isn't UTF-8, would otherwise fail
     # the first name it can't hold, after a create or join has already done its work.
     watch_mod.utf8_output()
+    run = _Run()
     if platform.is_frozen() and platform.os_name() == "windows":
         # the copies earlier updates renamed the running binary to (DESIGN, "Self-update")
         install.sweep_old()
-    run = _Run()
+        # a kill of the bootloader alone must end this process too (DESIGN, "Running
+        # watchers")
+        run.parent = install.exit_with_parent(run.parent_gone)
     return _main(argv, run)
 
 
@@ -1199,6 +1202,8 @@ class _Run:
         self.watchdog = None
         self.updated_line = None
         self.orphaned_line = None
+        # a Windows binary's bootloader (install.exit_with_parent); None elsewhere
+        self.parent = None
 
     def watch_code(self, say):
         """Starts the watchdog of a long-running command (watch, sync --repeat); say prints
@@ -1209,7 +1214,7 @@ class _Run:
         # long-running command imports nothing after its start (DESIGN, "Running watchers");
         # sysconfig keeps what it read, so later fix lines import nothing.
         platform.self_command()
-        self.watchdog = install.Watchdog()
+        self.watchdog = install.Watchdog(parent=self.parent)
         self.updated_line = lambda: say("EXIT updated")
         self.orphaned_line = lambda: say("EXIT orphaned")
         return self.watchdog
@@ -1223,6 +1228,15 @@ class _Run:
                       "exiting with %d" % (what, self.watchdog.parent.pid,
                                            install.EXIT_ORPHANED), create=True)
         return True
+
+    def parent_gone(self, parent):
+        """What a Windows binary does when its bootloader (parent, an install.Parent) is
+        gone, from the thread that waits on it (install.exit_with_parent), before it exits 15:
+        the log line, and in watch and sync --repeat their EXIT orphaned."""
+        self.log_line("info", "the process that started this one (pid %d) is gone; exiting "
+                      "with %d" % (parent.pid, install.EXIT_ORPHANED), create=True)
+        if self.orphaned_line is not None:
+            self.orphaned_line()
 
     def log_line(self, level, msg, create=False):
         if self.log is None and create:

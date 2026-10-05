@@ -11,6 +11,7 @@ import json
 import os
 import queue
 import re
+import select
 import shutil
 import signal
 import stat
@@ -1762,8 +1763,8 @@ class StreamTest(WatchCase):
                 "watch.sync_argv = lambda sync_args, repeat=None: [sys.executable, '-c', %r, %r]\n"
                 "start = []\n"
                 "init = install.Watchdog.__init__\n"
-                "def watched(self, *args):\n"
-                "    init(self, *args)\n"
+                "def watched(self, *args, **kwargs):\n"
+                "    init(self, *args, **kwargs)\n"
                 "    start.append(set(sys.modules))\n"
                 "install.Watchdog.__init__ = watched\n"
                 "code = cli.main(sys.argv[1:])\n"
@@ -3270,6 +3271,7 @@ class UpdatedTest(WatchCase):
 
         class Parent:
             pid = 4242
+            followed = False
 
             def gone(self):
                 return bool(gone)
@@ -3314,8 +3316,8 @@ class UpdatedTest(WatchCase):
                 "install.code_path = lambda: %r\n"
                 "start = []\n"
                 "init = install.Watchdog.__init__\n"
-                "def watched(self, *args):\n"
-                "    init(self, *args)\n"
+                "def watched(self, *args, **kwargs):\n"
+                "    init(self, *args, **kwargs)\n"
                 "    start.append(set(sys.modules))\n"
                 "install.Watchdog.__init__ = watched\n"
                 "code = cli.main(sys.argv[1:])\n"
@@ -3373,6 +3375,154 @@ class UpdatedTest(WatchCase):
                 self.assertEqual((code, out), (1, ""))
                 self.assertTrue(err.startswith("ERROR internal: ImportError: no module named "
                                                "x\n"), err)
+
+
+# Runs cli.main as a Windows binary's Python child would, on Linux: _winapi's wait on the
+# bootloader backed by a pidfd, and "a Windows binary" answered only to cli.main's check and to
+# install.Parent, so the rest runs as on this OS. _exit is wrapped to say which thread ended
+# the process (the real os._exit still ends it); FILL_STDOUT fills stdout from a thread once
+# the start is done, as a pipe no one reads would.
+BOOTLOADER_CHILD = """\
+import os, select, sys, threading, time
+from vcharon import cli, install, platform
+
+
+class PidfdWinapi:
+    WAIT_OBJECT_0 = 0
+    WAIT_TIMEOUT = 258
+    INFINITE = 0xFFFFFFFF
+
+    def OpenProcess(self, access, inherit, pid):
+        return os.pidfd_open(pid)
+
+    def WaitForSingleObject(self, handle, ms):
+        ready = select.select([handle], [], [], None if ms == self.INFINITE else ms / 1000)[0]
+        return self.WAIT_OBJECT_0 if ready else self.WAIT_TIMEOUT
+
+
+install._winapi = PidfdWinapi()
+install.sweep_old = lambda *args: None
+real_os_name, real_frozen = platform.os_name, platform.is_frozen
+AS_WINDOWS = {("vcharon.cli", "main"), ("vcharon.install", "__init__"),
+              ("vcharon.install", "gone")}
+
+
+def caller():
+    frame = sys._getframe(2)
+    return frame.f_globals.get("__name__"), frame.f_code.co_name
+
+
+platform.os_name = lambda: "windows" if caller() in AS_WINDOWS else real_os_name()
+platform.is_frozen = lambda: caller() == ("vcharon.cli", "main") or real_frozen()
+real_exit = install._exit
+
+
+def recorded_exit(code):
+    with open(os.environ["EXITS"], "a") as f:
+        f.write("%s %d\\n" % (threading.current_thread().name, code))
+    real_exit(code)
+
+
+install._exit = recorded_exit
+with open(os.environ["PID_FILE"] + ".part", "w") as f:
+    f.write(str(os.getpid()))
+os.replace(os.environ["PID_FILE"] + ".part", os.environ["PID_FILE"])
+if os.environ.get("FILL_STDOUT"):
+    def fill():
+        # after main has started its thread: what comes before it reconfigures stdout
+        time.sleep(0.5)
+        sys.stdout.write("x" * (4 << 20))
+        sys.stdout.flush()
+
+    threading.Thread(target=fill, daemon=True).start()
+sys.exit(cli.main(sys.argv[1:]))
+"""
+
+
+@unittest.skipUnless(hasattr(os, "pidfd_open"), "a pidfd stands in for the bootloader's handle")
+class BootloaderKillTest(WatchCase):
+    """A Windows binary's watcher whose bootloader is killed alone, run for real on Linux: the
+    bootloader a stand-in process, killed with SIGKILL, and its handle a pidfd. The watcher
+    must end at once, not at its next round (300 s off), and free its lock."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.local_record()
+        self.exits = os.path.join(self.tmp, "exits")
+        self.pid_file = os.path.join(self.tmp, "pid")
+
+    def kill_bootloader(self, fill=False):
+        """Starts the watcher under a stand-in bootloader, kills the stand-in once the watcher
+        runs: (seconds from the kill to the watcher's end, its stdout lines or None when
+        filled, the exits it recorded)."""
+        env = dict(no_site_env(), EXITS=self.exits, PID_FILE=self.pid_file)
+        if fill:
+            env["FILL_STDOUT"] = "1"
+        stand_in = subprocess.Popen(
+            [sys.executable, "-S", "-c", "import subprocess, sys; subprocess.run(sys.argv[1:])",
+             sys.executable, "-S", "-c", BOOTLOADER_CHILD, "watch", "mb", "--project", "q",
+             "--every", "300"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+        self.addCleanup(stand_in.stdout.close)
+        self.addCleanup(stand_in.wait)
+        self.addCleanup(stand_in.kill)
+        lines = None
+        if fill:
+            deadline = time.monotonic() + 30
+            while not os.path.exists(self.pid_file):
+                self.assertLess(time.monotonic(), deadline, "the watcher never started")
+                time.sleep(0.05)
+            # the fill is under way, and main's own first line is behind it
+            time.sleep(1.5)
+        else:
+            lines = [util.readline(stand_in.stdout).decode("utf-8").rstrip("\n")]
+        with open(self.pid_file, encoding="utf-8") as f:
+            pid = int(f.read())
+        # opened while it runs: the pid can't be another process's yet
+        handle = os.pidfd_open(pid)
+        self.addCleanup(os.close, handle)
+        start = time.monotonic()
+        stand_in.kill()
+        stand_in.wait()
+        ended = select.select([handle], [], [], 30)[0]
+        took = time.monotonic() - start
+        if not ended:
+            os.kill(pid, signal.SIGKILL)
+            self.fail("the watcher still ran 30 s after its bootloader was killed")
+        if not fill:
+            lines += stand_in.stdout.read().decode("utf-8").splitlines()
+        with open(self.exits, encoding="utf-8") as f:
+            exits = f.read().splitlines()
+        return took, lines, exits
+
+    def gone_lines(self):
+        with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"),
+                  encoding="utf-8") as f:
+            return [line for line in f if "is gone; exiting with" in line]
+
+    def test_the_watcher_ends_at_once_and_frees_its_lock(self):
+        took, lines, exits = self.kill_bootloader()
+        self.assertLess(took, 10)
+        # the thread's exit, once; the round's check never ran, so one EXIT orphaned
+        self.assertEqual(exits, ["bootloader-watch 15"])
+        self.assertEqual(self.said(lines), [watching(self.tree, 0), "EXIT orphaned"])
+        gone = self.gone_lines()
+        self.assertEqual(len(gone), 1, gone)
+        # the thread's line, not the round check's ("watch: the process ...")
+        self.assertIn("  info  the process that started this one (pid ", gone[0])
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=never,
+                               rounds=1)
+        self.assertEqual(code, 0)
+
+    def test_a_full_stdout_cant_hold_the_exit(self):
+        took, _, exits = self.kill_bootloader(fill=True)
+        # the timer's exit: the thread is stuck in its EXIT orphaned
+        self.assertEqual(len(exits), 1, exits)
+        self.assertNotIn("bootloader-watch", exits[0])
+        self.assertTrue(exits[0].endswith(" 15"), exits)
+        self.assertGreaterEqual(took, install.ORPHAN_WRITE_WAIT - 0.1)
+        self.assertLess(took, 10)
+        # the log line comes before the write that blocks
+        self.assertEqual(len(self.gone_lines()), 1)
 
 
 class LooseTest(WatchCase):

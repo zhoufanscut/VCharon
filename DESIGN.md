@@ -1662,7 +1662,8 @@ OK  2 jobs  (0.7 s)
 The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher (or a `create`,
 `join`, `leave` or `close` of the member) runs, 13 closed, 14 updated (VCharon was replaced
 while it ran; `sync --repeat` exits 14 too), and 15 orphaned (a binary's bootloader process is
-gone; `sync --repeat` too). A usage error is 3, not argparse's 2, since 2 means busy.
+gone; `sync --repeat` too, and on Windows any command of a binary, though nothing is left to
+see it). A usage error is 3, not argparse's 2, since 2 means busy.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -1805,8 +1806,8 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
 - The fix for 14 is to start the watcher again: that runs the new VCharon.
 - **Orphans.** A one-file binary runs as two processes: the bootloader, and the Python child
   it starts. A signal the bootloader can't catch (SIGKILL; `TerminateProcess` on Windows) ends
-  the bootloader alone; the child runs on, holding the watcher's lock, and its unpack folder
-  stays. Measured on Linux: after a SIGKILL of the bootloader, the child ran on until it was
+  the bootloader alone; on POSIX the child runs on, holding the watcher's lock, and its unpack
+  folder stays (a Windows binary: the next bullet). Measured on Linux: after a SIGKILL of the bootloader, the child ran on until it was
   stopped by hand. So in a binary, `watch` and `sync --repeat` note their parent at start
   (POSIX: the parent pid; Windows: a handle on the parent, opened with `SYNCHRONIZE`) and check
   it at the top of each round, after the update check: gone (POSIX: another parent pid, not
@@ -1817,6 +1818,26 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   child printed `EXIT orphaned` and exited 1.9 s after the SIGKILL (rounds every 2 s), and a
   new watcher then started. The unpack folder (about 20 MB) still stays: only the bootloader
   removes it.
+- **A Windows binary ends with its bootloader, at once.** Every command of a Windows binary,
+  a plain `sync` too, opens the `SYNCHRONIZE` handle on its parent at start and waits on it in
+  a daemon thread (the wait doesn't hold the GIL). Signalled, the thread logs the orphaned line,
+  prints `EXIT orphaned` in `watch` and `sync --repeat`, and exits 15 with `os._exit`; a timer
+  exits after 2 s whatever the printing does, since a full pipe no one reads would block it.
+  The OS drops the locks, as for any kill. While the thread waits, the round's check leaves
+  the exit to it, so one death prints one `EXIT orphaned`; a wait that fails gives the check
+  back. Why: `TerminateProcess` ends the bootloader alone,
+  whoever sends it (a watcher ending its sync child, `fsops.run`'s timeout, a harness stopping
+  a watcher), and Windows has no process group to kill with it; the check at the top of a
+  round comes late and a plain `sync` has none. One thread covers every case, with no ctypes
+  and no other program. Not on POSIX, where the round's check stays and vcharon's own kills
+  reach the whole group. Not in a Python install: a checkout run by a system Python is one
+  process, and in a venv or pipx install the venv launcher already runs the real `python.exe`
+  in a job that ends with it (from CPython's source, not run). Without the handle (OpenProcess
+  refused) nothing is started, and the round's check stays. The ssh under such a process isn't
+  killed: it ends at its stdin's end, or on a dead link after ssh's keepalive gives up, about
+  45 s (inferred). The unpack folder stays each time. Tested with a stand-in `_winapi` on
+  every OS, and on Windows with the real one and a Python stand-in for the bootloader; no test
+  runs a real Windows binary.
 - **Ending a sync child.** The other way round, a watcher ending its sync child must not kill
   only the bootloader. On POSIX the streaming child runs in a session of its own; a child that
   hasn't ended 10 s after its stdin closed gets SIGTERM, which the bootloader passes on to its
@@ -1829,8 +1850,8 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   `--max-minutes` unable to fire, the lock held), and it holds the job's locks, so every later
   round would be busy. A pipe whose reader still runs after the child ended is left open, never
   closed under the reader. Windows has no tree kill here: `TerminateProcess` ends the bootloader
-  alone, and its Python process ends by its own rules (its stdin's end, the orphan check); the
-  watcher no longer waits for it (inferred, not run on Windows).
+  alone, and a binary's Python process then ends itself at once, mid-round, as SIGTERM ends it
+  on POSIX (the bullet above); the watcher doesn't wait for it (inferred, not run on Windows).
 
 ### Self-update
 

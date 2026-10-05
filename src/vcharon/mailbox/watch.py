@@ -1241,10 +1241,11 @@ def silent_fix(job):
 def run_sync(job, sync_args):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
     stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
-    session of its own: past RUN_TIMEOUT its whole process group is killed, and in a binary
-    that is the bootloader and the Python process it starts, which would otherwise run on
-    holding the job's locks, so every later round would be busy (DESIGN, "Running
-    watchers")."""
+    session of its own: past RUN_TIMEOUT its whole process group is killed on POSIX, and in a
+    binary that is the bootloader and the Python process it starts, which would otherwise run
+    on holding the job's locks, so every later round would be busy. Windows kills the
+    bootloader alone; a binary's Python process then ends itself (install.exit_with_parent)
+    (DESIGN, "Running watchers")."""
     try:
         ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True,
                         env=platform.child_env())
@@ -1281,9 +1282,8 @@ def _end(proc, term_wait=TERM_WAIT):
     goes; then, after it ended or term_wait passed, SIGKILL to what is left of the process
     group, when the child leads one (_spawn's session). The group is killed before the child
     is reaped: until then its pid, the group's id, can't go to another process. Windows:
-    TerminateProcess ends the bootloader alone, and its Python process ends by its own rules
-    (the end of its stdin, after its round under way; the orphan check at its next round);
-    _close doesn't wait for it."""
+    TerminateProcess ends the bootloader alone, and a binary's Python process ends itself at
+    once (install.exit_with_parent); _close doesn't wait for it."""
     if GROUP:
         leads = _leads_group(proc)
         # os.kill, not proc.terminate, which reaps a child that has just exited

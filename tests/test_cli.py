@@ -1370,6 +1370,7 @@ class RepeatTest(FakeSshCase):
 
         class Parent:
             pid = 4242
+            followed = False
 
             def gone(self):
                 return bool(gone)
@@ -1624,8 +1625,8 @@ class RepeatTest(FakeSshCase):
                   "install.code_path = lambda: %r\n"
                   "start = []\n"
                   "init = install.Watchdog.__init__\n"
-                  "def watched(self, *args):\n"
-                  "    init(self, *args)\n"
+                  "def watched(self, *args, **kwargs):\n"
+                  "    init(self, *args, **kwargs)\n"
                   "    start.append(set(sys.modules))\n"
                   "install.Watchdog.__init__ = watched\n"
                   "def dump():\n"

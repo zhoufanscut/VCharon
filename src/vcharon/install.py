@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import sys
+import threading
 
 from . import platform
 
@@ -37,6 +38,9 @@ EXIT_UPDATED = 14
 EXIT_ORPHANED = 15
 # OpenProcess's right to wait on a process
 SYNCHRONIZE = 0x00100000
+# How long a Windows binary that lost its bootloader gives its log line and EXIT orphaned
+# before it exits anyway: a full pipe that no one reads would hold that write for good.
+ORPHAN_WRITE_WAIT = 2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -134,11 +138,14 @@ class Watchdog:
     "Running watchers"): its identity at start, compared again at the top of each round, and
     after an unexpected exception in a binary."""
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, parent=None):
         self.path = code_path() if path is None else path
         self.start = identity(self.path)
-        # only in a binary: there, the process that started this one is the bootloader
-        self.parent = Parent() if platform.is_frozen() else None
+        # only in a binary: there, the process that started this one is the bootloader. parent:
+        # the one exit_with_parent took at start, so its handle is opened once
+        if parent is None and platform.is_frozen():
+            parent = Parent()
+        self.parent = parent
 
     def changed(self):
         """Whether the code's file is another one now, or gone."""
@@ -149,7 +156,10 @@ class Watchdog:
         processes, the bootloader and its Python child; a signal the bootloader can't catch
         (SIGKILL; TerminateProcess) ends it alone, and the child would run on, holding its
         locks, with no one left to stop it."""
-        return self.parent is not None and self.parent.gone()
+        # a parent followed by exit_with_parent's thread is that thread's to report: both
+        # would print EXIT orphaned for one death
+        return (self.parent is not None and not self.parent.followed
+                and self.parent.gone())
 
     def after_crash(self):
         """Whether an unexpected exception may come from an update: a one-file binary reads
@@ -173,6 +183,8 @@ class Parent:
     def __init__(self):
         self.pid = os.getppid()
         self.handle = None
+        # whether follow's thread is waiting on the handle; it then owns the exit
+        self.followed = False
         if platform.os_name() == "windows" and _winapi is not None:
             try:
                 self.handle = _winapi.OpenProcess(SYNCHRONIZE, False, self.pid)
@@ -185,6 +197,59 @@ class Parent:
                 return False
             return _winapi.WaitForSingleObject(self.handle, 0) == _winapi.WAIT_OBJECT_0
         return os.getppid() != self.pid
+
+
+def exit_with_parent(on_gone):
+    """In a Windows binary, ends this process as soon as its bootloader is gone (DESIGN,
+    "Running watchers"): TerminateProcess on the bootloader, from vcharon's own kill of a sync
+    child or from outside, ends it alone, and this process would run on holding its locks.
+    The check at the top of a watcher's rounds comes too late for that, and a plain sync has
+    none. on_gone(parent) runs in the thread before the exit. Returns the Parent, for the
+    Watchdog to reuse; without a handle (OpenProcess refused) nothing is started, and the
+    watchers' check stays. The caller checks that this is a Windows binary."""
+    parent = Parent()
+    if parent.handle is not None:
+        # the Parent goes to on_gone itself: the caller may not have stored it yet when the
+        # bootloader is already gone
+        follow(parent, lambda: on_gone(parent))
+    return parent
+
+
+def follow(parent, on_gone):
+    """Starts a daemon thread that waits on parent's handle. Once it is signalled: on_gone()
+    (the log line; EXIT orphaned in watch and sync --repeat), then exit 15 with os._exit (a
+    thread's sys.exit would end only the thread); and since on_gone's write to a full pipe could
+    block, a timer exits after ORPHAN_WRITE_WAIT whatever it does. The OS drops the locks, as
+    for any kill. The wait doesn't hold the GIL. At a normal exit the bootloader is still
+    there, so the thread is still waiting and ends with the process. While the thread waits,
+    parent.followed is set and the Watchdog leaves the exit to it; a wait that fails clears it,
+    so the round's check takes over again. Returns the thread."""
+    def wait():
+        try:
+            signalled = (_winapi.WaitForSingleObject(parent.handle, _winapi.INFINITE)
+                         == _winapi.WAIT_OBJECT_0)
+        except OSError:
+            signalled = False
+        if not signalled:
+            parent.followed = False
+            return
+        timer = threading.Timer(ORPHAN_WRITE_WAIT, _exit, (EXIT_ORPHANED,))
+        timer.daemon = True
+        timer.start()
+        try:
+            on_gone()
+        finally:
+            _exit(EXIT_ORPHANED)
+
+    parent.followed = True
+    thread = threading.Thread(target=wait, name="bootloader-watch", daemon=True)
+    thread.start()
+    return thread
+
+
+def _exit(code):
+    """os._exit: the process ends at once, with no cleanup, as a kill would end it."""
+    os._exit(code)
 
 
 def sweep_old(executable=None):
