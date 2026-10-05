@@ -758,8 +758,7 @@ def refresh_skills(binary, agents):
     if ran.rc is None:
         return "it didn't finish within %d s" % SMOKE_TIMEOUT
     if ran.rc != 0:
-        detail = (ran.err.decode("utf-8", "replace") or ran.out.decode("utf-8", "replace")
-                  ).strip().splitlines()
+        detail = (fsops.child_text(ran.err) or fsops.child_text(ran.out)).strip().splitlines()
         return "it exited %d: %s" % (ran.rc, detail[0] if detail else "no output")
     return None
 
@@ -773,12 +772,12 @@ def _smoke_test(binary, expected):
     except OSError as e:
         raise UpdateError("smoke_failed", "the downloaded binary wouldn't run (%s); nothing "
                           "was installed" % e, fix) from e
-    out = ran.out.decode("utf-8", "replace")
+    out = fsops.child_text(ran.out)
     if ran.rc is None:
         raise UpdateError("smoke_failed", "the downloaded binary didn't answer --version "
                           "within %d s; nothing was installed" % SMOKE_TIMEOUT, fix)
     if ran.rc != 0:
-        detail = (ran.err.decode("utf-8", "replace") or out).strip().splitlines()
+        detail = (fsops.child_text(ran.err) or out).strip().splitlines()
         raise UpdateError("smoke_failed", "the downloaded binary exited %d on --version (%s); "
                           "nothing was installed"
                           % (ran.rc, detail[0] if detail else "no output"), fix)

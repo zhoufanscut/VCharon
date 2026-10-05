@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import codecs
 import collections
 import errno
+import locale
 import os
 import signal
 import stat
@@ -809,6 +811,51 @@ def run(argv, timeout, new_session=False, env=None):
             proc.wait(KILL_WAIT)
         except subprocess.TimeoutExpired:
             pass
+
+
+def _ansi_cp():
+    """The ANSI code page as a codec name ("cp936" on a Chinese Windows), or None. UTF-8 mode
+    doesn't change it."""
+    try:
+        return locale.getencoding()
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def child_encodings():
+    """The codecs child_text() tries on Windows after UTF-8: the ANSI code page's, or none
+    when it is UTF-8 (a code page without a codec of its own reads through mbcs).
+    Win32-OpenSSH writes the system's text of some errors (a host name it can't resolve) in
+    the ANSI code page. Not the console's
+    code page: ssh sets it to UTF-8 for its run, and an OEM one (cp437, cp850, cp866) decodes
+    any byte, so it would hide the ANSI text (DESIGN, "Launch rules"). Never raises."""
+    try:
+        name = codecs.lookup(_ansi_cp()).name
+    except (LookupError, TypeError, ValueError, OSError):
+        return []
+    return [] if name == "utf-8" else [name]
+
+
+# Looked up once at start, codecs and all: a long-running command imports nothing later
+# (DESIGN, "Running watchers").
+CHILD_ENCODINGS = child_encodings() if WINDOWS else []
+
+
+def child_text(data):
+    """Another program's output (bytes) as text to show or log: UTF-8 if it is valid UTF-8; on
+    Windows, else the first of CHILD_ENCODINGS that decodes it all; else UTF-8 with U+FFFD for
+    the bad bytes. Never raises."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    if WINDOWS:
+        for name in CHILD_ENCODINGS:
+            try:
+                return data.decode(name)
+            except (UnicodeDecodeError, LookupError):
+                pass
+    return data.decode("utf-8", "replace")
 
 
 def run_terminal(argv):

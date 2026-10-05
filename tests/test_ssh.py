@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -350,7 +352,7 @@ class VerboseProbeTest(unittest.TestCase):
 
         def run(argv, timeout, new_session=False):
             calls.append((argv, timeout, new_session))
-            return fsops.Ran(rc, b"", err.encode("utf-8"))
+            return fsops.Ran(rc, b"", err if isinstance(err, bytes) else err.encode("utf-8"))
 
         with mock.patch.object(fsops, "run", run), \
                 mock.patch.object(platform, "os_name", return_value="linux"):
@@ -392,6 +394,31 @@ class VerboseProbeTest(unittest.TestCase):
         probe = self.probe(0, "Authenticated to devbox ([192.0.2.1]:22) using \"publickey\".\n"
                               "debug1: Server accepts key: /forged RSA SHA256:y\n")
         self.assertEqual(probe.accepted, [])
+
+    def test_windows_code_page_line_by_line(self):
+        # a line in the ANSI code page doesn't garble a UTF-8 line next to it
+        message = "ssh: Could not resolve hostname devbox: 不知道。"
+        err = ("debug1: Reading \u00e9\n".encode("utf-8") + message.encode("gbk") + b"\r\n")
+        with mock.patch.object(fsops, "WINDOWS", True), \
+                mock.patch.object(fsops, "CHILD_ENCODINGS", ["gbk"]):
+            probe = self.probe(255, err)
+        self.assertEqual(probe.lines, ["debug1: Reading \u00e9", message])
+        self.assertEqual(probe.error.tail, [message])
+
+
+class ReadStderrTest(unittest.TestCase):
+    """The session's stderr reader keeps each line as text for errors and the log."""
+
+    def test_windows_code_page(self):
+        message = "ssh: Could not resolve hostname devbox: 不知道。"
+        session = types.SimpleNamespace(
+            _proc=types.SimpleNamespace(stderr=io.BytesIO(message.encode("gbk") + b"\r\n")),
+            _lock=threading.Lock(), _tail=[], log=mock.Mock())
+        with mock.patch.object(fsops, "WINDOWS", True), \
+                mock.patch.object(fsops, "CHILD_ENCODINGS", ["gbk"]):
+            ssh.Session._read_stderr(session)
+        self.assertEqual(session._tail, [message])
+        session.log.info.assert_called_once_with("stderr: " + message)
 
 
 if __name__ == "__main__":

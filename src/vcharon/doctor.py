@@ -309,7 +309,7 @@ def _ssh(rep, settings):
         return
     text = ""
     for data in (ran.err, ran.out):
-        lines = [line.strip() for line in data.decode("utf-8", "replace").splitlines()
+        lines = [line.strip() for line in fsops.child_text(data).splitlines()
                  if line.strip()]
         if lines:
             text = lines[0]

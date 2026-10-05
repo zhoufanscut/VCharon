@@ -44,7 +44,7 @@ def agent_state(settings):
     except OSError as e:
         return "error", "couldn't start %s: %s" % (argv[0], e.strerror or e)
     if ran.rc == 0:
-        lines = [line for line in ran.out.decode("utf-8", "replace").splitlines()
+        lines = [line for line in fsops.child_text(ran.out).splitlines()
                  if line.strip()]
         return "keys", len(lines)
     if ran.rc == 1:

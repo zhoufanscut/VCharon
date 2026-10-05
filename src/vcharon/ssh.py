@@ -245,7 +245,8 @@ def verbose_probe(settings, dest, log):
     except OSError as e:
         raise VCharonError("connect", "couldn't start %s: %s" % (argv[0], e.strerror or e),
                            hint=START_HINT)
-    lines = ran.err.decode("utf-8", "replace").replace("\r", "").split("\n")
+    # line by line: one line in a code page mustn't garble the others (fsops.child_text)
+    lines = [fsops.child_text(line) for line in ran.err.replace(b"\r", b"").split(b"\n")]
     if lines and not lines[-1]:
         lines.pop()
     for line in lines:
@@ -628,7 +629,7 @@ class Session:
                 line = stream.readline(8192)
                 if not line:
                     return
-                text = line.decode("utf-8", "replace").rstrip("\r\n")
+                text = fsops.child_text(line).rstrip("\r\n")
                 with self._lock:
                     self._tail.append(text)
                 self.log.info("stderr: %s" % text)

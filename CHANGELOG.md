@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Windows: ssh's error text in the ANSI code page should now show as written. On a
+  Chinese-locale Windows 11 box (vcharon 0.2.2, Git Bash), ssh's error text showed as mojibake
+  (measured), from `vcharon list --server` with a lowercase alias that didn't resolve. Output
+  of ssh, `ssh -V` and `ssh-add -l` that isn't valid UTF-8 is now decoded on Windows with the
+  ANSI code page, else as UTF-8 with replacement characters; valid UTF-8 and every other OS are
+  unchanged. Why the ANSI code page and not the console's: Win32-OpenSSH writes the system's
+  error text through it and sets the console to UTF-8 for its run (inferred from
+  Win32-OpenSSH's source, not run). Checked by unit tests that fake Windows and its code page
+  and feed GBK bytes (measured on Linux); not checked on a real Windows box, so whether it
+  removes the mojibake seen there is unconfirmed.
 - `vcharon post` warns when the title or body names an ssh alias or host name this machine's
   vcharon uses (a join record's `--server`, a channel section's `ssh`), as a whole word in any
   case: `WARN entry <id> names <alias>: …` and a `fix:` line on stderr. The post still stands,

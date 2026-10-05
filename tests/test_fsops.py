@@ -796,5 +796,58 @@ class RunTest(unittest.TestCase):
                     self.assertEqual(stream.close.called, not windows)
 
 
+# Win32-OpenSSH's message for a host name it can't resolve, on a Chinese Windows: the English
+# part is ssh's own, the rest the system's, in the ANSI code page (cp936)
+RESOLVE = "ssh: Could not resolve hostname devbox: 不知道这样的主机。"
+
+
+class ChildTextTest(unittest.TestCase):
+    """child_text and child_encodings, with the OS and its code page faked: runs on every OS."""
+
+    def encodings(self, ansi):
+        with mock.patch.object(fsops, "_ansi_cp", ansi):
+            return fsops.child_encodings()
+
+    def text(self, data, windows, encodings):
+        with mock.patch.object(fsops, "WINDOWS", windows), \
+                mock.patch.object(fsops, "CHILD_ENCODINGS", encodings):
+            return fsops.child_text(data)
+
+    def test_gbk_on_windows(self):
+        found = self.encodings(lambda: "cp936")
+        self.assertEqual(found, ["gbk"])
+        self.assertEqual(self.text(RESOLVE.encode("gbk"), True, found), RESOLVE)
+
+    def test_left_out(self):
+        # UTF-8 (tried first anyway), a code page Python has no codec for, none, a failure
+        def boom():
+            raise OSError("no")
+        self.assertEqual(self.encodings(lambda: "cp65001"), [])
+        self.assertEqual(self.encodings(lambda: "cp99999"), [])
+        self.assertEqual(self.encodings(lambda: None), [])
+        self.assertEqual(self.encodings(boom), [])
+
+    def test_utf8_first(self):
+        # these bytes are valid GBK too, as "caf" and U+8305: code pages first would read them so
+        data = "café".encode()
+        self.assertEqual(data.decode("gbk"), "caf\u8305")
+        self.assertEqual(self.text(data, True, ["gbk"]), "café")
+
+    def test_replacement_when_nothing_decodes(self):
+        data = b"ssh: \xff\xff"
+        self.assertEqual(self.text(data, True, ["gbk"]), "ssh: \ufffd\ufffd")
+        self.assertEqual(self.text(data, True, []), "ssh: \ufffd\ufffd")
+
+    def test_posix_unchanged(self):
+        data = RESOLVE.encode("gbk")
+        self.assertEqual(self.text(data, False, ["gbk"]), data.decode("utf-8", "replace"))
+
+    def test_ansi_cp(self):
+        with mock.patch("locale.getencoding", return_value="cp936"):
+            self.assertEqual(fsops._ansi_cp(), "cp936")
+        with mock.patch("locale.getencoding", side_effect=OSError("no")):
+            self.assertIsNone(fsops._ansi_cp())
+
+
 if __name__ == "__main__":
     unittest.main()

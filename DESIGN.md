@@ -1658,6 +1658,17 @@ So that a run from an agent's background shell behaves like one from a terminal:
   command acts: a Windows code page, a POSIX locale or a `PYTHONIOENCODING` that isn't UTF-8
   would fail the first name it can't hold, after a create or join has done its work, and the
   retry would say the channel exists. Every file VCharon writes is UTF-8;
+- another program's output (ssh's stderr, `ssh -V`, `ssh-add -l`) is read as UTF-8 when it is
+  valid UTF-8; on Windows, else in the ANSI code page if that decodes it all; else as UTF-8
+  with U+FFFD for the bad bytes, never an error. Win32-OpenSSH writes the system's text of some
+  errors (a host name it can't resolve) in the ANSI code page, which UTF-8 alone shows as
+  garbage on a non-English Windows. Not the console's code page: ssh sets the console to UTF-8
+  for its run, and an OEM code page (cp437, cp850, cp866) decodes any byte, so trying it first
+  would hide the ANSI text (inferred from Win32-OpenSSH's source, not run). The session's ssh
+  stderr and the `-v` probe's are decoded line by line, so one such line can't change how the
+  others read. The `vcharon sync` child of a watcher is read as UTF-8 only: it is told to write
+  UTF-8 ([Running watchers](#running-watchers)). What the server's shell prints before
+  VCharon's marker is remote text, cut at a byte count: it is read as UTF-8 with U+FFFD;
 - never prompt (BatchMode, no `input()`), except `vcharon key` and `--update`'s `Update now?
   [y/N]`, which takes no terminal as "no";
 - starting itself as a child (the watcher's sync) uses `platform.self_argv()`: the binary itself,
@@ -1743,17 +1754,18 @@ and worked after a swap with a byte-identical copy. The checks below turned each
 unchanged build's, into `EXIT updated` and exit 14 within a round, with no traceback.
 
 - So the long-running commands import every module they can need at start, in every install mode:
-  `cli.py` imports every module of the package at its top, the plugins too (which `plugin.py` loads
-  by name); the few imports inside functions, there to break an import cycle, only look up a module
-  already loaded. The standard library loads some modules at first use: the UTF-16 codec
+  `cli.py` imports every module of the package at its top, the plugins too (which `plugin.py`
+  loads by name); the few imports inside functions, there to break an import cycle, only look up a
+  module already loaded. The standard library loads some modules at first use: the UTF-16 codec
   `pathrules` counts with and the `utf-8-sig` one `config` reads with are looked up when those
-  load; the Windows-only `winreg` loads at start on Windows; and the start of `watch` and `sync
-  --repeat` spells `vcharon` once as fix lines do, which reads sysconfig's data
-  (`_sysconfigdata_*`, and `_osx_support` on macOS) when an entry point named `vcharon` is on PATH.
-  `update.py` is the one module imported later, by `--update` alone, which imports nothing after
-  its swap. Tests run a watcher and `sync --repeat` in a child through rounds and check that no
-  module was imported after the start, each child under `-S` (no `.pth` read, as in a binary) with
-  the environment's scripts folder first on PATH.
+  load; on Windows, `winreg` and the codec of the ANSI code page that `fsops` reads other
+  programs' output with ([Launch rules](#launch-rules)) load at start;
+  and the start of `watch` and `sync --repeat` spells `vcharon` once as fix lines do, which reads
+  sysconfig's data (`_sysconfigdata_*`, and `_osx_support` on macOS) when an entry point named
+  `vcharon` is on PATH. `update.py` is the one module imported later, by `--update` alone, which
+  imports nothing after its swap. Tests run a watcher and `sync --repeat` in a child through
+  rounds and check that no module was imported after the start, each child under `-S` (no `.pth`
+  read, as in a binary) with the environment's scripts folder first on PATH.
 - At the top of each round, before any other work, `watch` and `sync --repeat` compare the
   code's file with the one they started with: a binary's own file, else the package's
   `__init__.py` (pipx and pip rewrite it), by size, modification time and file id (`st_ino`,
