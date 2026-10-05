@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Linux and macOS binary: a `--no-stream` round's sync that hits its 900 s limit, or is cut
+  by Ctrl-C, now gets SIGTERM and up to 3 s to end before the SIGKILL, so it removes its
+  unpack folder (about 20 MB) from the temp folder; before, it was SIGKILLed at once and the
+  folder stayed each time. The stop takes up to 3 s longer only when the sync doesn't end on
+  SIGTERM. Error lines and exit codes are unchanged; other programs vcharon runs (ssh probes,
+  `doctor`, `vcharon key`, `--update`'s runs of the new binary) are still killed at once, and
+  Windows is unchanged. Checked on Linux (measured): unit tests, and a binary built with
+  PyInstaller 6.22.3 run as such a child (`vcharon ping` blocked on a stand-in ssh, a 4 s
+  limit) left no unpack folder after the limit or a Ctrl-C, and one each time with the old
+  immediate kill. macOS inferred from PyInstaller's docs; not run on macOS or Windows.
 - Windows binary: a vcharon process whose bootloader is killed now exits at once, with exit 15
   and the orphaned log line (`EXIT orphaned` too, in `watch` and `sync --repeat`; given up
   after 2 s if stdout blocks), so it no longer holds its locks. A Windows binary runs as two

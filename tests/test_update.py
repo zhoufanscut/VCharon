@@ -1398,7 +1398,7 @@ class OrphanTest(unittest.TestCase):
             # a --no-stream round's sync
             ran = []
 
-            def run(argv, timeout, new_session=False, env=None):
+            def run(argv, timeout, new_session=False, env=None, term_wait=0):
                 ran.append(env)
                 return fsops.Ran(0, b"", b"")
 

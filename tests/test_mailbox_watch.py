@@ -1564,11 +1564,13 @@ class ClientModeTest(WatchCase):
 
     def test_the_child_is_this_vcharon(self):
         # --no-stream's child each round: self_argv, -P and all; a binary's unpacks its own copy;
-        # through fsops.run, in a session of its own, so a timeout kills its whole group
+        # through fsops.run, in a session of its own, so a timeout or Ctrl-C ends its whole
+        # group, with SIGTERM first so a binary's bootloader removes its unpack folder
         ran = []
 
-        def run(argv, timeout, new_session=False, env=None):
-            self.assertEqual((timeout, new_session), (watch.RUN_TIMEOUT, True))
+        def run(argv, timeout, new_session=False, env=None, term_wait=0):
+            self.assertEqual((timeout, new_session, term_wait),
+                             (watch.RUN_TIMEOUT, True, watch.TERM_WAIT))
             ran.append((argv, env))
             return fsops.Ran(0, b"", b"")
 

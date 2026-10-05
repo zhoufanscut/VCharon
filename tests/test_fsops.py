@@ -6,6 +6,7 @@ import contextlib
 import errno
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -794,6 +795,232 @@ class RunTest(unittest.TestCase):
                 proc.kill.assert_called()
                 for stream in (proc.stdout, proc.stderr):
                     self.assertEqual(stream.close.called, not windows)
+
+    def termed(self, tmp, ignore=False):
+        """A program that writes tmp/ready once its SIGTERM handling is set, then sleeps: on
+        SIGTERM it writes tmp/termed and exits, or, with ignore, carries on."""
+        ready, termed = os.path.join(tmp, "ready"), os.path.join(tmp, "termed")
+        handler = ("signal.SIG_IGN" if ignore else
+                   "lambda *a: (open(%r, 'w').close(), sys.exit(0))" % termed)
+        return self.py("import signal, sys, time\n"
+                       "signal.signal(signal.SIGTERM, %s)\n"
+                       "open(%r, 'w').close()\n"
+                       "time.sleep(60)\n" % (handler, ready)), ready, termed
+
+    def scratch(self):
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        return tmp
+
+    @unittest.skipUnless(POSIX, "process groups")
+    def test_timeout_term_wait(self):
+        # with term_wait the program gets SIGTERM and ends its own way (a binary's bootloader
+        # removes its unpack folder); without, SIGKILL at once
+        for term_wait, ends_itself in ((3, True), (0, False)):
+            with self.subTest(term_wait=term_wait):
+                argv, ready, termed = self.termed(self.scratch())
+                ran = fsops.run(argv, timeout=1, new_session=True, term_wait=term_wait)
+                self.assertTrue(os.path.exists(ready))
+                self.assertIsNone(ran.rc)
+                self.assertEqual(os.path.exists(termed), ends_itself)
+
+    @unittest.skipUnless(POSIX, "process groups")
+    def test_term_wait_is_bounded(self):
+        # a program that ignores SIGTERM is killed after term_wait
+        argv, ready, _termed = self.termed(self.scratch(), ignore=True)
+        started = time.monotonic()
+        ran = fsops.run(argv, timeout=1, new_session=True, term_wait=1)
+        took = time.monotonic() - started
+        self.assertTrue(os.path.exists(ready))
+        self.assertIsNone(ran.rc)
+        self.assertGreaterEqual(took, 1 + 1 - 0.2)
+        self.assertLess(took, 1 + 1 + 5)
+
+    @unittest.skipUnless(POSIX, "process groups")
+    def test_term_reaches_the_group(self):
+        # the SIGTERM goes to the whole group, not the program alone: here the program
+        # ignores it and only a child it started, in its group, can end on it
+        child, ready, termed = self.termed(self.scratch())
+        argv = self.py("import signal, subprocess\n"
+                       "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                       "subprocess.run(%r)\n" % (child,))
+        ran = fsops.run(argv, timeout=1, new_session=True, term_wait=3)
+        self.assertTrue(os.path.exists(ready))
+        self.assertIsNone(ran.rc)
+        self.assertTrue(os.path.exists(termed))
+
+    def ctrl_c_popen(self, ready, procs, stack):
+        """Popen whose communicate raises KeyboardInterrupt once ready exists."""
+        real = subprocess.Popen
+
+        class Popen(real):
+            def __init__(self, *args, **kw):
+                real.__init__(self, *args, **kw)
+                procs.append(self)
+
+            def communicate(self, *args, **kw):
+                end = time.monotonic() + 30
+                while not os.path.exists(ready) and time.monotonic() < end:
+                    time.sleep(0.05)
+                raise KeyboardInterrupt
+
+        def cleanup():
+            for proc in procs:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+
+        self.addCleanup(cleanup)
+        stack.enter_context(mock.patch.object(subprocess, "Popen", Popen))
+
+    @unittest.skipUnless(POSIX, "process groups")
+    def test_ctrl_c_term_wait(self):
+        argv, ready, termed = self.termed(self.scratch())
+        procs = []
+        with contextlib.ExitStack() as stack:
+            self.ctrl_c_popen(ready, procs, stack)
+            with self.assertRaises(KeyboardInterrupt):
+                fsops.run(argv, timeout=30, new_session=True, term_wait=3)
+        [proc] = procs
+        self.assertEqual(proc.wait(5), 0)
+        self.assertTrue(os.path.exists(termed))
+
+    @unittest.skipUnless(POSIX, "process groups")
+    def test_second_ctrl_c_still_kills(self):
+        # a Ctrl-C during the wait after SIGTERM still sends the SIGKILL
+        argv, ready, _termed = self.termed(self.scratch(), ignore=True)
+        procs = []
+        with contextlib.ExitStack() as stack:
+            self.ctrl_c_popen(ready, procs, stack)
+            stack.enter_context(mock.patch.object(fsops, "exited",
+                                                  side_effect=KeyboardInterrupt))
+            with self.assertRaises(KeyboardInterrupt):
+                fsops.run(argv, timeout=30, new_session=True, term_wait=3)
+        [proc] = procs
+        self.assertEqual(proc.wait(5), -9)
+
+    def test_no_term_wait_on_windows(self):
+        # no process group: the program alone is killed, at once
+        proc = self.stuck_proc()
+        proc.returncode = None
+        with mock.patch.object(fsops, "WINDOWS", True), \
+                mock.patch.object(subprocess, "Popen", return_value=proc), \
+                mock.patch.object(fsops, "exited") as exited, \
+                mock.patch.object(os, "killpg", create=True) as killpg:
+            fsops.run(["x"], timeout=1, new_session=True, term_wait=3)
+        proc.kill.assert_called()
+        killpg.assert_not_called()
+        exited.assert_not_called()
+
+
+@unittest.skipUnless(POSIX, "process groups")
+class TermWaitBootloaderTest(unittest.TestCase):
+    """run's term_wait against a stand-in for a binary's bootloader: it makes an unpack folder,
+    starts a child in its group and, on SIGTERM, waits for the child, takes CLEANUP seconds and
+    removes the folder. Ctrl-C comes as a real SIGINT to a process running fsops.run."""
+
+    CLEANUP = 1.0
+    TERM_WAIT = 4
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.unpack = os.path.join(self.tmp, "_MEI")
+        self.ready = os.path.join(self.tmp, "ready")
+
+    def bootloader(self, ignore=False):
+        child = ("import signal, time\n"
+                 "signal.signal(signal.SIGTERM, lambda *a: (time.sleep(0.2), exit(0)))\n"
+                 "time.sleep(60)\n")
+        handler = ("signal.SIG_IGN" if ignore else
+                   "lambda *a: (child.wait(), time.sleep(%r), os.rmdir(%r), sys.exit(0))"
+                   % (self.CLEANUP, self.unpack))
+        return [sys.executable, "-c",
+                "import os, signal, subprocess, sys, time\n"
+                "os.mkdir(%r)\n"
+                "child = subprocess.Popen([sys.executable, '-c', %r])\n"
+                "signal.signal(signal.SIGTERM, %s)\n"
+                "with open(%r + '.tmp', 'w') as f:\n"
+                "    f.write('%%d %%d' %% (os.getpid(), child.pid))\n"
+                "os.rename(%r + '.tmp', %r)\n"
+                "time.sleep(60)\n"
+                % (self.unpack, child, handler, self.ready, self.ready, self.ready)]
+
+    def wait_ready(self, limit=30):
+        end = time.monotonic() + limit
+        while not os.path.exists(self.ready):
+            self.assertLess(time.monotonic(), end, "the stand-in never got ready")
+            time.sleep(0.05)
+        with open(self.ready) as f:
+            return [int(pid) for pid in f.read().split()]
+
+    def assert_gone(self, pids, limit=5):
+        # an orphan is reaped by init: wait for it to vanish, not just to die
+        end = time.monotonic() + limit
+        for pid in pids:
+            while True:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                self.assertLess(time.monotonic(), end, "pid %d still there" % pid)
+                time.sleep(0.05)
+
+    def test_timeout_waits_for_the_cleanup_not_the_whole_grace(self):
+        # the SIGKILL comes once the leader has exited: after its cleanup, well before term_wait
+        started = time.monotonic()
+        ran = fsops.run(self.bootloader(), timeout=1, new_session=True,
+                        term_wait=self.TERM_WAIT)
+        took = time.monotonic() - started
+        self.assertIsNone(ran.rc)
+        self.assertTrue(os.path.exists(self.ready))
+        self.assertFalse(os.path.exists(self.unpack))
+        self.assertGreaterEqual(took, 1 + self.CLEANUP - 0.1)
+        self.assertLess(took, 1 + self.TERM_WAIT - 1)
+
+    def runner(self, argv):
+        """A process running fsops.run(argv) with term_wait, which a real SIGINT can reach:
+        started from Python, so SIGINT isn't ignored as in a shell's background job."""
+        code = ("import sys\n"
+                "from vcharon import fsops\n"
+                "fsops.run(%r, timeout=60, new_session=True, term_wait=%r)\n"
+                % (argv, self.TERM_WAIT))
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, start_new_session=True)
+
+        def cleanup():
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+            proc.stderr.close()
+
+        self.addCleanup(cleanup)
+        return proc
+
+    def test_ctrl_c_lets_the_bootloader_clean_up(self):
+        proc = self.runner(self.bootloader())
+        pids = self.wait_ready()
+        proc.send_signal(signal.SIGINT)
+        err = proc.stderr.read()
+        self.assertNotEqual(proc.wait(15), 0)
+        self.assertIn(b"KeyboardInterrupt", err)
+        self.assertFalse(os.path.exists(self.unpack))
+        self.assert_gone(pids)
+
+    def test_second_ctrl_c_kills_at_once(self):
+        # a stand-in that ignores SIGTERM would get the whole term_wait; a second Ctrl-C cuts
+        # it short and still kills the group
+        proc = self.runner(self.bootloader(ignore=True))
+        pids = self.wait_ready()
+        proc.send_signal(signal.SIGINT)
+        time.sleep(0.5)
+        second = time.monotonic()
+        proc.send_signal(signal.SIGINT)
+        proc.stderr.read()
+        proc.wait(15)
+        self.assertLess(time.monotonic() - second, self.TERM_WAIT - 2)
+        self.assert_gone(pids)
+        self.assertTrue(os.path.exists(self.unpack))
 
 
 # Win32-OpenSSH's message for a host name it can't resolve, on a Chinese Windows: the English

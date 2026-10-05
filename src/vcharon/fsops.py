@@ -753,13 +753,49 @@ def _kill(proc, group):
         pass
 
 
-def run(argv, timeout, new_session=False, env=None):
+def exited(proc, timeout):
+    """Waits up to timeout seconds for the child to exit, without reaping it."""
+    until = time.monotonic() + timeout
+    while proc.returncode is None:
+        try:
+            if os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT):
+                return
+        except ChildProcessError:
+            return
+        if time.monotonic() >= until:
+            return
+        time.sleep(0.05)
+
+
+def _end(proc, group, term_wait):
+    """Kills proc as _kill does; with term_wait and group, SIGTERM to the process group first,
+    then up to term_wait seconds for proc to exit, so a binary's bootloader can remove its
+    unpack folder, which it can't after a SIGKILL (DESIGN, "Running watchers"). The leader
+    isn't reaped before the SIGKILL: until then its pid, the group's id, can't go to another
+    process. The SIGKILL is in a finally, so a second Ctrl-C during the wait still sends it."""
+    try:
+        if term_wait and group and proc.returncode is None:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+            else:
+                exited(proc, term_wait)
+    finally:
+        _kill(proc, group)
+
+
+def run(argv, timeout, new_session=False, env=None, term_wait=0):
     """Runs argv, an argument list and never a shell line, with an empty pipe closed at once as
     stdin and stdout and stderr captured; returns a Ran. env: the program's environment, as
     Popen takes it; None inherits this process's. After timeout seconds it kills the
     program and returns what it had printed, with rc None, or the exit code if the program
     itself had already exited. An OSError from starting it propagates. The one way vcharon runs
     another program, apart from the session's own ssh and vcharon key's ssh-add (run_terminal).
+
+    term_wait (POSIX, with new_session): on the timeout and on Ctrl-C, the program's process
+    group gets SIGTERM and up to term_wait seconds to end before the SIGKILL (_end). 0, the
+    default, kills at once. Windows always kills the program alone, at once.
 
     The empty pipe, not the null device: a program that reads stdin must see the end of input.
     Win32-OpenSSH 9.5p2 never signals it for a null-device stdin, so a probe's ssh, whose
@@ -781,7 +817,7 @@ def run(argv, timeout, new_session=False, env=None):
         # The program may have exited, and only a child it left behind holds the pipes: then
         # its exit code stands.
         rc = proc.poll()
-        _kill(proc, group)
+        _end(proc, group, term_wait)
         try:
             out, err = proc.communicate(timeout=KILL_WAIT)
         except subprocess.TimeoutExpired as e:
@@ -791,7 +827,7 @@ def run(argv, timeout, new_session=False, env=None):
         return Ran(rc, out or b"", err or b"")
     except BaseException:
         # Ctrl-C, or a bug: never leave the program running.
-        _kill(proc, group)
+        _end(proc, group, term_wait)
         raise
     finally:
         # communicate() closes stdin, but a Ctrl-C can come before it does.

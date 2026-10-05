@@ -1241,14 +1241,15 @@ def silent_fix(job):
 def run_sync(job, sync_args):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
     stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
-    session of its own: past RUN_TIMEOUT its whole process group is killed on POSIX, and in a
-    binary that is the bootloader and the Python process it starts, which would otherwise run
-    on holding the job's locks, so every later round would be busy. Windows kills the
-    bootloader alone; a binary's Python process then ends itself (install.exit_with_parent)
-    (DESIGN, "Running watchers")."""
+    session of its own: past RUN_TIMEOUT, or on Ctrl-C, its whole process group is ended on
+    POSIX, and in a binary that is the bootloader and the Python process it starts, which would
+    otherwise run on holding the job's locks, so every later round would be busy. SIGTERM
+    first, up to TERM_WAIT before the SIGKILL, so the bootloader removes its unpack folder.
+    Windows kills the bootloader alone; a binary's Python process then ends itself
+    (install.exit_with_parent) (DESIGN, "Running watchers")."""
     try:
         ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True,
-                        env=platform.child_env())
+                        env=platform.child_env(), term_wait=TERM_WAIT)
     except OSError as e:
         return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
     if ran.rc is None:
@@ -1259,7 +1260,8 @@ def run_sync(job, sync_args):
 # POSIX: the streaming child gets a session of its own, so Stream can end its whole process
 # group (_end)
 GROUP = os.name != "nt"
-# how long a child that didn't end after its stdin closed gets after SIGTERM, before the kill
+# how long a child that didn't end after its stdin closed gets after SIGTERM, before the kill;
+# also a --no-stream round's sync, after its timeout or a Ctrl-C (run_sync)
 TERM_WAIT = 3
 
 
@@ -1292,7 +1294,7 @@ def _end(proc, term_wait=TERM_WAIT):
                 os.kill(proc.pid, signal.SIGTERM)
             except OSError:
                 pass
-        _exited(proc, term_wait)
+        fsops.exited(proc, term_wait)
         if leads:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -1314,20 +1316,6 @@ def _leads_group(proc):
         return proc.returncode is None and os.getpgid(proc.pid) == proc.pid
     except OSError:
         return False
-
-
-def _exited(proc, timeout):
-    """Waits up to timeout seconds for the child to exit, without reaping it."""
-    until = time.monotonic() + timeout
-    while proc.returncode is None:
-        try:
-            if os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT):
-                return
-        except ChildProcessError:
-            return
-        if time.monotonic() >= until:
-            return
-        time.sleep(0.05)
 
 
 def _lines_of(stream):

@@ -1387,7 +1387,7 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   POSIX ([Running watchers](#running-watchers)). The child gets `PYTHONIOENCODING=utf-8` and its
   output is read as UTF-8: a Windows code page would garble `—`. `--no-stream` runs one sync per
   round instead (every 30 s by default), through `fsops.run` in a session of its own, so its
-  900 s timeout kills the sync's whole process group.
+  900 s timeout, or a Ctrl-C, ends the sync's whole process group.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
   own folder (in any case, on macOS and Windows), never stage files. It prints, each line
   starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
@@ -1844,14 +1844,21 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   Python process, so both end the usual way and the unpack folder goes; after 3 s, whatever is
   left of its process group gets SIGKILL, sent before the child is reaped, so the group's id
   can't belong to another process yet. `--no-stream`'s sync runs through `fsops.run` in a new
-  session, whose timeout kills the whole group with SIGKILL at once, so a binary's unpack folder
-  stays behind each time: rare, and better than an orphan holding the locks. Why: the Python
-  process holds the pipes, so the watcher would wait on it with no end (no `EXIT` line,
-  `--max-minutes` unable to fire, the lock held), and it holds the job's locks, so every later
-  round would be busy. A pipe whose reader still runs after the child ended is left open, never
-  closed under the reader. Windows has no tree kill here: `TerminateProcess` ends the bootloader
-  alone, and a binary's Python process then ends itself at once, mid-round, as SIGTERM ends it
-  on POSIX (the bullet above); the watcher doesn't wait for it (inferred, not run on Windows).
+  session; on its timeout or a Ctrl-C, `fsops.run` sends SIGTERM to the whole group, waits up
+  to the same 3 s for the bootloader without reaping it, then sends SIGKILL to what is left,
+  so the bootloader removes its unpack folder (PyInstaller's docs: it cleans up whenever its
+  child exits, but can't once it is killed itself). Only that caller asks for the grace:
+  `fsops.run`'s other callers (the ssh probes, `doctor`, `vcharon key`, macOS's `ioreg`,
+  `--update`'s runs of the new binary) still kill at once. The session's own ssh, started in a
+  session of its own, isn't in the group: it ends at its stdin's end, or on a dead link after
+  ssh's keepalive gives up (inferred). Why: the Python process holds the pipes, so the watcher
+  would wait on it with no end (no `EXIT` line, `--max-minutes` unable to fire, the lock held),
+  and it holds the job's locks, so every later round would be busy. A pipe whose reader still
+  runs after the child ended is left open, never closed under the reader. Windows has no tree
+  kill here, and no grace: `TerminateProcess` ends the bootloader alone, at once, and a
+  binary's Python process then ends itself at once, mid-round, as SIGTERM ends it on POSIX
+  (the bullet above), and its unpack folder stays; the watcher doesn't wait for it (inferred,
+  not run on Windows).
 
 ### Self-update
 
