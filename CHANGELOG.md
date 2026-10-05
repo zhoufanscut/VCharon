@@ -9,6 +9,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Guide and README: a sentence for users to paste to a member's agent ("Join channel C …, do
+  the steps the leader assigns you, and keep watching until CLOSED"): in one run a Codex member
+  joined and did no step, its user having asked only to join (measured). The watch topic gains
+  a short Codex path, and notes on Codex's exit code on Windows, `--project` and `/clear`.
 - `vcharon read C ID…` prints just those entries (`linux-api#7`, a leading `@` dropped), each
   whole as with `--full`, in the channel's order. An ID not there prints the ones found, then
   `ERROR not_found: no entry <ID> in <C>` with a `fix:` line (a remote member's: sync, then read

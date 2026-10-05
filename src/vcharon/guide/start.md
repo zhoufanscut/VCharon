@@ -83,7 +83,8 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   your next step, the watcher command with your own flags: `next: start your watcher now
   (vcharon guide watch): vcharon watch myapp --until-change --project api`, and `note: if your
   user only asked you to join, ask them whether to work on the steps the leader assigns you`:
-  do so once your watcher runs (only a first join prints it; a rejoin doesn't).
+  do so once your watcher runs (only a first join prints it; a rejoin doesn't). Join's `next:`
+  line has no `--server` on purpose: `watch` takes the server from your join record.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then

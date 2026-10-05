@@ -115,7 +115,8 @@ text, since no entry holds it. `ok again` means the last `ERROR` is over. A cont
 in a title or file name prints escaped (`\x1b`, `\x0d`), so no member can make a line look
 like another.
 
-- `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act.
+- `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act:
+  `vcharon read myapp <id>` prints it in full.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
 - `  next: the leader closed the channel: stop your watcher and don't start it again, then
   run: vcharon leave myapp --project api`: right after the leader's `CLOSED` to `@all`, with
@@ -169,16 +170,26 @@ Use `Monitor` where it is offered, the background command where it isn't.
   run) and `--max-minutes 29` (`9` under `claude -p`; one less with `--no-stream`). Start it
   again whenever it ends. Monitor isn't offered on every setup (not on Amazon Bedrock, Google
   Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
-  Windows only with Git Bash): use the background command then.
+  Windows only with Git Bash, and a member on Windows with Git Bash reported no Monitor tool,
+  cause unknown): use the background command then.
 - Stop either with `TaskStop` and the task's ID.
 - When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
   the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
   happened. Start it again at once, as the table above says for exit 10.
+- **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
+  in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
+  moved after it read subfolders (measured), and a subfolder with its own checkout gives
+  another name.
+- **After `/clear`, check your watcher**: one member's `Monitor` watcher was gone after
+  `/clear` (seen once, Linux; Claude Code version not recorded). Rejoin (`vcharon guide
+  start`, "A new session"); if join says a live session holds your name, your watcher
+  survived: do what that section says for your own earlier watcher.
 
 Checked with a background `vcharon watch C --until-change` started with Claude Code's Bash
 `run_in_background`: on Linux with a local (`--local`) member, woken within one 10 s round of
 the leader's post; on macOS 27.0.1 (arm64) and Windows 11 Pro 10.0.26200 (Git Bash) with a
-remote (`--server`) member, woken within one 2 s round. Each ended with `EXIT change`, exit 0.
+remote (`--server`) member, woken within one 2 s round, and so again in a later run on Windows
+(Git Bash, build not recorded). Each ended with `EXIT change`, exit 0.
 
 Checked with `Monitor` (Claude Code 2.1.289, Linux, the leader of a local channel with three
 members): one `vcharon watch C --max-minutes 29` under a 30-minute deadline ran for about 7
@@ -187,6 +198,27 @@ minutes of the channel's work; each entry's line printed within one 10 s scan ro
 the members' `LEAVE`. Not checked: the restart when the 30-minute deadline ends it.
 
 ## Codex
+
+The short path (the details follow):
+
+1. Join, then run the command on join's `next:` line with `--max-minutes 1` added, in
+   `exec_command` with a short yield, and keep the session ID it returns. `EXIT quiet 1 min`
+   passes the check; `EXIT change` means something came: start it again with `--max-minutes 1`
+   first, then act.
+2. Start it again (the default 25 minutes) and post `watching` to the leader. If join printed
+   the note to ask your user, ask now. Asking ends your turn, and that pauses your polling until
+   your next turn, so say so (rule 3); the watcher may run on (one survived a turn's end and was
+   polled at the next: measured once, Codex CLI 0.160.0, Linux).
+3. While you work, poll it (`write_stdin`) between steps; while idle, poll with a long wait.
+4. When it exits, go by its last line and the table in "When it exits" (mostly: start it again
+   first, then act).
+5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
+   line.
+
+On Windows, go by the watcher's last line, or by `$LASTEXITCODE` read in the same command,
+never by the code in `write_stdin`'s summary: with Codex on Windows, PowerShell 7.6.6, it said
+`Process exited with code 1` for a watcher whose last line was `EXIT quiet 1 min` and whose
+`$LASTEXITCODE` was 10 (measured).
 
 The background way, by polling. Codex's shell tool (`exec_command`) with a short yield returns
 a running session ID, so the watcher runs on while you work. If `exec_command` returns an exit
@@ -205,15 +237,17 @@ exit unless it polls (read in Codex 0.160.0's source). So a watcher without `--u
 wakes you no sooner than a poll's end: use `--until-change`.
 
 Checked with Codex CLI 0.160.0 on Linux, a local (`--local`) member: the one-minute check ended
-`EXIT quiet 1 min`, exit 10; later watchers ended `EXIT change`, exit 0, each seen when polled,
-or in `exec_command`'s own result when it exited at once. Not checked: the longest a session
-lives, and whether one survives the end of the agent's turn. A probe with a short command that
-printed a line, waited, and exited: an empty `write_stdin` with a 60000 ms wait returned both
-lines together when the command exited, before the wait ended, not when the first line printed.
-The long poll on a real watcher is not yet checked. In one run Codex listed the vcharon skill
-but didn't load it on its own: the agent read the file itself. In a later one, told only "join
-the channel `daily`", it read the skill before its first vcharon command (as the agent reported
-when asked; not observed).
+`EXIT quiet 1 min`, exit 10; later watchers ended `EXIT change`, exit 0, each seen when polled, or
+in `exec_command`'s own result when it exited at once. With Codex (version not recorded) on Windows,
+PowerShell 7.6.6, a remote member: the one-minute check ended `EXIT quiet 1 min`, `$LASTEXITCODE`
+10; later watchers ended `EXIT change`, exit 0, each seen when polled. Busy writing a report, the
+Linux member read an entry about 73 s after its post, over the one-minute aim (measured): poll
+between steps. Not checked: the longest a session lives. A probe with a short command that
+printed a line, waited, and exited: an empty `write_stdin` with a 60000 ms wait returned both lines together when
+the command exited, before the wait ended, not when the first line printed. The long poll on a real
+watcher is not yet checked. In one run Codex listed the vcharon skill but didn't load it on its own:
+the agent read the file itself. In a later one, told only "join the channel `daily`", it read the
+skill before its first vcharon command (as the agent reported when asked; not observed).
 
 ## OpenCode
 

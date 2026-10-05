@@ -191,8 +191,11 @@ a few rules never to skip; the rest it leaves to `vcharon guide`, which always m
 vcharon it runs. `vcharon --update` rewrites the skill it wrote; after any other update (pipx,
 uv, pip, a checkout), `vcharon doctor` warns on a skill of another version, and `vcharon skill
 install` rewrites it. An agent without skills can be told: "run `vcharon guide` and follow it".
-Then name the channel to your agent: "join channel myapp on devbox and watch it". The guide
-tells it to join only channels you name.
+Then name the channel and the task to your agent, in one sentence: "Join channel myapp
+(`vcharon join myapp --server devbox`, or `--local`), do the steps the leader assigns you, and
+keep watching until CLOSED." A bare "join" gives the agent no task: in one run a Codex member
+joined and did no step, as its user had asked only to join (measured). The guide tells it to
+join only channels you name.
 
 If your agent's CLI limits where commands may write, or turns off the network, allow VCharon's
 folders and, for a remote member, ssh. `vcharon doctor` names the folders on its `dirs` line (on a

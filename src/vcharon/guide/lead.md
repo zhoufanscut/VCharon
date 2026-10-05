@@ -23,6 +23,15 @@ the steps, each assigned to one member by name: a step with no name gets two mem
 Mark the steps that are your user's (a terminal, an admin shell, a decision): no member may do
 them.
 
+- **A name you write before its `JOIN` is a guess** (it comes from the member's machine and
+  folder): post the real names once the `JOIN`s are in.
+- **Give your user a sentence to paste** to each member's agent: "Join channel myapp (`vcharon
+  join myapp --server devbox`, or `--local`), do the steps the leader assigns you, and keep
+  watching until CLOSED." (`--server` with that machine's alias for the channel's server.) A bare
+  "join" is no task: a careful agent may join and stop.
+- **Check a step's facts before you assign it** (a flag, a file, which side runs it): a wrong
+  one costs a round trip.
+
 ## A new step
 
 Post it the same way, `--steps --to @all`: each member gets it as a `to all:` line. If one
