@@ -109,6 +109,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
 | `WARN not sent to <server>: …`, `fix: the entry is saved in your folder; your watcher sends it, …` (the post stands, exit 0) | the server didn't answer, or a file changed during the send: nothing to redo, your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
 | `WARN not sent to <server>: …`, `fix: the entry is saved in your folder, but no sync sends it until: …` (the post stands, exit 0) | no sync gets past that error: follow the rest of the `fix:` line as for that error (a closed channel: `vcharon guide end`); don't post the entry again |
+| `WARN entry <id> names <alias>: an ssh alias or host name this machine uses; …` (the post stands, exit 0) | if that word is the ssh alias, the entry carries a machine detail (`vcharon guide rules`): post a correction entry without it, `--re <id>`, and never edit the entry; if it names something else there, nothing to do |
 | `--title: it holds a control or format character (…)` (exit 3) | give a title of plain text, with no escape codes or invisible characters |
 | `--<flag> isn't valid UTF-8` (exit 3) | give that option's text in UTF-8 |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |

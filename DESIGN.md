@@ -1245,6 +1245,25 @@ re: linux-api#3
   refuses, `state_mismatch`) prints the up job's own fix after `the entry is saved in your
   folder, but no sync sends it until:`, since every later sync fails the same way. The up job's
   lock never waits, so a post can't deadlock with a watcher.
+- A title or body that names an ssh alias or host name this machine's vcharon uses gets
+  `WARN entry <id> names <name>: …` and a `fix:` line (if it is the alias, post a correction
+  entry without it, `--re <id>`; if it names something else, nothing to do) on stderr, after
+  the `posted` line; the post stands, exit 0, since the entry is written and entries are never
+  edited. The names are the host part (`user@`, `ssh://` and a `:port` taken off) of every join
+  record's server and every channel section's `ssh`, one per name whatever its case; a
+  one-letter name is left out (it would match every "a"), and so is a name the channel's
+  entries hold anyway: the channel's, this box's, the project or role of this machine's
+  records of the channel, or any `-`-joined run of parts of a member's name (the tree's
+  folders, those records' names and leaders); another channel's record never excuses a name.
+  A name matches as a whole word, case-insensitively: a word runs on through ASCII
+  letters, digits, `_`, `-`, and a `.` followed by one of those, so `devbox` matches in `sent
+  to devbox.`, `me@devbox:22` and `已发送到devbox。` (Chinese text puts no space around a
+  name) but not in `devbox-2`, `win-devbox#3` or `devbox.example.com`. The records are read
+  one by one: one that can't be read only leaves its own name out.
+  Why: vcharon's own lines (`sent to <server>`, `--server <alias>` in fix lines) print the
+  alias, and an agent quoting them carries it into the channel, which the rules keep machine
+  details out of; the warning names the word, since it is seen only on this machine's terminal.
+  It never refuses: a word can be a host's name and an ordinary word at once.
 - The whole new file goes to a `.vcharon-stage-` temp file in the same folder, then replaces it
   in one step: a reader or a sync sees the old file or the new one, never half. On Windows the
   replace fails while another program holds the file (a sync uploading it); it is tried again

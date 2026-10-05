@@ -10,6 +10,7 @@ import io
 import json
 import os
 import posixpath
+import re
 import string
 import sys
 import threading
@@ -579,9 +580,92 @@ def _post(args, run):
                               channel=args.channel)
     print("posted %s — %s to %s at %s" % (id_, title, "/".join([name] + parts), when))
     sys.stdout.flush()
+    _warn_hosts(cfg, record, tree, id_, title, body)
     if record["ssh"] is not None and not args.no_sync:
         _send_post(args.channel, record, flags)
     return 0
+
+
+def _ssh_hosts(cfg, records):
+    """The ssh aliases and host names this machine's vcharon uses: the host part of each join
+    record's server (records) and of each config job's destination (user@, ssh:// and :port
+    taken off), one of each name whatever its case."""
+    dests = [job.ssh for job in cfg.jobs.values()] + [r["ssh"] for r in records]
+    hosts = {}
+    for dest in dests:
+        if not isinstance(dest, str):
+            continue
+        host = dest.removeprefix("ssh://").rpartition("@")[2]
+        if host.startswith("["):
+            host = host[1:].partition("]")[0]
+        elif host.count(":") == 1:
+            host = host.partition(":")[0]
+        # a one-letter alias would match every "a" in a sentence
+        if len(host) > 1:
+            hosts.setdefault(host.casefold(), host)
+    return set(hosts.values())
+
+
+def _channel_words(cfg, channel, records, tree):
+    """The casefolded words a channel's entries name anyway: the channel's name, this box's,
+    and each '-'-joined run of parts of every member name (the tree's folders, records' names
+    and leaders), so a box, project or role is in it whole, plus the records' projects and
+    roles. records: this machine's records of the channel only. An alias that is one of these
+    is no news in an entry."""
+    names = [r[k] for r in records for k in ("name", "leader")]
+    try:
+        names += [n for n in os.listdir(tree) if os.path.isdir(os.path.join(tree, n))]
+    except OSError:
+        pass
+    words = {channel, cfg.box_name}
+    words.update(r[k] for r in records for k in ("project", "role") if r[k])
+    for name in names:
+        parts = name.split("-")
+        words.update("-".join(parts[i:j]) for i in range(len(parts))
+                     for j in range(i + 1, len(parts) + 1))
+    return {w.casefold() for w in words}
+
+
+def hosts_in(text, hosts):
+    """The names among hosts that text holds as a whole word, case-insensitively, as written in
+    hosts, sorted. A word goes on through ASCII letters, digits, '_' and '-', and through a '.'
+    with one of those after it: "devbox" is in "sent to devbox.", "me@devbox:22" and
+    "已发送到devbox。", but not in "devbox-2", "my-devbox" or "devbox.example.com" (a name of
+    its own, whose own entry in hosts matches it)."""
+    found = set()
+    for host in hosts:
+        pattern = r"(?<![\w-])(?<![\w-]\.)%s(?![\w-])(?!\.[\w-])" % re.escape(host)
+        # ASCII: a name written next to Chinese text (no space between) is still a word
+        if re.search(pattern, text, re.IGNORECASE | re.ASCII):
+            found.add(host)
+    return sorted(found)
+
+
+# the rules keep machine details out of a channel (the guide's rules topic); a post's own
+# command line is the one place vcharon can see one going in, so it warns there
+HOST_WARN = ("WARN entry %s names %s: an ssh alias or host name this machine uses; the rules keep "
+             "ssh aliases and host names out of the channel")
+HOST_FIX = ("  fix: if that is the ssh alias, post a correction entry without it, with --re %s; "
+            "if it names something else here, nothing to do")
+
+
+def _warn_hosts(cfg, record, tree, id_, title, body):
+    """A WARN on stderr when the posted entry's title or body names an ssh alias or host
+    name of this machine's vcharon (_ssh_hosts), other than a word the channel names anyway
+    (_channel_words): the entry stands, and a correction is a new entry. The user sees the
+    name on its own terminal only. Never fails: a record that can't be read only leaves its
+    names out, since the entry is written already."""
+    records = channel_cmd.records(skip_unreadable=True)
+    # only this channel's: a project or role of another channel's membership isn't named in
+    # this one's entries, so an alias equal to it still warns
+    known = _channel_words(cfg, record["channel"],
+                           [r for r in records if r["channel"] == record["channel"]], tree)
+    hosts = {h for h in _ssh_hosts(cfg, records) if h.casefold() not in known}
+    found = hosts_in("%s\n%s" % (title, body), hosts)
+    if found:
+        print(HOST_WARN % (id_, ", ".join(found)), file=sys.stderr)
+        print(HOST_FIX % id_, file=sys.stderr)
+        sys.stderr.flush()
 
 
 def _check_tree(record, tree, synced, own=None):

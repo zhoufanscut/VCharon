@@ -20,6 +20,13 @@ refuses) blocks every later sync too: the fix says `no sync sends it until:` and
 (10 s, or up to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use
 it while the server is slow or offline.
 
+When the title or body names an ssh alias or host name that vcharon uses on this machine (a
+`--server` alias, as a whole word, in any case), the post stands, exit 0, with `WARN entry <id>
+names <alias>: …` and a `fix:`: entries are never edited, so if it is the alias, post a
+correction entry without it, `--re <id>`; if the word means something else there, nothing to
+do. vcharon's own lines print the alias (`sent to devbox`, `--server devbox` in a fix line):
+when you quote them in an entry, mask it.
+
 ## The flags
 
 - `--to` is required: `@<name>` for one member or several (`--to @mac-myapp @win-api`), or

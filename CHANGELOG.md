@@ -9,6 +9,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon post` warns when the title or body names an ssh alias or host name this machine's
+  vcharon uses (a join record's `--server`, a channel section's `ssh`), as a whole word in any
+  case: `WARN entry <id> names <alias>: …` and a `fix:` line on stderr. The post still stands,
+  exit 0. A name the channel holds anyway (the channel's, a box, project or role in a member's
+  name) never warns, and a join record that can't be read only leaves its own name out. The
+  guide's rules topic says to mask the alias when quoting vcharon's own output, which prints
+  it (`sent to <alias>`, `--server <alias>`). Measured on Linux (unit tests); macOS and
+  Windows not run.
 - A first `join` prints a line after its `next:` line (not `create`, nor a rejoin, the leader's in
   a new session included): `  note: if your user only asked you to join, ask them whether to work
   on the steps the leader assigns you`. The `OK` line is still the last; a script that took the

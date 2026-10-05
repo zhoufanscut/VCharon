@@ -297,6 +297,13 @@ refuses) blocks every later sync too: the fix says `no sync sends it until:` and
 (10 s, or up to 30 s if the login hangs). `--no-sync` writes the entry without sending it: use
 it while the server is slow or offline.
 
+When the title or body names an ssh alias or host name that vcharon uses on this machine (a
+`--server` alias, as a whole word, in any case), the post stands, exit 0, with `WARN entry <id>
+names <alias>: …` and a `fix:`: entries are never edited, so if it is the alias, post a
+correction entry without it, `--re <id>`; if the word means something else there, nothing to
+do. vcharon's own lines print the alias (`sent to devbox`, `--server devbox` in a fix line):
+when you quote them in an entry, mask it.
+
 ### The flags
 
 - `--to` is required: `@<name>` for one member or several (`--to @mac-myapp @win-api`), or
@@ -687,7 +694,8 @@ Each rule has its reason after the colon.
   host's name. Give the path in the repository and the revision instead, and name your machine
   by its box (the first part of your member name). A public link (a library's docs) is fine.
   Even when your user asks for paths in a report, give them relative to your project, or
-  starting `~/`.
+  starting `~/`. When you quote vcharon's own output, mask the server alias: its lines print
+  it (`sent to devbox`, `--server devbox`). `vcharon post` warns when an entry names one.
 - **A path in another member's entry is in that member's checkout**: find the file in yours,
   since the layouts may differ.
 - **One writer per folder.** Never create, edit or delete anything in another member's folder:
@@ -1008,6 +1016,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `--to <name>: not a member of <C> (members: …)` | address one of the members listed, by name or as `@<name>` |
 | `WARN not sent to <server>: …`, `fix: the entry is saved in your folder; your watcher sends it, …` (the post stands, exit 0) | the server didn't answer, or a file changed during the send: nothing to redo, your watcher or the next `vcharon sync` sends it. If your watcher isn't running, start it |
 | `WARN not sent to <server>: …`, `fix: the entry is saved in your folder, but no sync sends it until: …` (the post stands, exit 0) | no sync gets past that error: follow the rest of the `fix:` line as for that error (a closed channel: `vcharon guide end`); don't post the entry again |
+| `WARN entry <id> names <alias>: an ssh alias or host name this machine uses; …` (the post stands, exit 0) | if that word is the ssh alias, the entry carries a machine detail (`vcharon guide rules`): post a correction entry without it, `--re <id>`, and never edit the entry; if it names something else there, nothing to do |
 | `--title: it holds a control or format character (…)` (exit 3) | give a title of plain text, with no escape codes or invisible characters |
 | `--<flag> isn't valid UTF-8` (exit 3) | give that option's text in UTF-8 |
 | `note: a sync of <C> is running (your watcher's): it sends the entry` | nothing to do |

@@ -225,14 +225,18 @@ def check_channel(channel):
 
 # --- which membership: channel + project + role (DESIGN, "Which membership") ---
 
-def records(channel=None):
+def records(channel=None, skip_unreadable=False):
     """Every join record on this box, of channel if given, in file name order. A record that
-    can't be read is an error, as read_record's: vcharon never guesses."""
+    can't be read is an error, as read_record's: vcharon never guesses. skip_unreadable leaves
+    out each record (and the folder) that can't be read instead, for a caller that only looks
+    for names and must not fail."""
     try:
         files = sorted(os.listdir(records_dir()))
     except FileNotFoundError:
         return []
     except OSError as e:
+        if skip_unreadable:
+            return []
         raise fsops.error(e, records_dir())
     out = []
     for f in files:
@@ -243,7 +247,12 @@ def records(channel=None):
             continue
         if channels.channel_problem(ch) or pathrules.writer_problem(name):
             continue
-        record = read_record(ch, name)
+        try:
+            record = read_record(ch, name)
+        except VCharonError:
+            if not skip_unreadable:
+                raise
+            continue
         if record is not None:
             out.append(record)
     return out

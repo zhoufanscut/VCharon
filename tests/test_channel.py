@@ -1943,6 +1943,126 @@ class PostSendTest(ChannelCase):
         self.assertIn("--no-sync is for a remote member", err)
 
 
+class PostHostWarnTest(ChannelCase):
+    """A post whose title or body names an ssh alias or host name this machine's vcharon uses
+    gets a WARN with a fix line; the entry posts all the same, exit 0."""
+
+    TEMPLATE = True
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        self.from_template(self.joined_game)
+
+    def joined_game(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+
+    def warned(self, title="done", body="b"):
+        """(the ID, the stderr lines) of a post that must succeed."""
+        code, out, err = self.run_cli("post", "game", "--to", "@laptop-ui", "--title", title,
+                                      "--body", body, "--no-sync")
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"\Aposted mac-web#\d+ — ")
+        return out.split()[1], err.splitlines()
+
+    def test_an_alias_in_the_body_or_the_title(self):
+        for title, body in (("done", "sent to fake-dest and back"),
+                            ("ran --server fake-dest", "b"),
+                            ("done", "line one\nfake-dest."),
+                            ("done", "已发送到fake-dest。")):
+            with self.subTest(title=title, body=body):
+                id_, lines = self.warned(title, body)
+                self.assertEqual(lines, [
+                    "WARN entry %s names fake-dest: an ssh alias or host name this machine "
+                    "uses; the rules keep ssh aliases and host names out of the channel" % id_,
+                    "  fix: if that is the ssh alias, post a correction entry without it, "
+                    "with --re %s; if it names something else here, nothing to do" % id_])
+        # the entries are written all the same
+        titles = [e.title for e in entries.parse_file(
+            os.path.join(self.joined("game.mac-web"), "mac-web", "RESULTS.md"))]
+        self.assertIn("ran --server fake-dest", titles)
+
+    def test_case_is_ignored(self):
+        _id, lines = self.warned(body="see FAKE-Dest")
+        self.assertEqual(len(lines), 2)
+        self.assertIn(" names fake-dest: ", lines[0])
+
+    def test_only_a_whole_word(self):
+        for body in ("fake-dest2", "my-fake-dest", "fake-dest-2", "fake-dest.example.com",
+                     "x.fake-dest", "fake-dest_x", "fake", "fakedest"):
+            with self.subTest(body=body):
+                self.assertEqual(self.warned(body=body)[1], [])
+        for body in ("me@fake-dest:22", "(fake-dest)", "`fake-dest`", "ssh://fake-dest/"):
+            with self.subTest(body=body):
+                self.assertEqual(len(self.warned(body=body)[1]), 2)
+        # a word ends at a character that isn't ASCII: Chinese text runs on with no space
+        hosts = {"gugu"}
+        for text in ("已发送到gugu。", "gugu的日志", "GUGU，"):
+            with self.subTest(text=text):
+                self.assertEqual(cli.hosts_in(text, hosts), ["gugu"])
+        for text in ("x.gugu", "gugu-2", "gugu.example.com", "win-gugu#3", "gugu_x"):
+            with self.subTest(text=text):
+                self.assertEqual(cli.hosts_in(text, hosts), [])
+
+    def test_names_the_channel_has_anyway(self):
+        # an alias that is also the channel's name, a box, project or role in a member's name,
+        # or this box: entries name those anyway
+        hosts = {"game", "laptop", "UI", "web", "mac", "mac-web", "devbox"}
+        with mock.patch("vcharon.cli._ssh_hosts", return_value=hosts):
+            _id, lines = self.warned(body="game laptop ui web mac mac-web devbox")
+        self.assertEqual(len(lines), 2)
+        self.assertIn(" names devbox: ", lines[0])
+
+    def test_another_channel_s_names_still_warn(self):
+        # another channel's membership on this machine, on server devbox from project devbox:
+        # its project and name are never in this channel's entries, so devbox still warns
+        self.write_record("other", "mac-devbox", "laptop-devbox", ssh="devbox",
+                          project="devbox", role="devbox")
+        _id, lines = self.warned(body="see devbox")
+        self.assertEqual(len(lines), 2)
+        self.assertIn(" names devbox: ", lines[0])
+
+    def test_an_unreadable_record_never_breaks_the_post(self):
+        # a record that can't be read, sorted before the good one: only its own name is left
+        # out, and the good record's alias still warns
+        records = os.path.join(os.environ["VCHARON_HOME"], "state", "channels")
+        with open(os.path.join(records, "aaa.mac-web.json"), "wb") as f:
+            f.write(b"{not json")
+        self.assertEqual([r["name"] for r in channel_cmd.records(skip_unreadable=True)],
+                         ["mac-web"])
+        with self.assertRaises(VCharonError):
+            channel_cmd.records()
+        with mock.patch("vcharon.cli._ssh_hosts", wraps=cli._ssh_hosts) as seen:
+            _id, lines = self.warned(body="fake-dest")
+        self.assertEqual(len(lines), 2)
+        self.assertEqual([r["name"] for r in seen.call_args.args[1]], ["mac-web"])
+        with mock.patch("os.listdir", side_effect=PermissionError("denied")):
+            self.assertEqual(channel_cmd.records(skip_unreadable=True), [])
+
+    def test_a_local_member_with_no_aliases(self):
+        # no remote membership and no section with ssh on this box: nothing to warn about
+        self.use_box("solo")
+        self.lead("local", where=("--local",), box="pc")
+        self.use_box("solo")
+        self.ok("join", "local", "--local")
+        code, out, err = self.run_cli("post", "local", "--to", "@pc-ui", "--title",
+                                      "fake-dest", "--body", "sent to fake-dest")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(out.splitlines()), 1)
+
+    def test_the_host_of_each_destination(self):
+        jobs = {str(i): mock.Mock(ssh=d) for i, d in enumerate(
+            ["me@devbox", "ssh://me@server.example.com:2222", "[::1]:22", "x", "lab:2200",
+             "DevBox"])}
+        hosts = cli._ssh_hosts(mock.Mock(jobs=jobs), [])
+        # one of each name whatever its case
+        self.assertEqual({h.casefold() for h in hosts},
+                         {"devbox", "server.example.com", "::1", "lab"})
+        self.assertEqual(len(hosts), 4)
+        self.assertEqual(cli.hosts_in("on Server.Example.com.", hosts), ["server.example.com"])
+        self.assertEqual(cli.hosts_in("devbox2 and server.example.community", hosts), [])
+
+
 class SkippedTest(ChannelCase):
     """channels.d/ files that are broken, through the commands."""
 
