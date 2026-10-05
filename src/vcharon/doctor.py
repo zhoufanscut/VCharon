@@ -115,6 +115,10 @@ class Report:
         if note:
             self.say(" " * len(head) + "note: " + note)
 
+    def aside(self, text):
+        """A note under the last check's text, not a check of its own (--json has the data)."""
+        self.say(" " * (self.width + 10) + "note: " + text)
+
     def last_line(self, seconds):
         warned = ", %s" % _counted(self.warnings, "warning") if self.warnings else ""
         if self.failed:
@@ -353,6 +357,8 @@ def _dirs(rep):
     # only the state and log dirs are made and tried here: the others may not exist yet, and
     # doctor makes nothing else
     tried = (where["state"], where["logs"])
+    listing = "state %s, logs %s, joined %s, channels %s" % (
+        where["state"], where["logs"], where["joined"], where["channels"])
     good = True
     for folder in tried:
         try:
@@ -362,11 +368,16 @@ def _dirs(rep):
             os.remove(tmp)
         except OSError as e:
             good = False
-            rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e),
-                      "fix its permissions, or set VCHARON_HOME to an absolute folder")
+            # an agent CLI's sandbox gives these on a folder that is fine: the fix says so
+            hint = (fsops.error(e, folder).hint if e.errno in fsops.SANDBOX_ERRNOS
+                    else "fix its permissions, or set VCHARON_HOME to an absolute folder")
+            rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e), hint)
     if good:
-        rep.check("ok", "dirs", "state %s, logs %s, joined %s, channels %s"
-                  % (where["state"], where["logs"], where["joined"], where["channels"]))
+        rep.check("ok", "dirs", listing)
+    else:
+        # the folders a user allows for a sandboxed agent: listed even when a check fails,
+        # which is when they are needed
+        rep.aside("vcharon's folders: " + listing)
 
 
 def _machine(rep):

@@ -10,7 +10,7 @@ import sys
 import time
 import traceback
 
-from . import PROTOCOL, VERSION, channels, plan, platform, plugin, proto, stage
+from . import PROTOCOL, VERSION, channels, fsops, plan, platform, plugin, proto, stage
 from .proto import VCharonError
 
 # A busy helper sends a tick at most this often, so it never looks idle (DESIGN, "Threads, timeouts,
@@ -427,6 +427,8 @@ def serve(h):
 
 
 def main(nonce):
+    # no agent's sandbox runs here: a refused write is the folder's own
+    fsops.SERVER = True
     out = take_stdout()
     conn = HelperConn(sys.stdin.buffer, out)
     h = None

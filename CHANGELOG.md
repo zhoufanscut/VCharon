@@ -9,6 +9,22 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- An `ERROR permission` from `Read-only file system` (`EROFS`) or `Operation not permitted`
+  (`EPERM`) now ends `fix: if your CLI's sandbox blocked it, ask your user to allow vcharon's
+  folders (vcharon doctor); else check the owner and permissions of <path>` (was only the last
+  part). `Permission denied` (`EACCES`) and errors from the server's side keep the old fix; the
+  error code stays `permission`. For `EROFS` or `EPERM`, `doctor`'s failed `dirs` check gives
+  the same fix (any other error keeps `fix its permissions, or set VCHARON_HOME …`), and it now
+  lists the four folders on a `note:` line under the failures (they were shown only when every
+  check passed). The `errors` guide
+  has a section on it. Why: with Codex CLI 0.160.0 on Linux, an agent's `join --local` failed
+  with `Read-only file system` and was told to check the folder's permissions; the same
+  command, re-run with Codex's approval outside its sandbox, succeeded (as the agent reported).
+  Measured on Linux: unit tests for the errno mapping, the server's fix and doctor's lines; and
+  `join --local` and `doctor` under `unshare -rm` with the state and channel folders bind-mounted
+  read-only printed the new fix lines and the folder list, and the same join without the mounts
+  passed. Inferred for macOS (its sandbox's `EPERM`, not checked) and Windows (`access denied`
+  keeps its own fix).
 - `vcharon read C` without `--full` or `--json` ends, when it lists an entry, with a line on
   how to see the bodies: `  note: to see the bodies: vcharon read C --full [--last N] --project P
   [--role R]`. The `read` guide says so near its top. In a channel run, two agents (Codex,

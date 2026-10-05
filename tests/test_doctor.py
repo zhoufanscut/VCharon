@@ -7,6 +7,7 @@ case per row.
 from __future__ import annotations
 
 import builtins
+import errno
 import json
 import os
 import re
@@ -17,7 +18,7 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import bundle, channels, doctor, install, keys, platform, skill, ssh, state
+from vcharon import bundle, channels, doctor, fsops, install, keys, platform, skill, ssh, state
 
 from tests import util
 from tests.util import (
@@ -415,6 +416,33 @@ class DoctorTest(DoctorCase):
         self.assertEqual(len(dirs), 2, out)
         self.assertTrue(dirs[0].startswith("  FAIL  dirs     can't write in %s: "
                                            % os.path.join(blocker, "state")), dirs)
+
+    def test_dirs_refused_by_a_sandbox(self):
+        # an agent CLI's sandbox: the folder is fine, the write is refused. The fix says so,
+        # and the folders to allow are still listed, under the failures
+        self.write_config("")
+        real = doctor.tempfile.mkstemp
+
+        def refused(*args, dir=None, **kw):
+            if dir is not None and dir.startswith(self.vcharon_home):
+                raise OSError(errno.EROFS, "Read-only file system")
+            return real(*args, dir=dir, **kw)
+
+        self.patch(doctor.tempfile, "mkstemp", side_effect=refused)
+        self.patch(platform, "self_command", return_value="vcharon")
+        lines = self.doctor(code=1)
+        state_dir = os.path.join(self.vcharon_home, "state")
+        logs_dir = os.path.join(self.vcharon_home, "logs")
+        self.assertEqual(self.of(lines, "dirs"), [
+            ("FAIL", "can't write in %s: Read-only file system" % state_dir),
+            ("FAIL", "can't write in %s: Read-only file system" % logs_dir)])
+        at = next(n for n, line in enumerate(lines) if line.startswith("  FAIL  dirs"))
+        pad = " " * lines[at].index("can't")
+        self.assertEqual(lines[at + 1], pad + "fix: " + fsops.SANDBOX_HINT % state_dir)
+        self.assertEqual(lines[at + 4], pad + "note: vcharon's folders: state %s, logs %s, "
+                         "joined %s, channels %s"
+                         % (state_dir, logs_dir, os.path.join(self.vcharon_home, "joined"),
+                            channels.root_path()))
 
     def test_machine(self):
         # this machine's id; doctor checks it before any destination and never asks one, so a

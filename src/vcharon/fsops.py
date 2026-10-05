@@ -30,6 +30,16 @@ DEVICE_HINT = "pick a root with no mount points under it"
 # not the path source's NAME_HINT text: a root path can be too long too, and a mailbox job
 # swaps that hint (cli.SOURCE_HINTS)
 TOO_LONG_HINT = "rename it at the source, or pick a shorter root"
+# An agent CLI's sandbox refuses with these on a folder that is fine: EROFS (Codex on Linux),
+# EPERM (macOS's sandbox) (DESIGN, "Fix lines"). EACCES is usually the file's own owner or mode.
+SANDBOX_ERRNOS = (errno.EROFS, errno.EPERM)
+# fsops can't import platform (a cycle): the printer spells the command, as for every fix line
+SANDBOX_HINT = ("if your CLI's sandbox blocked it, ask your user to allow vcharon's folders "
+                "(vcharon doctor); else check the owner and permissions of %s")
+PERMISSION_HINT = "check the owner and permissions of %s"
+# True in the helper on a server, where no agent's sandbox runs: there the plain hint. Set only
+# by helper.main, never reset: a test that runs helper.main in-process must restore it.
+SERVER = False
 
 # Sharing-violation retries on Windows (DESIGN, "Staging and commit"): virus scanners briefly hold
 # new files.
@@ -90,8 +100,8 @@ def error(e, path):
         return VCharonError("not_found", "%s: no such file or directory" % path,
                             "it may have been removed during the run; run again")
     if no in (errno.EACCES, errno.EPERM, errno.EROFS):
-        return VCharonError("permission", "%s: %s" % (path, text),
-                            "check the owner and permissions of %s" % path)
+        hint = SANDBOX_HINT if no in SANDBOX_ERRNOS and not SERVER else PERMISSION_HINT
+        return VCharonError("permission", "%s: %s" % (path, text), hint % path)
     if no is not None and no in (errno.ENOSPC, getattr(errno, "EDQUOT", None)):
         return VCharonError("no_space", "%s: the disk is full" % path,
                             "free some space, then run again")

@@ -695,6 +695,10 @@ HINTS = {
         ("start one in this shell: %s, then run vcharon key again", ("eval $(ssh-agent)",)),
         ("check the passphrase, then run vcharon key again", ()),
         ("open a new Terminal window, then run vcharon key again", ())],
+    "fsops.py": [
+        # EROFS and EPERM: "(vcharon doctor)" ends at its ")"
+        ("if your CLI's sandbox blocked it, ask your user to allow vcharon's folders "
+         "(vcharon doctor); else check the owner and permissions of %s", ("/tmp/x",))],
     "ssh.py": [("add your key to the server, or run: vcharon key %s", ("dev",))],
     "state.py": [("check the target, then run both: vcharon sync %s --reset %s %s ; vcharon "
                   "sync %s --full %s", ("game", "up", FLAGS, "game", FLAGS))],

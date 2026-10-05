@@ -44,6 +44,15 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 
 The watcher has its own (0, 10 to 15): `vcharon guide watch`.
 
+## A refused write (any command)
+
+`ERROR permission: <path>: Read-only file system` (or `Operation not permitted`), from any
+command (`join`, `create`, `post`), or `ERROR <C>.<name>.up: permission: …` (`.down`) in a sync
+or watcher round, with a `fix:` that names your CLI's sandbox: the folder is likely fine and
+your CLI blocked the write. Ask your user to allow vcharon's folders (`vcharon guide start`,
+"Before the first channel"), quoting the lines; never work around it. With `Permission denied`,
+or a fix without the sandbox, follow the `fix:` line.
+
 ## Joining and creating
 
 | it says | what to do |

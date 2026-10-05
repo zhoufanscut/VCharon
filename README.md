@@ -195,11 +195,11 @@ Then name the channel to your agent: "join channel myapp on devbox and watch it"
 tells it to join only channels you name.
 
 If your agent's CLI limits where commands may write, or turns off the network, allow VCharon's
-folders and, for a remote member, ssh. `vcharon doctor --json` lists the folders under `dirs`,
-and the config file under its `config` check; the plain `dirs` line names them all only when
-they can be written. Codex, started with `--add-dir` naming VCharon's `state` folder (which held
-the channel root), ran `join`, `post`, `read`, `watch`, `whoami` and `guide` as a local member
-with no permission error (Linux).
+folders and, for a remote member, ssh. `vcharon doctor` names the folders on its `dirs` line (on a
+`note:` line under it when one can't be written), `--json` under `dirs`, and the config file under
+its `config` check. Codex, started with `--add-dir` naming VCharon's `state` folder (which held the
+channel root), ran `join`, `post`, `read`, `watch`, `whoami` and `guide` as a local member with no
+permission error (Linux).
 
 ## Keys
 
@@ -386,8 +386,8 @@ There is no uninstall command. Stop every watcher, leave (or close) your channel
    | joined channels (a remote member's copies) | `~/.local/state/vcharon/joined/` | `~/.local/state/vcharon/joined/` | `%LOCALAPPDATA%\vcharon\joined\` |
    | channel root (local members' channels) | `~/.local/state/vcharon/channels/` | `~/.local/state/vcharon/channels/` | `%USERPROFILE%\.local\state\vcharon\channels\` |
 
-   Before you remove the program, `vcharon doctor --json` lists the exact folders under `dirs`
-   (the plain `dirs` line names them all only when they can be written).
+   Before you remove the program, `vcharon doctor` lists the exact folders (`--json`: under
+   `dirs`).
 4. On the server: `~/.local/state/vcharon/channels/`, the channel root, once no one uses it.
    Nothing else of VCharon's is there.
 

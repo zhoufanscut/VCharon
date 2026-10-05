@@ -1659,6 +1659,16 @@ line of text>` for the agent or its user.
   is never rewritten: in a pipx, uv, pip or checkout install, `<python> -P -m vcharon --update`
   would only print the other tool's command, and the user knows how they installed VCharon.
   `--update`'s own line for a binary, `… --update --yes`, is spelled with `self_command()`.
+- `permission` from `EROFS` or `EPERM` gets `fix: if your CLI's sandbox blocked it, ask your
+  user to allow vcharon's folders (vcharon doctor); else check the owner and permissions of
+  <path>`; `EACCES` keeps only the last part, and so does the helper on a server
+  (`fsops.SERVER`), where no agent's sandbox runs. The error code stays `permission`. A failed
+  `dirs` check of `doctor` gives the same fix for `EROFS` or `EPERM` (any other error keeps `fix
+  its permissions, or set VCHARON_HOME …`), and a `note:` under it still names all four
+  folders. Why: an agent CLI's
+  sandbox refuses with these on a folder that is fine (Codex CLI 0.160.0 on Linux: `Read-only
+  file system`; macOS's sandbox is expected to give `Operation not permitted`, not checked),
+  allowing the folders is the user's step, and the fix points at the list they need.
 - The tests parse every command-form fix line back with the command line's own parser.
 
 ### Running watchers

@@ -30,6 +30,18 @@ def echo(h, call_id, args):
 _real.HANDLERS["echo"] = echo
 """
 
+# an echo that fails as a refused write on the server does
+REFUSED = """
+import errno
+from vcharon import fsops, proto
+
+def echo(h, call_id, args):
+    proto.receive_stream(h.conn, [0], lambda index, fin: fin.read())
+    raise fsops.error(OSError(errno.EROFS, "Read-only file system"), "/srv/c")
+
+_real.HANDLERS["echo"] = echo
+"""
+
 # busy for 1.5 s, calling the real h.tick(), which here may tick every 0.2 s
 TICKING = """
 import io
@@ -340,6 +352,14 @@ class SessionTest(FakeSshCase):
         self.assertLess(time.monotonic() - started, 5)
         self.assertEqual((err.code, err.exit_code), ("timeout", 1))
         self.assertEqual(err.message, "the run passed run_timeout (2 s)")
+
+    def test_a_server_names_no_sandbox(self):
+        # the helper on a server: no agent's sandbox runs there, so the plain fix
+        s = self.session(extra_modules=helper_override(REFUSED))
+        s.open()
+        err = self.failure(s.echo, b"hello")
+        self.assertEqual((err.code, err.message), ("permission", "/srv/c: Read-only file system"))
+        self.assertEqual(err.hint, "check the owner and permissions of /srv/c")
 
     def test_timeout_hint_at_the_cap(self):
         # a setting already at the cap can't be raised, so the hint doesn't say to

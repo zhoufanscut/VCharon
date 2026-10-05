@@ -15,7 +15,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import fsops
+from vcharon import fsops, platform
 from vcharon.proto import VCharonError
 
 from tests.util import fd_count, patch_stats, read_tree, unblock_fifo, write_tree
@@ -94,9 +94,32 @@ class ErrorTest(unittest.TestCase):
         # its own text, which a mailbox job doesn't swap (a root path can be too long too)
         self.assertEqual(fsops.error(OSError(errno.ENAMETOOLONG, "x"), "p").hint,
                          fsops.TOO_LONG_HINT)
-        self.assertEqual(fsops.error(os_error(errno.EPERM), "/r").hint,
+        self.assertEqual(fsops.error(os_error(errno.EACCES), "/r").hint,
                          "check the owner and permissions of /r")
         self.assertEqual(fsops.error(os_error(errno.EIO), "p").exit_code, 1)
+
+    def test_a_sandbox_is_named_for_erofs_and_eperm(self):
+        # an agent CLI's sandbox refuses with these on a folder that is fine (Codex on Linux:
+        # EROFS; macOS's sandbox: EPERM), so the fix names the sandbox first
+        for no in (errno.EROFS, errno.EPERM):
+            with self.subTest(errno=errno.errorcode[no]):
+                got = fsops.error(os_error(no), "/r")
+                self.assertEqual(got.code, "permission")
+                self.assertEqual(got.hint, (
+                    "if your CLI's sandbox blocked it, ask your user to allow vcharon's "
+                    "folders (vcharon doctor); else check the owner and permissions of /r"))
+                # spelled the way this install runs, when printed; the path is left alone
+                printed = platform.runnable(got.hint, "/x/py -P -m vcharon")
+                self.assertIn("folders (/x/py -P -m vcharon doctor); else", printed)
+                self.assertTrue(printed.endswith("permissions of /r"))
+
+    def test_a_server_names_no_sandbox(self):
+        # the helper on a server sets SERVER: no agent's sandbox runs there
+        with mock.patch.object(fsops, "SERVER", True):
+            for no in (errno.EROFS, errno.EPERM, errno.EACCES):
+                with self.subTest(errno=errno.errorcode[no]):
+                    self.assertEqual(fsops.error(os_error(no), "/r").hint,
+                                     "check the owner and permissions of /r")
 
 
 class RetryTest(unittest.TestCase):
