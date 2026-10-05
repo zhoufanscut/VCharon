@@ -20,7 +20,19 @@ import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import channel_cmd, channels, cli, config, entries, platform, skill, state
+from vcharon import (
+    channel_cmd,
+    channels,
+    charter,
+    cli,
+    config,
+    entries,
+    plan,
+    platform,
+    remote,
+    skill,
+    state,
+)
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -3192,3 +3204,332 @@ class MemberFieldsTest(ChannelCase):
         self.assertIn("took back game/mac-web", out)
         self.assertEqual(entries.header_of(entries.read_text(
             os.path.join(self.root, "game", "mac-web", "MEMBER.md")), "mac-web")["box"], "mac")
+
+
+class SeenTest(ChannelCase):
+    """The members' last-watched stamps: seen/<channel>/<member> beside the root, stamped by a
+    watcher's pull, its age back in the down's plan reply, kept on the client and shown by
+    whoami C; swept with the channel."""
+
+    def seen(self, *parts):
+        return os.path.join(self.home, "seen", *parts)
+
+    def test_stamp_and_list(self):
+        write_tree(self.root, {"game/a/": None, "game/b/": None})
+        self.assertTrue(channels.stamp_seen(self.root, "game", "a", "stream 2", now=1000))
+        path = self.seen("game", "a")
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"stream 2\n")
+        self.assertEqual(os.stat(path).st_mtime, 1000)
+        # under SEEN_EVERY: no write; at it: the time, set as given
+        self.assertFalse(channels.stamp_seen(self.root, "game", "a", "stream 2", now=1029))
+        self.assertEqual(os.stat(path).st_mtime, 1000)
+        self.assertTrue(channels.stamp_seen(self.root, "game", "a", "stream 2", now=1030))
+        self.assertEqual(os.stat(path).st_mtime, 1030)
+        # a clock set back writes it again
+        self.assertTrue(channels.stamp_seen(self.root, "game", "a", "stream 2", now=900))
+        # another pace is written at once
+        self.assertTrue(channels.stamp_seen(self.root, "game", "a", "run 30", now=901))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"run 30\n")
+        # a stamp of a name with no member folder, and stray files, are left out
+        write_tree(self.home, {"seen/game/zz": b"local 10\n", "seen/game/b": b"what\n",
+                               "seen/game/.x.tmp": b"run 30\n"})
+        self.assertEqual(channels.list_seen(self.root, "game", now=961), {"a": [60, "run 30"]})
+        self.assertEqual(channels.list_seen(self.root, "nope"), {})
+        # no channel folder: no stamp, nothing made
+        self.assertFalse(channels.stamp_seen(self.root, "nope", "a", "run 30"))
+        self.assertFalse(os.path.exists(self.seen("nope")))
+        for pace in ("walk 2", "run 0", "run 86401", "run 2 ", ""):
+            with self.subTest(pace=pace), self.assertRaises(VCharonError):
+                channels.stamp_seen(self.root, "game", "a", pace)
+        with self.assertRaises(VCharonError):
+            channels.stamp_seen(self.root, "..", "a", "run 30")
+
+    def test_a_close_between_the_check_and_the_mkdir(self):
+        # the channel goes after the stamp saw it: the seen/<channel>/ it made goes too
+        write_tree(self.root, {"game/a/": None})
+        real = channels._mkdir
+
+        def mkdir(path):
+            made = real(path)
+            if path == self.seen("game"):
+                shutil.rmtree(os.path.join(self.root, "game"))
+            return made
+
+        with mock.patch.object(channels, "_mkdir", mkdir):
+            self.assertFalse(channels.stamp_seen(self.root, "game", "a", "run 30"))
+        self.assertEqual(os.listdir(self.seen()), [])
+
+    def test_swept_with_the_channel(self):
+        write_tree(self.home, {"seen/old/a": b"run 30\n",
+                               # not what a stamp makes: left
+                               "seen/odd/a/x": b"", "seen/big/a": b"x" * 100,
+                               "seen/game/c": b"run 30\n", "seen/game/a": b"run 30\n"})
+        write_tree(self.root, {"game/a/MEMBER.md": b"m"})
+        # a claim sweeps, and a new member's name loses an earlier member's stamp
+        channels.claim(self.root, "game", "c", False)
+        channels.claim(self.root, "game", "a", False)
+        self.assertEqual(sorted(read_tree(self.seen())),
+                         ["big/", "big/a", "game/", "game/a", "odd/", "odd/a/", "odd/a/x"])
+        # a failed create's undo (release)
+        write_tree(self.root, {"solo/lead/MEMBER.md": b"m"})
+        write_tree(self.home, {"seen/solo/lead": b"run 30\n"})
+        self.assertEqual(channels.release(self.root, "solo", "lead"), {"removed": True})
+        self.assertFalse(os.path.exists(self.seen("solo")))
+        # a close
+        write_tree(self.root, {"docs/lead/CHANNEL.md": b"c"})
+        write_tree(self.home, {"seen/docs/lead": b"local 10\n"})
+        channels.remove(self.root, "docs", "lead")
+        self.assertFalse(os.path.exists(self.seen("docs")))
+        self.assertTrue(os.path.exists(self.seen("game", "a")))
+
+    def plan(self, s, path, **more):
+        args = {"plugin": "path", "options": {"path": path, "mailbox_me": "a", "prune": "yes",
+                                              "allow_empty": "yes"},
+                "state": {}, "full": False}
+        args.update(more)
+        got = s.call("source.plan", args)
+        remote.reset(s)
+        return got
+
+    def test_the_helper_stamps_a_watchers_pull_only(self):
+        write_tree(self.root, {"game/a/MEMBER.md": b"m", "game/b/MEMBER.md": b"m"})
+        s = self.session()
+        s.open()
+        game = os.path.join(self.root, "game")
+        # a pull without watch: the ages, no stamp
+        got = self.plan(s, game)
+        self.assertEqual(got["seen"], {})
+        self.assertNotIn("seen_error", got)
+        self.assertFalse(os.path.exists(self.seen()))
+        got = self.plan(s, game, watch="stream 2")
+        self.assertEqual(got["seen"], {"a": [0, "stream 2"]})
+        with open(self.seen("game", "a"), "rb") as f:
+            self.assertEqual(f.read(), b"stream 2\n")
+        # the rest of the reply is the plan: from_json refuses a key it doesn't know
+        with self.assertRaises(VCharonError):
+            plan.from_json(dict(got))
+        p = plan.from_json({k: v for k, v in got.items() if k != "seen"})
+        self.assertEqual(sorted(e.path for e in p.entries), ["b", "b/MEMBER.md"])
+        # a folder that isn't a channel in the root: nothing
+        write_tree(self.tmp, {"other/a/x": b"x"})
+        self.assertNotIn("seen", self.plan(s, os.path.join(self.tmp, "other"),
+                                           watch="stream 2"))
+        # a stamp that fails never fails the plan
+        shutil.rmtree(self.seen())
+        with open(self.seen(), "wb") as f:
+            f.write(b"a file")
+        got = self.plan(s, game, watch="run 30")
+        self.assertIn("stamping a: ", got["seen_error"])
+        self.assertEqual(got["seen"], {})
+        self.assertIn("entries", got)
+        # a pace in another shape: refused, as any malformed call
+        with self.assertRaises(VCharonError) as cm:
+            s.call("source.plan", {"plugin": "path", "options": {"path": game},
+                                   "state": {}, "full": False, "watch": "fast"})
+        self.assertEqual(cm.exception.code, "protocol")
+
+    def test_a_watchers_sync_and_whoami(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        # a sync by hand stamps nothing, but brings the ages (none yet)
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        self.assertFalse(os.path.exists(self.seen("game")))
+        with open(charter.seen_path("game.mac-web"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"members": {}})
+        # a watcher's child: its environment carries the pace
+        with mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
+            self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        with open(self.seen("game", "mac-web"), "rb") as f:
+            self.assertEqual(f.read(), b"stream 2\n")
+        # a pace in another shape is no watcher's: nothing stamped
+        os.environ[watch.WATCH_ENV] = "fast"
+        self.addCleanup(os.environ.pop, watch.WATCH_ENV, None)
+        self.use_box("laptop")
+        self.assertEqual(self.run_cli("sync", "game", "--project", "ui")[0], 0)
+        self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
+        self.use_box("mac")
+        doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
+        got = {m["name"]: (m["watched"] is not None, m["watch_every"]) for m in doc["members"]}
+        self.assertEqual(got, {"laptop-ui": (False, None), "mac-web": (True, 2)})
+        self.assertNotIn("vcharon", doc["members"][0])
+        lines = self.run_cli("whoami", "game")[1].splitlines()
+        self.assertRegex(lines[-1], r"\A    mac-web \(you\)  .*  watched \d+ s ago "
+                                    r"\(every 2 s\)\Z")
+        self.assertTrue(lines[-2].endswith("  watched -"), lines[-2])
+        # read --json carries them too
+        doc = json.loads(self.run_cli("read", "game", "--json")[1])
+        got = {m["name"]: (m["watched"] is not None, m["watch_every"])
+               for m in doc["member_info"]}
+        self.assertEqual(got, {"laptop-ui": (False, None), "mac-web": (True, 2)})
+        # leave removes the kept ages with the membership's other files
+        self.ok("leave", "game")
+        self.assertFalse(os.path.exists(charter.seen_path("game.mac-web")))
+
+
+class SeenRoundsTest(ChannelCase):
+    """The stamps across a watcher's sync --repeat rounds, in a real child over the fake ssh,
+    and a seen/ that is a link."""
+
+    def seen(self, *parts):
+        return os.path.join(self.home, "seen", *parts)
+
+    def down_log(self):
+        try:
+            with open(os.path.join(os.environ["VCHARON_HOME"], "logs", "game.mac-web.down.log"),
+                      encoding="utf-8") as f:
+                return f.read().splitlines()
+        except FileNotFoundError:
+            return []
+
+    def test_each_round_of_one_session_stamps_quietly(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        code = ("import sys\n"
+                "sys.path.insert(0, %r)\n"
+                "from vcharon import cli, ssh\n"
+                "ssh.ssh_prefix = lambda settings: [sys.executable, %r]\n"
+                "sys.exit(cli.main(sys.argv[1:]))\n" % (VCHARON_DIR, FAKE_SSH))
+        env = dict(os.environ, **{watch.WATCH_ENV: "stream 2"})
+        child = subprocess.Popen([sys.executable, "-c", code, "sync", "game", "--repeat", "1"],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, env=env)
+        stamp = self.seen("game", "mac-web")
+        try:
+            # round 0 pulls the channel; round 1 has nothing to do
+            rounds = [util.readline(child.stdout) for _ in range(2)]
+            self.assertEqual([r.rstrip(b"\r\n") for r in rounds], [b"ROUND 0"] * 2)
+            with open(stamp, "rb") as f:
+                self.assertEqual(f.read(), b"stream 2\n")
+            logged = self.down_log()
+            # a control: the round that pulled logged
+            self.assertTrue(any("saved the state of game.mac-web.down" in line
+                                for line in logged), logged)
+            # an old stamp: a later round of the same session writes the time again
+            old = time.time() - 100
+            os.utime(stamp, (old, old))
+            rounds = [util.readline(child.stdout) for _ in range(2)]
+            self.assertEqual([r.rstrip(b"\r\n") for r in rounds], [b"ROUND 0"] * 2)
+            self.assertGreater(os.stat(stamp).st_mtime, old + 90)
+            # the stamp isn't a change: those rounds logged nothing
+            self.assertEqual(self.down_log(), logged)
+        finally:
+            child.stdin.close()
+            child.stdin = None
+            if child.poll() is None:
+                try:
+                    child.communicate(timeout=60)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.communicate()
+        self.assertEqual(child.returncode, 0)
+        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 2)
+        # the leader never watched: no stamp
+        self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
+
+    @unittest.skipUnless(CAN_SYMLINK, "needs symlinks")
+    def test_a_linked_seen_is_never_followed(self):
+        write_tree(self.root, {"game/a/": None})
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        # what a stamp leaves, but outside the store: a sweep would take it for one
+        write_tree(elsewhere, {"notes/alice": b"todo\n", "notes/bob": b"run 30\n"})
+        os.symlink(elsewhere, self.seen())
+        channels.sweep_seen(self.root)
+        self.assertTrue(os.path.exists(os.path.join(elsewhere, "notes", "alice")))
+        self.assertFalse(channels.stamp_seen(self.root, "game", "a", "run 30"))
+        write_tree(self.root, {"notes/alice/": None, "notes/bob/": None})
+        channels.drop_seen(self.root, "notes", "alice")
+        self.assertEqual(channels.list_seen(self.root, "notes"), {})
+        self.assertEqual(sorted(read_tree(elsewhere)), ["notes/", "notes/alice", "notes/bob"])
+
+    @unittest.skipUnless(CAN_SYMLINK, "needs symlinks")
+    def test_a_linked_channel_stamps_folder_is_never_followed(self):
+        # seen/ real, seen/<channel> a link: one level down, the same rule
+        write_tree(self.root, {"game/alice/": None})
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        write_tree(elsewhere, {"alice": b"todo\n", "bob": b"run 30\n"})
+        os.mkdir(self.seen())
+        os.symlink(elsewhere, self.seen("game"))
+        self.assertFalse(channels.stamp_seen(self.root, "game", "alice", "run 30"))
+        self.assertEqual(channels.list_seen(self.root, "game"), {})
+        channels.drop_seen(self.root, "game", "alice")
+        self.assertEqual(sorted(read_tree(elsewhere)), ["alice", "bob"])
+
+    def test_a_junction_seen_is_a_link_not_an_error(self):
+        # a Windows junction: fsops.kind says LINK, os.path.islink says False; faked here
+        write_tree(self.root, {"game/a/": None})
+        os.mkdir(self.seen())
+        real_kind = channels.fsops.kind
+        top = os.lstat(self.seen())
+
+        def kind(st):
+            if (st.st_dev, st.st_ino) == (top.st_dev, top.st_ino):
+                return channels.fsops.LINK
+            return real_kind(st)
+
+        with mock.patch.object(channels.fsops, "kind", kind):
+            self.assertFalse(channels.stamp_seen(self.root, "game", "a", "run 30"))
+        self.assertEqual(os.listdir(self.seen()), [])
+
+
+@unittest.skipIf(sys.platform == "win32", "the fake ssh is reached through a shell script")
+class SeenWatchProcessTest(ChannelCase):
+    """A real vcharon watch process of a remote member stamps the server: the pace goes from the
+    watcher through its sync child's environment to the helper, streaming or not."""
+
+    def seen(self, *parts):
+        return os.path.join(self.home, "seen", *parts)
+
+    def watch_until_stamped(self, *flags):
+        """Runs vcharon watch game <flags> until seen/game/mac-web exists; (its text, the
+        watcher's output)."""
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        # the sync children are new processes: they reach the fake server through ssh_path
+        wrapper = os.path.join(self.tmp, "ssh.sh")
+        with open(wrapper, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\nexec %s %s \"$@\"\n" % (sys.executable, FAKE_SSH))
+        os.chmod(wrapper, 0o755)
+        with open(os.path.join(self.homes["mac"], "vcharon.ini"), "a", encoding="utf-8") as f:
+            f.write("ssh_path = %s\n" % wrapper)
+        out_path = os.path.join(self.tmp, "watch.out")
+        env = dict(os.environ, PYTHONPATH=VCHARON_DIR)
+        env.pop(watch.WATCH_ENV, None)
+        with open(out_path, "wb") as out:
+            proc = subprocess.Popen([sys.executable, "-m", "vcharon", "watch", "game", *flags],
+                                    stdin=subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        stamp = self.seen("game", "mac-web")
+        try:
+            deadline = time.monotonic() + 60
+            while not os.path.exists(stamp) and time.monotonic() < deadline:
+                self.assertIsNone(proc.poll(), "the watcher ended early")
+                time.sleep(0.2)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(30)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, 9)
+                proc.wait()
+        with open(out_path, encoding="utf-8", errors="replace") as f:
+            said = f.read()
+        self.assertTrue(os.path.exists(stamp), said)
+        with open(stamp, "rb") as f:
+            return f.read(), said
+
+    def test_a_streaming_watcher_stamps(self):
+        text, said = self.watch_until_stamped("--every", "3")
+        self.assertEqual(text, b"stream 3\n")
+        # the member's own copy of the ages came back with the same pull
+        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 3)
+        # the leader's watcher never ran: no stamp of it
+        self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
+        self.assertNotIn("watched", said)
+
+    def test_a_no_stream_watcher_stamps(self):
+        text, said = self.watch_until_stamped("--no-stream", "--every", "7")
+        self.assertEqual(text, b"run 7\n")
+        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 7)
+        self.assertNotIn("watched", said)

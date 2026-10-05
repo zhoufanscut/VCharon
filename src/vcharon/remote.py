@@ -8,6 +8,10 @@ from . import plan as planmod
 from . import proto, stage
 from .proto import VCharonError
 
+# A plan reply's fields beside the plan: a channel's down gets the members' last-watched ages,
+# or the text of why they couldn't be had (DESIGN, "The watcher in a channel").
+PLAN_EXTRA = ("seen", "seen_error")
+
 
 class RemoteSource:
     """A source that runs in the helper: two round trips, plan and send; a third,
@@ -15,19 +19,26 @@ class RemoteSource:
 
     remote = True
 
-    def __init__(self, session, name, options, log=None):
+    def __init__(self, session, name, options, log=None, plan_args=None):
         # options: the raw strings; the helper converts and checks them itself. log: the
         # running job's own; the session's belongs to the job that opened it (a sync's up, of
-        # up and down).
+        # up and down). plan_args: more args of source.plan (a watcher's down: its pace).
         self.session = session
         self.log = log if log is not None else session.log
         self.name = name
         self.options = options
+        self.plan_args = plan_args or {}
+        # the plan reply's fields of PLAN_EXTRA, once plan() ran
+        self.reply = {}
 
     def plan(self, state, full=False):
-        result = self.session.call("source.plan", {"plugin": self.name,
-                                                   "options": self.options, "state": state,
-                                                   "full": bool(full)})
+        args = {"plugin": self.name, "options": self.options, "state": state,
+                "full": bool(full)}
+        args.update(self.plan_args)
+        result = self.session.call("source.plan", args)
+        # taken out first: plan.from_json refuses keys it doesn't know
+        if isinstance(result, dict):
+            self.reply = {k: result.pop(k) for k in PLAN_EXTRA if k in result}
         return planmod.from_json(result)
 
     def send(self, indexes, stage_file):

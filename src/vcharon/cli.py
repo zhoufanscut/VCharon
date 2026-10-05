@@ -20,6 +20,7 @@ import traceback
 from . import (
     VERSION,
     channel_cmd,
+    channels,
     charter,
     config,
     doctor,
@@ -487,7 +488,8 @@ def _whoami(args, run):
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
     without one. "box" is this machine's box now (a membership keeps the name it joined
     with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
-    With C only, "members": read_mod.member_list's of the tree, null when it can't be read.
+    With C only, "members": read_mod.member_list's of the tree but its "vcharon", null when
+    it can't be read.
     Without C: {"box", "box_source", "project", "role", "name", "channels"}: "name" is the
     name a join from here would take, "channels" every membership of this project on this box
     (of this role too, with --role), each an object as with C, without "box", "box_source"
@@ -497,15 +499,19 @@ def _whoami(args, run):
     if args.channel is not None:
         record, _ = _membership(args)
         doc = _member_doc(cfg, record)
-        members, unread = _members_of(doc["tree"], record["leader"])
+        seen = _watched(record, doc["tree"])
+        members, unread = _members_of(doc["tree"], record["leader"], seen)
         if args.json:
-            return _print_json(dict(doc, members=members, **box))
+            # the version is read's (member_info): whoami's members keep their fields
+            shown = None if members is None else [
+                {k: v for k, v in one.items() if k != "vcharon"} for one in members]
+            return _print_json(dict(doc, members=shown, **box))
         _say("vcharon: whoami %s" % args.channel)
         _whoami_lines(doc)
         _say("  box      %s" % cfg.box_text())
         # the version this box runs: vcharon read notes when the members' differ
         _say("  vcharon  %s" % VERSION)
-        _members_lines(doc, members, unread)
+        _members_lines(doc, members, unread, seen)
         return 0
     channel_cmd.check_role(args.role)
     project = channel_cmd.project_part(args.project)
@@ -529,31 +535,50 @@ def _whoami(args, run):
     return 0
 
 
-def _members_of(tree, leader):
+def _members_of(tree, leader, seen):
     """(whoami C's members of the tree, read_mod.member_list's; None and why when the tree
     can't be read). whoami says who you are first: a tree it can't list is a line, not an
     error."""
     try:
-        return read_mod.member_list(tree, leader), None
+        return read_mod.member_list(tree, leader, seen), None
     except OSError as e:
         return None, e.strerror or str(e)
 
 
-def _members_lines(doc, members, unread):
-    """whoami C's members, one line each: who writes in the channel, without reading it all.
-    A remote member's are this box's copy."""
+def _watched(record, tree):
+    """The members' last-watched stamps, {name: (time on this box, --every seconds)}: a remote
+    member's as its last pull brought them (charter.load_seen), a local member's from the
+    stamps beside the channel root; {} for none, or when they can't be read (they only add
+    to whoami and read --json)."""
+    if record["ssh"] is not None:
+        return charter.load_seen(_section(record))
+    now = time.time()
+    try:
+        got = channels.list_seen(os.path.dirname(tree), record["channel"], now)
+    except OSError:
+        return {}
+    return {name: (now - age, channels.parse_pace(pace)[1])
+            for name, (age, pace) in got.items()}
+
+
+def _members_lines(doc, members, unread, seen):
+    """whoami C's members, one line each: who writes in the channel, without reading it all,
+    and when each one's watcher last pulled it (read_mod.watched_text). A remote member's are
+    this box's copy, the ages as of its last sync."""
     copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
     if members is None:
         _say("  members  can't read %s: %s" % (doc["tree"], unread))
         return
     _say("  members  %d%s" % (len(members), copy))
+    now = time.time()
     for one in members:
         marks = [m for m, on in (("leader", one["leader"]), ("you", one["name"] == doc["name"]))
                  if on]
-        _say(pathrules.printable("    %s%s  %s  newest file %s" % (
+        _say(pathrules.printable("    %s%s  %s  newest file %s  %s" % (
             one["name"], " (%s)" % ", ".join(marks) if marks else "",
             ", ".join("%s %s" % (k, one[k] or "?") for k in read_mod.WHO_FIELDS),
-            one["newest"] or "-")))
+            one["newest"] or "-",
+            read_mod.watched_text(seen, one["name"], one["vcharon"], now))))
 
 
 def _whoami_lines(doc):
@@ -837,7 +862,7 @@ def _read(args, run):
         if args.json:
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
                                      last=args.last, skip=skip, notes=notes, ids=ids,
-                                     mine=mine)
+                                     mine=mine, seen=_watched(record, tree))
             missing = doc["missing"]
         else:
             last = ["--last", str(args.last)] if args.last else []
@@ -2097,8 +2122,9 @@ def _run_one(args, jr, conn, stack):
         bound.append(binding)
         _summary(say, p, checked, args.dry_run, job=True, full=args.full)
 
+    down = job.mailbox is not None and name == job.mailbox.section + ".down"
     eng = engine.Engine(session, job.source, job.sink, log, after_check=after_check,
-                        after_plan=after_plan)
+                        after_plan=after_plan, plan_args=_watch_args(down))
     # a first run, or a source that saved nothing: {}
     source_state = saved.source if saved is not None and saved.source is not None else {}
     try:
@@ -2125,7 +2151,7 @@ def _run_one(args, jr, conn, stack):
                                % (name, err.message), SAVE_HINT)
         log.info("saved the state of %s" % name)
         jr.saved_state = True
-    if done is not None and job.mailbox is not None and name == job.mailbox.section + ".down":
+    if done is not None and down:
         # the members this pull left out for their size: the watcher's WARN and read's note
         # come from there (with --repeat the notes reach only the log); after the state,
         # which holds those members' entries as they were
@@ -2135,7 +2161,35 @@ def _run_one(args, jr, conn, stack):
                                   int(job.source.options["max_files"]))
         except OSError as e:
             log.warn("couldn't save the members left out: %s" % e)
+    if down:
+        _save_seen(job.mailbox.section, eng.plan_reply, log)
     return eng, done
+
+
+def _watch_args(down):
+    """A channel down's more source.plan args: {"watch": the pace} when a watcher started this
+    sync (watch_mod.WATCH_ENV in its environment), so the server stamps the member's last
+    watched time; else None. Only a watcher's pull counts: a by-hand sync or a join's pull
+    would make a member look watched."""
+    pace = os.environ.get(watch_mod.WATCH_ENV) if down else None
+    if pace is None or channels.parse_pace(pace) is None:
+        return None
+    return {"watch": pace}
+
+
+def _save_seen(section, reply, log):
+    """Keeps the members' last-watched ages a down plan's reply brought, for whoami and
+    read --json. Best effort: a failure, or the server's own (seen_error), is only logged, never
+    printed: a watcher's rounds print nothing for it."""
+    if "seen_error" in reply:
+        log.warn("the server couldn't give the members' last-watched times: %s"
+                 % pathrules.printable(str(reply["seen_error"])[:300]))
+    if "seen" not in reply:
+        return
+    try:
+        charter.save_seen(section, reply["seen"], time.time())
+    except (OSError, TypeError, ValueError) as e:
+        log.warn("couldn't keep the members' last-watched times: %s" % e)
 
 
 def _same_state(saved, new):

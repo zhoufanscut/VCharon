@@ -560,5 +560,52 @@ class WatchLimitTest(unittest.TestCase):
             "gone mac/big.bin",
             "WARN cleared: " + warn])
 
+
+class SeenCacheTest(unittest.TestCase):
+    """A remote member's kept last-watched times: from a down's plan reply, written when they
+    change, at most every 30 s while only times move."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": os.path.join(self.tmp, "vh")})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.path = charter.seen_path("mb.mac")
+
+    def save(self, seen, now):
+        return charter.save_seen("mb.mac", seen, now)
+
+    def test_written_on_change_and_throttled(self):
+        self.assertTrue(self.save({"a": [10, "stream 2"]}, 1000))
+        self.assertEqual(charter.load_seen("mb.mac"), {"a": (990, 2)})
+        os.utime(self.path, (1000, 1000))
+        # the same time again, give or take a second: not written
+        self.assertFalse(self.save({"a": [11, "stream 2"]}, 1000))
+        # a time that moved, within 30 s of the last write: not yet; after: written
+        self.assertFalse(self.save({"a": [0, "stream 2"]}, 1029))
+        self.assertTrue(self.save({"a": [0, "stream 2"]}, 1030))
+        self.assertEqual(charter.load_seen("mb.mac"), {"a": (1030, 2)})
+        os.utime(self.path, (1030, 1030))
+        # a new member, or a new pace: at once
+        self.assertTrue(self.save({"a": [0, "stream 2"], "b": [5, "run 30"]}, 1031))
+        os.utime(self.path, (1031, 1031))
+        self.assertTrue(self.save({"a": [0, "run 30"], "b": [5, "run 30"]}, 1032))
+        self.assertEqual(charter.load_seen("mb.mac"), {"a": (1032, 30), "b": (1027, 30)})
+
+    def test_a_malformed_reply_writes_nothing(self):
+        for seen in ([], {"a": [1]}, {"a": ["1", "run 30"]}, {"a": [-1, "run 30"]},
+                     {"a": [True, "run 30"]}, {"a": [1, "fast"]}, {"Bad": [1, "run 30"]}):
+            with self.subTest(seen=seen), self.assertRaises((TypeError, ValueError)):
+                self.save(seen, 1000)
+        self.assertFalse(os.path.exists(self.path))
+        self.assertEqual(charter.load_seen("mb.mac"), {})
+        # a file in another shape reads as none
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write('{"members": {"a": [1, "fast"]}}')
+        self.assertEqual(charter.load_seen("mb.mac"), {})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,11 +16,15 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import VERSION, channel_cmd, cli, config, keys, platform
+from vcharon import VERSION, channel_cmd, channels, cli, config, keys, platform
+from vcharon.mailbox import read
 from vcharon.proto import VCharonError
 
 from tests.test_channel import ChannelCase
 from tests.util import CAN_SYMLINK, PACKAGE_DIR, read_tree, write_tree
+
+# whoami C's last-watched part for a member of this version that never watched
+UNWATCHED = "watched -"
 
 
 class IdentityTest(ChannelCase):
@@ -160,9 +164,9 @@ class WhoamiTest(ChannelCase):
         newest = [m.pop("newest") for m in members]
         self.assertEqual(members, [
             {"name": "laptop-ui", "agent": "other", "box": "laptop", "os": platform.os_word(),
-             "leader": True},
+             "leader": True, "watched": None, "watch_every": None},
             {"name": "mac-web-b", "agent": "other", "box": "mac", "os": platform.os_word(),
-             "leader": False}])
+             "leader": False, "watched": None, "watch_every": None}])
         for n in newest:
             self.assertRegex(n, r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\Z")
         code, out, err = self.run_cli("whoami", "game", "--role", "b")
@@ -175,10 +179,10 @@ class WhoamiTest(ChannelCase):
             "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini"),
             "  vcharon  %s" % VERSION,
             "  members  2 (this box's copy, as of its last sync)",
-            "    laptop-ui (leader)  agent other, box laptop, os %s  newest file %s"
-            % (platform.os_word(), newest[0]),
-            "    mac-web-b (you)  agent other, box mac, os %s  newest file %s"
-            % (platform.os_word(), newest[1])])
+            "    laptop-ui (leader)  agent other, box laptop, os %s  newest file %s  %s"
+            % (platform.os_word(), newest[0], UNWATCHED),
+            "    mac-web-b (you)  agent other, box mac, os %s  newest file %s  %s"
+            % (platform.os_word(), newest[1], UNWATCHED)])
         # the leader, a local member
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
@@ -251,22 +255,25 @@ class WhoamiMembersTest(ChannelCase):
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
         self.assertEqual(self.members(), [
             {"name": "linux-api", "agent": None, "box": None, "os": None, "leader": False,
-             "newest": when},
+             "newest": when, "watched": None, "watch_every": None},
             {"name": "linux-d", "agent": "other", "box": "linux", "os": platform.os_word(),
-             "leader": True, "newest": when}])
+             "leader": True, "newest": when, "watched": None, "watch_every": None}])
         lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
         self.assertEqual(lines[-3:], [
             "  members  2",
-            "    linux-api  agent ?, box ?, os ?  newest file %s" % when,
-            "    linux-d (leader, you)  agent other, box linux, os %s  newest file %s"
-            % (platform.os_word(), when)])
+            "    linux-api  agent ?, box ?, os ?  newest file %s  watched ? (vcharon unknown)"
+            % when,
+            "    linux-d (leader, you)  agent other, box linux, os %s  newest file %s  %s"
+            % (platform.os_word(), when, UNWATCHED)])
 
     def test_an_empty_folder_and_an_unreadable_tree(self):
         write_tree(self.tree, {"linux-api/": None})
         self.assertEqual(self.members()[0], {"name": "linux-api", "agent": None, "box": None,
-                                             "os": None, "leader": False, "newest": None})
+                                             "os": None, "leader": False, "newest": None,
+                                             "watched": None, "watch_every": None})
         lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
-        self.assertEqual(lines[-2], "    linux-api  agent ?, box ?, os ?  newest file -")
+        self.assertEqual(lines[-2], "    linux-api  agent ?, box ?, os ?  newest file -  "
+                         "watched ? (vcharon unknown)")
         # who you are still shows when the tree can't be listed
         with mock.patch("os.scandir", side_effect=PermissionError(13, "Permission denied")):
             self.assertIsNone(self.members())
@@ -274,6 +281,35 @@ class WhoamiMembersTest(ChannelCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out.splitlines()[-1], "  members  can't read %s: Permission denied"
                          % self.tree)
+
+    def test_last_watched(self):
+        # a stamp beside the root: its age and pace; a member of a version that stamps, with
+        # none: never watched; one of an older version: can't tell. 0.2.3 is the last version
+        # whose watchers don't stamp.
+        member = ("# MEMBER\n\n## t \u2014 %s#1 \u2014 member\nto: @linux-d\nvcharon: %s\n")
+        versions = {"linux-api": "9.0.0", "linux-b": "0.2.3", "linux-c": "0.2.4",
+                    "linux-old": "0.2.0"}
+        write_tree(self.tree, {"%s/MEMBER.md" % n: (member % (n, v)).encode()
+                               for n, v in versions.items()})
+        channels.stamp_seen(self.root, "docs", "linux-d", "local 10", now=time.time() - 300)
+        got = {m["name"]: (m["watched"] is not None, m["watch_every"]) for m in self.members()}
+        self.assertEqual(got, {"linux-api": (False, None), "linux-b": (False, None),
+                               "linux-c": (False, None), "linux-d": (True, 10),
+                               "linux-old": (False, None)})
+        # as a released build after 0.2.3 sees them
+        with mock.patch.object(read, "THIS", (0, 2, 4)):
+            lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertTrue(lines[-5].endswith("  watched -"), lines[-5])
+        self.assertTrue(lines[-4].endswith("  watched ? (vcharon 0.2.3)"), lines[-4])
+        self.assertTrue(lines[-3].endswith("  watched -"), lines[-3])
+        self.assertTrue(lines[-2].endswith("  watched 5 min ago (every 10 s)"), lines[-2])
+        self.assertTrue(lines[-1].endswith("  watched ? (vcharon 0.2.0)"), lines[-1])
+        # a build that stamps but is still numbered 0.2.3 writes 0.2.3: such a member is one
+        # that never watched
+        with mock.patch.object(read, "THIS", (0, 2, 3)):
+            lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertTrue(lines[-4].endswith("  watched -"), lines[-4])
+        self.assertTrue(lines[-1].endswith("  watched ? (vcharon 0.2.0)"), lines[-1])
 
 
 class SetupTest(ChannelCase):

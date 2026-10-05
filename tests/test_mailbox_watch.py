@@ -24,7 +24,17 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, charter, cli, entries, fsops, install, platform, skill
+from vcharon import (
+    channel_cmd,
+    channels,
+    charter,
+    cli,
+    entries,
+    fsops,
+    install,
+    platform,
+    skill,
+)
 from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
@@ -260,6 +270,58 @@ class ServerModeTest(WatchCase):
                                        "changed windows/run.log",
                                        "gone windows/new.patch", "gone windows/run.log"])
         self.assertEqual(sleep.seconds, [10] * 4)
+
+
+class LocalStampTest(WatchCase):
+    """A local member's rounds stamp its last-watched time beside the channel root, silently,
+    and only for a channel in this machine's root."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.root = os.path.join(self.tmp, "channels")
+        self.tree = os.path.join(self.root, "mb")
+        self.member()
+        patch = mock.patch.dict(os.environ, {"VCHARON_CHANNELS_ROOT": self.root})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.stamp = os.path.join(self.tmp, "seen", "mb", "debian")
+
+    def test_a_round_stamps(self):
+        # a positive control: a file that isn't an entry still prints its line
+        sleep = Rounds(lambda: write_tree(self.tree, {"windows/x.txt": b"x"}))
+        code = watch.watch_dir(self.tree, "debian", 7, out=self.lines.append, sleep=sleep,
+                               rounds=1)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(), [watching(self.tree, 0), "new windows/x.txt"])
+        with open(self.stamp, "rb") as f:
+            self.assertEqual(f.read(), b"local 7\n")
+        self.assertEqual(channels.list_seen(self.root, "mb")["debian"][1], "local 7")
+
+    def test_a_failed_stamp_says_nothing(self):
+        with open(os.path.join(self.tmp, "seen"), "wb") as f:
+            f.write(b"not a folder")
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                               sleep=Rounds(lambda: None), rounds=1)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.said(), [watching(self.tree, 0)])
+
+    def test_a_failed_scan_isnt_stamped(self):
+        # a round that couldn't read the channel isn't a watched round
+        def scan(root, me, fold=False):
+            raise PermissionError(13, "Permission denied")
+
+        with mock.patch.object(watch, "scan", scan):
+            watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                            sleep=Rounds(lambda: None), rounds=1)
+        self.assertTrue(any("Permission denied" in line for line in self.said()))
+        self.assertFalse(os.path.lexists(self.stamp))
+
+    def test_a_folder_outside_the_root_isnt_stamped(self):
+        os.environ["VCHARON_CHANNELS_ROOT"] = os.path.join(self.tmp, "elsewhere")
+        watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                        sleep=Rounds(lambda: None), rounds=1)
+        self.assertFalse(os.path.lexists(os.path.join(self.tmp, "seen")))
+
 
 class TimeTest(WatchCase):
     def test_every_line_starts_with_the_local_time(self):
@@ -1587,6 +1649,22 @@ class ClientModeTest(WatchCase):
         self.assertEqual(env["VCHARON_HOME"], self.vcharon_home)
         self.assertEqual(frozen_argv, [binary, "sync"] + SYNC)
         self.assertEqual(frozen_env["PYINSTALLER_RESET_ENVIRONMENT"], "1")
+        # not a watcher's child: its pull stamps nothing
+        self.assertNotIn(watch.WATCH_ENV, env)
+
+    def test_a_watchers_child_carries_its_pace(self):
+        # --no-stream: each round's sync is marked with the watcher's pace, so its down plan
+        # stamps the member's last-watched time at the server
+        envs = []
+
+        def run(argv, timeout, new_session=False, env=None, term_wait=0):
+            envs.append(env)
+            return fsops.Ran(0, b"", b"")
+
+        with mock.patch.object(watch.fsops, "run", run):
+            watch.watch_job("mb.windows", self.sync_args, 45, out=self.lines.append,
+                            sleep=Rounds(lambda: None), rounds=2)
+        self.assertEqual([env[watch.WATCH_ENV] for env in envs], ["run 45"] * 2)
 
     def test_a_stuck_vcharon_run(self):
         # fsops.run's rc None: its timeout killed the run
@@ -1841,6 +1919,8 @@ class StreamTest(WatchCase):
         self.assertEqual((env["PYTHONIOENCODING"], env["PYTHONUTF8"]), ("utf-8", "1"))
         self.assertEqual(env["VCHARON_HOME"], self.vcharon_home)
         self.assertNotIn("PYINSTALLER_RESET_ENVIRONMENT", env)
+        # the watcher's pace: the child's down plans stamp the member's last-watched time
+        self.assertEqual(env[watch.WATCH_ENV], "stream 2")
         self.assertEqual(self.slept, [])
         self.assert_all_stopped()
 

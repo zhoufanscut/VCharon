@@ -262,14 +262,62 @@ def plugin_doctor(h, call_id, args):
     h.ok(call_id, plugin.checks_to_json(checks))
 
 
+def _is_pace(value):
+    return channels.parse_pace(value) is not None
+
+
 def source_plan(h, call_id, args):
-    _check_args("source.plan", args, {"plugin": _is_str, "options": _is_options,
-                                      "state": _is_state, "full": _is_bool})
+    checks = {"plugin": _is_str, "options": _is_options, "state": _is_state, "full": _is_bool}
+    if "watch" in args:
+        # a watcher's pull: its pace, which the member's last-watched stamp keeps
+        checks["watch"] = _is_pace
+    _check_args("source.plan", args, checks)
     _once(h, "source.plan")
     # Set before planning, so its handles close at exit even if planning fails.
     h.source = plugin.make("remote", args["plugin"], "source", args["options"], h.ctx)
     h.plan = h.source.plan(args["state"], full=args["full"])
-    h.ok(call_id, plan.to_json(h.plan))
+    reply = plan.to_json(h.plan)
+    reply.update(_seen(h, args))
+    h.ok(call_id, reply)
+
+
+def _seen(h, args):
+    """A channel's down plan, after it opened the channel folder: the watcher's stamp (only
+    with watch), then {"seen": channels.list_seen's ages}. A down of a folder that isn't a
+    channel's in the channel root gets nothing. Best effort: a failure is {"seen_error": its
+    text}, which the client only logs; the plan goes ahead either way (DESIGN, "The watcher
+    in a channel")."""
+    options = args["options"]
+    me = options.get("mailbox_me")
+    if args["plugin"] != "path" or not me or "path" not in options:
+        return {}
+    try:
+        root = channels.root_path()
+        folder = os.path.normpath(h.ctx.resolve(options["path"], "from.path"))
+    except Exception as e:  # noqa: BLE001
+        return {"seen_error": "finding the channel root: %s" % _why(e)}
+    if os.path.dirname(folder) != root:
+        return {}
+    channel = os.path.basename(folder)
+    out = {}
+    if "watch" in args:
+        try:
+            channels.stamp_seen(root, channel, me, args["watch"])
+        except Exception as e:  # noqa: BLE001
+            out["seen_error"] = "stamping %s: %s" % (me, _why(e))
+    try:
+        out["seen"] = channels.list_seen(root, channel)
+    except Exception as e:  # noqa: BLE001
+        out["seen_error"] = "listing the stamps: %s" % _why(e)
+    return out
+
+
+def _why(e):
+    if isinstance(e, VCharonError):
+        return e.message
+    if isinstance(e, OSError):
+        return e.strerror or str(e)
+    return "%s: %s" % (type(e).__name__, e)
 
 
 def source_send(h, call_id, args):

@@ -57,7 +57,9 @@ view is printed: `ERROR not_found: no entry <ids> in <C>` and its fix line.
 "member_info", "count", "entries", "notes", "missing"}. "folder" is the tree read; "synced" is
 true for a remote member's copy; "members" the member folders read; "member_info" each one's
 {"name", "box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it
-lacks; "vcharon" the version the member last joined or watched with); "count" every entry in
+lacks; "vcharon" the version the member last joined or watched with), and "watched" (the time
+of its watcher's last pull, local, or null) and "watch_every" (that watcher's --every seconds,
+or null) from the members' last-watched stamps; "count" every entry in
 the tree, while "entries" holds the ones shown (--last, IDs, --to-me), in the view's order,
 each {"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}: "file" is
 the entry's file relative to the tree, with "/"; "time", "id", "name", "number" and "re" are
@@ -74,8 +76,9 @@ import datetime
 import heapq
 import itertools
 import os
+import re
 
-from .. import channels, entries, pathrules
+from .. import VERSION, channels, entries, pathrules
 
 INDENT = "    "
 
@@ -286,28 +289,41 @@ def _now():
 INFO_FIELDS = channels.LIST_FIELDS + ("vcharon",)
 
 
-def member_info(root, folders):
-    """[{"name", "box", "os", "agent", "project", "vcharon"}] of the member folders read, from
-    each one's MEMBER.md #1; None for a field it lacks, or holds in another shape."""
+def member_info(root, folders, seen=None):
+    """[{"name", "box", "os", "agent", "project", "vcharon", "watched", "watch_every"}] of the
+    member folders read, from each one's MEMBER.md #1; None for a field it lacks, or holds in
+    another shape. "watched" and "watch_every": watched_fields of seen."""
     out = []
     for name in folders:
         found = channels.read_member(os.path.join(root, name), name)
-        out.append(dict([("name", name)] + [(k, found.get(k)) for k in INFO_FIELDS]))
+        out.append(dict([("name", name)] + [(k, found.get(k)) for k in INFO_FIELDS]
+                        + watched_fields(seen, name)))
     return out
+
+
+def watched_fields(seen, name):
+    """[("watched", time), ("watch_every", seconds)] of name in seen ({name: (time on this
+    box, --every seconds)}: the members' last-watched stamps): time local, to the second;
+    both None for a member with no stamp. A member's stamp is its watcher's last pull of
+    the channel, at most 30 s plus one of its rounds old (and the sync's own time) while the
+    watcher runs; it is late past 2 x every + 120 s (the guide's lead topic)."""
+    t, every = (seen or {}).get(name, (None, None))
+    return [("watched", None if t is None else entries.stamp(t)), ("watch_every", every)]
 
 
 # the fields of a member's MEMBER.md #1 that whoami C lists
 WHO_FIELDS = ("agent", "box", "os")
 
 
-def member_list(root, leader):
-    """whoami C's members: [{"name", "agent", "box", "os", "leader", "newest"}], one per
-    top-level folder of the tree root whose name can be a member's (not a symlink, a stage dir
-    or a stray name), in name order. "agent", "box" and "os" come from the folder's MEMBER.md
-    #1 (None for one it lacks): the only text read from a member's files, so nothing else of
-    its machine shows. "leader": whether it is the leader's folder. "newest": the time of its
-    newest file outside stage dirs, local, to the second, or None. OSError when the root can't
-    be read."""
+def member_list(root, leader, seen=None):
+    """whoami C's members: [{"name", "agent", "box", "os", "leader", "newest", "watched",
+    "watch_every", "vcharon"}], one per top-level folder of the tree root whose name can be a
+    member's (not a symlink, a stage dir or a stray name), in name order. "agent", "box",
+    "os" and "vcharon" come from the folder's MEMBER.md #1 (None for one it lacks): the only
+    text read from a member's files, so nothing else of its machine shows. "leader": whether
+    it is the leader's folder. "newest": the time of its newest file outside stage dirs,
+    local, to the second, or None. "watched", "watch_every": watched_fields of seen. OSError
+    when the root can't be read."""
     with os.scandir(root) as it:
         top = sorted(it, key=lambda d: d.name)
     out = []
@@ -322,8 +338,56 @@ def member_list(root, leader):
         newest = channels.newest_file(d.path)
         out.append(dict([("name", d.name)] + [(k, found.get(k)) for k in WHO_FIELDS]
                         + [("leader", d.name == leader),
-                           ("newest", None if newest is None else entries.stamp(newest))]))
+                           ("newest", None if newest is None else entries.stamp(newest))]
+                        + watched_fields(seen, d.name) + [("vcharon", found.get("vcharon"))]))
     return out
+
+
+# the last release whose watchers stamp nothing: a member that has no stamp and last ran it,
+# or an older one, may be watching all the same
+UNSTAMPED_UPTO = (0, 2, 3)
+_RELEASE = re.compile(r"\A(\d+)\.(\d+)\.(\d+)")
+
+
+def _numbers(version):
+    m = _RELEASE.match(version) if version else None
+    return None if m is None else tuple(int(n) for n in m.groups())
+
+
+# this build's numbers: a build that stamps but still carries UNSTAMPED_UPTO's numbers (before
+# the release that bumps them) writes them into its members' MEMBER.md too
+THIS = _numbers(VERSION)
+
+
+def may_not_stamp(version):
+    """Whether a member whose MEMBER.md says version (None: no vcharon: line, before 0.2.0)
+    runs a vcharon whose watcher stamps nothing: UNSTAMPED_UPTO or older (a pre-release by
+    its numbers), and older than this build, since a member that ran this build stamps."""
+    numbers = _numbers(version)
+    return numbers is None or (numbers <= UNSTAMPED_UPTO and (THIS is None or numbers < THIS))
+
+
+def ago(seconds):
+    """An age as whoami prints it: seconds under 2 minutes, minutes under 2 hours, else
+    hours."""
+    seconds = max(0, int(seconds))
+    if seconds < 120:
+        return "%d s" % seconds
+    if seconds < 7200:
+        return "%d min" % (seconds // 60)
+    return "%d h" % (seconds // 3600)
+
+
+def watched_text(seen, name, version, now):
+    """whoami C's last-watched part of a member's line: `watched <age> ago (every <n> s)`;
+    without a stamp `watched ? (vcharon <version>)` for a member whose version may not stamp
+    (may_not_stamp; `unknown` for none), else `watched -`."""
+    t, every = (seen or {}).get(name, (None, None))
+    if t is not None:
+        return "watched %s ago (every %d s)" % (ago(now - t), every)
+    if may_not_stamp(version):
+        return "watched ? (vcharon %s)" % (version or "unknown")
+    return "watched -"
 
 
 def version_note(info):
@@ -337,17 +401,17 @@ def version_note(info):
                                      for one in info))
 
 
-def _collect(root, now, skip=None, notes=()):
+def _collect(root, now, skip=None, notes=(), seen=None):
     """(member folders, items in the view's order, notes, member_info) of the tree root;
     OSError when the root can't be read. notes: more notes' texts, first; the version note,
-    if any, last."""
+    if any, last. seen: member_info's."""
     folders, items, read_notes = read_tree(root, skip)
     read_notes = ["note: %s" % n for n in notes] + read_notes
     if now is None:
         now = _now()
     ordered, minute_notes = order(items, now)
     notes = read_notes + [n for item in ordered for n in item.notes] + minute_notes
-    info = member_info(root, folders)
+    info = member_info(root, folders, seen)
     versions = version_note(info)
     if versions is not None:
         notes.append(versions)
@@ -406,10 +470,11 @@ def view(root, channel, synced=False, full=False, last=None, now=None, skip=None
 
 
 def view_json(root, channel, synced=False, full=False, last=None, now=None, skip=None,
-              notes=(), ids=None, mine=None):
+              notes=(), ids=None, mine=None, seen=None):
     """The view as one JSON object (the module's docstring has its fields); OSError when the
-    root can't be read. skip and notes: view's; ids and mine: pick's (ids imply full)."""
-    folders, ordered, notes, info = _collect(root, now, skip, notes)
+    root can't be read. skip and notes: view's; ids and mine: pick's (ids imply full); seen:
+    member_info's."""
+    folders, ordered, notes, info = _collect(root, now, skip, notes, seen)
     shown, missing = pick(ordered, last, ids, mine)
     full = full or bool(ids)
     items = []

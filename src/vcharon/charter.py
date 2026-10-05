@@ -292,3 +292,99 @@ def left_out_notes(section):
         return []
     return [skipped_note(name, "over the channel's limit of %s" % doc["limit"])
             for name in sorted(doc["members"])]
+
+
+# --- the members' last-watched ages, as a remote member's last pull brought them ---
+
+# the cache is written at most this often while only its times move: a streaming watcher pulls
+# every 2 s, and the stamps it reads move every 30 s at most (channels.SEEN_EVERY)
+SEEN_SAVE_EVERY = 30
+# a time that moved by this much or less is the same: each pull works it out again from an
+# age in whole seconds
+SEEN_SLACK = 2
+
+
+def seen_path(section):
+    """Where a channel section's down keeps the members' last-watched stamps its last pull
+    brought: {"members": {name: [time on this box, pace]}}, the time being this box's clock
+    less the age the server worked out, so no two machines' clocks are compared."""
+    return os.path.join(platform.state_dir(), section + ".down.seen.json")
+
+
+def save_seen(section, seen, now):
+    """Keeps a down plan's seen ({name: [age, pace]}, checked here: a reply in another shape
+    is refused with TypeError or ValueError, and nothing is written). Written when a member or
+    a pace changed, or a time moved, but while only times move at most once every
+    SEEN_SAVE_EVERY seconds by the file's own mtime. Returns whether it wrote."""
+    from . import channels
+
+    if not isinstance(seen, dict):
+        raise TypeError("not an object")
+    members = {}
+    for name, value in seen.items():
+        if (pathrules.writer_problem(name) is not None or not isinstance(value, list)
+                or len(value) != 2 or not isinstance(value[0], int)
+                or isinstance(value[0], bool) or value[0] < 0
+                or channels.parse_pace(value[1]) is None):
+            raise ValueError("a malformed member: %s" % json.dumps([name, value])[:200])
+        members[name] = [int(now - value[0]), value[1]]
+    path = seen_path(section)
+    old = _load_seen_doc(path)
+    if old is not None:
+        same_keys = ({k: v[1] for k, v in old.items()}
+                     == {k: v[1] for k, v in members.items()})
+        moved = any(abs(old[k][0] - members[k][0]) > SEEN_SLACK for k in members) \
+            if same_keys else True
+        if not moved:
+            return False
+        if same_keys:
+            try:
+                if now - os.stat(path).st_mtime < SEEN_SAVE_EVERY:
+                    return False
+            except OSError:
+                pass
+    data = json.dumps({"members": members}, sort_keys=True).encode("utf-8")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".", suffix=".tmp")
+    try:
+        with open(fd, "wb") as f:
+            f.write(data)
+        entries._replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def _load_seen_doc(path):
+    """{name: [time, pace]} of the cache file path, or None: none, or one that can't be read
+    or has another shape."""
+    from . import channels
+
+    try:
+        with open(path, "rb") as f:
+            doc = json.loads(f.read(1 << 20).decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    members = doc.get("members") if isinstance(doc, dict) else None
+    if not isinstance(members, dict):
+        return None
+    for name, value in members.items():
+        if (pathrules.writer_problem(name) is not None or not isinstance(value, list)
+                or len(value) != 2 or not isinstance(value[0], int)
+                or isinstance(value[0], bool) or channels.parse_pace(value[1]) is None):
+            return None
+    return members
+
+
+def load_seen(section):
+    """{name: (time on this box, --every seconds)} of what save_seen kept; {} for none, or
+    one that can't be read (it only adds to whoami and read --json, so nothing is refused for
+    it)."""
+    from . import channels
+
+    members = _load_seen_doc(seen_path(section)) or {}
+    return {name: (t, channels.parse_pace(pace)[1]) for name, (t, pace) in members.items()}

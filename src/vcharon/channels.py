@@ -1,12 +1,14 @@
 """The channel root: list, claim, release and remove channel and member
 folders, directly below the root; on both ends (the helper's channel.* calls, and vcharon's
---local in-process)."""
+--local in-process). Beside the root, seen/ holds each member's last-watched stamp."""
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import stat
+import tempfile
 import time
 
 from . import charter, fsops, pathrules, platform
@@ -343,6 +345,10 @@ def claim(root, channel, name, create, tick=_no_tick):
         claimer = _claimer_of(ch, name) if existed else None
     finally:
         _close_all(ch, top)
+    if not existed:
+        # a stamp left by an earlier member of this name isn't this member's
+        drop_seen(root, channel, name)
+    sweep_seen(root)
     reply = {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
              "claimer": claimer}
     # a new channel's CHANNEL.md isn't written yet: create writes it after the claim
@@ -400,6 +406,8 @@ def release(root, channel, name, tick=_no_tick):
         raise fsops.error(e, os.path.join(root, channel, name))
     finally:
         _close_all(member, ch, top)
+    # undoing a failed create removes the channel with no close
+    sweep_seen(root)
     return {"removed": True}
 
 
@@ -469,6 +477,7 @@ def remove(root, channel, name, tick=_no_tick):
         raise _not_gone(e, os.path.join(root, channel))
     finally:
         _close_all(ch, top)
+    sweep_seen(root)
     return {"closed": closed, "deleted": deleted}
 
 
@@ -493,3 +502,229 @@ def _not_gone(e, path):
         return VCharonError("vanished", "%s went away while the channel was checked or closed"
                             % path, "check it in vcharon list's output, then close again")
     return err
+
+
+# --- the watchers' stamps: seen/<channel>/<member> beside the root ---
+
+# The folder beside the channel root that holds, per channel, each member's last-watched stamp:
+# a file named after the member, holding the watcher's pace (PACE), its mtime the time of the
+# watcher's last pull. Beside the root, never in it: a name at the root's top would show in
+# list, and one in a channel would be synced, logged and refused by close (DESIGN, "The watcher
+# in a channel").
+SEEN = "seen"
+# A stamp's time is written at most this often, so a watcher every 2 s costs one metadata write
+# every 30 s at the channel's machine; readers allow for it.
+SEEN_EVERY = 30
+# the stamp's text: the watcher's mode and its --every (stream, run: a remote member's watcher,
+# streaming or with --no-stream; local: a local member's)
+_PACE = re.compile(r"\A(stream|run|local) ([1-9][0-9]{0,4})\Z")
+PACE_MAX = 86400
+# a stamp file holds a few bytes; one bigger isn't vcharon's
+_SEEN_READ_MAX = 64
+
+
+def parse_pace(text):
+    """(mode, seconds) of a stamp's pace text, or None for one not in PACE's shape."""
+    m = _PACE.match(text) if isinstance(text, str) else None
+    if m is None or int(m.group(2)) > PACE_MAX:
+        return None
+    return m.group(1), int(m.group(2))
+
+
+def seen_root(root):
+    """The stamps' folder of the channel root root: seen beside it. Callers pass
+    root_path(), so the helper and a local member find the same folder."""
+    return os.path.join(os.path.dirname(root), SEEN)
+
+
+def _is_real_dir(path):
+    try:
+        return fsops.kind(os.lstat(path)) == fsops.DIR
+    except OSError:
+        return False
+
+
+def _mkdir(path):
+    """mkdir path; whether it made it (False: there already)."""
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        return False
+    return True
+
+
+def _read_pace(path):
+    """The pace text of the stamp file path, or None: never through a link, at most
+    _SEEN_READ_MAX bytes."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return None
+    try:
+        data = os.read(fd, _SEEN_READ_MAX + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if len(data) > _SEEN_READ_MAX:
+        return None
+    return data.decode("ascii", "replace").strip()
+
+
+def stamp_seen(root, channel, name, pace, now=None):
+    """A watcher's pull of channel worked: seen/<channel>/<name> holds pace, its mtime now (this
+    process's clock, set explicitly, so a file server's own clock never counts). Only while
+    <root>/<channel> is a real folder; seen/ and seen/<channel>/ are each one mkdir (never
+    makedirs), and a seen/<channel>/ made for a channel that went away meanwhile (a close) is
+    removed again. The time is written only when SEEN_EVERY has passed, or the pace changed.
+    Returns whether it wrote. Raises OSError or VCharonError: every caller treats a stamp as
+    best effort, which never fails a pull and prints nothing."""
+    _check_names(channel, name)
+    if parse_pace(pace) is None:
+        raise VCharonError("protocol", "a pace that isn't one: %s" % pathrules.show(pace))
+    t = time.time() if now is None else now
+    channel_dir = os.path.join(root, channel)
+    if not _is_real_dir(channel_dir):
+        return False
+    top = seen_root(root)
+    _mkdir(top)
+    if not _is_real_dir(top):
+        # never followed (no mkdir through it), never replaced; a file there is reported
+        # (the remote client logs it), as the mkdir in it would have been
+        # fsops.kind, as _is_real_dir: a Windows junction is a link too, which islink misses
+        try:
+            if fsops.kind(os.lstat(top)) == fsops.LINK:
+                return False
+        except OSError:
+            pass
+        raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR))
+    folder = os.path.join(top, channel)
+    if _mkdir(folder) and not _is_real_dir(channel_dir):
+        os.rmdir(folder)
+        return False
+    if not _is_real_dir(folder):
+        return False
+    path = os.path.join(folder, name)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        st = None
+    if st is not None and not stat.S_ISREG(st.st_mode):
+        return False
+    if st is None or _read_pace(path) != pace:
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")
+        try:
+            with open(fd, "wb") as f:
+                f.write(pace.encode("ascii") + b"\n")
+            os.utime(tmp, (t, t))
+            if fsops.WINDOWS:
+                # a reader holding the old file gives access denied for a moment
+                fsops.retry_in_use(os.replace, tmp, path, codes=fsops.HELD_CODES)
+            else:
+                os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+        return True
+    # abs: a clock set back writes it again too
+    if abs(t - st.st_mtime) < SEEN_EVERY:
+        return False
+    os.utime(path, (t, t))
+    return True
+
+
+def list_seen(root, channel, now=None):
+    """{name: [age in whole seconds, pace]} of the stamps in seen/<channel>/ whose name has a
+    member folder in <root>/<channel>: a stamp of a member gone, or of an earlier channel of
+    that name, is left out. {} for none. Raises OSError when seen/<channel>/ exists but can't
+    be listed."""
+    t = time.time() if now is None else now
+    top = seen_root(root)
+    folder = os.path.join(top, channel)
+    # a linked seen/ is never followed: lstat of folder alone would go through it
+    if channel_problem(channel) or not _is_real_dir(top) or not _is_real_dir(folder):
+        return {}
+    out = {}
+    for name in sorted(os.listdir(folder)):
+        if (pathrules.writer_problem(name) is not None
+                or not _is_real_dir(os.path.join(root, channel, name))):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        pace = _read_pace(path) if stat.S_ISREG(st.st_mode) else None
+        if parse_pace(pace) is None:
+            continue
+        out[name] = [max(0, round(t - st.st_mtime)), pace]
+    return out
+
+
+def drop_seen(root, channel, name):
+    """Removes seen/<channel>/<name>, a stamp left by an earlier member of that name (a new
+    claim of it). Best effort: never raises."""
+    if channel_problem(channel) or pathrules.writer_problem(name) is not None:
+        return
+    top = seen_root(root)
+    folder = os.path.join(top, channel)
+    # either level a link: removing through it would delete a file outside the store
+    if not _is_real_dir(top) or not _is_real_dir(folder):
+        return
+    path = os.path.join(folder, name)
+    try:
+        if not stat.S_ISDIR(os.lstat(path).st_mode):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def sweep_seen(root):
+    """Removes each seen/<X>/ whose channel folder <root>/<X> is gone: after a close, the
+    undo of a failed create, or a watcher's stamp that raced a close. Only what a stamp makes is
+    removed: a folder whose name can be a channel's, holding only small regular files whose
+    names can be a member's (and a stamp's temp files); anything else is left. Best effort:
+    never raises."""
+    top = seen_root(root)
+    if not _is_real_dir(top):
+        # a link: a sweep through it would delete files outside the store
+        return
+    try:
+        names = os.listdir(top)
+    except OSError:
+        return
+    for x in names:
+        if channel_problem(x):
+            continue
+        try:
+            os.lstat(os.path.join(root, x))
+            continue
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # can't tell: left
+            continue
+        folder = os.path.join(top, x)
+        try:
+            if not _is_real_dir(folder):
+                continue
+            inside = os.listdir(folder)
+            ok = True
+            for n in inside:
+                st = os.lstat(os.path.join(folder, n))
+                stamp = (pathrules.writer_problem(n) is None
+                         or (n.startswith(".") and n.endswith(".tmp")))
+                if not stamp or not stat.S_ISREG(st.st_mode) or st.st_size > _SEEN_READ_MAX:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for n in inside:
+                os.remove(os.path.join(folder, n))
+            os.rmdir(folder)
+        except OSError:
+            continue

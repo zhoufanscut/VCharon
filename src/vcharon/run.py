@@ -30,10 +30,12 @@ class Engine:
     """Steps 5-8 of (DESIGN, "How a sync works"), for either direction: plan, check, transfer,
     commit. The side on the remote end is a proxy; the other one runs here."""
 
-    def __init__(self, session, source, sink, log, after_check=None, after_plan=None):
+    def __init__(self, session, source, sink, log, after_check=None, after_plan=None,
+                 plan_args=None):
         # session: an open ssh.Session. after_plan(plan) runs right after the plan, before the
         # check: it may refuse a plan the caller never asked for. after_check(plan, checked)
-        # runs after the check, before any bytes move.
+        # runs after the check, before any bytes move. plan_args: more args of a remote
+        # source's source.plan.
         if [source.end, sink.end] not in (["local", "remote"], ["remote", "local"]):
             raise VCharonError("internal", "exactly one side of a run is remote, not the %s "
                                "source and the %s sink" % (source.end, sink.end))
@@ -43,17 +45,22 @@ class Engine:
         self.log = log
         self.after_check = after_check
         self.after_plan = after_plan
+        self.plan_args = plan_args
         # filled in as the run goes
         self.plan = self.checked = self.done = None
+        # a remote source's plan reply's fields beside the plan (remote.PLAN_EXTRA)
+        self.plan_reply = {}
         # after a commit that failed partway in a run that keeps state: what the source wants
         # saved (DESIGN, "The path source"), or None
         self.state_after = None
 
     def _make(self, side, role):
         if side.end == "remote":
-            cls = remote.RemoteSource if role == "source" else remote.RemoteSink
             # Its warnings go to this job's log, not the session's (a sync of up and down).
-            return cls(self.session, side.plugin, side.options, self.log)
+            if role == "source":
+                return remote.RemoteSource(self.session, side.plugin, side.options, self.log,
+                                           plan_args=self.plan_args)
+            return remote.RemoteSink(self.session, side.plugin, side.options, self.log)
         log, prefix = self.log, role + ": "
         # No tick: local work never counts as idle (DESIGN, "Threads, timeouts, shutdown").
         ctx = plugin.Ctx("local", log=lambda msg: log.info("%s%s" % (prefix, msg)))
@@ -86,6 +93,7 @@ class Engine:
     def _run(self, source, sink, dry_run, state, full):
         log = self.log
         self.plan = p = source.plan(state, full=full)
+        self.plan_reply = getattr(source, "reply", {})
         self._log_plan(p)
         if self.after_plan is not None:
             self.after_plan(p)

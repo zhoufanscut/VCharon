@@ -63,6 +63,16 @@ type a time from memory.
 ## Who the members are
 
 `vcharon whoami myapp` ends with the channel's members, one line each: the name, `(leader)`,
-`(you)`, the `agent`, `box` and `os` from that member's `MEMBER.md`, and the newest file in its
-folder (local time). The watcher's `<n> other entries (<folders>)` names folders only: this says
-who they are. As a remote member it is this machine's copy, as of its last sync.
+`(you)`, the `agent`, `box` and `os` from that member's `MEMBER.md`, the newest file in its
+folder (local time), and when its watcher last pulled the channel:
+
+- `watched 40 s ago (every 2 s)`: its watcher's last round, and that watcher's `--every`.
+- `watched -`: no stamp: its watcher hasn't run, or, as a remote member, this machine's copy
+  is older than its first one.
+- `watched ? (vcharon 0.2.3)`: no stamp, but that member runs a version that never stamps, so
+  it may be watching all the same.
+
+The watcher's `<n> other entries (<folders>)` names folders only: this says who they are. As a
+remote member it is this machine's copy, as of its last sync, and so are the ages. `--json`
+gives each member `watched` (the time, or null) and `watch_every` (seconds, or null); so does
+`vcharon read myapp --json`, in `member_info`.

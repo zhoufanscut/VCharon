@@ -103,6 +103,12 @@ restart whose first round fails with the saved text prints it again without coun
 blocked client isn't woken in a loop. With --until-change, a round whose save failed ends the
 watch with EXIT error (exit 11). A lock on it keeps a second watcher of the same membership from
 starting (exit 12).
+
+Each round that read the channel stamps the member's last-watched time at the channel's
+machine (channels.stamp_seen, beside the channel root, never in the channel): a local member's
+round after its scan worked; a remote member's sync child, marked by WATCH_ENV, through its
+down plan. At most one metadata write every 30 s, best effort, and never a line here: whoami C
+shows the ages.
 """
 
 from __future__ import annotations
@@ -125,6 +131,7 @@ import time
 # before anything can change the files under it (DESIGN, "Running watchers").
 from .. import (
     channel_cmd,
+    channels,
     charter,
     config,
     entries,
@@ -165,6 +172,10 @@ STREAM_ERROR_ROUND = 30
 BACKOFF = (2, 4, 8, 16, 30)
 # how long the child may take to end after its stdin closes, before it's killed
 STOP_WAIT = 10
+# Set in a remote member's sync child's environment to the watcher's pace (channels.parse_pace's
+# shape, as "stream 2"): its down plan then stamps the member's last-watched time at the server.
+# A by-hand sync has none, so it never makes a member look watched.
+WATCH_ENV = "VCHARON_WATCHER"
 # the child's line that ends one round: the sync's exit code for it
 _ROUND = re.compile(r"\AROUND (\d+)\Z")
 # Windows and macOS clients ignore case in names, so Windows/ there is the own folder.
@@ -1180,12 +1191,29 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
             changes += w.status(error, fix)
             # a failed scan saves too: the error shown must survive a restart
             saved = w.save(scanned=error is None)
+            if error is None:
+                stamp_local(root, me, every)
             return changes, None if w.told() else error is not None, saved
 
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
                      max_errors, rounds, updated=updated, orphaned=orphaned)
     finally:
         lk.release()
+
+
+def stamp_local(root, me, every):
+    """A local member's round read its channel folder root: the member's last-watched stamp,
+    when root is a channel in this machine's channel root (channels.root_path, as the helper
+    finds it); else, and on any failure, nothing: a stamp never stops or delays a watch, nor
+    prints a line (DESIGN, "The watcher in a channel")."""
+    try:
+        top = channels.root_path()
+        if os.path.dirname(os.path.normpath(root)) != top:
+            return
+        channels.stamp_seen(top, os.path.basename(os.path.normpath(root)), me,
+                            "local %d" % every)
+    except (OSError, VCharonError):
+        pass
 
 
 def sync_argv(sync_args, repeat=None):
@@ -1238,7 +1266,7 @@ def silent_fix(job):
                     [job + suffix + ".log" for suffix in config.MAILBOX_JOBS] + ["vcharon.log"]))
 
 
-def run_sync(job, sync_args):
+def run_sync(job, sync_args, pace=None):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
     stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
     session of its own: past RUN_TIMEOUT, or on Ctrl-C, its whole process group is ended on
@@ -1246,10 +1274,14 @@ def run_sync(job, sync_args):
     otherwise run on holding the job's locks, so every later round would be busy. SIGTERM
     first, up to TERM_WAIT before the SIGKILL, so the bootloader removes its unpack folder.
     Windows kills the bootloader alone; a binary's Python process then ends itself
-    (install.exit_with_parent) (DESIGN, "Running watchers")."""
+    (install.exit_with_parent) (DESIGN, "Running watchers"). pace: the watcher's, for
+    WATCH_ENV."""
+    env = platform.child_env()
+    if pace is not None:
+        env[WATCH_ENV] = pace
     try:
-        ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True,
-                        env=platform.child_env(), term_wait=TERM_WAIT)
+        ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True, env=env,
+                        term_wait=TERM_WAIT)
     except OSError as e:
         return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
     if ran.rc is None:
@@ -1357,8 +1389,10 @@ class Stream:
     BACKOFF's wait. spawn, sleep and timer are the tests' to replace."""
 
     def __init__(self, job, sync_args, every, spawn=_spawn, sleep=time.sleep,
-                 timer=time.monotonic, stop_wait=STOP_WAIT):
+                 timer=time.monotonic, stop_wait=STOP_WAIT, pace=None):
         self.job = job
+        # the watcher's pace, for WATCH_ENV
+        self.pace = pace
         self.argv = sync_argv(sync_args, repeat=every)
         self.every = every
         self.spawn = spawn
@@ -1384,6 +1418,8 @@ class Stream:
         # vcharon's own prints in UTF-8, on Windows too (the gbk lesson); a binary's child
         # unpacks its own copy (platform.child_env)
         env = platform.child_env(dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1"))
+        if self.pace is not None:
+            env[WATCH_ENV] = self.pace
         proc = self.spawn(self.argv, env)
         self.proc = proc
         self._lines = queue.Queue()
@@ -1650,7 +1686,7 @@ def is_gone(fix):
     return fix.startswith(channel_cmd.CHANNEL_GONE_PREFIX)
 
 
-def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, rounds=None,
+def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
               updated=None, orphaned=None):
@@ -1660,7 +1696,10 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
     <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
-    way. orphaned: _loop's."""
+    way. orphaned: _loop's. run: run_sync with the watcher's pace, unless a test gives one."""
+    if run is None:
+        def run(job, sync_args):
+            return run_sync(job, sync_args, pace="run %d" % every)
     local, me, leader, channel = mailbox_of(job)
     state = snapshot_path(local, me, job)
     closing = closed_next(channel, me, leader)
@@ -1683,7 +1722,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
         start = timer()
         if stream:
             child = Stream(job, sync_args, every, spawn=spawn, sleep=sleep, timer=timer,
-                           stop_wait=stop_wait)
+                           stop_wait=stop_wait, pace="stream %d" % every)
             deadline = None if max_minutes is None else start + max_minutes * 60
             error_seconds = max_errors * STREAM_ERROR_ROUND
 

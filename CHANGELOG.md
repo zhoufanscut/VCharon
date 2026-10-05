@@ -9,6 +9,22 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `whoami C` shows when each member's watcher last pulled the channel: each member's line ends
+  with `watched <age> ago (every <n> s)`, `watched -` (no stamp) or `watched ? (vcharon
+  <version>)` (a member on 0.2.3 or older, which never stamps). `whoami C --json`'s `members`
+  and `read --json`'s `member_info` gain `watched` (local time, or null) and `watch_every`
+  (seconds, or null): fields added, none changed. A watcher's round stamps the time in a new
+  folder `seen/` beside the channel root on the channel's machine (by default
+  `~/.local/state/vcharon/seen/`), at most one small write every 30 s, outside the channel, so
+  no channel file, watcher line, exit code or channel format changes; a sync by hand stamps
+  nothing. A remote member keeps the ages in `<state>/<C>.<name>.down.seen.json`, which `leave`
+  and `close` remove (one more `removed` line). `create`, `join` and `close` remove the
+  `seen/<C>/` of channels that are gone. The guide's lead topic says how to tell a watcher that
+  stopped. To adapt: nothing; a script that compares whoami's member lines as whole text sees
+  the new part at their end. Checked on Linux (measured): unit tests,
+  including a sync over the fake ssh with and without the watcher's mark, a local member's
+  watch, and the helper's stamp failing without failing the plan. Not run on macOS or
+  Windows: the stamp's `os.utime` and the cache's retried replace there are inferred.
 - Linux and macOS binary: a `--no-stream` round's sync that hits its 900 s limit, or is cut
   by Ctrl-C, now gets SIGTERM and up to 3 s to end before the SIGKILL, so it removes its
   unpack folder (about 20 MB) from the temp folder; before, it was SIGKILLed at once and the

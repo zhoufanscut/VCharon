@@ -1630,6 +1630,7 @@ def _remove_membership(cfg, record, section, say, watcher):
                 drop(path)
             drop(os.path.join(platform.state_dir(), job + ".lock"), lock=True)
         drop(charter.left_out_path(section))
+        drop(charter.seen_path(section))
     drop(snapshot)
     if post_lock is not None:
         drop(post_lock, lock=True)

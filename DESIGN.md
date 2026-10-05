@@ -156,7 +156,9 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
 - Quiet on disk: a job's state is written only when it changed, and a round with nothing to do
   logs nothing; the log gets one line every 10 minutes (`repeat: <n> rounds since <time>,
   nothing to do in <m>`). Else a quiet watch would fsync two files and grow the log every two
-  seconds.
+  seconds. The exceptions are a watcher's last-watched stamp at the server and the client's
+  copy of the ages, each at most one small write every 30 s, not fsynced: without them nothing
+  shows that a watcher still runs ([The watcher in a channel](#the-watcher-in-a-channel)).
 - `run_timeout` counts per round. Refused with `--full`, `--dry-run` or `--reset`.
 
 ## Files
@@ -404,7 +406,7 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 |---|---|---|---|
 | `echo` | – | `{}` | upload one file (at most 16 MiB), then the same bytes back |
 | `plugin.doctor` | `plugin`, `role`, `options` | `{"checks": [[level, message, hint], …]}` | – |
-| `source.plan` | `plugin`, `options`, `state`, `full` | a plan | – |
+| `source.plan` | `plugin`, `options`, `state`, `full`, optional `watch` | a plan; a channel's down also `seen` or `seen_error` | – |
 | `source.send` | `indexes` | `{}` | download of those file puts |
 | `source.state_after` | `written`, `deleted` | `{"state": …}`, or `{"state": null}` | – |
 | `sink.check` | `plugin`, `options`, `plan` | `{"root", "notes", "deletes", "have"}` | – |
@@ -428,10 +430,18 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   state: the sink never reads it, and it can be large.
 - `deletes_done` lists the deletes a commit got through; `source.state_after` uses it after a
   commit that failed partway.
+- `watch` in `source.plan` is a watcher's pace: the helper stamps the member's last-watched time
+  after the plan. A down of a channel in the root (`mailbox_me` set) gets `seen`, `{member:
+  [age seconds, pace]}`, beside the plan's fields, or `seen_error` with why not; the client takes
+  both out before reading the plan ([The watcher in a channel](#the-watcher-in-a-channel)).
 - The `channel.*` calls work on the channel root: the fixed `~/.local/state/vcharon/channels`,
   or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only). Never an argument: every
   member must reach the same folder. Each call checks the names again, works only directly below
   the root, and never follows a symlink. `--local` calls the same functions in-process.
+  `claim`, `release` (undoing a failed claim) and `remove` also sweep `seen/` beside the root: each
+  `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed, and a
+  new member's claim drops an earlier member's stamp of its name. Why there: those calls end or
+  reuse channels, and the stamps of a channel that is gone are nobody's.
 - `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`);
   `claimer` is the `claimer:` of an existing folder's `MEMBER.md`, or null; `format` and
   `limits` are the channel's, read from its leader's `CHANNEL.md`. No reply carries a host name.
@@ -729,6 +739,7 @@ less the umask. Not copied: owner, ACLs, extended attributes, resource forks, fo
 | logs | `%LOCALAPPDATA%\vcharon\logs\` | `~/Library/Logs/vcharon/` | `$XDG_STATE_HOME/vcharon/logs/` |
 | local trees (`joined`) | `%LOCALAPPDATA%\vcharon\joined\` | `~/.local/state/vcharon/joined/` | `~/.local/state/vcharon/joined/` |
 | channel root | `~/.local/state/vcharon/channels/` (under `%USERPROFILE%`) | `~/.local/state/vcharon/channels/` | `~/.local/state/vcharon/channels/` |
+| last-watched stamps (`seen`) | beside the channel root | the same | the same |
 
 Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 
@@ -1154,9 +1165,10 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   member's is noted and nothing posted. Else it posts `LEAVE` (once: not again after a failed
   try) and syncs; a failed sync stops before removing anything. Then it removes the local tree
   (only when it is exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
-  state, logs, locks not held, the watcher's snapshot, the post lock, the record, the section
-  file, and last the watcher's lock file, after the record, so a watcher started then finds no
-  membership; deleted and released in the order a failed join uses. One `removed <path>` line
+  state, the kept last-watched ages, logs, locks not held, the watcher's snapshot, the post
+  lock, the record, the section file, and last the watcher's lock file, after the record, so a
+  watcher started then finds no membership; deleted and released in the order a failed join
+  uses. One `removed <path>` line
   each. The member's folder in the channel stays: it is its history, and its name stays taken.
   When the channel, or the member's folder in it, was gone, it ends with `note    nothing of <C>
   as <name> is left on this machine` (and `still here: <names>` for other memberships of C on
@@ -1388,6 +1400,37 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   output is read as UTF-8: a Windows code page would garble `—`. `--no-stream` runs one sync per
   round instead (every 30 s by default), through `fsops.run` in a session of its own, so its
   900 s timeout, or a Ctrl-C, ends the sync's whole process group.
+- **Last watched.** Each round that read the channel stamps the member's last-watched time at
+  the channel's machine, in `seen/<C>/<member>` beside the channel root (by default
+  `~/.local/state/vcharon/seen/`): a file holding the watcher's pace (`stream 2`, `run 30`,
+  `local 10`: its mode and `--every`), its mtime the time. Why: a `watching` entry is a claim,
+  and nothing else showed whether a member's watcher still ran.
+  - Who stamps: a local member's watcher after a round's scan worked; a remote member's through
+    its down plan, the helper stamping after the plan opened the channel folder. The watcher
+    marks its sync child (streaming or not) with the private `VCHARON_WATCHER=<pace>`, and the
+    sync then adds `watch` to `source.plan`. A sync by hand, or a join's pull, stamps nothing:
+    it would make a member look watched. Every channel down still gets the ages back.
+  - Where: beside the root, never in it: a name at a channel's top is synced to every member,
+    logged by every down and makes close refuse; one at the root's top shows in `list`. The
+    helper and a local member both find it through the channel root, so they agree; a down of
+    a folder that isn't a channel in the root gets no stamp and no ages.
+  - Cost: the time is written only when 30 s have passed (or the pace changed), with the
+    writer's own clock set explicitly (`os.utime`), never a file server's. A stamp makes `seen/`
+    and `seen/<C>/` with one `mkdir` each, never above them, and removes a `seen/<C>/` it made
+    when the channel went meanwhile (a close).
+  - Best effort: a stamp or listing that fails never fails a plan or prints a watcher line; the
+    helper sends its text as `seen_error`, which the client logs as a warning.
+  - The ages ride back in the down's plan reply (`seen`: each stamped member's age in seconds
+    and pace, worked out by the channel machine's own clock, so no two machines' clocks are
+    compared). A remote member keeps them in `<state>/<C>.<name>.down.seen.json`, as this box's
+    time less the age: written when a member or a pace changed, else at most every 30 s. Read
+    by `whoami C` and `read --json` ([Reading a channel](#reading-a-channel)); removed by
+    `leave` and `close` with the membership's other files.
+  - How late is dead: a live watcher's stamp is at most 30 s plus one of its rounds old at the
+    channel's machine (and the sync's own time), and a remote reader's copy lags by up to another
+    30 s plus its own round while its own watcher runs; else since its last pull. The guide's
+    rule: late past 2 × `--every` + 120 s. `--until-change` restarts and foreground runs make
+    gaps normal.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
   own folder (in any case, on macOS and Windows), never stage files. It prints, each line
   starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
@@ -1451,9 +1494,10 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   its file taken from the next one seen), hashes of entries without an ID of their folder, the
   warnings shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's
   lines are printed, so a crash may print a change twice but never loses one; written only when it
-  changed, so a quiet watch doesn't touch the disk, and a restart's first round that changes nothing
-  doesn't either. A restart goes on from it (`watching <dir>, <n> files in other folders, since
-  <time>`, the time of the last round that changed it) and prints what came meanwhile; a saved error
+  changed, so a quiet watch doesn't touch the disk (but for the last-watched stamp, at most one
+  small write every 30 s), and a restart's first round that changes nothing doesn't either. A
+  restart goes on from it (`watching <dir>, <n> files in other folders, since <time>`, the
+  time of the last round that changed it) and prints what came meanwhile; a saved error
   that holds is printed again without counting, so a blocked member isn't woken in a loop. The first
   start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote member,
   this machine's copy as of its last sync), none of it printed; what the first round brings prints
@@ -1530,6 +1574,17 @@ says so.
   line, still exit 0, since who you are is shown). Why: the watcher's `<n> other entries
   (<folders>)` doesn't say who the folders are, and `list` needs the server. It reads nothing
   else of a member's files, so no host name or path shows.
+- **Last watched**: each member's line ends with `watched <age> ago (every <n> s)`, from the
+  stamps ([The watcher in a channel](#the-watcher-in-a-channel)): the age in seconds under 2
+  minutes, minutes under 2 hours, else hours; `watched -` for a member with no stamp; `watched ?
+  (vcharon <version>)` for one with none whose `MEMBER.md` says 0.2.3 or older (or no version:
+  `unknown`), since those versions never stamp and such a member may be watching all the same.
+  A version the reader's own build also carries counts as stamping: a build that stamps but
+  is not yet numbered past 0.2.3 writes 0.2.3 too.
+  A remote member's are as of its last sync, as the rest of its list. `--json` gives each
+  member `watched` (the time, local, to the second, or null) and `watch_every` (seconds, or
+  null), in `whoami C`'s `members` and `read`'s `member_info`. No verdict and no note in
+  `read`'s text: how late is too late depends on the pace, which the guide's lead topic gives.
 
 ### Clocks
 
@@ -1549,6 +1604,10 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   member last ran (`vcharon:`), `whoami` prints the running one, and `read` notes when the
   members' differ. Why: nothing else in a channel shows which version a member runs.
 - A channel's files are guarded by the format ([Formats](#formats)).
+- Last-watched stamps: a member on 0.2.3 or older never stamps; `whoami C` shows it as `watched
+  ?` with its version, not as never watched. An older version's close (or a failed create's
+  undo) doesn't sweep `seen/`; the next claim or close on that machine does. The `watch` arg
+  and the `seen` reply pass only between a client and its own helper.
 - The record and the section hold everything a later command needs, so a membership made by one
   version is used by the next. A record in another shape (an older layout, or a hand edit) is
   refused, with the fix: the user removes it, then the member rejoins with `--rejoin`. It has
@@ -2108,12 +2167,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     "max_entry_kb"}`; each of `others` `{"name", "why"}`.
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "leads", "mode", "server",
     "folder", "tree", "box", "box_source", "members"}`, each member `{"name", "agent", "box",
-    "os", "leader", "newest"}`. `whoami` without C: `{"box", "box_source", "project", "role",
-    "name", "channels"}`, each channel as with C without `box`, `box_source` and `members`.
+    "os", "leader", "newest", "watched", "watch_every"}`. `whoami` without C: `{"box",
+    "box_source", "project", "role", "name", "channels"}`, each channel as with C without
+    `box`, `box_source` and `members`.
   - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
     "notes", "missing"}`; each of `member_info` `{"name", "box", "os", "agent", "project",
-    "vcharon"}`; each entry `{"time", "id", "name", "number", "to", "re", "title", "file",
-    "header", "body"}`.
+    "vcharon", "watched", "watch_every"}`; each entry `{"time", "id", "name", "number", "to",
+    "re", "title", "file", "header", "body"}`.
   - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
     "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
     "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",
