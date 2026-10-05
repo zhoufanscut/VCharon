@@ -1363,6 +1363,17 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   - `to you: <id> — <title>  (<path>)` for an entry whose `to:` holds `@<me>` (even with
     `@all`), and `to all: …` for `@all` from the leader (the record's leader, never "whoever holds
     `CHANNEL.md`"); in the entries' own time order;
+  - `  next: the leader closed the channel: stop your watcher and don't start it again, then
+    run: vcharon leave C <flags>` right after the line of the leader's entry to `@all` (a `to
+    all`, or a `to you` when it names the member too) whose whole title is `CLOSED` exactly,
+    letter case included, spaces around it aside. The flags are the member's record's (a placeholder
+    without one, as the gone fix's), the command as this box runs vcharon; never for the
+    leader, who closes instead; it doesn't count on its own (its entry does), and comes again
+    only with its entry's line. Why: the guide's end has each member leave after the leader's
+    `CLOSED` and the leader close after the `LEAVE`s, so the channel is still there and no `EXIT
+    closed` fix line gives the command. Why the exact title: a looser match ("Closed", "CLOSED
+    soon") could tell a member to leave a channel that goes on, while a miss only leaves the
+    member to the guide's example;
   - at most one line a round each: `<n> other entries (<folders>)`, `1 other entry (<folder>)`
     for one (addressed elsewhere, no ID, an ID not its folder's, or a `MEMBER.md` #1), `note:
     @all from <folders>, not the leader: ignored`;
@@ -1975,7 +1986,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
     every <n> s]`
-  - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`
+  - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
+    leader's `CLOSED` to `@all`, `  next: <text>`, its command to run as printed
   - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
     <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
     `note: duplicate entry <id> in <path>: the one in <file> stands`, `note: your vcharon

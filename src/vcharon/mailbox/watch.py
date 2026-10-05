@@ -42,6 +42,10 @@ Lines; * marks the ones that count for --until-change:
   * to you: <id> — <title>  (<path>)
   * to all: <id> — <title>  (<path>)
                                    a new entry, in the entries' own time order
+      next: the leader closed the channel: stop your watcher and don't start it again, then
+          run: vcharon leave C <flags>
+                                   right after the leader's entry to @all titled CLOSED, for a
+                                   member (never the leader); with the flags from its record
   * WARN entry <id> was edited     a heading seen before with another text, in the same file;
                                    once
     WARN entry <id> in <folder>/: not its folder's
@@ -183,6 +187,14 @@ RETRY_KEYS = frozenset([TRANSPORT, "vanished", "aborted"])
 # mailbox job's name, S.up or S.down, holds a dot; a code never does.
 _CODE = re.compile(r"\AERROR (?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:up|down): )?([a-z_]+): ")
 _MORE = re.compile(r" \(and \d+ more; see the log\)")
+# The title the guide gives the leader's last entry to @all (vcharon guide end), matched whole
+# and exact but for spaces around it: a looser match ("Closed", "CLOSED soon") could tell a
+# member to leave a channel that goes on, while a miss only leaves it to the guide's example.
+CLOSED_TITLE = "CLOSED"
+# The line after that entry's: the leave command for this membership, as this box runs vcharon
+# (closed_next). Stop first: leave refuses while the watcher holds the member's lock.
+CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don't start it "
+               "again, then run: vcharon leave %s %s")
 
 
 def error_key(line):
@@ -421,7 +433,7 @@ class Told:
     ones that don't."""
 
     def __init__(self):
-        self.entries = []     # (time, path, line number, line)
+        self.entries = []     # (time, path, line number, [line, the lines after it])
         self.edited = []      # the WARN lines for edited entries: they count, once
         self.misplaced = []   # the WARN lines for IDs in another member's folder
         self.duplicates = []  # the notes for an ID already seen in another file
@@ -430,7 +442,7 @@ class Told:
         self.unread = []      # the entry files that couldn't be read: tried again next round
 
     def lines(self):
-        out = [line for _, _, _, line in sorted(self.entries, key=lambda e: e[:3])]
+        out = [line for e in sorted(self.entries, key=lambda e: e[:3]) for line in e[3]]
         out += self.edited + self.misplaced + self.duplicates
         if self.others:
             n = len(self.others)
@@ -445,12 +457,14 @@ class Told:
         return len(self.entries) + len(self.edited)
 
 
-def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
+def read_entries(root, paths, marks, me, leader, baseline=False, present=None, closing=None):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
     member's is ignored, since any member can write anything into its own folder. present:
     every file in the tree now (None: all those the marks name); an ID's head in a file gone
-    from it, or in a file that no longer holds the ID, gives way to the next copy seen."""
+    from it, or in a file that no longer holds the ID, gives way to the next copy seen.
+    closing: the line printed right after the leader's CLOSED to @all (CLOSED_NEXT), or None
+    for none."""
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -519,13 +533,16 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None):
             if baseline:
                 continue
             where = "%s — %s  (%s)" % (e.id, e.title, path)
+            # the leader's end of the channel, to @all (with @<me> too, it prints as to you)
+            after = ([closing] if closing is not None and folder == leader
+                     and entries.ALL in e.to and e.title.strip() == CLOSED_TITLE else [])
             if path == "%s/%s" % (folder, entries.MEMBER_FILE):
                 # a member's #1, addressed to the leader by design: its JOIN is what tells
                 told.others.append(folder)
             elif "@" + me in e.to:
-                told.entries.append((e.time or "", path, e.line, "to you: " + where))
+                told.entries.append((e.time or "", path, e.line, ["to you: " + where] + after))
             elif entries.ALL in e.to and folder == leader:
-                told.entries.append((e.time or "", path, e.line, "to all: " + where))
+                told.entries.append((e.time or "", path, e.line, ["to all: " + where] + after))
             elif entries.ALL in e.to:
                 told.all_from.append(folder)
             else:
@@ -782,7 +799,8 @@ class _Watch:
     snapshot."""
 
     def __init__(self, root, me, out, clock, fold=False, state=None, check=None, leader=None,
-                 gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None):
+                 gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None,
+                 closing=None):
         self.root = root
         self.me = me
         # a local member's: (max bytes, max files) of each other member's folder; one over
@@ -796,6 +814,8 @@ class _Watch:
         self.suffix = suffix
         # whose @all is to all: the record's, never the holder of CHANNEL.md
         self.leader = leader
+        # the line after the leader's CLOSED to @all (closed_next), or None
+        self.closing = closing
         self.marks = Marks()
         self.out = out
         self.clock = clock
@@ -896,7 +916,7 @@ class _Watch:
         """Reads the entry files among paths into the marks; returns the round's Told. A file
         that couldn't be read leaves files, so the next round reads it again."""
         told = read_entries(self.root, [p for p in paths if is_entry_file(p)], self.marks,
-                            self.me, self.leader, baseline, files)
+                            self.me, self.leader, baseline, files, self.closing)
         for path in told.unread:
             files.pop(path, None)
         return told
@@ -1147,7 +1167,8 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     leader = server_leader(root, me)
     state = snapshot_path(root, me)
     w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone,
-               folder_limits=folder_limits)
+               folder_limits=folder_limits,
+               closing=closed_next(os.path.basename(root), me, leader))
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
@@ -1560,8 +1581,8 @@ UPDATED = object()
 
 
 def mailbox_of(job):
-    """(local tree, me, leader) of the channel section job, read through vcharon's own config
-    code."""
+    """(local tree, me, leader, channel) of the channel section job, read through vcharon's own
+    config code."""
     cfg = config.load()
     if job not in cfg.mailboxes:
         skip = cfg.skipped_for(job)
@@ -1573,7 +1594,8 @@ def mailbox_of(job):
                            hint="join the channel again, with the --project and --role you "
                            "joined with: it writes the section")
     box = cfg.jobs[cfg.mailboxes[job][0]].mailbox
-    return plugin.Ctx("local").resolve(box.local, "mailbox.local"), box.me, box.leader
+    return (plugin.Ctx("local").resolve(box.local, "mailbox.local"), box.me, box.leader,
+            box.channel)
 
 
 def server_leader(root, me):
@@ -1620,6 +1642,15 @@ def gone_fix(root, me):
                              % (channel, channel_cmd.name_flags(channel, me)))
 
 
+def closed_next(channel, me, leader):
+    """The line after the leader's CLOSED to @all: the leave command with the flags from me's
+    record (a placeholder without one, as gone_fix), as this box runs vcharon. None for the
+    leader, who closes instead (its own folder is never read anyway)."""
+    if me == leader:
+        return None
+    return platform.runnable(CLOSED_NEXT % (channel, channel_cmd.name_flags(channel, me)))
+
+
 def is_gone(fix):
     """Whether a fix line is the one for a channel that's gone: CHANNEL_GONE_HINT's,
     told by its start, which neither platform.runnable nor run_sync's log part changes.
@@ -1642,14 +1673,15 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=run_sync, ro
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
     way. orphaned: _loop's."""
-    local, me, leader = mailbox_of(job)
+    local, me, leader, channel = mailbox_of(job)
     state = snapshot_path(local, me, job)
+    closing = closed_next(channel, me, leader)
     # the members the pull left out for their size, as the sync saved them after its down:
     # a WARN each while it lasts, in both modes (a streaming sync prints no notes)
     w = _Watch(local, me, out, clock, fold=FOLDS, state=state, leader=leader, timer=timer,
                hold=STREAM_HOLD if stream else None,
                suffix=", streaming every %d s" % every if stream else "",
-               check=lambda root, me: charter.left_out_notes(job))
+               check=lambda root, me: charter.left_out_notes(job), closing=closing)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED

@@ -1841,6 +1841,20 @@ class StreamTest(WatchCase):
         self.assertEqual(self.slept, [])
         self.assert_all_stopped()
 
+    def test_the_leaders_closed(self):
+        # streaming: the leave command right after the leader's CLOSED to @all, and the
+        # watch runs on until it is stopped
+        code, lines = self.watch(
+            [["out", "ROUND 0"], self.entry("debian", 2, "CLOSED", to="@all"),
+             ["out", "ROUND 0"], ["out", "ROUND 0"]], rounds=3)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, [
+            watching(self.tree, 0, ", streaming every 2 s"),
+            "to all: debian#2 — CLOSED  (debian/RESULTS.md)",
+            platform.runnable("  next: the leader closed the channel: stop your watcher and "
+                              "don't start it again, then run: vcharon leave mb --project p")])
+        self.assert_all_stopped()
+
     def test_a_binarys_child(self):
         # a PyInstaller binary starts itself, and its child unpacks its own copy (it outlives
         # the parent's unpacked folder)
@@ -2546,6 +2560,114 @@ class EntriesTest(WatchCase):
             watch.watch_dir(self.tree, "mac", 10, out=self.lines.append, sleep=never, rounds=0)
         self.assertEqual(cm.exception.message, "%s names no leader, and there's no record of "
                          "mac in mb" % os.path.join(self.tree, "mac", "MEMBER.md"))
+
+
+class ClosingTest(WatchCase):
+    """The leader's CLOSED to @all: right after its line, the leave command for this membership
+    (vcharon guide end). Server mode, as the member mac of mb, led by debian."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.member("mac", "debian")
+        self.member("windows", "debian")
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
+                                  "leader": "debian", "ssh": None, "remote": self.tree,
+                                  "machine": util.TEST_MACHINE_ID, "project": "web",
+                                  "role": "b", **util.record_format()})
+
+    @staticmethod
+    def next_line(flags):
+        return platform.runnable("  next: the leader closed the channel: stop your watcher and "
+                                 "don't start it again, then run: vcharon leave mb " + flags)
+
+    def watch(self, me, posted, **kw):
+        lines = []
+        code = watch.watch_dir(self.tree, me, 10, out=lines.append, sleep=Rounds(posted),
+                               rounds=1, **kw)
+        return code, self.said(lines)[1:]
+
+    def test_the_leaders_closed_to_all(self):
+        def posted():
+            self.post("debian", 2, "CLOSED", to="@all", when="2026-10-01 09:10")
+            self.post("windows", 2, "later", to="@mac", when="2026-10-01 09:11")
+
+        # one change, as before: the next line follows its entry's, in time order, and the
+        # watcher ends as for any change (its exit code and EXIT line unchanged)
+        self.assertEqual(self.watch("mac", posted, until_change=True, max_minutes=25), (
+            watch.EXIT_CHANGE, ["to all: debian#2 — CLOSED  (debian/RESULTS.md)",
+                                self.next_line("--project web --role b"),
+                                "to you: windows#2 — later  (windows/RESULTS.md)",
+                                "EXIT change"]))
+        # told once: a restart from the snapshot prints neither again
+        self.assertEqual(self.watch("mac", lambda: None), (0, []))
+        # with @mac too it prints as to you, and is still the leader's end of the channel
+        self.post("debian", 3, "CLOSED", to="@all @mac")
+        self.assertEqual(self.watch("mac", lambda: None), (0, [
+            "to you: debian#3 — CLOSED  (debian/RESULTS.md)",
+            self.next_line("--project web --role b")]))
+
+    def test_the_flags_come_from_the_record(self):
+        # windows has no record here: the placeholder gone_fix uses too, never made-up flags
+        self.assertEqual(self.watch("windows", lambda: self.post("debian", 2, "CLOSED",
+                                                               to="@all"))[1],
+                         ["to all: debian#2 — CLOSED  (debian/RESULTS.md)",
+                          self.next_line("<the --project and --role that make windows>")])
+
+    def test_no_next_line(self):
+        cases = [
+            # a member's @all is ignored: only the leader ends the channel
+            ("windows", 2, "CLOSED", "@all",
+             ["note: @all from windows, not the leader: ignored"]),
+            ("windows", 3, "CLOSED", "@all @mac",
+             ["to you: windows#3 — CLOSED  (windows/RESULTS.md)"]),
+            # the leader's CLOSED to one member, and a member's to mac
+            ("debian", 2, "CLOSED", "@mac", ["to you: debian#2 — CLOSED  (debian/RESULTS.md)"]),
+            ("windows", 4, "CLOSED", "@mac",
+             ["to you: windows#4 — CLOSED  (windows/RESULTS.md)"]),
+            # the title whole and exact, but for the spaces around it
+            ("debian", 3, "Closed", "@all", ["to all: debian#3 — Closed  (debian/RESULTS.md)"]),
+            ("debian", 4, "CLOSED soon", "@all",
+             ["to all: debian#4 — CLOSED soon  (debian/RESULTS.md)"]),
+            ("debian", 5, "NOT CLOSED", "@all",
+             ["to all: debian#5 — NOT CLOSED  (debian/RESULTS.md)"])]
+        for folder, n, title, to, want in cases:
+            with self.subTest(folder=folder, title=title, to=to):
+                # fresh: the round comes after the post, not at once from the saved snapshot
+                def posted(folder=folder, n=n, title=title, to=to):
+                    self.post(folder, n, title, to=to)
+
+                self.assertEqual(self.watch("mac", posted, fresh=True)[1], want)
+
+    def test_spaces_around_the_title(self):
+        def posted():
+            # by hand: a heading with spaces around its title
+            with open(os.path.join(self.tree, "debian", "RESULTS.md"), "ab") as f:
+                f.write("# RESULTS\n\n## 2026-10-01 09:00 — debian#2 —  CLOSED \nto: @all\n"
+                        .encode())
+
+        self.assertEqual(self.watch("mac", posted)[1], [
+            "to all: debian#2 —  CLOSED   (debian/RESULTS.md)",
+            self.next_line("--project web --role b")])
+
+    def test_not_for_the_leader(self):
+        # the leader closes instead; its own folder, which holds its CLOSED, is never read
+        self.assertIsNone(watch.closed_next("mb", "debian", "debian"))
+        self.assertEqual(self.watch("debian", lambda: self.post("debian", 2, "CLOSED",
+                                                              to="@all"))[1], [])
+
+    def test_a_remote_member(self):
+        # its flags from its record (no --server: leave reads it there), in every round of
+        # a --no-stream watch as in a streaming one (StreamTest)
+        sync_args = ClientModeTest.write_config(self)
+
+        def run(job, sync_args):
+            self.post("debian", 2, "CLOSED", to="@all")
+            return 0, None, None
+
+        watch.watch_job("mb.windows", sync_args, 30, out=self.lines.append, sleep=never,
+                        run=run, rounds=1)
+        self.assertEqual(self.said()[1:], ["to all: debian#2 — CLOSED  (debian/RESULTS.md)",
+                                           self.next_line("--project p")])
 
 
 class ClosedTest(WatchCase):

@@ -9,6 +9,25 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `watch` prints a new line right after the line of the leader's entry to `@all` titled `CLOSED`:
+  `  next: the leader closed the channel: stop your watcher and don't start it again, then run:
+  vcharon leave C --project P [--role R]`, the flags from the member's record, the command spelled
+  the way this install runs vcharon. The title must be exactly `CLOSED` (spaces around it aside;
+  `Closed` or `CLOSED soon` get no line). Never for the leader's own watcher, nor for a `CLOSED`
+  from another member or to one member only. A new watcher line (DESIGN, "Stable"); no other line,
+  exit code or `EXIT` line changed, and the entry counts for `--until-change` as before. To adapt:
+  a parser that skips lines it doesn't know needs no change; one that rejects them, or ties every
+  two-space-indented line to the `ERROR` above it, must accept `  next:` after a `to all:` or `to
+  you:` line. The `end` guide's member step, the `watch` guide's line list and `EXIT change` row,
+  the `rules` guide's stable list and the skill's restart rule say so; since the skill's text
+  changed, an installed copy gets the usual stale-skill note until `vcharon skill install` runs
+  again. Why: in a channel run the leader closes only after the members' `LEAVE`, so when `CLOSED`
+  arrives the channel still exists, no `EXIT closed` fix line gives the command, and a Claude Code
+  member had to build its `leave` from the guide's example. Measured on Linux: unit tests (a local
+  member's watcher with `--role`, `--until-change` and a restart; a remote member's `--no-stream`
+  and streaming watchers; no line for the leader's own watcher, a member's `CLOSED`, one to a
+  single member, or another title; a member with no record gets the gone fix's placeholder).
+  Inferred for macOS and Windows (the same code; not run there).
 - `join` and `create` without `--project` print, right after their `vcharon: join|create …`
   line, where the name's project part came from, and how to undo the membership: `  note:
   project src is the checkout <path> (.svn); if that is the wrong project: vcharon leave C

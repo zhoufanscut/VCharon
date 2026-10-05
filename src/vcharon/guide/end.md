@@ -11,12 +11,23 @@
    EOF
    ```
 
-2. The channel is over only when the leader posts `CLOSED` to `@all`. Then, in this order:
+2. The channel is over only when the leader posts `CLOSED` to `@all`. Your watcher prints its
+   line, then the command to leave with your own flags, spelled the way this machine runs
+   vcharon:
+
+   ```
+   2026-10-05 14:02:11 to all: mac-myapp#9 — CLOSED  (mac-myapp/RESULTS.md)
+   2026-10-05 14:02:11   next: the leader closed the channel: stop your watcher and don't start it again, then run: vcharon leave myapp --project api
+   ```
+
+   Then, in this order:
    1. Stop your watcher: don't start it again after its next exit, and stop the one running
       with your CLI's way to stop a background command (Claude Code: `TaskStop`); if you have
       none, ask your user.
-   2. Leave, from the same folder and with the same `--project` and `--role` you joined with
-      (never `--server` or `--local`: leave reads the server from your join record):
+   2. Leave: run the `next:` line's `leave` as printed. With no such line (an older vcharon, or a
+      title other than exactly `CLOSED`), leave from the same folder and with the same `--project`
+      and `--role` you joined with (never `--server` or `--local`: leave reads the server from your
+      join record):
 
       ```
       vcharon leave myapp

@@ -717,7 +717,10 @@ HINTS = {
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
         ("%s isn't there: your folder in the channel holds it, once vcharon join --local has "
-         "written it", None)],
+         "written it", None),
+        # the line after the leader's CLOSED to @all
+        ("  next: the leader closed the channel: stop your watcher and don't start it again, "
+         "then run: vcharon leave %s %s", ("game", FLAGS))],
 }
 
 

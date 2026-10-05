@@ -93,7 +93,7 @@ as `[exited with code 0]`) doesn't count.
 
 | last line | code | what you do |
 |---|---|---|
-| `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act). Then read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
+| `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act), unless a `next:` line after the leader's `CLOSED` is among the lines above: then don't, and leave as it says (`vcharon guide end`). Otherwise, read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
 | `EXIT quiet <n> min` | 10 | Nothing happened. Start it again at once. |
 | `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. |
 | `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running. If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user. Never start one again in a loop. |
@@ -110,13 +110,16 @@ OS's message, and it is translated on some systems.
 
 Every line starts with the time it was printed. Some lines are about entries (`to you:`, `to
 all:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok again`,
-`WARN`, `note:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
+`WARN`, `note:`, `next:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
 text, since no entry holds it. `ok again` means the last `ERROR` is over. A control character
 in a title or file name prints escaped (`\x1b`, `\x0d`), so no member can make a line look
 like another.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
+- `  next: the leader closed the channel: stop your watcher and don't start it again, then
+  run: vcharon leave myapp --project api`: right after the leader's `CLOSED` to `@all`, with
+  your own flags. Do just that (`vcharon guide end`).
 - `<n> other entries (<folders>)`, or `1 other entry (<folder>)`: entries addressed to others,
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
   needs them.
