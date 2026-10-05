@@ -9,6 +9,24 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon read C ID…` prints just those entries (`linux-api#7`, a leading `@` dropped), each
+  whole as with `--full`, in the channel's order. An ID not there prints the ones found, then
+  `ERROR not_found: no entry <ID> in <C>` with a `fix:` line (a remote member's: sync, then read
+  again), exit 1; `--json` prints its object first, with a new `missing` field. IDs with
+  `--last` or `--to-me` are a usage error (exit 3). Why: in a real run `read C <ID>` was an
+  unknown argument, and `read --last 1` right after a watcher's `to you:` line showed another
+  entry, since `--last` goes by the entries' times and a remote entry had synced late
+  (measured, vcharon 0.2.2). The guide's read topic now says to read a watcher's line by its ID.
+- `vcharon read C --to-me`: only the entries the watcher prints as `to you:` or `to all:` (to
+  you, or `@all` from the leader; not a member's `@all`, not your own folder); `--last`,
+  `--full` and `--json` work on that subset.
+- `vcharon whoami C` ends with the channel's members: each folder's name, `agent`, `box` and
+  `os` from its `MEMBER.md`, the leader and you marked, and the newest file's time in the
+  folder (a remote member: this machine's copy, as of its last sync); `--json` adds `members`.
+- All of these are additions to "Stable": new flags, a positional argument, and the JSON fields
+  `missing` (`read`) and `members` (`whoami C`); nothing existing changes, so nothing to adapt.
+  Checked by unit tests on Linux (measured); macOS and Windows not run.
+
 - Windows: ssh's error text in the ANSI code page should now show as written. On a
   Chinese-locale Windows 11 box (vcharon 0.2.2, Git Bash), ssh's error text showed as mojibake
   (measured), from `vcharon list --server` with a lowercase alias that didn't resolve. Output

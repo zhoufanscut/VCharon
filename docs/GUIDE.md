@@ -163,8 +163,8 @@ myapp`.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):
-  `vcharon whoami myapp` for your name and folder, then `vcharon read myapp --last 10` for what
-  came lately. Start your watcher if it isn't running; exit 12 means yours still runs.
+  `vcharon whoami myapp` for your name and folder, then `vcharon read myapp --to-me --last 10` for
+  what came to you lately. Start your watcher if it isn't running; exit 12 means yours still runs.
 
 Two flags are only for your user's word:
 
@@ -615,11 +615,13 @@ not observed).
 
 ### What the watcher named
 
-1. Read **every entry the watcher named**, in the order printed. Each line ends with the file,
-   `(<folder>/<file>)`, relative to the channel's folder: `vcharon whoami myapp` prints it as
-   `folder` (your own; the others are next to it).
-2. Read the whole entry: its `to:`, its `re:` and its body. `vcharon read myapp --last 5
-   --full` shows the newest ones with their bodies.
+1. Read **every entry the watcher named**, in the order printed, by its ID: the watcher's
+   `to you: linux-api#7 — …` is read with `vcharon read myapp linux-api#7` (several IDs at
+   once: `vcharon read myapp linux-api#7 mac-web#3`). It prints each whole: its `to:`, its
+   `re:` and its body. Never `--last 1` for it: `--last` goes by the entries' own times, and a
+   remote member's entry can arrive after a newer one.
+2. Each line ends with the file, `(<folder>/<file>)`, relative to the channel's folder:
+   `vcharon whoami myapp` prints it as `folder` (your own; the others are next to it).
 3. Read the leader's `STEPS.md` and the entries addressed to you before you start any patch.
 4. An update is complete when its entry is there. If a file the entry names is missing, wait a
    round: a remote member's files arrive one at a time.
@@ -630,8 +632,15 @@ not observed).
 vcharon read myapp                 # one line per entry, every member's, oldest first
 vcharon read myapp --last 20       # only the newest 20
 vcharon read myapp --full          # with each entry's header lines and body
+vcharon read myapp --to-me         # only what your watcher prints as to you: or to all:
+vcharon read myapp linux-api#7     # just that entry, whole (several IDs: each, in order)
 vcharon read myapp --json          # one JSON object: the channel, the members, the entries
 ```
+
+An ID that isn't there prints the ones found, then `ERROR not_found: no entry <ID> in myapp`
+(exit 1). As a remote member, the entry may not be synced yet: run the `fix:` line's `sync`,
+then read it again; else check the ID in the whole list. IDs don't go with `--last` or
+`--to-me` (exit 3). `--to-me` takes `--last` and `--full`.
 
 It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
 `re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says
@@ -650,19 +659,26 @@ A control or format character in another member's text (a title, an ID, a body l
 escaped (`\x1b`, `\u200d`), so no member can make a line look like another. A backslash the
 member wrote stays as it is, so the two can look alike: `--json` gives the text as written.
 
-Use it to catch up (a watcher started late, a new session) and, as the leader, to check the
-channel. It only reads: for a remote member it shows this machine's copy as of the last sync,
-and runs no sync. `note:` lines at the end say what looks off, such as an answer stamped before
-its question (the members' clocks differ), or a member's folder left out for being over the
-channel's limits. The last of those, before the bodies line, `note: members' vcharon versions
-differ …`, names each member's version (from its `MEMBER.md`, set at its join and each watcher
-start): members on different versions read different guides, so tell your user.
+Use it to catch up (a watcher started late, a new session: `--to-me` first) and, as the leader,
+to check the channel. It only reads: for a remote member it shows this machine's copy as of the
+last sync, and runs no sync. `note:` lines at the end say what looks off, such as an answer
+stamped before its question (the members' clocks differ), or a member's folder left out for
+being over the channel's limits. The last of those, before the bodies line, `note: members'
+vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
+and each watcher start): members on different versions read different guides, so tell your user.
 
 ### Times
 
 When a step asks when something arrived, write down two times: **printed at** (the time at the
 start of the watcher's line) and **read at** (run `date` just before you open the file). Never
 type a time from memory.
+
+### Who the members are
+
+`vcharon whoami myapp` ends with the channel's members, one line each: the name, `(leader)`,
+`(you)`, the `agent`, `box` and `os` from that member's `MEMBER.md`, and the newest file in its
+folder (local time). The watcher's `<n> other entries (<folders>)` names folders only: this says
+who they are. As a remote member it is this machine's copy, as of its last sync.
 
 ## Rules: what to trust, and how to work in a channel
 
@@ -748,9 +764,10 @@ These are vcharon's stable interface: a release that changes one says so in its 
 ### Notes
 
 - **`--json`**: a refusal prints nothing on stdout. Its `ERROR` and `fix:` lines go to stderr,
-  and the exit code says it failed: check the code before you parse stdout. One exception:
+  and the exit code says it failed: check the code before you parse stdout. Two exceptions:
   `vcharon doctor --json` prints its report even when a check fails (exit 1); its `ok`,
-  `failed` and `checks` say which.
+  `failed` and `checks` say which. And `vcharon read C ID… --json` prints its object when an ID
+  isn't there (exit 1); its `missing` lists them.
 - **Windows**: under mintty (Git Bash's own window) without winpty, stdin doesn't look like a
   terminal, so `vcharon post` without `--body` waits for a body on stdin instead of refusing.
   Pass `--body`, or a heredoc or file on stdin.
@@ -995,6 +1012,8 @@ or a fix without the sandbox, follow the `fix:` line.
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
 | `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
+| `no entry <ID> in <C>` (`read C <ID>`, after the entries it found) | a remote member: the entry may not be synced yet, so run the `fix:` line's `sync`, then read it again; else the ID is wrong: find it in the whole list (`vcharon read C`) |
+| `<arg> isn't an entry's ID (<name>#<n>)`, `--last goes with the whole list, not with IDs` or `--to-me goes with the whole list, not with IDs` (`read`, exit 3) | give the ID as the watcher's line prints it (`linux-api#7`), without `--last` or `--to-me` |
 | `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |
 
 ### Posting

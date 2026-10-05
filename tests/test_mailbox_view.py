@@ -311,7 +311,7 @@ class OutputTest(ViewCase):
             "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
             "member_info": [{"name": n, "box": None, "os": None, "agent": None,
                              "project": None, "vcharon": None} for n in ("aa", "bb")],
-            "count": 4, "notes": [],
+            "count": 4, "notes": [], "missing": [],
             "entries": [
                 {"time": "2026-10-02 10:01:00", "id": "aa#2", "name": "aa", "number": 2,
                  "to": ["@bb", "@cc"], "re": "bb#1", "title": "two", "file": "aa/R.md",
@@ -412,6 +412,117 @@ class VersionTest(ViewCase):
         self.assertEqual([m["vcharon"] for m in doc["member_info"]], ["0.1.0", "0.1.0"])
 
 
+class ByIdTest(ViewCase):
+    """vcharon read C ID ...: just those entries, whole, in the view's order."""
+
+    def setUp(self):
+        ViewCase.setUp(self)
+        write_tree(self.tree, {
+            "aa/R.md": md(entry("aa#1", "one", when="2026-10-02 10:00:00", body="body one"),
+                          entry("aa#2", "two", when="2026-10-02 10:05:00", to="@zz",
+                                extra=["kind: steps"], body="body two")),
+            # a forged copy of aa#2 in another folder is never taken for it
+            "bb/R.md": md(entry("bb#1", "b", when="2026-10-02 09:00:00", body="body b"),
+                          entry("aa#2", "forged", when="2026-10-02 09:30:00"))})
+
+    def test_entries_whole_in_channel_order(self):
+        # given newest first, with an @ and a repeat: printed once each, oldest first
+        lines = self.view("aa#2", "@bb#1", "bb#1")
+        self.assertEqual(lines[0], "mb: 4 entries from 2 members (%s)" % self.tree)
+        self.assertEqual(lines[1:6], [
+            "2026-10-02 09:00:00  bb#1  @all  b  (bb/R.md)",
+            "    body b",
+            "2026-10-02 10:05:00  aa#2  @zz  two  (aa/R.md)",
+            "    kind: steps",
+            "    body two"])
+        # the tree's notes follow; never the bodies line: they are shown
+        self.assertEqual(lines[6:], ["note: aa#2 in bb/: not its folder's"])
+        # --full changes nothing; IDs on both sides of a flag are all taken
+        self.assertEqual(self.view("aa#2", "--full", "bb#1"), lines)
+
+    def test_json(self):
+        code, lines, err = self.main("aa#1", "--json")
+        self.assertEqual((code, err), (0, ""))
+        doc = json.loads(lines[0])
+        self.assertEqual((doc["count"], doc["missing"]), (4, []))
+        [one] = doc["entries"]
+        self.assertEqual((one["id"], one["header"], one["body"]), ("aa#1", [], "body one"))
+
+    def test_not_found(self):
+        # the ones found print first; the rest is an error, exit 1
+        code, lines, err = self.main("zz#4", "aa#1", "cc#1")
+        self.assertEqual(code, 1)
+        self.assertEqual(lines[1:3], ["2026-10-02 10:00:00  aa#1  @all  one  (aa/R.md)",
+                                      "    body one"])
+        self.assertEqual(err.splitlines(), [
+            "ERROR not_found: no entry zz#4, cc#1 in mb",
+            "  fix: " + platform.runnable("check the ID in the whole list: vcharon read mb "
+                                          "--project p")])
+        code, lines, err = self.main("cc#1", "--json")
+        self.assertEqual(code, 1)
+        doc = json.loads(lines[0])
+        self.assertEqual((doc["entries"], doc["missing"]), ([], ["cc#1"]))
+        self.assertTrue(err.startswith("ERROR not_found: no entry cc#1 in mb\n"), err)
+
+    def test_usage(self):
+        for argv, first in ((["aa"], "ERROR config: aa isn't an entry's ID (<name>#<n>)"),
+                            (["aa#0"], "ERROR config: aa#0 isn't an entry's ID (<name>#<n>)"),
+                            (["Aa#1"], "ERROR config: Aa#1 isn't an entry's ID (<name>#<n>)"),
+                            (["aa#1", "--last", "1"],
+                             "ERROR config: --last goes with the whole list, not with IDs"),
+                            (["aa#1", "--to-me"],
+                             "ERROR config: --to-me goes with the whole list, not with IDs"),
+                            (["aa#1", "--fulll"],
+                             "ERROR config: unrecognized arguments: --fulll")):
+            with self.subTest(argv=argv):
+                code, lines, err = self.main(*argv)
+                self.assertEqual((code, lines), (3, []))
+                self.assertEqual(err.splitlines()[0], first)
+
+
+class ToMeTest(ViewCase):
+    """vcharon read C --to-me: what the member's watcher prints as to you: or to all:. The
+    member is zz; the leader aa."""
+
+    def setUp(self):
+        ViewCase.setUp(self)
+        write_tree(self.tree, {
+            # MEMBER.md is left out, even addressed to zz
+            "aa/MEMBER.md": md(entry("aa#1", "member", to="@zz")),
+            "aa/R.md": md(entry("aa#2", "plan", when="2026-10-02 10:00:00"),
+                          entry("aa#3", "to bb", when="2026-10-02 10:01:00", to="@bb"),
+                          entry("aa#4", "to zz", when="2026-10-02 10:02:00", to="@bb @zz",
+                                body="for you")),
+            "bb/R.md": md(entry("bb#1", "not the leader's all", when="2026-10-02 10:03:00"),
+                          entry("bb#2", "to zz", when="2026-10-02 10:04:00", to="@zz"),
+                          entry("aa#5", "forged", when="2026-10-02 10:05:00", to="@zz")),
+            # the member's own folder is never watched, even to itself
+            "zz/R.md": md(entry("zz#1", "mine", when="2026-10-02 10:06:00", to="@zz"))})
+
+    def test_the_watchers_set(self):
+        lines = self.view("--to-me")
+        self.assertEqual(self.ids(lines), ["aa#2", "aa#4", "bb#2"])
+        self.assertEqual(lines[0], "mb: 7 entries from 3 members (%s)" % self.tree)
+        self.assertEqual(lines[-1], platform.runnable("  note: to see the bodies: vcharon read "
+                                                      "mb --full --to-me --project p"))
+        self.assertEqual(self.ids(self.view("--to-me", "--last", "2")), ["aa#4", "bb#2"])
+        lines = self.view("--to-me", "--full", "--last", "2")
+        self.assertEqual(lines[1:3], ["2026-10-02 10:02:00  aa#4  @bb @zz  to zz  (aa/R.md)",
+                                      "    for you"])
+        doc = json.loads(self.main("--to-me", "--json")[1][0])
+        self.assertEqual(([e["id"] for e in doc["entries"]], doc["count"]),
+                         (["aa#2", "aa#4", "bb#2"], 7))
+
+    def test_the_leaders_own_all_isnt_to_the_leader(self):
+        # the leader's watcher skips its own folder: its @all is to the others only
+        os.remove(channel_cmd.record_path("mb", "zz"))
+        self.record("aa", None, self.tree)
+        write_tree(self.tree, {"bb/S.md": md(entry("bb#3", "q", to="@aa"))})
+        code, lines, err = self.main("--to-me")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.ids(lines), ["bb#3"])
+
+
 class JobTest(ViewCase):
     def setUp(self):
         ViewCase.setUp(self)
@@ -429,6 +540,16 @@ class JobTest(ViewCase):
         self.assertEqual(lines[0], "mb: 2 entries from 2 members (%s), as of this box's last "
                          "sync" % self.tree)
         self.assertEqual(self.ids(lines), ["debian#2", "windows#2"])
+
+    def test_an_id_not_synced_yet(self):
+        # a remote member's copy may lack an entry just posted: the fix says to sync first
+        code, _lines, err = self.main("debian#3")
+        self.assertEqual(code, 1)
+        self.assertEqual(err.splitlines(), [
+            "ERROR not_found: no entry debian#3 in mb, as of this box's last sync",
+            "  fix: " + platform.runnable("if it was just posted, sync, then read it again: "
+                                          "vcharon sync mb --project p ; else check the ID in "
+                                          "the whole list: vcharon read mb --project p")])
 
     def test_a_missing_section(self):
         os.remove(os.path.join(self.home, "channels.d", "mb.windows.ini"))

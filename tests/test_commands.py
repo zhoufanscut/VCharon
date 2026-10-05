@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import shutil
+import time
 import unittest
 from unittest import mock
 
@@ -148,11 +149,22 @@ class WhoamiTest(ChannelCase):
         code, out, err = self.run_cli("whoami", "game", "--role", "b", "--json")
         self.assertEqual((code, err), (0, ""))
         tree = self.joined("game.mac-web-b")
-        self.assertEqual(json.loads(out), {
+        doc = json.loads(out)
+        members = doc.pop("members")
+        self.assertEqual(doc, {
             "channel": "game", "name": "mac-web-b", "project": "web", "role": "b",
             "leader": "laptop-ui", "leads": False, "mode": "remote", "server": "fake-dest",
             "folder": os.path.join(tree, "mac-web-b"), "tree": tree, "box": "mac",
             "box_source": "config"})
+        # a remote member's: this box's copy, the leader's folder as the last sync brought it
+        newest = [m.pop("newest") for m in members]
+        self.assertEqual(members, [
+            {"name": "laptop-ui", "agent": "other", "box": "laptop", "os": platform.os_word(),
+             "leader": True},
+            {"name": "mac-web-b", "agent": "other", "box": "mac", "os": platform.os_word(),
+             "leader": False}])
+        for n in newest:
+            self.assertRegex(n, r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\Z")
         code, out, err = self.run_cli("whoami", "game", "--role", "b")
         self.assertEqual(out.splitlines(), [
             "vcharon: whoami game",
@@ -161,7 +173,12 @@ class WhoamiTest(ChannelCase):
             "  mode     remote, server fake-dest",
             "  folder   %s" % os.path.join(tree, "mac-web-b"),
             "  box      mac (set in %s)" % os.path.join(self.homes["mac"], "vcharon.ini"),
-            "  vcharon  %s" % VERSION])
+            "  vcharon  %s" % VERSION,
+            "  members  2 (this box's copy, as of its last sync)",
+            "    laptop-ui (leader)  agent other, box laptop, os %s  newest file %s"
+            % (platform.os_word(), newest[0]),
+            "    mac-web-b (you)  agent other, box mac, os %s  newest file %s"
+            % (platform.os_word(), newest[1])])
         # the leader, a local member
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
@@ -202,6 +219,61 @@ class WhoamiTest(ChannelCase):
         self.assertEqual(doc, {"box": "win", "box_source": "os", "project": "web",
                                "role": None, "name": "win-web", "channels": []})
         self.assertEqual(lines[1], "  box      win (default, from the OS)")
+
+
+class WhoamiMembersTest(ChannelCase):
+    """whoami C's members: each folder's name, agent, box and os from its MEMBER.md, the
+    leader marked, and its newest file's time."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.use_box("linux")
+        self.tree = os.path.join(self.root, "docs")
+
+    def members(self):
+        code, out, err = self.run_cli("whoami", "docs", "--project", "d", "--json")
+        self.assertEqual((code, err), (0, ""))
+        return json.loads(out)["members"]
+
+    def test_local_members_and_times(self):
+        # a folder with no MEMBER.md, and one with a stray name, which no member has; a stage
+        # dir's file (a sync half done) is no member's newest
+        write_tree(self.tree, {"linux-api/notes.txt": b"x", "Bad Name/x.md": b"",
+                               "linux-api/.vcharon-stage-1/R.md": b"x"})
+        stamp = 1790000000
+        for path in ("linux-api/notes.txt", "linux-d/MEMBER.md"):
+            os.utime(os.path.join(self.tree, *path.split("/")), (stamp, stamp))
+        older = stamp - 3600
+        for name in os.listdir(os.path.join(self.tree, "linux-d")):
+            if name != "MEMBER.md":
+                os.utime(os.path.join(self.tree, "linux-d", name), (older, older))
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
+        self.assertEqual(self.members(), [
+            {"name": "linux-api", "agent": None, "box": None, "os": None, "leader": False,
+             "newest": when},
+            {"name": "linux-d", "agent": "other", "box": "linux", "os": platform.os_word(),
+             "leader": True, "newest": when}])
+        lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertEqual(lines[-3:], [
+            "  members  2",
+            "    linux-api  agent ?, box ?, os ?  newest file %s" % when,
+            "    linux-d (leader, you)  agent other, box linux, os %s  newest file %s"
+            % (platform.os_word(), when)])
+
+    def test_an_empty_folder_and_an_unreadable_tree(self):
+        write_tree(self.tree, {"linux-api/": None})
+        self.assertEqual(self.members()[0], {"name": "linux-api", "agent": None, "box": None,
+                                             "os": None, "leader": False, "newest": None})
+        lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertEqual(lines[-2], "    linux-api  agent ?, box ?, os ?  newest file -")
+        # who you are still shows when the tree can't be listed
+        with mock.patch("os.scandir", side_effect=PermissionError(13, "Permission denied")):
+            self.assertIsNone(self.members())
+            code, out, err = self.run_cli("whoami", "docs", "--project", "d")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[-1], "  members  can't read %s: Permission denied"
+                         % self.tree)
 
 
 class SetupTest(ChannelCase):
@@ -673,6 +745,10 @@ HINTS = {
         ("vcharon read %s %s", ("game", FLAGS)),
         # the short read's last line
         ("  note: to see the bodies: vcharon read %s --full %s", ("game", "--last 5 " + FLAGS)),
+        # read with an ID it can't find: a local member's, a remote member's
+        ("check the ID in the whole list: vcharon read %s %s", ("game", FLAGS)),
+        ("if it was just posted, sync, then read it again: vcharon sync %s %s ; else check the "
+         "ID in the whole list: vcharon read %s %s", ("game", FLAGS, "game", FLAGS)),
         ("  fix: the entry is saved in your folder; your watcher sends it, or once the server "
          "answers, run: vcharon sync %s", ("game " + FLAGS,)),
         ("the writer of each folder named above %s; your up still runs; more: vcharon guide "

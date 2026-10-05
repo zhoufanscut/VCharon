@@ -224,10 +224,29 @@ def list_channels(root, tick=_no_tick):
     return {"channels": channels, "others": others}
 
 
+def newest_file(path, tick=_no_tick, stages=False):
+    """The newest mtime of a regular file below path, or None for none. os.walk never follows
+    a symlinked folder. stages: also the files of vcharon's stage dirs, half-written files of
+    a sync in progress (list counts them: they are activity in the channel)."""
+    newest = None
+    for dirpath, dirnames, filenames in os.walk(path):
+        tick()
+        if not stages:
+            dirnames[:] = [d for d in dirnames
+                           if not d.casefold().startswith(pathrules.STAGE_PREFIX)]
+        for f in filenames:
+            try:
+                st = os.lstat(os.path.join(dirpath, f))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode) and (newest is None or st.st_mtime > newest):
+                newest = st.st_mtime
+    return newest
+
+
 def _channel_info(path, name, tick):
     members, leaders, strays = [], [], []
     fields = {}
-    newest = None
     for entry in sorted(os.scandir(path), key=lambda e: e.name):
         if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
             members.append(entry.name)
@@ -241,16 +260,7 @@ def _channel_info(path, name, tick):
                 leaders.append(entry.name)
         else:
             strays.append(entry.name)
-    # os.walk never follows a symlinked folder
-    for dirpath, dirnames, filenames in os.walk(path):
-        tick()
-        for f in filenames:
-            try:
-                st = os.lstat(os.path.join(dirpath, f))
-            except OSError:
-                continue
-            if stat.S_ISREG(st.st_mode) and (newest is None or st.st_mtime > newest):
-                newest = st.st_mtime
+    newest = newest_file(path, tick, stages=True)
     info = {"name": name, "members": members, "fields": fields, "leaders": leaders,
             "strays": strays, "newest": newest}
     info.update(_charter(path, leaders))

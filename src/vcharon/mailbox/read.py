@@ -15,7 +15,10 @@ marks the folder. Lines, in this order:
     <time>  <id>  <to>  [re <id>  ]<title>  (<folder>/<file>)
                                    one line an entry, oldest first; - for a part it lacks.
                                    --full adds the header's other lines and the body, indented
-                                   by 4. --last N: only the newest N
+                                   by 4. --last N: only the newest N. ID ...: only the entries
+                                   with those IDs (placed ones), with --full's lines.
+                                   --to-me: only the entries the member's watcher prints as
+                                   `to you:` or `to all:` (to_me)
     note: <text>                   after the list, one line each (below)
       note: to see the bodies: vcharon read <C> --full ...
                                    last, without --full, when an entry is listed (cli.py's
@@ -47,18 +50,22 @@ control or format character in one is shown escaped, never sent to the terminal.
 
 Exit 0; 1 when the channel's folder can't be read: an ERROR line with its code and a fix line
 on stderr (cli.py's _read; a local member's channel folder that is gone gives the leave
-command, as the watcher does).
+command, as the watcher does). With IDs, an ID no placed entry has is exit 1 too, after the
+view is printed: `ERROR not_found: no entry <ids> in <C>` and its fix line.
 
 --json prints one object instead (view_json): {"channel", "folder", "synced", "members",
-"member_info", "count", "entries", "notes"}. "folder" is the tree read; "synced" is true for a
-remote member's copy; "members" the member folders read; "member_info" each one's {"name",
-"box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it lacks;
-"vcharon" the version the member last joined or watched with); "count" every entry in the
-tree, while "entries" holds the ones shown (--last), in the view's order, each {"time", "id",
-"name", "number", "to", "re", "title", "file", "header", "body"}: "file" is the entry's file
-relative to the tree, with "/"; "time", "id", "name", "number" and "re" are null when the
-entry lacks them; "header" (a list of [key, value], key "" for a line without one) and "body"
-are null unless --full. "notes" are the note lines' texts, without "note: ".
+"member_info", "count", "entries", "notes", "missing"}. "folder" is the tree read; "synced" is
+true for a remote member's copy; "members" the member folders read; "member_info" each one's
+{"name", "box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it
+lacks; "vcharon" the version the member last joined or watched with); "count" every entry in
+the tree, while "entries" holds the ones shown (--last, IDs, --to-me), in the view's order,
+each {"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}: "file" is
+the entry's file relative to the tree, with "/"; "time", "id", "name", "number" and "re" are
+null when the entry lacks them; "header" (a list of [key, value], key "" for a line without
+one) and "body" are null unless --full (or IDs). "notes" are the note lines' texts, without
+"note: "; "missing" the IDs asked for that no placed entry has ([] without IDs).
+
+member_list is whoami C's: the member folders with their MEMBER.md's agent, box and os.
 """
 
 from __future__ import annotations
@@ -289,6 +296,36 @@ def member_info(root, folders):
     return out
 
 
+# the fields of a member's MEMBER.md #1 that whoami C lists
+WHO_FIELDS = ("agent", "box", "os")
+
+
+def member_list(root, leader):
+    """whoami C's members: [{"name", "agent", "box", "os", "leader", "newest"}], one per
+    top-level folder of the tree root whose name can be a member's (not a symlink, a stage dir
+    or a stray name), in name order. "agent", "box" and "os" come from the folder's MEMBER.md
+    #1 (None for one it lacks): the only text read from a member's files, so nothing else of
+    its machine shows. "leader": whether it is the leader's folder. "newest": the time of its
+    newest file outside stage dirs, local, to the second, or None. OSError when the root can't
+    be read."""
+    with os.scandir(root) as it:
+        top = sorted(it, key=lambda d: d.name)
+    out = []
+    for d in top:
+        try:
+            is_dir = d.is_dir(follow_symlinks=False)
+        except OSError:
+            continue
+        if not is_dir or pathrules.writer_problem(d.name) is not None:
+            continue
+        found = channels.read_member(d.path, d.name)
+        newest = channels.newest_file(d.path)
+        out.append(dict([("name", d.name)] + [(k, found.get(k)) for k in WHO_FIELDS]
+                        + [("leader", d.name == leader),
+                           ("newest", None if newest is None else entries.stamp(newest))]))
+    return out
+
+
 def version_note(info):
     """The note when the members' MEMBER.md give two or more vcharon versions, each member
     with its version (unknown for one with none); None otherwise. Why: members on different
@@ -317,33 +354,64 @@ def _collect(root, now, skip=None, notes=()):
     return folders, ordered, notes, info
 
 
+def to_me(item, me, leader):
+    """Whether the watcher of me would print item as `to you:` or `to all:`: a placed entry in
+    another member's folder addressed to @<me>, or to @all from the leader. Its own folder is
+    never watched, and a member's @all is ignored, so neither is here either."""
+    e = item.e
+    if not item.placed or item.folder == me:
+        return False
+    return "@" + me in e.to or (entries.ALL in e.to and item.folder == leader)
+
+
+def pick(ordered, last=None, ids=None, mine=None):
+    """(the items shown, in the view's order; the IDs asked for that no placed entry has).
+    ids: only the placed entries with those IDs (a forged copy in another folder is never
+    taken for the entry); mine: (me, leader), only the entries to_me; last: the newest N of
+    what is left."""
+    shown = ordered
+    missing = []
+    if ids:
+        found = {item.e.id for item in ordered if item.placed and item.e.id in ids}
+        missing = [i for i in ids if i not in found]
+        shown = [item for item in shown if item.placed and item.e.id in ids]
+    if mine is not None:
+        shown = [item for item in shown if to_me(item, *mine)]
+    if last:
+        shown = shown[-last:]
+    return shown, missing
+
+
 def view(root, channel, synced=False, full=False, last=None, now=None, skip=None, notes=(),
-         bodies=None):
-    """The view's lines of the channel tree root, to print; OSError when the root can't be
-    read (the caller names it with a code and a fix). Nothing is printed here, so an error
-    writing stdout is never taken for one reading the tree. skip: read_tree's; notes: more
-    notes (a remote member's: the members its last pull left out); bodies: the last line when
-    the list, without full, shows at least one entry (the caller's: how to see the bodies)."""
+         bodies=None, ids=None, mine=None):
+    """(the view's lines of the channel tree root, to print; the IDs of ids not found);
+    OSError when the root can't be read (the caller names it with a code and a fix). Nothing
+    is printed here, so an error writing stdout is never taken for one reading the tree.
+    skip: read_tree's; notes: more notes (a remote member's: the members its last pull left
+    out); bodies: the last line when the list, without full, shows at least one entry (the
+    caller's: how to see the bodies); ids, mine: pick's (ids imply full)."""
     folders, ordered, notes, _info = _collect(root, now, skip, notes)
     out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
                                       _counted(len(folders), "member", "members"), root,
                                       ", as of this box's last sync" if synced else "")]
-    shown = ordered[-last:] if last else ordered
+    shown, missing = pick(ordered, last, ids, mine)
+    full = full or bool(ids)
     out += lines(shown, full)
     # a note holds IDs, times and paths from members' files too
     out += [pathrules.printable(note) for note in notes]
     # the short form shows titles only: say how to see the bodies
     if bodies is not None and shown and not full:
         out.append(bodies)
-    return out
+    return out, missing
 
 
 def view_json(root, channel, synced=False, full=False, last=None, now=None, skip=None,
-              notes=()):
+              notes=(), ids=None, mine=None):
     """The view as one JSON object (the module's docstring has its fields); OSError when the
-    root can't be read. skip and notes: view's."""
+    root can't be read. skip and notes: view's; ids and mine: pick's (ids imply full)."""
     folders, ordered, notes, info = _collect(root, now, skip, notes)
-    shown = ordered[-last:] if last else ordered
+    shown, missing = pick(ordered, last, ids, mine)
+    full = full or bool(ids)
     items = []
     for item in shown:
         e = item.e
@@ -353,4 +421,4 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
                       "body": e.body if full else None})
     return {"channel": channel, "folder": root, "synced": synced, "members": folders,
             "member_info": info, "count": len(ordered), "entries": items,
-            "notes": [n.removeprefix("note: ") for n in notes]}
+            "notes": [n.removeprefix("note: ") for n in notes], "missing": missing}

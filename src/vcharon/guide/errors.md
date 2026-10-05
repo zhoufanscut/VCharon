@@ -88,6 +88,8 @@ or a fix without the sandbox, follow the `fix:` line.
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
 | `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
+| `no entry <ID> in <C>` (`read C <ID>`, after the entries it found) | a remote member: the entry may not be synced yet, so run the `fix:` line's `sync`, then read it again; else the ID is wrong: find it in the whole list (`vcharon read C`) |
+| `<arg> isn't an entry's ID (<name>#<n>)`, `--last goes with the whole list, not with IDs` or `--to-me goes with the whole list, not with IDs` (`read`, exit 3) | give the ID as the watcher's line prints it (`linux-api#7`), without `--last` or `--to-me` |
 | `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |
 
 ## Posting

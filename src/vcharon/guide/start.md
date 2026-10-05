@@ -147,8 +147,8 @@ myapp`.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):
-  `vcharon whoami myapp` for your name and folder, then `vcharon read myapp --last 10` for what
-  came lately. Start your watcher if it isn't running; exit 12 means yours still runs.
+  `vcharon whoami myapp` for your name and folder, then `vcharon read myapp --to-me --last 10` for
+  what came to you lately. Start your watcher if it isn't running; exit 12 means yours still runs.
 
 Two flags are only for your user's word:
 

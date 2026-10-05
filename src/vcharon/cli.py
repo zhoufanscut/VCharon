@@ -228,8 +228,13 @@ def _parser():
     one.add_argument("--no-sync", action="store_true", help="a remote member: don't send the "
                      "entry to the server now; your watcher or the next sync sends it")
     ident(one)
-    one = verb("read", "every member's entries, in one order", "vcharon read myapp --last 20")
+    one = verb("read", "every member's entries, in one order; with IDs, just those entries, "
+               "whole", "vcharon read myapp mac-myapp#3")
     channel(one)
+    one.add_argument("ids", metavar="ID", nargs="*", help="only these entries (<name>#<n>, "
+                     "as the watcher prints them), each with its header and body")
+    one.add_argument("--to-me", action="store_true", help="only the entries your watcher "
+                     "prints as to you: or to all:")
     one.add_argument("--last", type=_number(1, 1000000, "entries"), metavar="N",
                      help="only the newest N entries")
     one.add_argument("--full", action="store_true", help="each entry's other header lines and "
@@ -319,6 +324,11 @@ def _main(argv, run):
         except SystemExit as e:
             # --help, --version
             return e.code if isinstance(e.code, int) else 0
+        if extra and args.command == "read":
+            # IDs on both sides of a flag (read C a#1 --full b#2): argparse takes only the
+            # first run of them into the list
+            args.ids += [w for w in extra if not w.startswith("-")]
+            extra = [w for w in extra if w.startswith("-")]
         if extra:
             # parse_args would say the same, but from the top parser, whose fix is the top
             # help: a flag unknown after a verb is the verb's to explain
@@ -469,27 +479,30 @@ def _member_doc(cfg, record):
 
 def _whoami(args, run):
     """vcharon whoami [C] [--json]. With C, one object: {"channel", "name", "project", "role",
-    "leader", "leads", "mode", "server", "folder", "tree", "box", "box_source"}: "mode" is
-    "local" or "remote", "server" the alias (null for a local member), "folder" your own
+    "leader", "leads", "mode", "server", "folder", "tree", "box", "box_source", "members"}:
+    "mode" is "local" or "remote", "server" the alias (null for a local member), "folder" your own
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
     without one. "box" is this machine's box now (a membership keeps the name it joined
     with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
+    With C only, "members": read_mod.member_list's of the tree, null when it can't be read.
     Without C: {"box", "box_source", "project", "role", "name", "channels"}: "name" is the
     name a join from here would take, "channels" every membership of this project on this box
-    (of this role too, with --role), each an object as with C, without "box" and
-    "box_source"."""
+    (of this role too, with --role), each an object as with C, without "box", "box_source"
+    and "members"."""
     cfg = load_config()
     box = {"box": cfg.box_name, "box_source": cfg.box_source}
     if args.channel is not None:
         record, _ = _membership(args)
         doc = _member_doc(cfg, record)
+        members, unread = _members_of(doc["tree"], record["leader"])
         if args.json:
-            return _print_json(dict(doc, **box))
+            return _print_json(dict(doc, members=members, **box))
         _say("vcharon: whoami %s" % args.channel)
         _whoami_lines(doc)
         _say("  box      %s" % cfg.box_text())
         # the version this box runs: vcharon read notes when the members' differ
         _say("  vcharon  %s" % VERSION)
+        _members_lines(doc, members, unread)
         return 0
     channel_cmd.check_role(args.role)
     project = channel_cmd.project_part(args.project)
@@ -511,6 +524,33 @@ def _whoami(args, run):
         _say("")
         _whoami_lines(one)
     return 0
+
+
+def _members_of(tree, leader):
+    """(whoami C's members of the tree, read_mod.member_list's; None and why when the tree
+    can't be read). whoami says who you are first: a tree it can't list is a line, not an
+    error."""
+    try:
+        return read_mod.member_list(tree, leader), None
+    except OSError as e:
+        return None, e.strerror or str(e)
+
+
+def _members_lines(doc, members, unread):
+    """whoami C's members, one line each: who writes in the channel, without reading it all.
+    A remote member's are this box's copy."""
+    copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
+    if members is None:
+        _say("  members  can't read %s: %s" % (doc["tree"], unread))
+        return
+    _say("  members  %d%s" % (len(members), copy))
+    for one in members:
+        marks = [m for m, on in (("leader", one["leader"]), ("you", one["name"] == doc["name"]))
+                 if on]
+        _say(pathrules.printable("    %s%s  %s  newest file %s" % (
+            one["name"], " (%s)" % ", ".join(marks) if marks else "",
+            ", ".join("%s %s" % (k, one[k] or "?") for k in read_mod.WHO_FIELDS),
+            one["newest"] or "-")))
 
 
 def _whoami_lines(doc):
@@ -750,8 +790,34 @@ def _send_post(channel, record, flags):
 READ_FULL_HINT = "  note: to see the bodies: vcharon read %s --full %s"
 
 
+# an ID read can't find: the list shows every entry, and a remote member's copy may not hold
+# one just posted. " ; " sets the commands apart, so that no mark sticks to a flag's value
+READ_MISSING_HINT = "check the ID in the whole list: vcharon read %s %s"
+READ_MISSING_SYNC_HINT = ("if it was just posted, sync, then read it again: vcharon sync %s %s "
+                          "; else check the ID in the whole list: vcharon read %s %s")
+
+
+def _read_ids(args):
+    """The IDs read was given, each once, in order, a leading @ dropped (post's --re takes it
+    too, by habit); a usage error for one that isn't an ID, or with --last or --to-me."""
+    ids = []
+    for arg in args.ids:
+        one = arg.removeprefix("@")
+        if entries.parse_id(one) is None:
+            raise _usage("%s isn't an entry's ID (<name>#<n>)" % pathrules.show(arg),
+                         "give each ID as <name>#<n>, as the watcher's line prints it")
+        if one not in ids:
+            ids.append(one)
+    if ids and (args.last or args.to_me):
+        flag = "--last" if args.last else "--to-me"
+        raise _usage("%s goes with the whole list, not with IDs" % flag,
+                     "leave out %s, or the IDs" % flag)
+    return ids
+
+
 def _read(args, run):
-    """vcharon read C [--json]: read_mod's view of the channel's tree on this box."""
+    """vcharon read C [ID ...] [--json]: read_mod's view of the channel's tree on this box."""
+    ids = _read_ids(args)
     cfg = load_config()
     record, flags = _membership(args)
     limits = channel_cmd.channel_limits(record)
@@ -762,22 +828,38 @@ def _read(args, run):
     skip = None if synced else _over_limit(limits, record["name"])
     # a remote member: the members its last pull left out, whose copy here is as it was
     notes = charter.left_out_notes(_section(record)) if synced else []
+    mine = (record["name"], record["leader"]) if args.to_me else None
     # only the reading is in the try: a closed stdout is _guarded's to handle
     try:
         if args.json:
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
-                                     last=args.last, skip=skip, notes=notes)
+                                     last=args.last, skip=skip, notes=notes, ids=ids,
+                                     mine=mine)
+            missing = doc["missing"]
         else:
             last = ["--last", str(args.last)] if args.last else []
-            bodies = platform.runnable(READ_FULL_HINT % (args.channel, " ".join(last + flags)))
-            shown = read_mod.view(tree, args.channel, synced=synced, full=args.full,
-                                  last=args.last, skip=skip, notes=notes, bodies=bodies)
+            to_me = ["--to-me"] if args.to_me else []
+            bodies = platform.runnable(READ_FULL_HINT % (args.channel,
+                                                         " ".join(to_me + last + flags)))
+            shown, missing = read_mod.view(tree, args.channel, synced=synced, full=args.full,
+                                           last=args.last, skip=skip, notes=notes,
+                                           bodies=bodies, ids=ids, mine=mine)
     except OSError as e:
         raise fsops.error(e, tree)
     if args.json:
-        return _print_json(doc)
-    for line in shown:
-        print(line)
+        _print_json(doc)
+    else:
+        for line in shown:
+            print(line)
+        sys.stdout.flush()
+    if missing:
+        # after the ones found, which an agent reads anyway
+        flag_text = " ".join(flags)
+        hint = (READ_MISSING_SYNC_HINT % (args.channel, flag_text, args.channel, flag_text)
+                if synced else READ_MISSING_HINT % (args.channel, flag_text))
+        raise VCharonError("not_found", "no entry %s in %s%s"
+                           % (", ".join(missing), args.channel,
+                              ", as of this box's last sync" if synced else ""), hint)
     return 0
 
 

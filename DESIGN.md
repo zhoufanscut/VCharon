@@ -1476,8 +1476,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 
 ### Reading a channel
 
-`vcharon read C [--last N] [--full] [--json]` shows every member's entries in one order. It only
-reads: for a remote member it shows the local tree as of the last sync, and says so.
+`vcharon read C [ID…] [--to-me] [--last N] [--full] [--json]` shows every member's entries in
+one order. It only reads: for a remote member it shows the local tree as of the last sync, and
+says so.
 
 - It reads each top-level folder with a valid member name, the own folder too, and every `.md`
   file below it but `MEMBER.md`, whose #1 only marks the folder.
@@ -1499,11 +1500,36 @@ reads: for a remote member it shows the local tree as of the last sync, and says
   channel run didn't find how to see a body.
 - `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
   (null when missing).
+- **IDs** (`read C mac-web#3 …`, a leading `@` dropped, as `post --re` takes it): only the
+  placed entries with those IDs, whole (as `--full`), in the view's order; the first line and
+  the notes as always. Why: the watcher names one entry by its ID, and `--last` goes by entry
+  time, so a remote entry that synced late is not the newest. A copy of an ID in another folder
+  is never taken for the entry. An ID no placed entry has is `ERROR not_found: no entry <ids> in
+  <C>` (`, as of this box's last sync` for a remote member), exit 1, after the entries found
+  are printed (with `--json`, after the object, whose `missing` lists them): the fix is the whole
+  list's `read`, and for a remote member a `sync` first. An argument that isn't `<name>#<n>`,
+  or IDs with `--last` or `--to-me`, is a usage error (exit 3): `--last` and `--to-me` pick
+  from the whole list, and IDs already name what to show.
+- **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:`
+  ([The watcher in a channel](#the-watcher-in-a-channel)): a placed entry in another member's
+  folder addressed to `@<me>`, or to `@all` from the leader. A member's `@all` and the own
+  folder are left out, as the watcher leaves them out. `--last` and `--full` apply to that
+  subset; the bodies line keeps `--to-me`.
+- A top-level folder whose name can't be a member's (a Windows reserved name such as `con`) is
+  left out of `read` and `--to-me`, while the watcher still reports it; `join` refuses such names.
 - The text lines escape other members' text ([Entries](#entries)); `--json` gives it as it is,
   JSON-escaped.
 - A tree it can't read is an `ERROR <code>:` line and a `fix:` line, text and `--json` alike. A
   local member's channel folder that is gone (closed) is `not_found` with the `leave` fix; a
   remote member's copy stays until its `leave`, so it can still read the channel then.
+- **`whoami C` lists the members** after who you are: each member folder of the tree read
+  (a remote member's copy, said so: `members <n> (this box's copy, as of its last sync)`), with
+  `agent`, `box` and `os` from its `MEMBER.md` #1 (`?` for one it lacks), `(leader)` and
+  `(you)`, and the newest file's time in the folder, local, to the second (`-` for none);
+  `--json` gives them as `members`, null when the tree can't be listed (text: a `can't read`
+  line, still exit 0, since who you are is shown). Why: the watcher's `<n> other entries
+  (<folders>)` doesn't say who the folders are, and `list` needs the server. It reads nothing
+  else of a member's files, so no host name or path shows.
 
 ### Clocks
 
@@ -1551,7 +1577,7 @@ Channels
 Messages
   vcharon post   C --to @NAME… --title TEXT [--re NAME#N] [--body TEXT]
                  [--file NAME.md | --steps] [--no-sync] [--project P] [--role R]
-  vcharon read   C [--last N] [--full] [--project P] [--role R] [--json]
+  vcharon read   C [ID…] [--to-me] [--last N] [--full] [--project P] [--role R] [--json]
   vcharon watch  C [--until-change] [--every S] [--max-minutes M] [--fresh] [--no-stream]
                  [--max-errors N] [--project P] [--role R]
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
@@ -1570,8 +1596,8 @@ Every verb also takes `-v` (log lines to stderr too).
   flags' contract.
 - **`--json`** on every verb that reports something: `list`, `whoami`, `read`, `doctor`. A
   refusal prints nothing on stdout; `doctor --json` prints its report even when a check fails,
-  and `--update --json` its object even when it fails (not a usage error, which prints nothing
-  on stdout; [Self-update](#self-update)).
+  `read C ID… --json` its object when an ID isn't found, and `--update --json` its object even
+  when it fails (not a usage error, which prints nothing on stdout; [Self-update](#self-update)).
 - **Short help**: `vcharon --help` fits one screen and lists the exit codes; each verb's
   `--help` shows one example.
 - `setup` writes the config, or prints what this machine uses; `doctor` checks this machine
@@ -2053,13 +2079,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     `{"name", "box", "os", "agent", "project"}`, `limits` `{"max_mb", "max_files",
     "max_entry_kb"}`; each of `others` `{"name", "why"}`.
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "leads", "mode", "server",
-    "folder", "tree", "box", "box_source"}`. `whoami` without C: `{"box", "box_source",
-    "project", "role", "name", "channels"}`, each channel as with C without `box` and
-    `box_source`.
+    "folder", "tree", "box", "box_source", "members"}`, each member `{"name", "agent", "box",
+    "os", "leader", "newest"}`. `whoami` without C: `{"box", "box_source", "project", "role",
+    "name", "channels"}`, each channel as with C without `box`, `box_source` and `members`.
   - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
-    "notes"}`; each of `member_info` `{"name", "box", "os", "agent", "project", "vcharon"}`;
-    each entry `{"time", "id", "name", "number", "to", "re", "title", "file", "header",
-    "body"}`.
+    "notes", "missing"}`; each of `member_info` `{"name", "box", "os", "agent", "project",
+    "vcharon"}`; each entry `{"time", "id", "name", "number", "to", "re", "title", "file",
+    "header", "body"}`.
   - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
     "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
     "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",

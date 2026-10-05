@@ -82,9 +82,10 @@ These are vcharon's stable interface: a release that changes one says so in its 
 ## Notes
 
 - **`--json`**: a refusal prints nothing on stdout. Its `ERROR` and `fix:` lines go to stderr,
-  and the exit code says it failed: check the code before you parse stdout. One exception:
+  and the exit code says it failed: check the code before you parse stdout. Two exceptions:
   `vcharon doctor --json` prints its report even when a check fails (exit 1); its `ok`,
-  `failed` and `checks` say which.
+  `failed` and `checks` say which. And `vcharon read C ID… --json` prints its object when an ID
+  isn't there (exit 1); its `missing` lists them.
 - **Windows**: under mintty (Git Bash's own window) without winpty, stdin doesn't look like a
   terminal, so `vcharon post` without `--body` waits for a body on stdin instead of refusing.
   Pass `--body`, or a heredoc or file on stdin.
