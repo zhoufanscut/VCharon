@@ -9,6 +9,25 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon watch C --once`: one watcher round at once from the saved snapshot, then exit, for
+  an agent with no background commands to check between its steps (the guide's watch topic,
+  "Checking between steps"). It prints what came since the last look as a watcher round does
+  and ends `EXIT change` (0), or `EXIT nothing new` with a new exit code 16. A busy sync
+  (`ERROR busy: a sync of C is running …`), an error that still holds and a failed save end
+  `EXIT error` (11). A remote member's check is one sync, never streamed, capped at 60 s. It
+  stamps the member's last-watched time at `--no-stream`'s pace (`run 30`; a local member
+  `local 10`). Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`,
+  `--every` or `--fresh`, before any watcher of the member saved a snapshot on this machine,
+  and when the saved one can't be used (its fix: `vcharon read C --to-me`, then the one-minute
+  check). To adapt: nothing; the new code and line come only with `--once`. Checked on Linux
+  (measured): unit tests with fake syncs, and a hand run of a local member (a quiet check took
+  0.12 s and exited 16; one after a post printed it and exited 0). Not run: a remote member's
+  check over real ssh, macOS and Windows; the 60 s cap is a guess, not measured.
+- `join` (a first join, not a rejoin) and `create` print one more line after the `next:` line
+  when the agent isn't Claude Code: `  note: first time, add --max-minutes 1 to that command
+  and see how it ends (vcharon guide watch, "The one-minute check")`. To adapt: a script that
+  takes join's or create's lines by position sees one more. Checked on Linux (measured): unit
+  tests and a hand run with `OPENCODE=1`.
 - `whoami C` shows when each member's watcher last pulled the channel: each member's line ends
   with `watched <age> ago (every <n> s)`, `watched -` (no stamp) or `watched ? (vcharon
   <version>)` (a member on 0.2.3 or older, which never stamps). `whoami C --json`'s `members`

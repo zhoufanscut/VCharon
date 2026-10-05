@@ -2985,7 +2985,8 @@ class CommandTest(WatchCase):
                     self.assertEqual(self.cli(*argv, project="p")[0], 130)
         # the local member's channel folder, from its record; the remote member's section,
         # and the sync's arguments that find it again
-        plain = {"fresh": False, "until_change": False, "max_minutes": None, "max_errors": 10}
+        plain = {"fresh": False, "until_change": False, "max_minutes": None, "max_errors": 10,
+                 "once": False}
         # a remote member streams by default, every 2 s; --no-stream syncs every 30 s
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
@@ -3003,6 +3004,41 @@ class CommandTest(WatchCase):
             (("mb.windows", SYNC, 3600), dict(plain, stream=False)),
             (("mb.windows", SYNC, 300), streams)])
 
+    def test_once(self):
+        for project, flag in (("q", ["--until-change"]), ("q", ["--max-minutes", "1"]),
+                              ("q", ["--max-errors", "3"]), ("q", ["--every", "5"]),
+                              ("p", ["--fresh"]), ("p", ["--until-change", "--fresh"])):
+            with self.subTest(flag=flag):
+                ran = AssertionError("the watch started")
+                with mock.patch.object(watch, "watch_dir", side_effect=ran), \
+                        mock.patch.object(watch, "watch_job", side_effect=ran):
+                    code, out, err = self.cli("--once", *flag, project=project)
+                self.assertEqual((code, out), (3, ""))
+                self.assertEqual(err.splitlines(), ["ERROR config: --once doesn't go with %s"
+                                                    % flag[0], "  fix: leave out %s" % flag[0]])
+        # a local member keeps its --no-stream refusal; a remote one never streams a check,
+        # with or without --no-stream, at --no-stream's pace
+        self.assertEqual(self.cli("--once", "--no-stream")[0], 3)
+        calls = []
+        with mock.patch.object(watch, "watch_dir", lambda *a, **kw: calls.append((a, kw)) or 16):
+            self.assertEqual(self.cli("--once")[0], 16)
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: calls.append((a, kw)) or 16):
+            self.assertEqual(self.cli("--once", project="p")[0], 16)
+            self.assertEqual(self.cli("--once", "--no-stream", project="p")[0], 16)
+        self.assertEqual([(a, kw["once"], kw.get("stream")) for a, kw in calls], [
+            ((self.tree, "debian", 10), True, None),
+            (("mb.windows", SYNC, 30), True, False),
+            (("mb.windows", SYNC, 30), True, False)])
+        # the real check with no snapshot: the fix runs as printed
+        code, out, err = self.cli("--once")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err.splitlines(), [
+            "ERROR config: --once needs your watcher's saved snapshot: none has run for debian "
+            "on this machine",
+            "  fix: " + platform.runnable("start your watcher first: vcharon watch mb "
+                                          "--until-change --max-minutes 1 --project q (the "
+                                          "one-minute check)")])
+
     def test_a_role_is_part_of_the_sync_args(self):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows-b",
                                   "leader": "debian", "ssh": "devbox", "remote": "r",
@@ -3016,7 +3052,7 @@ class CommandTest(WatchCase):
         self.assertEqual(calls, [("mb.windows-b", ["mb", "--project", "p", "--role", "b"], 2)])
 
     def test_exit_codes(self):
-        for code in (0, 10, 11, 12, 13, 14):
+        for code in (0, 10, 11, 12, 13, 14, 16):
             with self.subTest(code=code), \
                     mock.patch.object(watch, "watch_dir", return_value=code):
                 self.assertEqual(self.cli()[0], code)
@@ -3039,6 +3075,264 @@ class CommandTest(WatchCase):
                              capture_output=True, timeout=60, check=False)
         want = "new mañana.md\n".encode().replace(b"\n", os.linesep.encode())
         self.assertEqual((ran.returncode, ran.stdout), (0, want), ran.stderr)
+
+
+class OnceTest(WatchCase):
+    """vcharon watch C --once: one round at once from the saved snapshot, then an ending of its
+    own (DESIGN, "The watcher in a channel")."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.member("mac")
+
+    def baseline(self):
+        """A watcher's first start: what --once needs, its saved snapshot."""
+        self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
+                                         rounds=0), 0)
+        self.assertTrue(os.path.exists(self.state()))
+
+    def once(self, **kw):
+        """(exit code, lines without their time) of one local --once check."""
+        lines = []
+        code = watch.watch_dir(self.tree, "debian", 10, out=lines.append, sleep=never,
+                               once=True, **kw)
+        return code, self.said(lines)
+
+    def test_nothing_new_then_a_change(self):
+        # the code is in Stable: 10's rule, "start it again at once", would make a check a loop
+        self.assertEqual(watch.EXIT_NOTHING, 16)
+        self.baseline()
+        since = "since %s" % self.saved_at(self.state())
+        self.assertEqual(self.once(), (watch.EXIT_NOTHING, [
+            watching(self.tree, 1, ", " + since), "EXIT nothing new"]))
+        self.post("mac", 2, "go")
+        code, lines = self.once()
+        self.assertEqual((code, lines[1:]), (watch.EXIT_CHANGE, [
+            "to you: mac#2 — go  (mac/RESULTS.md)", "EXIT change"]))
+        # told once: the next check prints it no more
+        self.assertEqual(self.once()[0], watch.EXIT_NOTHING)
+
+    def test_no_snapshot_is_refused(self):
+        # a first start is a baseline: what came since the join would be lost for good
+        self.local_record(project="web")
+        self.post("mac", 2, "go")
+        with self.assertRaises(VCharonError) as cm:
+            self.once()
+        e = cm.exception
+        self.assertEqual((e.code, e.message, e.hint), (
+            "config", "--once needs your watcher's saved snapshot: none has run for debian on "
+            "this machine", "start your watcher first: vcharon watch mb --until-change "
+            "--max-minutes 1 --project web (the one-minute check)"))
+        self.assertFalse(os.path.exists(self.state()))
+        self.assertFalse(os.path.exists(self.state() + ".lock"))
+
+    def test_an_unusable_snapshot_is_refused(self):
+        # a start would save a baseline over it: what came since the last look would be lost
+        self.baseline()
+        self.local_record(project="web")
+        self.post("mac", 2, "go")
+        # before the lock: refused even while a watcher holds it
+        lk = watch.take_lock(self.state())
+        self.addCleanup(lk.release)
+        for text, why in (("{", "it isn't JSON"), ("[]", "it has another shape")):
+            with open(self.state(), "w", encoding="utf-8") as f:
+                f.write(text)
+            with self.assertRaises(VCharonError) as cm:
+                self.once()
+            e = cm.exception
+            self.assertEqual((e.code, e.message, e.hint), (
+                "config", "--once can't use your watcher's saved snapshot %s: %s"
+                % (self.state(), why), "run vcharon read mb --to-me --project web (what came "
+                "to you may not all have been printed), then vcharon watch mb --until-change "
+                "--max-minutes 1 --project web (the one-minute check)"))
+            # left as it was
+            with open(self.state(), encoding="utf-8") as f:
+                self.assertEqual(f.read(), text)
+
+    def test_a_snapshot_spoilt_after_the_check(self):
+        # between the check and the lock: the start's baseline can't tell what came before
+        self.baseline()
+        with open(self.state(), "w", encoding="utf-8") as f:
+            f.write("{")
+        with mock.patch.object(watch, "_need_snapshot", lambda *a: None):
+            code, lines = self.once()
+        self.assertEqual(code, watch.EXIT_ERROR)
+        self.assertTrue(lines[0].startswith("note: ignoring the saved snapshot "), lines)
+        self.assertEqual(lines[-1], "EXIT error")
+
+    def test_another_watcher(self):
+        self.baseline()
+        lk = watch.take_lock(self.state())
+        self.addCleanup(lk.release)
+        self.assertEqual(self.once(), (watch.EXIT_LOCKED, [LOCKED % self.state()]))
+
+    def test_closed(self):
+        self.baseline()
+        shutil.rmtree(self.tree)
+        code, lines = self.once()
+        self.assertEqual((code, lines[-1]), (watch.EXIT_CLOSED, "EXIT closed"))
+
+    def test_a_failed_save(self):
+        self.baseline()
+        self.post("mac", 2, "go")
+        with mock.patch.object(watch, "save_snapshot", side_effect=OSError(28, "No space")):
+            code, lines = self.once()
+        self.assertEqual(code, watch.EXIT_ERROR)
+        self.assertEqual(lines[-3:], ["to you: mac#2 — go  (mac/RESULTS.md)",
+                                      "ERROR can't save the snapshot %s: No space"
+                                      % self.state(), "EXIT error"])
+
+    def test_updated_first(self):
+        self.baseline()
+        self.post("mac", 2, "go")
+        code, lines = self.once(updated=lambda: True)
+        self.assertEqual((code, lines[1:]), (watch.EXIT_UPDATED, ["EXIT updated"]))
+        # nothing read: the next check tells it
+        self.assertEqual(self.once()[0], watch.EXIT_CHANGE)
+
+    def test_orphaned_first(self):
+        self.baseline()
+        self.post("mac", 2, "go")
+        code, lines = self.once(orphaned=lambda: True)
+        self.assertEqual((code, lines[1:]), (watch.EXIT_ORPHANED, ["EXIT orphaned"]))
+        # nothing read: the next check tells it
+        code, lines = self.once()
+        self.assertEqual((code, lines[1:]), (watch.EXIT_CHANGE, [
+            "to you: mac#2 — go  (mac/RESULTS.md)", "EXIT change"]))
+
+
+class OnceRemoteTest(WatchCase):
+    """A remote member's --once: one sync, never streamed, capped at ONCE_TIMEOUT."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.sync_args = ClientModeTest.write_config(self)
+
+    def no_spawn(self, argv, env):
+        raise AssertionError("a --once check streamed")
+
+    def job(self, results, once=True, rounds=None):
+        """(exit code, lines without their time) of a watch_job whose syncs give results."""
+        lines, runs = [], []
+
+        def run(job, sync_args):
+            runs.append(sync_args)
+            return results.pop(0)
+
+        # streaming asked for: --once overrides it
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=lines.append, sleep=never,
+                               run=run, once=once, rounds=rounds, stream=once,
+                               spawn=self.no_spawn)
+        self.assertEqual(results, [])
+        return code, self.said(lines)
+
+    def baseline(self):
+        self.assertEqual(self.job([], once=False, rounds=0), (0, [watching(self.tree, 0)]))
+
+    def test_one_sync(self):
+        self.baseline()
+        code, lines = self.job([(0, None, None)])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_NOTHING, ["EXIT nothing new"]))
+        self.assertIn(", since ", lines[0])
+
+    def test_no_snapshot_is_refused(self):
+        with self.assertRaises(VCharonError) as cm:
+            self.job([])
+        self.assertEqual(cm.exception.hint, "start your watcher first: vcharon watch mb "
+                         "--until-change --max-minutes 1 --project p (the one-minute check)")
+
+    def test_an_unusable_snapshot_is_refused(self):
+        self.baseline()
+        state = self.state("windows", "mb.windows")
+        with open(state, "w", encoding="utf-8") as f:
+            f.write("{")
+        with self.assertRaises(VCharonError) as cm:
+            self.job([])
+        self.assertEqual((cm.exception.message, cm.exception.hint), (
+            "--once can't use your watcher's saved snapshot %s: it isn't JSON" % state,
+            "run vcharon read mb --to-me --project p (what came to you may not all have been "
+            "printed), then vcharon watch mb --until-change --max-minutes 1 --project p (the "
+            "one-minute check)"))
+
+    def test_a_closed_channel(self):
+        # the sync's fix is the closed channel's: EXIT closed (don't start it again), not
+        # EXIT change
+        self.baseline()
+        code, lines = self.job([(1, "ERROR not_found: no channel mb",
+                                 channel_cmd.CHANNEL_GONE_PREFIX + " x")])
+        self.assertEqual((code, lines[-1]), (watch.EXIT_CLOSED, "EXIT closed"))
+
+    def test_busy_is_no_answer(self):
+        # a post's sync holds the job: nothing was synced, so "nothing new" would be a guess
+        self.baseline()
+        code, lines = self.job([(watch.BUSY, "ERROR busy: another run", None)])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_ERROR, [
+            "ERROR busy: a sync of mb is running (a post's, or one a stopped watcher left): "
+            "nothing was synced",
+            "  fix: " + platform.runnable("run vcharon watch mb --once --project p again after "
+                                          "your next step; 3 times in a row, tell your user"),
+            "EXIT error"]))
+
+    def test_busy_after_what_the_post_brought(self):
+        # what is in the copy already still counts
+        self.baseline()
+        self.post("debian", 2, "go", to="@windows")
+        code, lines = self.job([(watch.BUSY, "ERROR busy: another run", None)])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_CHANGE, [
+            "to you: debian#2 — go  (debian/RESULTS.md)", "EXIT change"]))
+
+    def test_a_network_blip_is_an_error(self):
+        # one round never waits out a blip, so it never counts: still not "nothing new"
+        self.baseline()
+        code, lines = self.job([(4, "ERROR connect: couldn't reach devbox", None)])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_ERROR, [
+            "ERROR connect: couldn't reach devbox", "EXIT error"]))
+
+    def test_a_saved_error_that_holds(self):
+        self.baseline()
+        error = "ERROR permission: can't write x"
+        # a watcher saw it first and was woken for it
+        self.assertEqual(self.job([(1, error, "fix it")], once=False, rounds=1)[0], 0)
+        code, lines = self.job([(1, error, "fix it")])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_ERROR, [error, "  fix: fix it",
+                                                                "EXIT error"]))
+        # over: "ok again" counts, as for any watcher
+        code, lines = self.job([(0, None, None)])
+        self.assertEqual((code, lines[1:]), (watch.EXIT_CHANGE, ["ok again", "EXIT change"]))
+
+    def test_a_failed_sync_that_brought_an_entry(self):
+        # a run that failed may still have brought files: what came is printed and wakes the
+        # agent (EXIT change), the ERROR line among the lines above it, never EXIT error
+        for code_, error in ((1, "ERROR permission: can't write x"),
+                             (4, "ERROR connect: couldn't reach devbox")):
+            with self.subTest(code=code_):
+                self.baseline()
+                self.post("debian", 2, "go", to="@windows")
+                code, lines = self.job([(code_, error, None)])
+                self.assertEqual(code, watch.EXIT_CHANGE, lines)
+                self.assertEqual(lines[-1], "EXIT change")
+                self.assertIn("to you: debian#2 — go  (debian/RESULTS.md)", lines)
+                self.assertIn(error, lines)
+                os.remove(self.state("windows", "mb.windows"))
+                os.remove(os.path.join(self.tree, "debian", "RESULTS.md"))
+
+    def test_the_sync_is_capped_and_stamps(self):
+        # run_sync's timeout is ONCE_TIMEOUT, and the child is marked as a watcher's, at
+        # --no-stream's pace: a check stamps the member's last-watched time
+        self.baseline()
+        ran = []
+
+        def run(argv, timeout, new_session=False, env=None, term_wait=0):
+            ran.append((timeout, new_session, term_wait, env.get(watch.WATCH_ENV)))
+            return fsops.Ran(None, b"", b"")
+
+        lines = []
+        with mock.patch.object(watch.fsops, "run", run):
+            code = watch.watch_job("mb.windows", self.sync_args, 30, out=lines.append,
+                                   sleep=never, once=True, stream=True, spawn=self.no_spawn)
+        self.assertEqual(ran, [(60, True, watch.TERM_WAIT, "run 30")])
+        self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_ERROR, [
+            "ERROR vcharon sync of mb.windows didn't finish within 60 s", "EXIT error"]))
 
 
 class OutputInChannelTest(WatchCase):
@@ -3231,6 +3525,13 @@ class StaleSkillTest(WatchCase):
             code, out, err = self.cli("--until-change", project="p")
         self.assertEqual((code, err, len(started)), (0, "", 1))
         self.assertEqual(self.said(out.splitlines()), [self.note])
+
+    def test_not_in_a_check(self):
+        # a --once check runs between every two steps: join and every watcher start say it
+        started = []
+        with mock.patch.object(watch, "watch_job", lambda *a, **kw: started.append(a) or 16):
+            code, out, err = self.cli("--once", project="p")
+        self.assertEqual((code, out, err, len(started)), (16, "", "", 1))
 
     def test_no_note(self):
         # this version's copies, and the user's own file

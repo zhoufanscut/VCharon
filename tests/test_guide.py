@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from vcharon import channel_cmd, cli, guide, platform, skill
+from vcharon.mailbox import watch as watch_mod
 
 from tests.test_channel import ChannelCase
 from tests.test_commands import commands, parse
@@ -405,6 +406,33 @@ def headings(path):
             elif not fenced and line.startswith("#"):
                 found.append(line.lstrip("#").strip())
     return found
+
+
+class NamedSectionTest(unittest.TestCase):
+    """Lines vcharon prints name a section of the watch topic by its heading, which no other
+    test checks (DocReferenceTest checks DESIGN's and README's): renaming the heading must
+    change them too."""
+
+    def test_the_one_minute_check(self):
+        have = headings(os.path.join(GUIDE_DIR, "watch.md"))
+        [named] = re.findall(r'"([^"]+)"', channel_cmd.FIRST_CHECK)
+        self.assertEqual(named, "The one-minute check")
+        self.assertIn(named, have)
+        self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_FIRST)
+
+    def test_references_in_the_guide(self):
+        # `vcharon guide <topic>`, "<heading>": the heading must be in that topic
+        found = []
+        for name in sorted(os.listdir(GUIDE_DIR)):
+            if not name.endswith(".md"):
+                continue
+            with open(os.path.join(GUIDE_DIR, name), encoding="utf-8") as f:
+                text = f.read()
+            for topic, named in re.findall(r'vcharon guide (\w+)`?,\s+"([^"]+)"', text):
+                found.append((topic, named))
+                with self.subTest(file=name, topic=topic, heading=named):
+                    self.assertIn(named, headings(os.path.join(GUIDE_DIR, topic + ".md")))
+        self.assertIn(("watch", "Checking between steps"), found)
 
 
 def anchors(path):

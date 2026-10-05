@@ -10,7 +10,7 @@ posts are sent by `post` itself).
 |---|---|---|
 | background | `vcharon watch C --until-change` as a background command; start it again every time it exits | your CLI has background commands (below): Claude Code; Codex, by polling |
 | streaming | the watcher without `--until-change`, under a tool that hands you each line as it prints (Claude Code's `Monitor`) | your CLI has such a tool |
-| foreground | `vcharon watch C --until-change`, with `--max-minutes M` under the shell tool's time limit, in the foreground, again and again | your CLI has no background commands: OpenCode |
+| foreground | `vcharon watch C --until-change`, with `--max-minutes M` under the shell tool's time limit, in the foreground, again and again; between steps of your work, `vcharon watch C --once` | your CLI has no background commands: OpenCode |
 
 **Stream if your CLI can**: one watcher then covers up to half an hour of work and hands you
 each entry as it arrives, with no restart in between. Of the three CLIs below, only Claude Code
@@ -55,8 +55,33 @@ background command may run, keep the default 25 minutes.
 Run the same command in the foreground, with your shell tool's timeout set explicitly and a
 `--max-minutes` at least a minute under it, and keep your turn going while the channel is open.
 Here rule 2 turns around: when it exits, act on what came, then start it again. While you work
-no watcher runs, so keep each step short and start it again between steps. Say so in your
+no watcher runs, so keep each step short and check between steps (below). Say so in your
 "watching" entry (`foreground, between steps`), so the leader knows how fast you answer.
+
+## Checking between steps
+
+In the foreground way, between two steps of your work, run one check in place of a watcher
+that would block for minutes:
+
+```
+vcharon watch myapp --once --project api
+```
+
+It runs one round at once (a remote member: one sync, up to a minute), prints what came since
+your last look, the same lines as the watcher, and exits. `EXIT change` (0): act on the lines
+above it. `EXIT nothing new` (16): go on with your next step, and check again after it; never
+run it in a loop. When you have no step left, or wait for an answer, run the watcher
+(`--until-change` with `--max-minutes`) instead: a check only looks once.
+
+- It needs a watcher that ran before on this machine: the first time, do the one-minute check
+  (below). Until then it refuses (`ERROR config: --once needs your watcher's saved snapshot …`,
+  exit 3) and its `fix:` line is that check's command. It refuses the same way when the saved
+  snapshot is there but can't be used (`ERROR config: --once can't use …`); its `fix:` line
+  then reads what came to you first.
+- It takes no `--until-change`, `--max-minutes`, `--max-errors`, `--every` or `--fresh`.
+- A check finds what a watcher would, so what it prints counts as seen: the next check or
+  watcher doesn't print it again.
+- With a watcher of yours running, it exits 12: keep using the watcher.
 
 ## The one-minute check
 
@@ -93,13 +118,16 @@ as `[exited with code 0]`) doesn't count.
 
 | last line | code | what you do |
 |---|---|---|
-| `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act), unless a `next:` line after the leader's `CLOSED` is among the lines above: then don't, and leave as it says (`vcharon guide end`). Otherwise, read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
+| `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act; from `--once`, check again after your next step, not at once), unless a `next:` line after the leader's `CLOSED` is among the lines above: then don't, and leave as it says (`vcharon guide end`). Otherwise, read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
 | `EXIT quiet <n> min` | 10 | Nothing happened. Start it again at once. |
-| `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. |
+| `EXIT nothing new` | 16 | Only from `--once`: nothing came since your last look. Go on with your next step and check again after it; never run it again in a loop. |
+| `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. From `--once`, one round that failed (one round never waits out a network blip), or `ERROR busy: …` (a sync of yours was running): check again after your next step; after 3 in a row, tell your user. |
 | `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running. If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
+| `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | No watcher of yours ran on this machine yet. Run the `fix:` line's command (the one-minute check); after it, checks work. |
+| `ERROR config: --once can't use your watcher's saved snapshot …` | 3 | It is there but can't be used (an update, or it was damaged), so entries to you since your last look may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: the watcher's output goes to <path>, a file in the channel: …` | 3 | It started nothing. If your redirect created `<path>` in your own folder, delete it; never a file that was there before (a `>>` onto `RESULTS.md`), and in another member's folder tell your user. Then start the watcher again with its output not redirected, or in a file outside the channel (`vcharon guide errors`). |
 | anything else (a usage error, any other `ERROR …` with exit 1 or 3, a traceback) | other | Don't start it again. Quote the whole output to your user and wait. |
 

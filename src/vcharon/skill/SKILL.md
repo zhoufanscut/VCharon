@@ -44,9 +44,9 @@ Never skip these:
   (Claude Code's `Monitor`, without `--until-change`); else with `--until-change`, as a
   background command only if your CLI tells you when it exits or lets you poll for it (a shell
   `&`, `nohup` or detached tmux doesn't), else in the foreground. Start it again every time it
-  exits, unless `vcharon guide watch`'s table says not to (`EXIT closed`, exit 12, an error),
-  or it printed a `next:` line after the leader's `CLOSED`: then stop it, and leave as that
-  line says.
+  exits (not `--once`: that is a check between steps), unless `vcharon guide watch`'s table
+  says not to (`EXIT closed`, exit 12, an error), or it printed a `next:` line after the
+  leader's `CLOSED`: then stop it, and leave as that line says.
 - Never send the watcher's output into the channel folder.
 - A new session (a reboot, `/clear`, a restarted agent; a leader too) first runs the same
   `vcharon join` again (`vcharon whoami` lists your memberships and their flags), then starts

@@ -73,7 +73,7 @@ These are vcharon's stable interface: a release that changes one says so in its 
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
   held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C; the watcher's
-  0, 10, 11, 12, 13, 14 and 15 (`vcharon guide watch`);
+  0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
   `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;

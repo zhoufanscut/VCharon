@@ -1125,12 +1125,17 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   vcharon. A first `join` (not a rejoin) then prints `  note: if your user only asked you to join,
   ask them whether to work on the steps the leader assigns you`: a bare "join" is no task, and the
   steps are work only the user can ask for (`create`, and a rejoin, the leader's in a new session
-  too, print no such line). The watcher line is a command to run as printed, and it names the
-  topic rather than a way to run it: a background command is right only where the agent's CLI
-  reports its exit, and the topic says what to do otherwise. The plan line is a template (a
-  placeholder title, and the trailing words make it refuse to parse), since a plan posted as
-  printed would reach everyone and can't be taken back. Why: an agent that skips the guide still
-  sees what to run next. A join whose sync failed prints neither: its sync is the next step.
+  too, print no such line). A first `join` and a `create` whose agent (MEMBER.md's `agent:`) isn't
+  `claude` print, right after the watcher line, `  note: first time, add --max-minutes 1 to that
+  command and see how it ends (vcharon guide watch, "The one-minute check")`: only a watcher that
+  ran shows whether the agent's tool lets it end on its own, and the guide gives Claude Code's
+  limits. A note, not `--max-minutes 1` in the watcher line: run again as printed later, that
+  would keep every watcher at one minute. The watcher line is a command to run as printed, and it
+  names the topic rather than a way to run it: a background command is right only where the agent's
+  CLI reports its exit, and the topic says what to do otherwise. The plan line is a template (a
+  placeholder title, and the trailing words make it refuse to parse), since a plan posted as printed
+  would reach everyone and can't be taken back. Why: an agent that skips the guide still sees what
+  to run next. A join whose sync failed prints neither: its sync is the next step.
 - **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
   your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
   skill copy that `vcharon skill install` wrote (its marker line) holds another text than this
@@ -1470,12 +1475,43 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     folders its last pull left out;
   - `ERROR …`, then its `  fix: …` (and `  log: …`) lines, once while the text holds; `ok again`
     after the first good round;
-  - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed` as the last line.
+  - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT nothing new` as the
+    last line.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
   `to all`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok again` after one.
   Without it the watch runs on (for a streaming tool such as Claude Code's Monitor).
   `--max-minutes M` (1 to 1440; 25 with `--until-change`) exits 10 with `EXIT quiet M min`;
   streaming, a round under way at the deadline is stopped.
+- **`--once`**: one round at once from the saved snapshot, then exit: a check between steps
+  for an agent whose CLI has no background commands, where a quiet `--until-change
+  --max-minutes 1` costs a minute each time. It prints what came since the member's last look
+  as any round does, saves, and ends `EXIT change` (0) when something counted, else `EXIT
+  nothing new` (16). Its own code, not 10: the guide's rule for 10 is "start it again at once",
+  which would make a check a loop. A remote member's round is one `vcharon sync C`, never the
+  streaming child, through `run_sync` with a 60 s cap in place of 900 s (the sync's group gets
+  SIGTERM, then SIGKILL, as with `--no-stream`): an agent waits for it between steps. The cap is
+  a guess, not measured over real ssh. It stamps the member's last watched time as a round
+  does, at `--no-stream`'s pace (`run 30`; a local member `local 10`): a foreground member's
+  checks are its only sign of life.
+  - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every` or
+    `--fresh`, and when no snapshot was saved yet (`ERROR config: --once needs your watcher's
+    saved snapshot: none has run for <name> on this machine`, its fix the one-minute check's
+    command). Why: a fresh or first start is a baseline, which takes what is there as seen and
+    prints none of it, so an entry to the member would be lost for good. Refused (exit 3) too,
+    before the lock, when a snapshot is there but can't be used (not JSON, another shape, can't
+    be read, another root or member: the start's `note:` reasons), as `ERROR config: --once
+    can't use your watcher's saved snapshot <path>: <why>`; its fix is `vcharon read C --to-me`
+    (what came since the last look may not all have been printed), then the one-minute check.
+    Why: the same baseline would mark it all seen. One spoilt between that check and the lock
+    is found after the start's baseline: its `note:` line, then `EXIT error`.
+  - Never "nothing new" when the round can't tell: a sync that found the job busy (`ERROR busy:
+    a sync of C is running (a post's, or one a stopped watcher left): nothing was synced`, its
+    fix to run the check again after the next step) and an error that still holds (a network
+    blip counts only in its second round in a row, which a check never has; a saved error
+    shown again; the cap) end `EXIT error` (11). A failed save ends `EXIT error` too, as with
+    `--until-change`. `EXIT closed`, `EXIT updated` and `EXIT orphaned` come as in any round.
+  - The stale-skill note isn't printed: a check runs between every two steps, and join and
+    every watcher start print it.
 - **Which errors count**: by key: `transport` for `connect`, `timeout`, `lost` and the
   watcher's own sync failures; the code alone for `too_many_deletes`, `vanished` and `aborted`,
   whose text changes run to run; else the text. Each key counts once in a failing streak.
@@ -1638,7 +1674,7 @@ Messages
                  [--file NAME.md | --steps] [--no-sync] [--project P] [--role R]
   vcharon read   C [ID…] [--to-me] [--last N] [--full] [--project P] [--role R] [--json]
   vcharon watch  C [--until-change] [--every S] [--max-minutes M] [--fresh] [--no-stream]
-                 [--max-errors N] [--project P] [--role R]
+                 [--max-errors N] [--once] [--project P] [--role R]
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
 
 Other
@@ -1722,7 +1758,8 @@ The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher (or a 
 `join`, `leave` or `close` of the member) runs, 13 closed, 14 updated (VCharon was replaced
 while it ran; `sync --repeat` exits 14 too), and 15 orphaned (a binary's bootloader process is
 gone; `sync --repeat` too, and on Windows any command of a binary, though nothing is left to
-see it). A usage error is 3, not argparse's 2, since 2 means busy.
+see it), and 16 nothing new (a `--once` check that found nothing). A usage error is 3, not
+argparse's 2, since 2 means busy.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -2140,7 +2177,7 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 - **Verbs and flags**: the command line above, with each flag's meaning.
 - **Exit codes**: 0, 1, 2, 3, 4 and 130 ([Exit codes](#exit-codes)); the watcher's 0 (change),
   10 (quiet), 11 (error), 12 (another watcher, or a create, join, leave or close of the
-  member, runs), 13 (closed), 14 (updated) and 15 (orphaned).
+  member, runs), 13 (closed), 14 (updated), 15 (orphaned) and 16 (nothing new).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
     every <n> s]`
@@ -2156,10 +2193,10 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
   - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
-    orphaned`; `ERROR another watcher is running on this mailbox (<lock>), or a create, join,
-    leave or close of this member` with exit 12 (older versions end it at `(<lock>)`: match on that
-    start). The text after an `ERROR` line's colon is the OS's message and may be translated:
-    match on the prefix.
+    orphaned`, `EXIT nothing new`; `ERROR another watcher is running on this mailbox (<lock>), or a
+    create, join, leave or close of this member` with exit 12 (older versions end it at `(<lock>)`:
+    match on that start). The text after an `ERROR` line's colon is the OS's message and may be
+    translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "leader", "leaders",
     "members", "member_info", "newest", "strays", "format", "limits"}`, `member_info` each

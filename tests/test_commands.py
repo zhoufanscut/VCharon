@@ -766,6 +766,10 @@ HINTS = {
         # the next steps join and create print
         ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
+        # the first-time check after it: a pointer to a topic's section, whose comma sticks to
+        # the topic, not a command to run as printed
+        ("  note: first time, add --max-minutes 1 to that command and see how it ends "
+         "(vcharon guide watch, \"The one-minute check\")", None),
         # the undo in the note of a project part join or create took from the folder
         ("if that is the wrong project: vcharon leave %s %s (then join again with "
          "--project P)", ("game", FLAGS)),
@@ -834,6 +838,15 @@ HINTS = {
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
         ("%s isn't there: your folder in the channel holds it, once vcharon join --local has "
          "written it", None),
+        # a --once check's: no saved snapshot yet; a busy sync
+        ("start your watcher first: vcharon watch %s --until-change --max-minutes 1 %s "
+         "(the one-minute check)", ("game", FLAGS)),
+        ("run vcharon watch %s --once %s again after your next step; 3 times in a row, tell "
+         "your user", ("game", FLAGS)),
+        # a --once check's: a saved snapshot it can't use
+        ("run vcharon read %s --to-me %s (what came to you may not all have been printed), "
+         "then vcharon watch %s --until-change --max-minutes 1 %s (the one-minute check)",
+         ("game", FLAGS, "game", FLAGS)),
         # the line after the leader's CLOSED to @all
         ("  next: the leader closed the channel: stop your watcher and don't start it again, "
          "then run: vcharon leave %s %s", ("game", FLAGS))],

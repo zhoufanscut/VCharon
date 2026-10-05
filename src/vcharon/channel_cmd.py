@@ -58,6 +58,14 @@ NEXT_WATCH = ("  next: start your watcher now (vcharon guide watch): vcharon wat
               "--until-change %s")
 NEXT_PLAN = ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
              "--title '…' %s, with the body on stdin")
+# what join (a first join only) and create print after the next: line, for an agent other than
+# Claude Code: only a watcher that ran shows whether the agent's tool lets it end on its own. A
+# note, not --max-minutes 1 in the next: line: run again as printed later, that would keep
+# every watcher at one minute
+FIRST_CHECK = ("  note: first time, add --max-minutes 1 to that command and see how it ends "
+               "(vcharon guide watch, \"The one-minute check\")")
+# the agent whose limits the guide gives, so it can skip the check
+CHECK_SKIPPED = "claude"
 # the fix of "a live session holds": the holder is the reader's own, or another agent's in the
 # same folder, and only the reader (or its user) can tell which
 LIVE_SESSION_FIX = ("your own earlier watcher or command: keep it or let it end; another agent's "
@@ -907,14 +915,15 @@ def _create_held(args, cfg, name, log, say, take):
                                   "--full %s again" % (channel, channel,
                                                        name_flags(channel, name))))
             return code
-    _say_next(channel, name, say, plan=True)
+    _say_next(channel, name, say, plan=True, first=args.fields["agent"] != CHECK_SKIPPED)
     say("OK  created %s; your folder is %s" % (channel, own))
     return 0
 
 
-def _say_next(channel, name, say, plan=False):
+def _say_next(channel, name, say, plan=False, first=False):
     """The next steps, as this box runs vcharon, with the flags that find the membership from
-    any folder; before them, the note for a skill copy of another version (skill.stale_note).
+    any folder; before them, the note for a skill copy of another version (skill.stale_note);
+    first: FIRST_CHECK right after the watcher's line.
     On stdout with the rest: join and create print this machine's paths there already (the OK
     line's folder), and the agent reads stdout."""
     note = skill.stale_note()
@@ -923,6 +932,8 @@ def _say_next(channel, name, say, plan=False):
         say("  " + pathrules.printable(note))
     flags_ = name_flags(channel, name)
     say(platform.runnable(NEXT_WATCH % (channel, flags_)))
+    if first:
+        say(platform.runnable(FIRST_CHECK))
     if plan:
         say(platform.runnable(NEXT_PLAN % (channel, flags_)))
 
@@ -1137,7 +1148,8 @@ def _join_held(args, cfg, name, log, say, take):
     tree = os.path.dirname(own)
     _print_entries(tree, name, leader, channel, say)
     if code == 0:
-        _say_next(channel, name, say)
+        _say_next(channel, name, say,
+                  first=not rejoin and args.fields["agent"] != CHECK_SKIPPED)
         if not rejoin:
             # a first join only: a rejoin (a new session, the leader's too) had its answer
             say(ASK_USER)

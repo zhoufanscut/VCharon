@@ -61,7 +61,8 @@ EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 
   4 couldn't connect or start the helper, 130 Ctrl-C.
   watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher (or a create,
   join, leave or close of the member) runs, 13 the channel is closed,
-  14 vcharon was updated (start it again), 15 a binary's bootloader process was killed.
+  14 vcharon was updated (start it again), 15 a binary's bootloader process was killed,
+  16 nothing new (--once).
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -256,6 +257,9 @@ def _parser():
                      help="exit between rounds after this many minutes (default: none; 25 with "
                      "--until-change)")
     one.add_argument("--fresh", action="store_true", help="ignore the saved snapshot")
+    one.add_argument("--once", action="store_true", help="one round at once, then exit: 0 a "
+                     "change, 16 nothing new (a check between steps, for an agent with no "
+                     "background commands)")
     one.add_argument("--no-stream", action="store_true", help="a remote member: a sync each "
                      "round, in place of one long-lived vcharon sync --repeat")
     one.add_argument("--max-errors", type=_number(1, 1000, "rounds"), metavar="N",
@@ -908,6 +912,15 @@ def _over_limit(limits, me):
 def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
     its synced copy; the watcher's own exit codes."""
+    if args.once:
+        # each would change what one round means: a deadline, a pace, an error streak, and
+        # --fresh a baseline, which would take what came as seen without printing it
+        for flag, on in (("--until-change", args.until_change),
+                         ("--max-minutes", args.max_minutes is not None),
+                         ("--max-errors", args.max_errors is not None),
+                         ("--every", args.every is not None), ("--fresh", args.fresh)):
+            if on:
+                raise _usage("--once doesn't go with %s" % flag, "leave out %s" % flag)
     if args.max_errors is not None and not args.until_change:
         raise _usage("--max-errors needs --until-change", "add --until-change, or leave out "
                      "--max-errors")
@@ -941,8 +954,9 @@ def _watch(args, run):
                      "gets that file" % shown, hint)
     # once, at the start, as a status line: it never counts as a change, and it comes after
     # the check above, so the home paths in it stay out of the channel. Before the watchdog's
-    # start: reading the skill's text may import modules
-    note = skill.stale_note()
+    # start: reading the skill's text may import modules. Not for a --once check, which runs
+    # between every two steps: join and every watcher start say it already
+    note = None if args.once else skill.stale_note()
     if note is not None:
         watch_mod.say("%s %s" % (watch_mod.stamp(time.time()), pathrules.printable(note)))
     if tree is not None:
@@ -953,7 +967,7 @@ def _watch(args, run):
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
               "max_errors": args.max_errors or 10, "updated": dog.changed,
-              "orphaned": lambda: run.orphaned("watch")}
+              "orphaned": lambda: run.orphaned("watch"), "once": args.once}
     if record["ssh"] is None:
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
@@ -962,7 +976,9 @@ def _watch(args, run):
                                    record["name"], args.every or watch_mod.DIR_EVERY,
                                    folder_limits=(channel_limits["max_mb"] * charter.MB,
                                                   channel_limits["max_files"]), **limits)
-    stream = not args.no_stream
+    # a --once check runs one sync, never the streaming child, at --no-stream's pace (the pace
+    # its last-watched stamp keeps)
+    stream = not args.no_stream and not args.once
     if stream and args.every is not None and args.every > watch_mod.STREAM_EVERY_MAX:
         raise _usage("--every: 1 to %d seconds when streaming" % watch_mod.STREAM_EVERY_MAX,
                      "give a smaller --every, or add --no-stream")

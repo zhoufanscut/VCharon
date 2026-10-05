@@ -77,9 +77,10 @@ Lines; * marks the ones that count for --until-change:
                                    in it is as this box runs vcharon
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
-                                   the last line, when it exits on its own (exit 0, 10, 11,
-                                   13, 14, 15); EXIT closed right after the ERROR and fix (and log)
-                                   lines of a
+    | EXIT nothing new             the last line, when it exits on its own (exit 0, 10, 11,
+                                   13, 14, 15, 16); EXIT nothing new: a --once check that
+                                   found nothing; EXIT closed right after the ERROR and fix
+                                   (and log) lines of a
                                    channel that's gone, in every mode and on every start while
                                    it stays gone: don't restart, run the fix line's leave;
                                    EXIT updated when vcharon was replaced while it ran (an
@@ -156,6 +157,9 @@ LOG_SEP = "\n"
 LOG_ONLY_FIX = "the job's log has the rest: "
 # A round's sync has its own timeouts; this only keeps a stuck one from stopping the watch.
 RUN_TIMEOUT = 900
+# A --once check's sync: a foreground agent waits for it between its steps, so a stuck one
+# must not hold the agent for RUN_TIMEOUT (a minute is a guess, not measured over real ssh)
+ONCE_TIMEOUT = 60
 # a remote member's default seconds between rounds: streaming, and with --no-stream
 STREAM_EVERY, RUN_EVERY = 2, 30
 # a local member's
@@ -184,6 +188,9 @@ FOLDS = sys.platform in ("win32", "darwin")
 BUSY = 2
 # exit codes of the watcher itself (vcharon guide watch)
 EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 13
+# a --once check that found nothing new: not 10, whose rule is "start it again at once", which
+# would make a check between steps a loop
+EXIT_NOTHING = 16
 EXIT_UPDATED = install.EXIT_UPDATED
 EXIT_ORPHANED = install.EXIT_ORPHANED
 # the saved snapshot's format: 2 since channels, whose entries it keeps
@@ -206,6 +213,24 @@ CLOSED_TITLE = "CLOSED"
 # (closed_next). Stop first: leave refuses while the watcher holds the member's lock.
 CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don't start it "
                "again, then run: vcharon leave %s %s")
+# A --once check needs a saved snapshot: without one its round would be a baseline, which takes
+# what is there as seen and prints none of it, so an entry to the member would be lost for good.
+# The fix is the one-minute check, which saves one (vcharon guide watch).
+ONCE_NO_SNAPSHOT = ("--once needs your watcher's saved snapshot: none has run for %s on this "
+                    "machine")
+ONCE_FIRST = ("start your watcher first: vcharon watch %s --until-change --max-minutes 1 %s "
+              "(the one-minute check)")
+# A snapshot that is there but can't be used: a start would take a baseline in its place, and
+# what came since the last look would never be printed, so the check refuses and points at it
+ONCE_BAD_SNAPSHOT = "--once can't use your watcher's saved snapshot %s: %s"
+ONCE_BAD_FIX = ("run vcharon read %s --to-me %s (what came to you may not all have been printed), "
+                "then vcharon watch %s --until-change --max-minutes 1 %s (the one-minute check)")
+# A --once check whose sync found the job busy synced nothing, so "nothing new" would be a guess;
+# a post's own sync is short, so the next check most likely gets through
+ONCE_BUSY = ("ERROR busy: a sync of %s is running (a post's, or one a stopped watcher left): "
+             "nothing was synced")
+ONCE_BUSY_FIX = ("run vcharon watch %s --once %s again after your next step; 3 times in a row, "
+                 "tell your user")
 
 
 def error_key(line):
@@ -850,6 +875,8 @@ class _Watch:
         self.closed = False
         # whether the streaming child exited because vcharon was updated: EXIT updated
         self.updated = False
+        # a --once check's round whose sync found the job busy: the lines it ends with
+        self.busy = None
         # In the failing streak: the keys (error_key) that counted as a change, saved with the
         # snapshot; the keys that never count in it (the start's own error); and the key of
         # the round before, for a TRANSPORT error's second round.
@@ -1139,6 +1166,54 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     return 0
 
 
+def _once(w, step, updated=None, orphaned=None):
+    """A --once check: one round, at once, then the exit code. Its ending, after the round's
+    lines: updated, orphaned and closed as in _loop; an unsaved snapshot, EXIT error (the next
+    check would print the same lines again); a change, EXIT change; a busy sync (w.busy, its
+    lines), EXIT error; an error that still holds, EXIT error, never "nothing new": one round
+    can't wait out a network blip, so a check during an outage must not look quiet; else EXIT
+    nothing new."""
+    if updated is not None and updated():
+        w.say("EXIT updated")
+        return EXIT_UPDATED
+    if orphaned is not None and orphaned():
+        w.say("EXIT orphaned")
+        return EXIT_ORPHANED
+    changes, _failed, saved = step()
+    if w.updated:
+        w.say("EXIT updated")
+        return EXIT_UPDATED
+    if w.closed:
+        w.say("EXIT closed")
+        return EXIT_CLOSED
+    if not saved:
+        w.say("EXIT error")
+        return EXIT_ERROR
+    if changes:
+        w.say("EXIT change")
+        return EXIT_CHANGE
+    if w.busy is not None:
+        for line in w.busy:
+            w.say(line)
+        w.say("EXIT error")
+        return EXIT_ERROR
+    if w.error is not None:
+        # its ERROR line came before: the round printed it, as a restored error is printed
+        # again by the first round
+        w.say("EXIT error")
+        return EXIT_ERROR
+    w.say("EXIT nothing new")
+    return EXIT_NOTHING
+
+
+def _not_restored(w):
+    """A --once check whose start found no saved snapshot it could use (its note line says
+    why), though _need_snapshot found one before the lock (it changed in between): the start
+    took a baseline, so the round can't tell what came before it."""
+    w.say("EXIT error")
+    return EXIT_ERROR
+
+
 def _locked(w, state):
     """The lock on the saved snapshot, or None after the ERROR line if another watcher has
     it."""
@@ -1156,11 +1231,12 @@ def _locked(w, state):
 
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
-              max_errors=10, folder_limits=None, updated=None, orphaned=None):
+              max_errors=10, folder_limits=None, updated=None, orphaned=None, once=False):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
-    WARN line. updated, orphaned: _loop's. Returns the exit code. Refused (VCharonError) unless
+    WARN line. updated, orphaned: _loop's. once: a --once check (_once), refused (VCharonError)
+    with no saved snapshot. Returns the exit code. Refused (VCharonError) unless
     root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
     closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
@@ -1177,6 +1253,9 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         pass
     leader = server_leader(root, me)
     state = snapshot_path(root, me)
+    if once:
+        _need_snapshot(state, root, me, os.path.basename(root),
+                       channel_cmd.name_flags(os.path.basename(root), me))
     w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone,
                folder_limits=folder_limits,
                closing=closed_next(os.path.basename(root), me, leader))
@@ -1195,10 +1274,27 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
                 stamp_local(root, me, every)
             return changes, None if w.told() else error is not None, saved
 
+        if once:
+            if not at_once:
+                return _not_restored(w)
+            return _once(w, step, updated, orphaned)
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
                      max_errors, rounds, updated=updated, orphaned=orphaned)
     finally:
         lk.release()
+
+
+def _need_snapshot(state, root, me, channel, flags):
+    """A --once check's refusal, before the lock and before a start could save a baseline over
+    it, when the snapshot state was never saved, or is there but can't be used for root and me
+    (load_snapshot's note)."""
+    files, _saved, note = load_snapshot(state, root, me)[:3]
+    if files is not None:
+        return
+    if note is None:
+        raise VCharonError("config", ONCE_NO_SNAPSHOT % me, ONCE_FIRST % (channel, flags))
+    raise VCharonError("config", ONCE_BAD_SNAPSHOT % (state, note),
+                       ONCE_BAD_FIX % (channel, flags, channel, flags))
 
 
 def stamp_local(root, me, every):
@@ -1266,7 +1362,7 @@ def silent_fix(job):
                     [job + suffix + ".log" for suffix in config.MAILBOX_JOBS] + ["vcharon.log"]))
 
 
-def run_sync(job, sync_args, pace=None):
+def run_sync(job, sync_args, pace=None, timeout=None):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
     stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
     session of its own: past RUN_TIMEOUT, or on Ctrl-C, its whole process group is ended on
@@ -1275,17 +1371,19 @@ def run_sync(job, sync_args, pace=None):
     first, up to TERM_WAIT before the SIGKILL, so the bootloader removes its unpack folder.
     Windows kills the bootloader alone; a binary's Python process then ends itself
     (install.exit_with_parent) (DESIGN, "Running watchers"). pace: the watcher's, for
-    WATCH_ENV."""
+    WATCH_ENV. timeout: a --once check's ONCE_TIMEOUT; None, RUN_TIMEOUT as it is at the call."""
+    if timeout is None:
+        timeout = RUN_TIMEOUT
     env = platform.child_env()
     if pace is not None:
         env[WATCH_ENV] = pace
     try:
-        ran = fsops.run(sync_argv(sync_args), RUN_TIMEOUT, new_session=True, env=env,
+        ran = fsops.run(sync_argv(sync_args), timeout, new_session=True, env=env,
                         term_wait=TERM_WAIT)
     except OSError as e:
         return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
     if ran.rc is None:
-        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, RUN_TIMEOUT), None
+        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, timeout), None
     return parse_failure(ran.rc, ran.err.decode("utf-8", "replace").splitlines(), job)
 
 
@@ -1689,19 +1787,25 @@ def is_gone(fix):
 def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
-              updated=None, orphaned=None):
+              updated=None, orphaned=None, once=False):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
     membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
     <every>` (Stream; spawn starts it, sleep waits before a restart), in place of a
     run(job, sync_args) every `every` seconds; the wake rules then count time by timer.
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
-    way. orphaned: _loop's. run: run_sync with the watcher's pace, unless a test gives one."""
+    way. orphaned: _loop's. once: a --once check (_once): one sync, never streamed, capped at
+    ONCE_TIMEOUT; refused (VCharonError) with no saved snapshot. run: run_sync with the
+    watcher's pace, unless a test gives one."""
+    stream = stream and not once
     if run is None:
         def run(job, sync_args):
-            return run_sync(job, sync_args, pace="run %d" % every)
+            return run_sync(job, sync_args, pace="run %d" % every,
+                            timeout=ONCE_TIMEOUT if once else None)
     local, me, leader, channel = mailbox_of(job)
     state = snapshot_path(local, me, job)
+    if once:
+        _need_snapshot(state, local, me, sync_args[0], " ".join(sync_args[1:]))
     closing = closed_next(channel, me, leader)
     # the members the pull left out for their size, as the sync saved them after its down:
     # a WARN each while it lasts, in both modes (a streaming sync prints no notes)
@@ -1715,7 +1819,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     child = None
     try:
         # before the first run, so what it brings shows as new
-        w.start(fresh)
+        restored = w.start(fresh)
+        if once and not restored:
+            return _not_restored(w)
         error_seconds = None
         # one value for the loop's limits and the child's deadline: the loop can't go round
         # again at the deadline
@@ -1742,6 +1848,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
                 w.updated = True
                 return [], None, True
             code, line, fix = got
+            if once and code == BUSY:
+                w.busy = [ONCE_BUSY % sync_args[0], FIX + platform.runnable(
+                    ONCE_BUSY_FIX % (sync_args[0], " ".join(sync_args[1:])))]
             # a failed run may still have brought files, so the scan comes either way; a
             # failed run's error line is the one shown, not the scan's
             error, scan_fix, changes = w.round()
@@ -1761,6 +1870,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
             saved = w.save(scanned=error is None)
             return changes, failed, saved
 
+        if once:
+            return _once(w, step, updated, orphaned)
         # the client's first round runs at once, as it always did
         return _loop(w, every, sleep, step, timer, True, until_change, max_minutes,
                      max_errors, rounds, error_seconds, start=start, updated=updated,

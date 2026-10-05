@@ -355,10 +355,11 @@ class CreateJoinTest(ChannelCase):
         out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
         own = os.path.join(self.joined("game.laptop-ui"), "laptop-ui")
         # the next steps, with the flags that find the membership from any folder, then the OK
-        # line, still the last
-        self.assertEqual(out.splitlines()[-3:], [
+        # line, still the last; an agent other than Claude Code is told to check its tool
+        self.assertEqual(out.splitlines()[-4:], [
             platform.runnable("  next: start your watcher now (vcharon guide watch): "
                               "vcharon watch game --until-change --project ui"),
+            platform.runnable(channel_cmd.FIRST_CHECK),
             platform.runnable("  then post the plan (vcharon guide post): vcharon post game "
                               "--steps --to @all --title '…' --project ui, with the body on "
                               "stdin"),
@@ -450,18 +451,20 @@ class CreateJoinTest(ChannelCase):
         self.use_box("linux")
         out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
         own = os.path.join(self.root, "game", "linux-x-b")
-        # the watcher is next (a member posts no plan), then the note that the steps need its
-        # user's word; the OK line stays the last
-        self.assertEqual(out.splitlines()[-3:], [
+        # the watcher is next (a member posts no plan), then the check of the agent's tool,
+        # then the note that the steps need its user's word; the OK line stays the last
+        self.assertEqual(out.splitlines()[-4:], [
             platform.runnable("  next: start your watcher now (vcharon guide watch): "
                               "vcharon watch game --until-change --project x --role b"),
+            platform.runnable(channel_cmd.FIRST_CHECK),
             "  note: if your user only asked you to join, ask them whether to work on the steps "
             "the leader assigns you",
             "OK  in game as linux-x-b; your folder is %s" % own])
-        # a rejoin (a new session) doesn't ask again
+        # a rejoin (a new session) doesn't ask again, nor tell it to check its tool
         out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
         self.assertIn("took back game/linux-x-b", out)
         self.assertNotIn(channel_cmd.ASK_USER, out.splitlines())
+        self.assertNotIn(platform.runnable(channel_cmd.FIRST_CHECK), out.splitlines())
         self.assertEqual(sorted(os.listdir(own)), ["MEMBER.md", "RESULTS.md"])
         self.assertIn("entries for linux-x-b already in game:", out)
         self.assertEqual(self.record("game.linux-x-b"), {
@@ -932,12 +935,13 @@ class StaleSkillTest(ChannelCase):
             "vcharon skill install %s" % " ".join("--" + a for a in agents))
 
     def join(self, project="x"):
-        """A local join's stdout, which must exit 0 with nothing on stderr, less the member's
-        note after next: (checked here), so the lines line up with create's."""
+        """A local join's stdout, which must exit 0 with nothing on stderr, less the notes
+        after next: (checked here)."""
         code, out, err = self.channel("join", "game", "--local", "--project", project)
         self.assertEqual((code, err), (0, ""), out)
         lines = out.splitlines()
         self.assertEqual(lines.pop(-2), channel_cmd.ASK_USER, lines)
+        self.assertEqual(lines.pop(-2), platform.runnable(channel_cmd.FIRST_CHECK), lines)
         return lines
 
     def test_create_notes_a_stale_copy(self):
@@ -947,8 +951,8 @@ class StaleSkillTest(ChannelCase):
         code, out, err = self.channel("create", "game", "--local", "--project", "ui")
         self.assertEqual((code, err), (0, ""), out)
         lines = out.splitlines()
-        self.assertEqual(lines[-4], self.note("claude"))
-        self.assertTrue(lines[-3].startswith(platform.runnable("  next: ")), lines)
+        self.assertEqual(lines[-5], self.note("claude"))
+        self.assertTrue(lines[-4].startswith(platform.runnable("  next: ")), lines)
         self.assertEqual([l for l in lines if "skill" in l], [self.note("claude")])
 
     def test_join_notes_the_stale_copies(self):
@@ -1011,6 +1015,45 @@ class StaleSkillTest(ChannelCase):
         self.addCleanup(os.chmod, target, 0o600)
         lines = self.join()
         self.assertEqual([l for l in lines if "skill" in l], [])
+
+
+class FirstCheckTest(ChannelCase):
+    """A first join and a create tell an agent other than Claude Code to check its tool once
+    (the guide's one-minute check), right after the watcher's next: line; a rejoin doesn't."""
+
+    def lines(self, *argv):
+        code, out, err = self.channel(*argv)
+        self.assertEqual((code, err), (0, ""), out)
+        return out.splitlines()
+
+    def test_a_first_join_of_another_agent(self):
+        self.lead(where=("--local",))
+        lines = self.lines("join", "game", "--local", "--agent", "opencode")
+        at = lines.index(platform.runnable(channel_cmd.FIRST_CHECK))
+        self.assertTrue(lines[at - 1].startswith(platform.runnable("  next: start your "
+                                                                   "watcher")), lines)
+        self.assertEqual(lines[at + 1], channel_cmd.ASK_USER)
+        # a rejoin, a new session of the same agent, did the check already
+        self.assertNotIn(platform.runnable(channel_cmd.FIRST_CHECK),
+                         self.lines("join", "game", "--local", "--agent", "opencode"))
+
+    def test_claude_code_skips_it(self):
+        self.use_box("laptop")
+        lines = self.lines("create", "game", "--local", "--project", "ui", "--agent", "claude")
+        self.assertNotIn(platform.runnable(channel_cmd.FIRST_CHECK), lines)
+        self.assertTrue(lines[-3].startswith(platform.runnable("  next: ")), lines)
+        self.use_box("mac")
+        lines = self.lines("join", "game", "--local", "--agent", "claude")
+        self.assertNotIn(platform.runnable(channel_cmd.FIRST_CHECK), lines)
+        self.assertEqual(lines[-2], channel_cmd.ASK_USER)
+
+    def test_a_create_of_another_agent(self):
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}):
+            lines = self.lines("create", "game", "--local", "--project", "ui")
+        # between the watcher's line and the plan's: "that command" is the watcher's
+        self.assertEqual(lines[-3], platform.runnable(channel_cmd.FIRST_CHECK))
+        self.assertTrue(lines[-4].startswith(platform.runnable("  next: ")), lines)
+        self.assertTrue(lines[-2].startswith(platform.runnable("  then post the plan")), lines)
 
 
 class ProjectNoteTest(ChannelCase):
@@ -3533,3 +3576,135 @@ class SeenWatchProcessTest(ChannelCase):
         self.assertEqual(text, b"run 7\n")
         self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 7)
         self.assertNotIn("watched", said)
+
+
+@unittest.skipIf(sys.platform == "win32", "the fake ssh is reached through a shell script")
+class OnceProcessTest(ChannelCase):
+    """Real vcharon watch --once processes of a remote member, each with its own sync child
+    over the fake ssh: refused before a watcher ran, then a quiet check, a check that prints a
+    post once, and a stalled sync cut off at the check's own cap."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        # the sync children are new processes: they reach the fake server through ssh_path.
+        # Each ssh's pid is kept: ssh runs in a session of its own, so a sync cut off at its
+        # cap leaves it, and the test ends it
+        self.pids = os.path.join(self.tmp, "ssh.pids")
+        wrapper = os.path.join(self.tmp, "ssh.sh")
+        with open(wrapper, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\necho $$ >> %s\nexec %s %s \"$@\"\n"
+                    % (self.pids, sys.executable, FAKE_SSH))
+        os.chmod(wrapper, 0o755)
+        with open(os.path.join(self.homes["mac"], "vcharon.ini"), "a", encoding="utf-8") as f:
+            f.write("ssh_path = %s\n" % wrapper)
+        self.addCleanup(self.end_ssh)
+        self.state = os.path.join(self.homes["mac"], "state", "mailbox-watch-game.mac-web.json")
+        self.stamp = os.path.join(self.home, "seen", "game", "mac-web")
+
+    def end_ssh(self):
+        try:
+            with open(self.pids, encoding="utf-8") as f:
+                pids = [int(line) for line in f if line.strip()]
+        except FileNotFoundError:
+            return
+        for pid in pids:
+            try:
+                with open("/proc/%d/cmdline" % pid, "rb") as f:
+                    if FAKE_SSH.encode() not in f.read():
+                        continue
+                os.kill(pid, 9)
+            except (FileNotFoundError, ProcessLookupError):
+                pass
+
+    def env(self, **extra):
+        env = dict(os.environ, PYTHONPATH=VCHARON_DIR, **extra)
+        env.pop(watch.WATCH_ENV, None)
+        return env
+
+    def once(self, cap=None, **extra):
+        """(exit code, stdout lines without their time, stderr, seconds) of one real check;
+        cap: ONCE_TIMEOUT for it, set in its own process."""
+        argv = [sys.executable, "-m", "vcharon"]
+        if cap is not None:
+            argv = [sys.executable, "-c", "import sys; from vcharon.mailbox import watch; "
+                    "watch.ONCE_TIMEOUT = %d; from vcharon import cli; "
+                    "sys.exit(cli.main(sys.argv[1:]))" % cap]
+        started = time.monotonic()
+        ran = subprocess.run(argv + ["watch", "game", "--once"], stdin=subprocess.DEVNULL,
+                             capture_output=True, env=self.env(**extra), timeout=120,
+                             check=False)
+        took = time.monotonic() - started
+        out = ran.stdout.decode("utf-8", "replace").splitlines()
+        lines = [l[20:] if l[:4].isdigit() and l[19:20] == " " else l for l in out]
+        return ran.returncode, lines, ran.stderr.decode("utf-8", "replace"), took
+
+    def baseline(self):
+        """A real --no-stream watcher (every 7 s), until its first round stamped the server
+        and saved the snapshot."""
+        out_path = os.path.join(self.tmp, "watch.out")
+        with open(out_path, "wb") as out:
+            proc = subprocess.Popen([sys.executable, "-m", "vcharon", "watch", "game",
+                                     "--no-stream", "--every", "7"],
+                                    stdin=subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, env=self.env(),
+                                    start_new_session=True)
+        try:
+            deadline = time.monotonic() + 60
+            while (not (os.path.exists(self.state) and os.path.exists(self.stamp))
+                   and time.monotonic() < deadline):
+                self.assertIsNone(proc.poll(), "the watcher ended early")
+                time.sleep(0.2)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(30)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, 9)
+                proc.wait()
+        self.assertTrue(os.path.exists(self.state))
+        with open(self.stamp, "rb") as f:
+            self.assertEqual(f.read(), b"run 7\n")
+
+    def test_refused_then_quiet_then_a_post_once(self):
+        code, lines, err, _took = self.once()
+        self.assertEqual(code, 3, (lines, err))
+        self.assertIn("ERROR config: --once needs your watcher's saved snapshot: none has run "
+                      "for mac-web on this machine", err)
+        # the refusal saved no baseline over the entries it would have hidden
+        self.assertFalse(os.path.exists(self.state))
+        self.baseline()
+        code, lines, err, _took = self.once()
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
+        self.assertEqual([l for l in lines if l.startswith("to ")], [])
+        # the check stamped at its own pace, --no-stream's default
+        with open(self.stamp, "rb") as f:
+            self.assertEqual(f.read(), b"run 30\n")
+        self.use_box("laptop")
+        self.ok("post", "game", "--to", "@mac-web", "--title", "for web", "--body", "b",
+                "--project", "ui")
+        self.use_box("mac")
+        code, lines, err, _took = self.once()
+        self.assertEqual((code, lines[-1]), (0, "EXIT change"), (lines, err))
+        told = [l for l in lines if "for web" in l]
+        self.assertEqual(len(told), 1, lines)
+        self.assertTrue(told[0].startswith("to you: laptop-ui#"), told)
+        # seen once: the next check is quiet
+        code, lines, err, _took = self.once()
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
+        self.assertNotIn("for web", "\n".join(lines))
+
+    def test_a_stalled_sync_is_cut_off_at_the_cap(self):
+        self.baseline()
+        # the ssh hangs before the helper starts; the sync's own hello wait is 30 s, so a
+        # cap of 3 s is what ends it
+        code, lines, err, took = self.once(cap=3, FAKE_SSH_STALL="60")
+        self.assertEqual(code, 11, (lines, err))
+        self.assertEqual(lines[-2:], ["ERROR vcharon sync of game.mac-web didn't finish within "
+                                      "3 s", "EXIT error"])
+        self.assertLess(took, 20)
+        # the next check, with the ssh well again, reports the recovery, not a change
+        code, lines, err, _took = self.once()
+        self.assertEqual((code, lines[-2:]), (16, ["ok again", "EXIT nothing new"]),
+                         (lines, err))
