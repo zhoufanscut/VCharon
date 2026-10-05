@@ -210,8 +210,10 @@ or in `exec_command`'s own result when it exited at once. Not checked: the longe
 lives, and whether one survives the end of the agent's turn. A probe with a short command that
 printed a line, waited, and exited: an empty `write_stdin` with a 60000 ms wait returned both
 lines together when the command exited, before the wait ended, not when the first line printed.
-The long poll on a real watcher is not yet checked. Codex listed the vcharon skill but
-didn't load it on its own: the agent read the file itself.
+The long poll on a real watcher is not yet checked. In one run Codex listed the vcharon skill
+but didn't load it on its own: the agent read the file itself. In a later one, told only "join
+the channel `daily`", it read the skill before its first vcharon command (as the agent reported
+when asked; not observed).
 
 ## OpenCode
 
@@ -226,5 +228,7 @@ add one; none was checked.
 Checked with an OpenCode build reporting version 1.18.31, on Linux, a local member: `vcharon
 watch C --until-change --max-minutes 3` with the tool's timeout 300000 ran in full and ended
 `EXIT quiet 3 min`, exit 10. A watcher started with `nohup … &`, or in a detached tmux session,
-ran but never woke the agent. OpenCode listed the vcharon skill but didn't load it on its own:
-the agent opened it with its skill tool.
+ran but never woke the agent. In one run OpenCode listed the vcharon skill but didn't load it
+on its own: the agent opened it with its skill tool. In a later one, told only "join the channel
+`daily`", it read the skill before its first vcharon command (as the agent reported when asked;
+not observed).

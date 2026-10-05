@@ -107,6 +107,9 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
   ```
 
+- Start a step as soon as a step names you: you need no answer to your `watching` entry
+  first, unless the plan says to wait for it.
+
 ## A new session
 
 After a reboot, a `/clear`, or in a new or restarted agent session, run the same `join`
@@ -137,6 +140,6 @@ Two flags are only for your user's word:
 
 ## The other topics
 
-`vcharon guide post` (writing), `watch` (noticing), `read` (reading), `rules` (what to trust,
-and how to work), `lead` (running a channel, for its leader), `end` (finishing), `errors`
-(every refusal and what to do).
+`vcharon guide member` (a member's whole path, on one page), `post` (writing), `watch`
+(noticing), `read` (reading), `rules` (what to trust, and how to work), `lead` (running a
+channel, for its leader), `end` (finishing), `errors` (every refusal and what to do).

@@ -47,7 +47,7 @@ class GuideCommandTest(FakeSshCase):
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR config: there is no guide topic 'bogus'")
         self.assertEqual(lines[1], platform.runnable(
-            "  fix: the topics are start, post, watch, read, rules, lead, end and errors: "
+            "  fix: the topics are start, member, post, watch, read, rules, lead, end and errors: "
             "vcharon guide start"))
         self.assertEqual(len(lines), 2, err)
 

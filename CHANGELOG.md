@@ -9,6 +9,26 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The guide has a new topic, `vcharon guide member`: a member's whole path on one page (join,
+  the watcher for each CLI and the one-minute check, what to do while watching and on each exit,
+  the `watching` entry, acting on `to you:` and `to all:` lines, a report, `DONE`, and leaving
+  after the leader's `CLOSED`), 3740 bytes. `vcharon guide` lists it second, after `start`, and
+  the unknown-topic fix line names it. The skill's reading rule now has a member read start,
+  member and rules before its first entry (`vcharon guide`, `vcharon guide member` and `vcharon
+  guide rules` print 18791 bytes together, measured with `wc -c`), and watch, post, read and end
+  when it needs them; a leader reads start, rules, watch, post, lead and end before it posts the
+  plan. Its command list adds `vcharon guide member` and `vcharon guide read`. Since the skill's
+  text changed, an installed copy gets the usual stale-skill note until `vcharon skill install`
+  runs again. The `start` topic now says a member starts a step as soon as a step names it,
+  without waiting for an answer to its `watching` entry unless the plan says to. The `watch`
+  topic's Codex and OpenCode sections add a later run (Codex CLI 0.160.0 and OpenCode 1.18.31,
+  Linux): told only "join the channel `daily`", each agent read the skill before its first
+  vcharon command, as each reported when asked; not observed directly. Why: a Claude Code member
+  read start, watch, post and rules (33 kB) before its first entry, over its tool's inline
+  output limit, and said one member page would have covered most of what it used; it also
+  didn't know whether to wait for the leader before starting its step. Measured on Linux: the
+  guide and command unit tests (every command in the new topic parses, `docs/GUIDE.md` matches
+  the topics). Inferred for macOS and Windows (text only; the same code).
 - `watch` prints a new line right after the line of the leader's entry to `@all` titled `CLOSED`:
   `  next: the leader closed the channel: stop your watcher and don't start it again, then run:
   vcharon leave C --project P [--role R]`, the flags from the member's record, the command spelled
