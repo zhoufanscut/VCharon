@@ -9,6 +9,24 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join` and `create` without `--project` print, right after their `vcharon: join|create …`
+  line, where the name's project part came from, and how to undo the membership: `  note:
+  project src is the checkout <path> (.svn); if that is the wrong project: vcharon leave C
+  --project src (then join again with --project P)`, or `  note: project ws is this folder's
+  name (no .git, .svn or .hg here or above); if that is the wrong project: vcharon close C
+  --project ws (then create it again with --project P)`; `--role R` is in the flags when
+  given. A join with a record on this machine (a rejoin) prints only the part before `;`.
+  With `--project`, no note; join and create have no `--json`, so no field changed.
+  The `start` guide ("Your name") says so, and suggests `vcharon whoami` before a join from
+  outside a checkout. Why: in a channel run, an agent in a folder of checkouts (each
+  subfolder its own SVN working copy) got a different name from each folder it started in,
+  had to guess which, and passed `--project` every time to be safe. Measured on Linux: unit
+  tests (a checkout in the current folder and above it, `.git` folder and file, `.svn`,
+  `.hg`, none, a rejoin (no undo), `--role` in the undo, `--project` given, the path kept out of the
+  channel's files), and a hand run in a scratch folder of checkouts: `create` and `join
+  --local` printed the note, and the printed `close` and `leave` ran and exited 0. Inferred
+  for macOS and Windows (the same code; the tests compare paths as the process sees its
+  current folder).
 - An `ERROR permission` from `Read-only file system` (`EROFS`) or `Operation not permitted`
   (`EPERM`) now ends `fix: if your CLI's sandbox blocked it, ask your user to allow vcharon's
   folders (vcharon doctor); else check the owner and permissions of <path>` (was only the last

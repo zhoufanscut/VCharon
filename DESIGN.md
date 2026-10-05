@@ -925,7 +925,21 @@ member's folder name.
   `create` refuse a new name whose project folder is the home folder (the home itself, or any
   folder in a home kept in git for its dotfiles), exit 3, `give --project`: the home folder's
   name is the OS user name, which would land in the member's name, its folder and every ID. A
-  membership with a record here keeps its name.
+  membership with a record here keeps its name. Without `--project`, `join` and `create` print
+  where it came from, right after their `vcharon: join|create …` line: `  note: project <p> is
+  the checkout <path> (<mark>); <undo>`, or `  note: project <p> is this folder's name (no
+  .git, .svn or .hg here or above); <undo>`, the path escaped as `read` escapes text. `<undo>`
+  is `if that is the wrong project: vcharon leave C --project <p> [--role R] (then join again
+  with --project P)`, for `create` `vcharon close C …` and `create it again`, spelled as this
+  machine runs vcharon, with flags built from the project and `--role` (the record isn't
+  written yet). The note names the undo, never just `--project P`: by then the name is taken,
+  and a second join with `--project` makes a second membership; a second create is refused.
+  Only a new membership (no record here) gets the undo; a join whose record is found keeps
+  just where the name came from: a member that joins again at each session isn't offered a
+  leave each time.
+  Why: in a folder of checkouts the name changes with the folder the agent starts in,
+  silently. On this box's stdout only, which already names its folders (the `OK` line's): no
+  channel file holds it.
 - `-<role>`: only with `--role R`, 1 to 6 of `a-z0-9`.
 - The whole name: lowercase `a-z0-9-_`, starting with a letter or digit, at most 32 (10 + 1 +
   14 + 1 + 6), not a name Windows reserves: a Windows client must be able to hold the folder,

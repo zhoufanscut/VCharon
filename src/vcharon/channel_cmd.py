@@ -80,16 +80,52 @@ def project_of(cwd):
 
 def project_folder(cwd):
     """The folder whose name project_of gives: the checkout's root, else cwd itself."""
+    return project_source(cwd)[0]
+
+
+def project_source(cwd):
+    """(the folder project_of names, the mark that made it a checkout's root: ".git", ".svn" or
+    ".hg"; None when no folder from cwd up holds one, and the folder is cwd itself)."""
     folder = os.path.abspath(cwd)
     while True:
         if (os.path.isdir(os.path.join(folder, ".git"))
-                or os.path.isfile(os.path.join(folder, ".git"))
-                or any(os.path.isdir(os.path.join(folder, mark)) for mark in (".svn", ".hg"))):
-            return folder
+                or os.path.isfile(os.path.join(folder, ".git"))):
+            return folder, ".git"
+        for mark in (".svn", ".hg"):
+            if os.path.isdir(os.path.join(folder, mark)):
+                return folder, mark
         up = os.path.dirname(folder)
         if up == folder:
-            return os.path.abspath(cwd)
+            return os.path.abspath(cwd), None
         folder = up
+
+
+# the undo project_note names, by verb: the name is taken by then, and a second join or create
+# with --project would make a second membership, not rename the first (DESIGN, "Member names")
+PROJECT_UNDO = {
+    "join": "if that is the wrong project: vcharon leave %s %s (then join again with "
+            "--project P)",
+    "create": "if that is the wrong project: vcharon close %s %s (then create it again with "
+              "--project P)"}
+
+
+def project_note(verb, channel, project, role, cwd=None, undo=True):
+    """The line join and create (verb) print when the project part comes from the folder, not
+    --project: where it came from, and, with undo (a new membership), the command that undoes
+    it; a rejoin's name is settled, so its member isn't offered a leave at each session. In a
+    workspace of checkouts, the name changes with the folder the agent starts in, and nothing
+    else says so. Printed on this box only: it may name a path, which no channel file may
+    hold. The flags are built here: the record isn't written yet."""
+    folder, mark = project_source(cwd or os.getcwd())
+    if mark is None:
+        where = "this folder's name (no .git, .svn or .hg here or above)"
+    else:
+        # escaped alone: runnable() must never see the path, which may hold any text
+        where = "the checkout %s (%s)" % (pathrules.printable(folder), mark)
+    head = "  note: project %s is %s" % (project, where)
+    if not undo:
+        return head
+    return head + "; " + platform.runnable(PROJECT_UNDO[verb] % (channel, flags(project, role)))
 
 
 def check_not_home(cwd=None):
@@ -634,6 +670,9 @@ def main(args, run):
                         else "the member without a role"))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}
+        args.project_note = (project_note(args.command, args.channel, project, args.role,
+                                          undo=record is None)
+                             if args.project is None else None)
         if getattr(args, "takeover", False) and not args.rejoin:
             raise VCharonError("config", "--takeover goes with --rejoin",
                                hint="add --rejoin, and only when your user confirms that this "
@@ -808,6 +847,8 @@ def _create_held(args, cfg, name, log, say, take):
             raise _stale_refusal(channel, name, record, "%s is gone from %s"
                                  % (channel, server.where), "create")
         say("vcharon: create %s  as %s on %s" % (channel, name, server.where))
+        if args.project_note is not None:
+            say(args.project_note)
         got = server.claim(channel, name, True)
         made = []
         try:
@@ -960,6 +1001,8 @@ def _join_held(args, cfg, name, log, say, take):
         # before any claim: a client-id file that can't be read or made stops here
         args.fields["claimer"] = platform.claimer(args.channel)
         say("vcharon: join %s  as %s on %s" % (channel, name, server.where))
+        if args.project_note is not None:
+            say(args.project_note)
         # 1. the leader, before any claim: a refused join leaves nothing behind
         found = _find(server.list(), channel, server.where)
         if found is None:

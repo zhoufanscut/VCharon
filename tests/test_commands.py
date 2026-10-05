@@ -654,6 +654,11 @@ HINTS = {
         # the next steps join and create print
         ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
+        # the undo in the note of a project part join or create took from the folder
+        ("if that is the wrong project: vcharon leave %s %s (then join again with "
+         "--project P)", ("game", FLAGS)),
+        ("if that is the wrong project: vcharon close %s %s (then create it again with "
+         "--project P)", ("game", FLAGS)),
         # a template, not a command (its title is a placeholder)
         ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
          "--title '…' %s, with the body on stdin", None)],

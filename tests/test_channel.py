@@ -226,6 +226,71 @@ class NamesTest(unittest.TestCase):
         os.mkdir(os.path.join(inner, ".git"))
         self.assertEqual(channel_cmd.project_of(os.path.join(inner, "src")), "inner")
 
+    def test_project_source(self):
+        # the folder and the mark that made it the project, for join's and create's note
+        for mark in (".git", ".svn", ".hg"):
+            with self.subTest(mark=mark):
+                root = os.path.join(self.tmp, "src" + mark)
+                deep = os.path.join(root, "a", "b")
+                os.makedirs(deep)
+                os.mkdir(os.path.join(root, mark))
+                self.assertEqual(channel_cmd.project_source(deep), (root, mark))
+                self.assertEqual(channel_cmd.project_source(root), (root, mark))
+        # a worktree's .git file
+        tree = os.path.join(self.tmp, "wt")
+        os.makedirs(os.path.join(tree, "x"))
+        with open(os.path.join(tree, ".git"), "w", encoding="utf-8", newline="") as f:
+            f.write("gitdir: elsewhere\n")
+        self.assertEqual(channel_cmd.project_source(os.path.join(tree, "x")), (tree, ".git"))
+        # none: the folder itself, and no mark
+        plain = os.path.join(self.tmp, "plain", "Here")
+        os.makedirs(plain)
+        self.assertEqual(channel_cmd.project_source(plain), (plain, None))
+
+    def test_project_note(self):
+        root = os.path.join(self.tmp, "src")
+        deep = os.path.join(root, "a")
+        os.makedirs(deep)
+        os.mkdir(os.path.join(root, ".svn"))
+        plain = os.path.join(self.tmp, "Here")
+        os.mkdir(plain)
+        # the undo, by verb, with the flags the record will hold; spelled as this box runs
+        # vcharon
+        self.assertEqual(channel_cmd.project_note("join", "game", "src", None, deep),
+                         "  note: project src is the checkout %s (.svn); " % root
+                         + platform.runnable("if that is the wrong project: vcharon leave game "
+                                             "--project src (then join again with --project "
+                                             "P)"))
+        self.assertEqual(channel_cmd.project_note("create", "game", "here", "b", plain),
+                         "  note: project here is this folder's name (no .git, .svn or .hg "
+                         "here or above); " + platform.runnable(
+                             "if that is the wrong project: vcharon close game --project here "
+                             "--role b (then create it again with --project P)"))
+
+        # without the undo (a rejoin): where the name came from only
+        self.assertEqual(channel_cmd.project_note("join", "game", "src", None, deep,
+                                                  undo=False),
+                         "  note: project src is the checkout %s (.svn)" % root)
+
+    @unittest.skipIf(os.name == "nt", "Windows names can't hold a control character")
+    def test_the_note_escapes_the_path(self):
+        root = os.path.join(self.tmp, "a\x1bb")
+        os.makedirs(os.path.join(root, ".git"))
+        note = channel_cmd.project_note("join", "game", "ab", None, root)
+        self.assertTrue(note.startswith("  note: project ab is the checkout %s (.git); "
+                                        % root.replace("\x1b", "\\x1b")), note)
+        self.assertNotIn("\x1b", note)
+
+    def test_runnable_never_sees_the_path(self):
+        # a folder named like a command stays as it is; only the undo is respelled
+        root = os.path.join(self.tmp, "x vcharon leave y")
+        os.makedirs(os.path.join(root, ".git"))
+        with mock.patch.object(platform, "self_command", return_value="/opt/vc"):
+            note = channel_cmd.project_note("join", "game", "y", None, root)
+        self.assertEqual(note, "  note: project y is the checkout %s (.git); if that is the "
+                         "wrong project: /opt/vc leave game --project y (then join again with "
+                         "--project P)" % root)
+
     def test_cleaning_and_cutting(self):
         for text, want in (("Web", "web"), ("a  b--c", "a-b-c"), ("-x-", "x"),
                            ("游戏_ui", "_ui"), ("abcdefghijklmnopq", "abcdefghijklmn"),
@@ -883,6 +948,94 @@ class StaleSkillTest(ChannelCase):
         self.addCleanup(os.chmod, target, 0o600)
         lines = self.join()
         self.assertEqual([l for l in lines if "skill" in l], [])
+
+
+class ProjectNoteTest(ChannelCase):
+    """join and create say where a project part they derived came from, and how to undo the
+    membership (DESIGN, "Member names"): one note line right after their `vcharon: join|create`
+    line, never with --project, and never in a channel file (it may name a path)."""
+
+    def run_in(self, cwd, *argv):
+        """stdout's lines of argv run from cwd, which must exit 0 with nothing on stderr; and
+        the folder as the process sees it (macOS's getcwd gives /private/var for /var)."""
+        os.chdir(cwd)
+        code, out, err = self.channel(*argv)
+        self.assertEqual((code, err), (0, ""), out)
+        return out.splitlines(), os.getcwd()
+
+    def undo(self, verb, flags_):
+        return platform.runnable("if that is the wrong project: vcharon %s game %s (then %s "
+                                 "again with --project P)" % (
+                                     "close" if verb == "create" else "leave", flags_,
+                                     "create it" if verb == "create" else "join"))
+
+    def test_a_workspace_of_checkouts(self):
+        # a folder that isn't a checkout, holding checkouts: the name depends on where the
+        # agent starts, so each start says which it was
+        ws = os.path.join(self.tmp, "ws")
+        src = os.path.join(ws, "server", "src")
+        deep = os.path.join(src, "deep")
+        os.makedirs(deep)
+        os.mkdir(os.path.join(src, ".svn"))
+        self.use_box("laptop")
+        lines, _ = self.run_in(ws, "create", "game", "--local")
+        self.assertEqual(lines[:2], [
+            "vcharon: create game  as laptop-ws on this machine",
+            "  note: project ws is this folder's name (no .git, .svn or .hg here or above); "
+            + self.undo("create", "--project ws")])
+        self.use_box("mac")
+        lines, here = self.run_in(deep, "join", "game", "--local", "--role", "b")
+        self.assertEqual(lines[:2], [
+            "vcharon: join game  as mac-src-b on this machine",
+            "  note: project src is the checkout %s (.svn); " % os.path.dirname(here)
+            + self.undo("join", "--project src --role b")])
+        # the path is this box's only: no channel file holds it
+        files = {rel: data for rel, data in self.server_tree().items() if data is not None}
+        self.assertIn("game/mac-src-b/MEMBER.md", files)
+        for rel, data in files.items():
+            self.assertNotIn(os.path.dirname(here).encode("utf-8"), data, rel)
+            self.assertNotIn(b"note: project", data, rel)
+
+    def test_a_checkout_in_the_current_folder(self):
+        self.lead(where=("--local",))
+        for mark in (".git", ".hg"):
+            with self.subTest(mark=mark):
+                repo = os.path.join(self.tmp, "co" + mark[1:])
+                os.makedirs(os.path.join(repo, mark))
+                lines, here = self.run_in(repo, "join", "game", "--local")
+                self.assertEqual(lines[1], "  note: project co%s is the checkout %s (%s); "
+                                 % (mark[1:], here, mark)
+                                 + self.undo("join", "--project co" + mark[1:]))
+
+    def test_a_rejoin_notes_it_without_the_undo(self):
+        # the record is found by the project the folder gives, so the second join is a rejoin
+        # of the same name: still from the folder, so still noted, but its name is settled:
+        # no leave offered at each session
+        self.lead(where=("--local",))
+        lines, here = self.run_in(self.project, "join", "game", "--local")
+        where = "  note: project web is the checkout %s (.git)" % here
+        self.assertEqual(lines[1], where + "; " + self.undo("join", "--project web"))
+        lines, _ = self.run_in(self.project, "join", "game", "--local")
+        self.assertEqual(lines[1], where)
+        self.assertIn("  took back game/mac-web; the leader is laptop-ui", lines)
+
+    def test_a_note_comes_after_the_also_hold_one(self):
+        # "note: you also hold" comes before the vcharon: line; the project note after it
+        self.lead(where=("--local",))
+        self.run_in(self.project, "join", "game", "--local", "--role", "b")
+        lines, here = self.run_in(self.project, "join", "game", "--local")
+        self.assertEqual(lines[:3], [
+            "note: you also hold game here as --role b",
+            "vcharon: join game  as mac-web on this machine",
+            "  note: project web is the checkout %s (.git); " % here
+            + self.undo("join", "--project web")])
+
+    def test_no_note_with_project(self):
+        for argv in (("create", "game", "--local", "--project", "ui"),
+                     ("join", "game", "--local", "--project", "api")):
+            with self.subTest(argv=argv):
+                lines, _ = self.run_in(self.project, *argv)
+                self.assertEqual([l for l in lines if "note: project" in l], [])
 
 
 class ConcurrencyTest(ChannelCase):

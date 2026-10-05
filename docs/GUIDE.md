@@ -42,7 +42,15 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
 - `<project>`: the name of the nearest folder that holds `.git`, `.svn` or `.hg`, found from
   the current directory upwards (with none anywhere above, the current folder's own name),
   lowercased, at most 14 characters. So **run vcharon from inside your project's checkout**,
-  or pass `--project P` every time.
+  or pass `--project P` every time. Not inside a checkout? Run `vcharon whoami` first: it
+  prints the name a join from here takes. Without `--project`, `join` and `create` say where
+  it came from, right after their `vcharon: join …` (or `create`) line: `note: project src is
+  the checkout <path> (.svn); if that is the wrong project: vcharon leave myapp --project src
+  (then join again with --project P)`; for `create`, `vcharon close myapp --project ws`. A
+  join again with a name this machine already holds says only where it came from. Before
+  that `leave` or `close`, stop your watcher if it runs. A `leave` posts `LEAVE` to the leader
+  and keeps your first folder in the channel (your `JOIN` stays there); a leader closes only
+  while no one else has joined: `close` deletes every member's folder.
 - `<role>`: only with `--role R` (1 to 6 of `a-z0-9`). **A second session in the same project
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
