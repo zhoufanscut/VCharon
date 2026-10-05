@@ -438,11 +438,18 @@ class CreateJoinTest(ChannelCase):
         self.use_box("linux")
         out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
         own = os.path.join(self.root, "game", "linux-x-b")
-        # the watcher is next (a member posts no plan); the OK line stays the last
-        self.assertEqual(out.splitlines()[-2:], [
+        # the watcher is next (a member posts no plan), then the note that the steps need its
+        # user's word; the OK line stays the last
+        self.assertEqual(out.splitlines()[-3:], [
             platform.runnable("  next: start your watcher now (vcharon guide watch): "
                               "vcharon watch game --until-change --project x --role b"),
+            "  note: if your user only asked you to join, ask them whether to work on the steps "
+            "the leader assigns you",
             "OK  in game as linux-x-b; your folder is %s" % own])
+        # a rejoin (a new session) doesn't ask again
+        out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
+        self.assertIn("took back game/linux-x-b", out)
+        self.assertNotIn(channel_cmd.ASK_USER, out.splitlines())
         self.assertEqual(sorted(os.listdir(own)), ["MEMBER.md", "RESULTS.md"])
         self.assertIn("entries for linux-x-b already in game:", out)
         self.assertEqual(self.record("game.linux-x-b"), {
@@ -630,6 +637,47 @@ class CreateJoinTest(ChannelCase):
         hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web",
                                                 os.path.join(self.root, "game")) + ".lock")
         self.assertEqual(self.refused("join", "game", "--local"), refused)
+
+    def test_the_refusal_names_the_holders_membership(self):
+        # a second agent in the leader's folder builds the leader's name: the refusal says the
+        # name is the leader's membership by this machine's record, and the fix leaves which
+        # case it is to the reader (the leader itself, re-running join after a /clear, gets the
+        # same line for its own watcher)
+        self.lead(where=("--local",), box="mac", project="web")
+        # the leader re-running join is told nothing about steps: it runs the channel
+        self.assertNotIn(channel_cmd.ASK_USER, self.ok("join", "game", "--local").splitlines())
+        hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web",
+                                                os.path.join(self.root, "game")) + ".lock")
+        fix = ("your own earlier watcher or command: keep it or let it end; another agent's "
+               "(your user says so): join with --role R; unsure: ask your user")
+        self.assertEqual(self.refusal("join", "game", "--local"), (
+            "ERROR channel: a live session holds mac-web in game (this machine's record: the "
+            "leader's membership, created here with --project web, no --role)", fix))
+        # with --role R the agent is a member of its own, and the note names the leader's
+        # membership without calling it the reader's
+        out = self.ok("join", "game", "--local", "--role", "cc")
+        self.assertEqual(out.splitlines()[0], "note: this project also holds game on this "
+                         "machine as mac-web (--project web, no --role): another session's, or "
+                         "yours with other flags")
+        # a member's own name held: the record says it is a member, with its flags
+        hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web-cc", "mac-web-cc",
+                                                os.path.join(self.root, "game")) + ".lock")
+        self.assertEqual(self.refusal("join", "game", "--local", "--role", "cc"), (
+            "ERROR channel: a live session holds mac-web-cc in game (this machine's record: a "
+            "member, joined here with --project web --role cc)", fix))
+
+    def test_the_refusal_for_a_name_held_on_another_server(self):
+        # the record is of a membership on another server: never this join's to take, so the
+        # fix is another member, and no alias is named. A --local join holding the same name
+        # stands in for the real case, a second server's join whose section key (C.name) and
+        # so watcher lock are the same
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web",
+                                                os.path.join(self.root, "game")) + ".lock")
+        self.assertEqual(self.refusal("join", "game", "--local"), (
+            "ERROR channel: a live session holds mac-web in game (this machine's record: a "
+            "membership on another server)", "pass --role R to join from here as another member"))
 
     def test_a_watcher_started_during_the_join_exits_12(self):
         # the join holds the watcher's lock to its end: a watcher started after the join's
@@ -872,10 +920,13 @@ class StaleSkillTest(ChannelCase):
             "vcharon skill install %s" % " ".join("--" + a for a in agents))
 
     def join(self, project="x"):
-        """A local join's stdout, which must exit 0 with nothing on stderr."""
+        """A local join's stdout, which must exit 0 with nothing on stderr, less the member's
+        note after next: (checked here), so the lines line up with create's."""
         code, out, err = self.channel("join", "game", "--local", "--project", project)
         self.assertEqual((code, err), (0, ""), out)
-        return out.splitlines()
+        lines = out.splitlines()
+        self.assertEqual(lines.pop(-2), channel_cmd.ASK_USER, lines)
+        return lines
 
     def test_create_notes_a_stale_copy(self):
         util.write_skill("claude", util.OLD_SKILL)
@@ -1020,12 +1071,13 @@ class ProjectNoteTest(ChannelCase):
         self.assertIn("  took back game/mac-web; the leader is laptop-ui", lines)
 
     def test_a_note_comes_after_the_also_hold_one(self):
-        # "note: you also hold" comes before the vcharon: line; the project note after it
+        # "note: this project also holds" comes before the vcharon: line; the project note after it
         self.lead(where=("--local",))
         self.run_in(self.project, "join", "game", "--local", "--role", "b")
         lines, here = self.run_in(self.project, "join", "game", "--local")
         self.assertEqual(lines[:3], [
-            "note: you also hold game here as --role b",
+            "note: this project also holds game on this machine as mac-web-b (--project web "
+            "--role b): another session's, or yours with other flags",
             "vcharon: join game  as mac-web on this machine",
             "  note: project web is the checkout %s (.git); " % here
             + self.undo("join", "--project web")])

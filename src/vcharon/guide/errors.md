@@ -58,7 +58,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` | your watcher, or another vcharon command of yours (a join still running), holds it: keep using that watcher, or let the command end and run this again; only when another session here is `<name>`: pass `--role R` |
+| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is your own watcher or command (a join still running): keep using that watcher, or let the command end and run this again, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |

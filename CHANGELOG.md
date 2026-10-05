@@ -7,6 +7,32 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A first `join` prints a line after its `next:` line (not `create`, nor a rejoin, the leader's in
+  a new session included): `  note: if your user only asked you to join, ask them whether to work
+  on the steps the leader assigns you`. The `OK` line is still the last; a script that took the
+  line before `OK` as the `next:` line should match `next:` instead.
+- The guide says how work for other members is asked for: a member posts `request: <what>` to
+  the leader (why, and who it thinks fits), and the leader dispatches it as a step or says no;
+  a member never assigns work to another member itself (`vcharon guide rules`, `member`,
+  `lead`, and the skill). The skill's text changed: run `vcharon skill install` after updating.
+- `join` and `create`'s note about another membership of the same project is now `note: this
+  project also holds C on this machine as <name> (--project P --role R): another session's, or
+  yours with other flags` (`--project P, no --role` for one without a role), in place of `note:
+  you also hold C here as --role R` / `as the member without a role`: the other membership may
+  be another agent's working in the same folder (a leader's, say), not the reader's. A script
+  that matched the old text should match `also holds`.
+- `a live session holds <name> in C` now goes on, when this machine has a record of the name,
+  with whose membership it is: `(this machine's record: the leader's membership, created here
+  with --project P, no --role)`, `(…: a member, joined here with --project P --role R)`, or
+  `(…: a membership on another server)`. Its `fix:` line names the cases: `your own earlier
+  watcher or command: keep it or let it end; another agent's (your user says so): join with
+  --role R; unsure: ask your user` (on another server: `pass --role R to join from here as another
+  member`). Before, it said "else pass --role R" while the guide and skill said never to. The
+  line's start is unchanged. Checked by unit tests on Linux (measured); macOS and Windows not
+  run.
+
 ## 0.2.2 — 2026-10-05
 
 Fixes from a simulated working day on one Linux machine: a leader in Claude Code and three local

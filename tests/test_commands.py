@@ -73,20 +73,24 @@ class IdentityTest(ChannelCase):
         # only step 1 runs at join: a forgotten --role makes another member, and says so
         self.lead()
         out = self.ok("join", "game", "--server", "fake-dest", "--role", "b")
-        self.assertNotIn("note: you also hold", out)
+        self.assertNotIn("also holds", out)
+        # named by its member name and flags, never called the reader's: it may be another
+        # session's in this folder (the leader's, say)
+        also = ("note: this project also holds game on this machine as %s: another session's, "
+                "or yours with other flags")
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertEqual(out.splitlines()[0], "note: you also hold game here as --role b")
+        self.assertEqual(out.splitlines()[0], also % "mac-web-b (--project web --role b)")
         self.assertEqual(out.splitlines()[1], "vcharon: join game  as mac-web on fake-dest")
         out = self.ok("join", "game", "--server", "fake-dest", "--role", "c")
         self.assertEqual(out.splitlines()[:2], [
-            "note: you also hold game here as --role b",
-            "note: you also hold game here as the member without a role"])
+            also % "mac-web-b (--project web --role b)",
+            also % "mac-web (--project web, no --role)"])
         # a rejoin of a membership found by its record: nothing to note
         out = self.ok("join", "game", "--server", "fake-dest", "--role", "c")
-        self.assertNotIn("note: you also hold", out)
+        self.assertNotIn("also holds", out)
         # another project's memberships aren't this one's
         out = self.ok("join", "game", "--server", "fake-dest", "--project", "api")
-        self.assertNotIn("note: you also hold", out)
+        self.assertNotIn("also holds", out)
 
     def test_a_box_renamed_after_the_join(self):
         # the record keeps the name it joined with: a join after the box changed takes the

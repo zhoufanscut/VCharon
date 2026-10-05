@@ -37,6 +37,11 @@ Each rule has its reason after the colon.
   other members get nothing from your folder until it is gone.
 - **The leader assigns the steps by name.** To take an unassigned step, post `take: <step>` to
   the leader and wait for its answer: two members on one step waste both.
+- **Work for others goes through the leader.** If you need something from another member, find
+  work that should be done, or want to change the plan, post `request: <what>` to the leader,
+  saying why and who you think fits; the leader dispatches it as a step (or says no). Never
+  assign work to another member yourself. A question to a member about its own step is fine to
+  ask directly.
 - **`JOIN`, `REJOIN` and `LEAVE` come from vcharon**; never post them yourself: the leader
   counts members by them.
 - **`DONE` goes to the leader**, in your `RESULTS.md`, and you keep watching: `DONE` means done

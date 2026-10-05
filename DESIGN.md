@@ -1048,9 +1048,12 @@ In order:
 
 `join` and `create` run step 1 only, before they build a new name: a `join C` after a `setup
 --box` rejoins under the name it had, not a second membership under the new box. Steps 2 and 3
-would block a legitimate role-less join, so instead `join` and `create` print `note: you also
-hold C here as --role R` (or `as the member without a role`) when the project has other
-memberships of C. Two records for one (C, project, role) are refused: ask the user.
+would block a legitimate role-less join, so instead `join` and `create` print `note: this
+project also holds C on this machine as <name> (--project P --role R): another session's, or
+yours with other flags` (`--project P, no --role` for one without a role) for each other
+membership of C the project has. It names the membership and never calls it the reader's: two
+agents can work in one folder (a leader and a member, say), and the other membership may be the
+other agent's. Two records for one (C, project, role) are refused: ask the user.
 
 ### Create, join, leave, close
 
@@ -1069,12 +1072,21 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   claim, so a refused join leaves nothing behind. (2) This machine's watcher lock for the name,
   taken without waiting: held by another means a live session already is that member: refused,
   `a live session holds <name> in C` (its watcher, or a `create`, `join`, `leave` or `close` of
-  it still running). Taken, the join holds it until it returns, through its sync, on every way
-  out; a join that fails with no record of the name left deletes the lock file it made, so it
-  leaves nothing behind here either (POSIX deletes it, then releases; Windows, which can't
-  delete an open file, releases first; a failed delete is ignored). Deleting first doesn't keep
-  everyone out on POSIX: a process that opened the file just before the delete gets the lock
-  of the deleted file once it is released, while a later one makes a new file at the path.
+  it still running). When this machine has a record of the name, the line goes on to say whose
+  membership it is, `(this machine's record: the leader's membership, created here with --project
+  P, no --role)` or `(…: a member, joined here with --project P --role R)`, and the fix names the
+  cases without choosing: `your own earlier watcher or command: keep it or let it end; another
+  agent's (your user says so): join with --role R; unsure: ask your user`. The record can't
+  choose: a leader re-running `join` after a `/clear` gets `the leader's membership` for its own
+  watcher. A record of the name on another server says `(this machine's record: a membership on
+  another server)`, with `pass --role R to join from here as another member`. Why: an agent in the
+  leader's folder builds the leader's name, so the holder may not be the reader's. Taken, the join
+  holds it until it returns, through its sync, on every way out; a join that fails with no record
+  of the name left deletes the lock file it made, so it leaves nothing behind here either (POSIX
+  deletes it, then releases; Windows, which can't delete an open file, releases first; a failed
+  delete is ignored). Deleting first doesn't keep everyone out on POSIX: a process that opened the
+  file just before the delete gets the lock of the deleted file once it is released, while a later
+  one makes a new file at the path.
   A record of this name for another server (the same channel name on a second server) is
   refused too, `you are in C on another server`. So is a record of this name whose folder
   isn't in the listed channel, or whose leader isn't the channel's: it is of an earlier
@@ -1094,18 +1106,20 @@ memberships of C. Two records for one (C, project, role) are refused: ask the us
   `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the
   entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two files
   only the first in path order is printed, the copy `read` and the watcher keep.
-- **The next step.** A `join` or `create` that succeeded prints, just before its `OK` line
-  (which stays the last), `  next: start your watcher now (vcharon guide watch): vcharon watch
-  C --until-change <flags>`; `create` adds `  then post the plan (vcharon guide post): vcharon
-  post C --steps --to @all --title '…' <flags>, with the body on stdin`. The flags are the
-  record's (`--project`, and `--role` when it has one), so the commands work from any folder;
-  spelled as this machine runs vcharon. The watcher line is a command to run as printed, and it
-  names the topic rather than a way to run it: a background command is right only where the
-  agent's CLI reports its exit, and the topic says what to do otherwise. The plan line is a
-  template (a placeholder title, and the trailing words make it refuse to parse), since a plan
-  posted as printed would reach everyone and can't be taken back. Why: an agent that skips the
-  guide still sees what to run next. A join whose sync failed prints neither: its sync is the
-  next step.
+- **The next step.** A `join` or `create` that succeeded prints, before its `OK` line (which stays
+  the last), `  next: start your watcher now (vcharon guide watch): vcharon watch C --until-change
+  <flags>`; `create` adds `  then post the plan (vcharon guide post): vcharon post C --steps --to
+  @all --title '…' <flags>, with the body on stdin`. The flags are the record's (`--project`, and
+  `--role` when it has one), so the commands work from any folder; spelled as this machine runs
+  vcharon. A first `join` (not a rejoin) then prints `  note: if your user only asked you to join,
+  ask them whether to work on the steps the leader assigns you`: a bare "join" is no task, and the
+  steps are work only the user can ask for (`create`, and a rejoin, the leader's in a new session
+  too, print no such line). The watcher line is a command to run as printed, and it names the
+  topic rather than a way to run it: a background command is right only where the agent's CLI
+  reports its exit, and the topic says what to do otherwise. The plan line is a template (a
+  placeholder title, and the trailing words make it refuse to parse), since a plan posted as
+  printed would reach everyone and can't be taken back. Why: an agent that skips the guide still
+  sees what to run next. A join whose sync failed prints neither: its sync is the next step.
 - **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
   your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
   skill copy that `vcharon skill install` wrote (its marker line) holds another text than this

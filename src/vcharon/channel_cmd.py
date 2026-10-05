@@ -58,6 +58,14 @@ NEXT_WATCH = ("  next: start your watcher now (vcharon guide watch): vcharon wat
               "--until-change %s")
 NEXT_PLAN = ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
              "--title '…' %s, with the body on stdin")
+# the fix of "a live session holds": the holder is the reader's own, or another agent's in the
+# same folder, and only the reader (or its user) can tell which
+LIVE_SESSION_FIX = ("your own earlier watcher or command: keep it or let it end; another agent's "
+                    "(your user says so): join with --role R; unsure: ask your user")
+# what join prints after its next: line, for a member: a bare "join" is no task, and the
+# steps the leader assigns are work only the user can ask for (vcharon guide rules)
+ASK_USER = ("  note: if your user only asked you to join, ask them whether to work on the steps "
+            "the leader assigns you")
 # A channel section's up never creates: a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
 # make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint) and a
@@ -244,6 +252,12 @@ def records(channel=None):
 def flags(project, role):
     """--project P [--role R]."""
     return "--project %s%s" % (project, " --role %s" % role if role else "")
+
+
+def record_flags(record):
+    """A record's flags, for a note or refusal that names a membership: --project P --role R,
+    or --project P, no --role (a reader told only "--project P" may not see that it has none)."""
+    return flags(record["project"], record["role"]) + ("" if record["role"] else ", no --role")
 
 
 def _is(record, project, role):
@@ -662,12 +676,14 @@ def main(args, run):
             if args.project is None:
                 check_not_home()
             name = member_parts(cfg, project, args.role)[0]
-            # a role forgotten, or one too many: said, never refused (only its step 1)
+            # a role forgotten, or one too many: said, never refused (only its step 1). The
+            # other membership may be another agent's session in this folder (the leader's,
+            # say), so the note names it, never calls it the reader's
             for other in records(args.channel):
                 if other["project"] == project and (other["role"] or None) != args.role:
-                    say("note: you also hold %s here as %s" % (
-                        args.channel, "--role %s" % other["role"] if other["role"]
-                        else "the member without a role"))
+                    say("note: this project also holds %s on this machine as %s (%s): another "
+                        "session's, or yours with other flags"
+                        % (args.channel, other["name"], record_flags(other)))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}
         args.project_note = (project_note(args.command, args.channel, project, args.role,
@@ -854,9 +870,10 @@ def _create_held(args, cfg, name, log, say, take):
         try:
             if server.ssh is None:
                 take(watcher_snapshot(None, section, name, os.path.join(server.root, channel)),
-                     lambda: _live_session(name, channel))
+                     lambda: _live_session(name, channel, record, server))
             else:
-                take(watcher_snapshot(None, section, name), lambda: _live_session(name, channel))
+                take(watcher_snapshot(None, section, name),
+                     lambda: _live_session(name, channel, record, server))
             own, _remote_text, _ = _write_member(cfg, server, channel, name, name, section,
                                                 made, got, args.ident, args.fields, info,
                                                 create=True)
@@ -1027,7 +1044,7 @@ def _join_held(args, cfg, name, log, say, take):
                                         os.path.join(server.root, channel))
         else:
             snapshot = watcher_snapshot(None, section, name)
-        take(snapshot, lambda: _live_session(name, channel))
+        take(snapshot, lambda: _live_session(name, channel, record, server))
         _another_server(record, server, channel)
         stale = _stale(found, name, record) if record is not None else None
         if stale is not None:
@@ -1112,16 +1129,32 @@ def _join_held(args, cfg, name, log, say, take):
     _print_entries(tree, name, leader, channel, say)
     if code == 0:
         _say_next(channel, name, say)
+        if not rejoin:
+            # a first join only: a rejoin (a new session, the leader's too) had its answer
+            say(ASK_USER)
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
 
 
-def _live_session(name, channel):
+def _live_session(name, channel, record, server):
     """The refusal of a create or join while the member's watcher lock is held: its watcher, or
-    another create, join, leave or close of it, runs on this machine."""
-    return channels.refused("a live session holds %s in %s" % (name, channel),
-                            "if that watcher or command is yours, keep using it or let it end; "
-                            "else pass --role R to be another member")
+    another create, join, leave or close of it, runs on this machine. record: this machine's
+    record of name, or None. An agent in the leader's folder builds the leader's name, so the
+    holder may not be the reader's: the line says whose membership the name is by the record,
+    and the fix tells the cases apart (a leader re-running join after a /clear gets "the
+    leader's membership" for its own watcher, so the record alone never says "another")."""
+    text = "a live session holds %s in %s" % (name, channel)
+    if record is not None and (record["machine"] != server.machine
+                               or record["ssh"] != server.ssh):
+        # a membership of this name on another server: never one this join can take
+        return channels.refused(text + " (this machine's record: a membership on another "
+                                "server)", "pass --role R to join from here as another member")
+    if record is not None:
+        leads = record["leader"] == name
+        text += " (this machine's record: %s, %s here with %s)" % (
+            "the leader's membership" if leads else "a member",
+            "created" if leads else "joined", record_flags(record))
+    return channels.refused(text, LIVE_SESSION_FIX)
 
 
 def _release_quietly(server, channel, name, log):

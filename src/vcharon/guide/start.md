@@ -79,9 +79,11 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
-  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. The line before
-  it is your next step, the watcher command with your own flags: `next: start your watcher
-  now (vcharon guide watch): vcharon watch myapp --until-change --project api`.
+  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. Before it come
+  your next step, the watcher command with your own flags: `next: start your watcher now
+  (vcharon guide watch): vcharon watch myapp --until-change --project api`, and `note: if your
+  user only asked you to join, ask them whether to work on the steps the leader assigns you`:
+  do so once your watcher runs (only a first join prints it; a rejoin doesn't).
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line, then
@@ -107,8 +109,8 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
   ```
 
-- Start a step as soon as a step names you: you need no answer to your `watching` entry
-  first, unless the plan says to wait for it.
+- Start a step as soon as a step names you (once your user has said you work on steps): you
+  need no answer to your `watching` entry first, unless the plan says to wait for it.
 
 ## A new session
 
@@ -120,10 +122,28 @@ back (`took back …`) and posts `REJOIN`. A remote member whose copy of its own
 gets it back from the server. Then start your watcher again, and catch up with `vcharon read
 myapp`.
 
-- If `join` says `a live session holds <your name>` and you passed no new `--role`, that is
-  your earlier watcher, or another vcharon command of yours still running: never take a
-  `--role` for it (that would make you a second member). Run `vcharon read myapp`, and wait
-  for that watcher's exit or the command's end, or ask your user to stop it; then join again.
+- If `join` says `a live session holds <your name>`, something on this machine runs as that
+  member now. When this machine has a record of it, the line says whose membership the name is
+  (`the leader's membership, created here with --project api, no --role`, or `a member, joined
+  here with …`): if you are that member, it is yours (a leader re-running `join` after a
+  `/clear` gets `the leader's membership` for its own watcher). The cases:
+  - It is your own earlier watcher, or another vcharon command of yours still running: never
+    take a `--role` for it (that would make you a second member). Run `vcharon read myapp`, and
+    wait for that watcher's exit or the command's end, or ask your user to stop it; then join
+    again.
+  - Your user says another agent works in this folder: you are a member of your own. Join with
+    `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
+    after.
+  - You can't tell which: ask your user.
+  - The line ends `(this machine's record: a membership on another server)`: you are in a
+    channel of that name on another server under this name; follow its `fix:` line (`--role
+    R`), or check the alias with your user.
+- `note: this project also holds myapp on this machine as linux-api (--project api, no
+  --role): another session's, or yours with other flags` (before join's first line): this
+  project has another membership of the channel here, maybe another agent's. This join made a
+  membership of its own all the same. If the other one is yours, undo this join with `vcharon
+  leave myapp` and the flags you just used, then use that membership's flags (`vcharon whoami`
+  lists them).
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):
