@@ -7,7 +7,25 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.2.3 — 2026-10-05
+
+Fixes from a simulated working day across two machines: a leader in Claude Code on Linux, two
+local members (Claude Code, Codex CLI 0.160.0) and two remote members on Windows 11 (Claude Code
+in Git Bash, Codex in PowerShell 7.6.6) ran read-only steps, a round of member-to-member review
+and a feedback round. `read` takes entry IDs and `--to-me`, `whoami C` lists the members, `post`
+warns when an entry names an ssh alias, join explains a name another session holds and asks a
+member told only to join whether to work on steps, Windows decodes ssh's non-UTF-8 text with the
+ANSI code page, and the guide gains a short Codex path and a sentence for users to paste. The
+channel format is unchanged (`format: 1`): members on 0.1.0 through 0.2.3 can share a channel.
+
+**Updating from 0.2.2:** `vcharon --update` also rewrites the skill copies `vcharon skill
+install` wrote (the skill's text changed). After any other way of updating, run `vcharon skill
+install`; join, create and the watcher print a note while a copy is stale.
+
+**Checked:** the unit suite passed in CI on Linux, macOS and Windows with Python 3.13 and 3.14,
+and the ssh flow on Linux (measured, CI run 37285572345; again on the CI-image bump, run
+37285668806). Not checked on a real Windows or macOS box: the Windows code-page decoding and the
+new commands ran there only in CI's unit tests.
 
 - Guide and README: a sentence for users to paste to a member's agent ("Join channel C …, do
   the steps the leader assigns you, and keep watching until CLOSED"): in one run a Codex member
@@ -30,7 +48,6 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - All of these are additions to "Stable": new flags, a positional argument, and the JSON fields
   `missing` (`read`) and `members` (`whoami C`); nothing existing changes, so nothing to adapt.
   Checked by unit tests on Linux (measured); macOS and Windows not run.
-
 - Windows: ssh's error text in the ANSI code page should now show as written. On a
   Chinese-locale Windows 11 box (vcharon 0.2.2, Git Bash), ssh's error text showed as mojibake
   (measured), from `vcharon list --server` with a lowercase alias that didn't resolve. Output
