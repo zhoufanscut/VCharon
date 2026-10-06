@@ -217,12 +217,12 @@ CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don
                "again, then run: vcharon leave %s %s")
 # A --once check needs a saved snapshot: without one its round would be a baseline, which takes
 # what is there as seen and prints none of it, so an entry to the member would be lost for good.
-# Join and create save one (first_look), so a missing one means a join that couldn't, one by an
-# older vcharon, or a snapshot removed: something may already have been missed, and the fix is
-# ONCE_BAD_FIX's, read --to-me first.
+# Join and create save one (first_look), so a missing one means a join or create by an older
+# vcharon or one stopped early, or a snapshot that couldn't be saved or was removed: something
+# may already have been missed, and the fix is ONCE_BAD_FIX's, read --to-me first.
 ONCE_NO_SNAPSHOT = ("--once needs your watcher's saved snapshot: there is none for %s on this "
-                    "machine (a join by an older vcharon or one stopped early, or a snapshot "
-                    "that couldn't be saved or was removed)")
+                    "machine (a join or create by an older vcharon or one stopped early, or a "
+                    "snapshot that couldn't be saved or was removed)")
 # A snapshot that is there but can't be used: a start would take a baseline in its place, and
 # what came since the last look would never be printed, so the check refuses and points at it
 ONCE_BAD_SNAPSHOT = "--once can't use your watcher's saved snapshot %s: %s"

@@ -1061,6 +1061,25 @@ class FirstLookTest(ChannelCase):
         lines = self.watch_local("linux", "linux-x")[1]
         self.assertEqual(self.told(lines), ["to you: laptop-ui#3 — late  (laptop-ui/STEPS.md)"])
 
+    def test_a_misplaced_entry_after_the_look_is_warned_once(self):
+        # the marks filter comes before the not-its-folder warning: the watcher prints that one
+        self.lead(where=("--local",))
+        real = watch.first_look
+        own = os.path.join(self.root, "game", "laptop-ui")
+
+        def first_look(*a, **kw):
+            got = real(*a, **kw)
+            entries.post(os.path.join(own, "STEPS.md"), own, "zed", "late", ["@linux-x"])
+            return got
+
+        with mock.patch.object(watch, "first_look", first_look):
+            out = self.join_local()
+        self.assertIn("  laptop-ui/CHANNEL.md", out.splitlines())
+        self.assertNotIn("not its folder's", out)
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertEqual([l for l in lines if "not its folder's" in l],
+                         ["WARN entry zed#1 in laptop-ui/: not its folder's"])
+
     def test_a_rejoin_keeps_its_snapshot(self):
         self.lead(where=("--local",))
         self.join_local()
@@ -1128,6 +1147,19 @@ class FirstLookTest(ChannelCase):
         # the first start is a baseline
         lines = self.watch_local("linux", "linux-x")[1]
         self.assertNotIn(", since ", lines[0])
+
+    def test_a_record_that_can_t_be_read_in_the_look_is_a_note(self):
+        broken = mock.patch.object(channel_cmd, "channel_limits",
+                                   side_effect=VCharonError("config", "the limits broke"))
+        self.lead(where=("--local",))
+        self.use_box("linux")
+        with broken:
+            code, out, _err = self.channel("join", "game", "--local", "--project", "x")
+        self.assertEqual(code, 0)
+        self.assertIn(platform.runnable(channel_cmd.SNAPSHOT_NOT_SAVED % (
+            "the limits broke", "game", "--project x")), out.splitlines())
+        self.assertIn("OK  in game as linux-x", out)
+        self.assertFalse(os.path.exists(self.snapshot("linux", "linux-x")))
 
     def test_an_interrupted_create_saves_nothing(self):
         self.use_box("laptop")

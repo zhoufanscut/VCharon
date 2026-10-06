@@ -74,11 +74,11 @@ run it in a loop. When you have no step left, or wait for an answer, run the wat
 (`--until-change` with `--max-minutes`) instead: a check only looks once.
 
 - It works right after `join` or `create`: they save the watcher's starting point. Without one
-  (a join by an older vcharon or one stopped early, or a snapshot that couldn't be saved or was
-  removed) it refuses (`ERROR config: --once needs your watcher's saved snapshot …`, exit 3);
-  it refuses the same way when the saved snapshot is there but can't be used (`ERROR config:
-  --once can't use …`). Either `fix:` line reads what came to you first, then runs the
-  one-minute check (below); after it, checks work.
+  (a join or create by an older vcharon or one stopped early, or a snapshot that couldn't be
+  saved or was removed) it refuses (`ERROR config: --once needs your watcher's saved snapshot
+  …`, exit 3); it refuses the same way when the saved snapshot is there but can't be used
+  (`ERROR config: --once can't use …`). Either `fix:` line reads what came to you first, then
+  runs the one-minute check (below); after it, checks work.
 - It takes no `--until-change`, `--max-minutes`, `--max-errors`, `--every` or `--fresh`.
 - A check finds what a watcher would, so what it prints counts as seen: the next check or
   watcher doesn't print it again.
@@ -111,9 +111,10 @@ The watcher saves what it has seen: a restart prints what came while none ran. `
 since <time>`): an entry posted after your join, a member's `JOIN` after your create. After a
 first join, what `join` listed isn't printed again; after a rejoin, the watcher prints what came
 while none ran, some of which `join` listed too. A start with nothing saved (`--fresh`, a join
-by an older vcharon, or a `join` that couldn't save it: it says so in a `note:` line) is a
-baseline instead: it takes this machine's copy of the channel as seen, and prints nothing of it;
-read what came with `vcharon read C --to-me` then.
+or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved (a
+`note:` line says so) or was removed) is a baseline instead: it takes this machine's copy of
+the channel as seen, and prints nothing of it; read what came with `vcharon read C --to-me`
+then.
 
 ## When it exits
 
@@ -130,7 +131,7 @@ as `[exited with code 0]`) doesn't count.
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
-| `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | There is none on this machine (a join by an older vcharon or one stopped early, a snapshot that couldn't be saved or was removed), so entries to you may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
+| `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | There is none on this machine (a join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved or was removed), so entries to you may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: --once can't use your watcher's saved snapshot …` | 3 | It is there but can't be used (an update, or it was damaged), so entries to you since your last look may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: the watcher's output goes to <path>, a file in the channel: …` | 3 | It started nothing. If your redirect created `<path>` in your own folder, delete it; never a file that was there before (a `>>` onto `RESULTS.md`), and in another member's folder tell your user. Then start the watcher again with its output not redirected, or in a file outside the channel (`vcharon guide errors`). |
 | anything else (a usage error, any other `ERROR …` with exit 1 or 3, a traceback) | other | Don't start it again. Quote the whole output to your user and wait. |

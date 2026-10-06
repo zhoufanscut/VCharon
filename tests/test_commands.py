@@ -429,6 +429,13 @@ class WhoamiLeftRemoteTest(ChannelCase):
                                              "max_entry_kb": 64}):
             doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
         self.assertEqual({m["name"]: m["left"] for m in doc["members"]}, want)
+        # limits that can't be read leave a local member's other folders unknown; a remote
+        # member never reads them, so every folder still has true or false
+        with mock.patch.object(channel_cmd, "channel_limits",
+                               side_effect=VCharonError("channel", "no limits")):
+            code, out, err = self.run_cli("whoami", "game", "--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual({m["name"]: m["left"] for m in json.loads(out)["members"]}, want)
 
 
 class SetupTest(ChannelCase):

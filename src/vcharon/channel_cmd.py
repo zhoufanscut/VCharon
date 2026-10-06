@@ -925,7 +925,7 @@ def _create_held(args, cfg, name, log, say, take):
         code = _run_section(args, section, full=True)
     if code != 130:
         # the leader's first watcher start then prints every member's JOIN, one the sync's
-        # down brought already too; a Ctrl-C stops everything at once, as in vcharon sync
+        # down brought already too; a Ctrl-C skips the save: the user stopped the command
         _first_look(channel, name, section, say, log, created=True)
     if code != 0:
         say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "

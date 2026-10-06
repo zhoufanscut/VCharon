@@ -3036,8 +3036,8 @@ class CommandTest(WatchCase):
         self.assertEqual((code, out), (3, ""))
         self.assertEqual(err.splitlines(), [
             "ERROR config: --once needs your watcher's saved snapshot: there is none for debian "
-            "on this machine (a join by an older vcharon or one stopped early, or a snapshot "
-            "that couldn't be saved or was removed)",
+            "on this machine (a join or create by an older vcharon or one stopped early, or a "
+            "snapshot that couldn't be saved or was removed)",
             "  fix: " + platform.runnable("run vcharon read mb --to-me --project q (what came to "
                                           "you may not all have been printed), then vcharon "
                                           "watch mb --until-change --max-minutes 1 --project q "
@@ -3126,8 +3126,9 @@ class OnceTest(WatchCase):
         e = cm.exception
         self.assertEqual((e.code, e.message, e.hint), (
             "config", "--once needs your watcher's saved snapshot: there is none for debian on "
-            "this machine (a join by an older vcharon or one stopped early, or a snapshot that "
-            "couldn't be saved or was removed)", "run vcharon read mb --to-me --project web "
+            "this machine (a join or create by an older vcharon or one stopped early, or a "
+            "snapshot that couldn't be saved or was removed)",
+            "run vcharon read mb --to-me --project web "
             "(what came to you may not all have been printed), then vcharon watch mb "
             "--until-change --max-minutes 1 --project web (the one-minute check)"))
         self.assertFalse(os.path.exists(self.state()))
@@ -3424,10 +3425,15 @@ class FirstLookTest(WatchCase):
     def test_the_start_goes_on_from_it(self):
         self.local_record()
         self.post("mac", 2, "before the look")
+        before = watch.stamp(time.time())
         marks = watch.first_look(channel_cmd.read_record("mb", "debian"), None)
+        after = watch.stamp(time.time())
         self.assertTrue(marks.has("mac", 2))
         self.assertFalse(marks.has("mac", 3))
-        since = "since %s" % self.saved_at(self.state())
+        # the time of the look itself: the watching line's since says when what follows began
+        saved = self.saved_at(self.state())
+        self.assertTrue(before <= saved <= after, (before, saved, after))
+        since = "since %s" % saved
         # between the look and the first start: printed once, by that start's first round
         self.post("mac", 3, "after the look")
         code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=never,

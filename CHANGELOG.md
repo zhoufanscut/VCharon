@@ -14,18 +14,19 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   the first round at once) and prints what came in between: an entry posted after the join,
   and for a leader each member's `JOIN`; before, that start took it all as seen and nothing
   ever printed it (only `read --to-me` showed it), for a remote member also after any sync in
-  between. `join` lists only what the snapshot takes as seen, so nothing is printed twice. A
-  rejoin keeps a usable snapshot, as before (its watcher prints what came while none ran),
-  and saves one when there is none it can use. `watch --once` works right after `join` or
-  `create`; its refusal with no snapshot now reads `ERROR config: --once needs your watcher's
-  saved snapshot: there is none for <name> on this machine (a join by an older vcharon or one
-  stopped early, or a snapshot that couldn't be saved or was removed)`, with `vcharon read C
-  --to-me` then the one-minute check as its fix. A save that fails doesn't fail the command:
-  `  note: your watcher's snapshot couldn't be saved (<why>): its first start takes what is
-  there then as seen; once it runs, read what came: vcharon read C --to-me <flags>`. To adapt:
-  a watcher (`--until-change` too) started after a member joined now prints the `JOIN` (and
-  `1 other entry` for its `MEMBER.md`) and exits `EXIT change` at once; a script that takes
-  join's lines by position may see the note. The snapshot's format, the watcher's lines and
+  between. After a first join, `join` lists only what the snapshot takes as seen, so nothing
+  is printed twice. A rejoin keeps a usable snapshot, as before (its watcher prints what came
+  while none ran, some of which `join` lists too), and saves one when there is none it can
+  use. `watch --once` works right after `join` or `create`; its refusal with no snapshot now
+  reads `ERROR config: --once needs your watcher's saved snapshot: there is none for <name> on
+  this machine (a join or create by an older vcharon or one stopped early, or a snapshot that
+  couldn't be saved or was removed)`, with `vcharon read C --to-me` then the one-minute check
+  as its fix. A save that fails doesn't fail the command: `  note: your watcher's snapshot
+  couldn't be saved (<why>): its first start takes what is there then as seen; once it runs,
+  read what came: vcharon read C --to-me <flags>`. To adapt: the leader's watcher
+  (`--until-change` too), started after a member joined, now prints the `JOIN` (and `1 other
+  entry` for its `MEMBER.md`) and exits `EXIT change` at once; a script that takes join's
+  lines by position may see the note. The snapshot's format, the watcher's lines and
   exit codes, and `--fresh` are unchanged. Checked on Linux (measured): unit tests (local and
   remote members over the fake ssh, a by-hand sync and a failed join sync before the first
   start, a join between a remote create's up and down) and a hand run of the README's

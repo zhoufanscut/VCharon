@@ -80,6 +80,6 @@ gives each member `watched` (the time, or null) and `watch_every` (seconds, or n
 `vcharon read myapp --json`, in `member_info`. Both are null for `-` and `?` alike: only
 `member_info` has the member's `vcharon` version, which tells them apart: `?` is a member on
 0.2.3 or older (or with no version), when your own vcharon is newer. Each member also has
-`left` (true or false) in both; in `whoami`'s it is null (unknown) for another member's folder
-over the channel's limits, whose entries, as `read`, it doesn't read, and for every other
-member when your join record's limits can't be read.
+`left` (true or false) in both; for a local member, in `whoami`'s it is null (unknown) for
+another member's folder over the channel's limits, whose entries, as `read`, it doesn't read,
+and for every other member when your join record's limits can't be read.

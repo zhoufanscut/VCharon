@@ -1138,11 +1138,12 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   saved, only those it takes as seen, so one that lands after the look is the watcher's to
   print, and each is printed once; with a kept snapshot (or none), all of them, and the watcher
   may print again what came while it was away. An entry edited between the look and the
-  listing shows its new text here, and the first round warns that it was edited. Each
-  line is escaped as `read` escapes it; an entry whose ID names another member is one line,
-  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the
-  entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two files
-  only the first in path order is printed, the copy `read` and the watcher keep.
+  listing shows its new text here; if its heading changed, the first round warns that it was
+  edited (the edit check hashes only the heading). Each line is escaped as `read` escapes it;
+  an entry whose ID names another member is one line,
+  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the entries,
+  and one with no ID is left out, as the watcher leaves it. Of an ID in two files only the first
+  in path order is printed, the copy `read` and the watcher keep.
 - **The next step.** A `join` or `create` that succeeded prints, before its `OK` line (which stays
   the last), `  next: start your watcher now (vcharon guide watch): vcharon watch C --until-change
   <flags>`; `create` adds `  then post the plan (vcharon guide post): vcharon post C --steps --to
@@ -1522,8 +1523,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   checks are its only sign of life.
   - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every` or
     `--fresh`, and when there is no snapshot (`ERROR config: --once needs your watcher's saved
-    snapshot: there is none for <name> on this machine (a join by an older vcharon or one
-    stopped early, or a snapshot that couldn't be saved or was removed)`, with the fix below).
+    snapshot: there is none for <name> on this machine (a join or create by an older vcharon or
+    one stopped early, or a snapshot that couldn't be saved or was removed)`, with the fix
+    below).
     Why: a fresh start, or one with no snapshot, is a baseline, which takes what is there as
     seen and prints none of it, so an entry to the member would be lost for good. Join and
     create save the snapshot, so a check works right after them, and a missing one means
@@ -1569,11 +1571,12 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   time of the last round that changed it) and prints what came meanwhile; a saved error
   that holds is printed again without counting, so a blocked member isn't woken in a loop. Join
   and create save the first one ([Create, join, leave, close](#create-join-leave-close)), so the
-  first start goes on from it too. A start with no snapshot (a join by an older vcharon or one
-  stopped by Ctrl-C, a save that failed, a snapshot removed), or `--fresh`, is a baseline: the
-  tree as it is before the first round (for a remote member, this machine's copy as of its last
-  sync), none of it printed; what the first round brings prints and counts as in any round. A
-  failed save with `--until-change` ends the watch with `EXIT error`.
+  first start goes on from it too. A start with no snapshot (a join or create by an older
+  vcharon or one stopped by Ctrl-C, or a snapshot that couldn't be saved or was removed), or
+  `--fresh`, is a baseline: the tree as it is before the first round (for a remote member, this
+  machine's copy as of its last sync), none of it printed; what the first round brings prints
+  and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT
+  error`.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>), or a create, join, leave or close of this member`:
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it
