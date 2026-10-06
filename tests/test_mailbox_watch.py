@@ -4057,6 +4057,12 @@ class BootloaderKillTest(WatchCase):
             time.sleep(1.5)
         else:
             lines = [util.readline(stand_in.stdout).decode("utf-8").rstrip("\n")]
+            # the start prints its watching line before it saves the snapshot; a kill in
+            # between leaves none, and the next start would take a baseline and sleep first
+            deadline = time.monotonic() + 30
+            while not os.path.exists(self.state()):
+                self.assertLess(time.monotonic(), deadline, "the watcher never saved")
+                time.sleep(0.05)
         with open(self.pid_file, encoding="utf-8") as f:
             pid = int(f.read())
         # opened while it runs: the pid can't be another process's yet
