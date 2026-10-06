@@ -3035,11 +3035,13 @@ class CommandTest(WatchCase):
         code, out, err = self.cli("--once")
         self.assertEqual((code, out), (3, ""))
         self.assertEqual(err.splitlines(), [
-            "ERROR config: --once needs your watcher's saved snapshot: none has run for debian "
-            "on this machine",
-            "  fix: " + platform.runnable("start your watcher first: vcharon watch mb "
-                                          "--until-change --max-minutes 1 --project q (the "
-                                          "one-minute check)")])
+            "ERROR config: --once needs your watcher's saved snapshot: there is none for debian "
+            "on this machine (a join by an older vcharon or one stopped early, or a snapshot "
+            "that couldn't be saved or was removed)",
+            "  fix: " + platform.runnable("run vcharon read mb --to-me --project q (what came to "
+                                          "you may not all have been printed), then vcharon "
+                                          "watch mb --until-change --max-minutes 1 --project q "
+                                          "(the one-minute check)")])
 
     def test_a_role_is_part_of_the_sync_args(self):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows-b",
@@ -3115,16 +3117,19 @@ class OnceTest(WatchCase):
         self.assertEqual(self.once()[0], watch.EXIT_NOTHING)
 
     def test_no_snapshot_is_refused(self):
-        # a first start is a baseline: what came since the join would be lost for good
+        # a first start is a baseline: what came since the join would be lost for good, so
+        # the fix reads it first
         self.local_record(project="web")
         self.post("mac", 2, "go")
         with self.assertRaises(VCharonError) as cm:
             self.once()
         e = cm.exception
         self.assertEqual((e.code, e.message, e.hint), (
-            "config", "--once needs your watcher's saved snapshot: none has run for debian on "
-            "this machine", "start your watcher first: vcharon watch mb --until-change "
-            "--max-minutes 1 --project web (the one-minute check)"))
+            "config", "--once needs your watcher's saved snapshot: there is none for debian on "
+            "this machine (a join by an older vcharon or one stopped early, or a snapshot that "
+            "couldn't be saved or was removed)", "run vcharon read mb --to-me --project web "
+            "(what came to you may not all have been printed), then vcharon watch mb "
+            "--until-change --max-minutes 1 --project web (the one-minute check)"))
         self.assertFalse(os.path.exists(self.state()))
         self.assertFalse(os.path.exists(self.state() + ".lock"))
 
@@ -3268,7 +3273,8 @@ class OnceRemoteTest(WatchCase):
     def test_no_snapshot_is_refused(self):
         with self.assertRaises(VCharonError) as cm:
             self.job([])
-        self.assertEqual(cm.exception.hint, "start your watcher first: vcharon watch mb "
+        self.assertEqual(cm.exception.hint, "run vcharon read mb --to-me --project p (what "
+                         "came to you may not all have been printed), then vcharon watch mb "
                          "--until-change --max-minutes 1 --project p (the one-minute check)")
 
     def test_an_unusable_snapshot_is_refused(self):
@@ -3398,6 +3404,126 @@ class OnceRemoteTest(WatchCase):
         self.assertEqual(ran, [(60, True, watch.TERM_WAIT, "run 30")])
         self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_ERROR, [
             "ERROR vcharon sync of mb.windows didn't finish within 60 s", "EXIT error"]))
+
+
+class FirstLookTest(WatchCase):
+    """join's and create's snapshot for the member's watcher (first_look): the first start goes
+    on from it, and it is the snapshot a start without one would save (DESIGN, "Create, join,
+    leave, close")."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.member("mac")
+
+    def doc(self, path):
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        del doc["saved"]
+        return doc
+
+    def test_the_start_goes_on_from_it(self):
+        self.local_record()
+        self.post("mac", 2, "before the look")
+        marks = watch.first_look(channel_cmd.read_record("mb", "debian"), None)
+        self.assertTrue(marks.has("mac", 2))
+        self.assertFalse(marks.has("mac", 3))
+        since = "since %s" % self.saved_at(self.state())
+        # between the look and the first start: printed once, by that start's first round
+        self.post("mac", 3, "after the look")
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=never,
+                               rounds=1)
+        self.assertEqual((code, self.said()), (0, [
+            watching(self.tree, 2, ", " + since),
+            "to you: mac#3 — after the look  (mac/RESULTS.md)"]))
+        lines = []
+        watch.watch_dir(self.tree, "debian", 10, out=lines.append, sleep=never, rounds=1)
+        self.assertEqual([l for l in self.said(lines) if l.startswith("to ")], [])
+
+    def test_a_local_member_s_is_the_start_s(self):
+        # warnings of both kinds: a name at the top, and a folder over the limits, which the
+        # snapshot holds as it was
+        limits = {"max_mb": 1, "max_files": 10, "max_entry_kb": 1}
+        self.local_record(project="q")
+        channel_cmd.write_record(dict(channel_cmd.read_record("mb", "debian"),
+                                      **util.record_format(limits)))
+        self.post("mac", 2, "for you")
+        self.post("mac", 3, "not its folder's", name="zed")
+        write_tree(self.tree, {"stray.txt": b"x"})
+        write_tree(self.tree, {"big/f%02d.txt" % i: b"y" for i in range(11)})
+        watch.first_look(channel_cmd.read_record("mb", "debian"), None)
+        looked = self.doc(self.state())
+        self.assertEqual(len(looked["warnings"]), 2, looked["warnings"])
+        self.assertTrue(looked["loose"])
+        os.remove(self.state())
+        watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never, rounds=0,
+                        folder_limits=(1 * charter.MB, 10))
+        self.assertEqual(self.doc(self.state()), looked)
+
+    def test_a_remote_member_s_is_the_start_s(self):
+        sync_args = ClientModeTest.write_config(self)
+        self.post("debian", 2, "steps", to="@all", file="STEPS.md")
+        self.post("mac", 2, "for you", to="@windows")
+        write_tree(self.tree, {"stray.txt": b"x"})
+        # the members the last pull left out: a WARN each
+        charter.save_left_out("mb.windows", [charter.skipped_note(
+            "big", "2.0 kB in 3 files, 1.0 kB over the limit of 1.0 kB and 10 files")],
+            1000, 10)
+        state = self.state("windows", "mb.windows")
+        watch.first_look(channel_cmd.read_record("mb", "windows"), "mb.windows")
+        looked = self.doc(state)
+        self.assertEqual(len(looked["warnings"]), 1, looked["warnings"])
+        self.assertEqual(sorted(looked["seen"]), ["debian", "mac"])
+        os.remove(state)
+        watch.watch_job("mb.windows", sync_args, 30, out=[].append, sleep=never,
+                        run=lambda job, args: (0, None, None), rounds=0)
+        self.assertEqual(self.doc(state), looked)
+
+    def test_create_s_marks_nothing_in_a_member_s_folder(self):
+        self.local_record()
+        self.post("mac", 2, "JOIN")
+        write_tree(self.tree, {"stray.txt": b"x"})
+        marks = watch.first_look(channel_cmd.read_record("mb", "debian"), None, created=True)
+        self.assertEqual(marks.doc(), watch.Marks().doc())
+        looked = self.doc(self.state())
+        self.assertEqual(sorted(looked["files"]), ["stray.txt"])
+        self.assertEqual(looked["warnings"], [
+            "stray.txt at the top isn't a writer's folder: clients leave it out"])
+        # the JOIN is new to the first start; the top's file and warning are not
+        watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=never, rounds=1)
+        lines = self.said()
+        self.assertIn("to you: mac#2 — JOIN  (mac/RESULTS.md)", lines)
+        self.assertNotIn("new stray.txt", lines)
+        self.assertEqual(lines.count("WARN stray.txt at the top isn't a writer's folder: "
+                                     "clients leave it out"), 1)
+
+    def test_keep_keeps_a_usable_snapshot(self):
+        self.local_record()
+        record = channel_cmd.read_record("mb", "debian")
+        watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never, rounds=0)
+        with open(self.state(), "rb") as f:
+            before = f.read()
+        self.post("mac", 2, "while away")
+        self.assertIsNone(watch.first_look(record, None, keep=True))
+        with open(self.state(), "rb") as f:
+            self.assertEqual(f.read(), before)
+        # one it can't use is replaced
+        with open(self.state(), "w", encoding="utf-8") as f:
+            f.write("{")
+        self.assertTrue(watch.first_look(record, None, keep=True).has("mac", 2))
+        self.assertIsNotNone(watch.load_snapshot(self.state(), self.tree, "debian")[0])
+
+    def test_marked(self):
+        self.local_record()
+        self.post("mac", 2, "own")
+        self.post("mac", 3, "not its folder's", name="zed")
+        marks = watch.first_look(channel_cmd.read_record("mb", "debian"), None)
+        found = entries.parse_file(os.path.join(self.tree, "mac", "RESULTS.md"))
+        self.assertEqual([watch.marked(marks, "mac", e) for e in found], [True, True])
+        self.post("mac", 4, "later")
+        self.post("mac", 5, "later, not its folder's", name="zed")
+        found = entries.parse_file(os.path.join(self.tree, "mac", "RESULTS.md"))
+        self.assertEqual([watch.marked(marks, "mac", e) for e in found],
+                         [True, True, False, False])
 
 
 class OutputInChannelTest(WatchCase):

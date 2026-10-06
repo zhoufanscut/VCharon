@@ -9,6 +9,27 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join` and `create` save the member's watcher snapshot, so the watcher's first start goes on
+  from the join or create (`watching <dir>, <n> files in other folders, since <time>`, then
+  the first round at once) and prints what came in between: an entry posted after the join,
+  and for a leader each member's `JOIN`; before, that start took it all as seen and nothing
+  ever printed it (only `read --to-me` showed it), for a remote member also after any sync in
+  between. `join` lists only what the snapshot takes as seen, so nothing is printed twice. A
+  rejoin keeps a usable snapshot, as before (its watcher prints what came while none ran),
+  and saves one when there is none it can use. `watch --once` works right after `join` or
+  `create`; its refusal with no snapshot now reads `ERROR config: --once needs your watcher's
+  saved snapshot: there is none for <name> on this machine (a join by an older vcharon or one
+  stopped early, or a snapshot that couldn't be saved or was removed)`, with `vcharon read C
+  --to-me` then the one-minute check as its fix. A save that fails doesn't fail the command:
+  `  note: your watcher's snapshot couldn't be saved (<why>): its first start takes what is
+  there then as seen; once it runs, read what came: vcharon read C --to-me <flags>`. To adapt:
+  a watcher (`--until-change` too) started after a member joined now prints the `JOIN` (and
+  `1 other entry` for its `MEMBER.md`) and exits `EXIT change` at once; a script that takes
+  join's lines by position may see the note. The snapshot's format, the watcher's lines and
+  exit codes, and `--fresh` are unchanged. Checked on Linux (measured): unit tests (local and
+  remote members over the fake ssh, a by-hand sync and a failed join sync before the first
+  start, a join between a remote create's up and down) and a hand run of the README's
+  one-machine example. Not run: real ssh, macOS and Windows.
 - `vcharon --update` runs the new binary (its `--version` check and the skill rewrite) in a
   session of its own on macOS and Linux: past the 90 s limit, or on a Ctrl-C, its whole
   process group gets SIGTERM, then SIGKILL once the bootloader ended or 3 s passed. Before, the
@@ -36,9 +57,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   `EXIT error` (11). A remote member's check is one sync, never streamed, capped at 60 s. It
   stamps the member's last-watched time at `--no-stream`'s pace (`run 30`; a local member
   `local 10`). Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`,
-  `--every` or `--fresh`, before any watcher of the member saved a snapshot on this machine,
-  and when the saved one can't be used (its fix: `vcharon read C --to-me`, then the one-minute
-  check). To adapt: nothing; the new code and line come only with `--once`. The skill's text
+  `--every` or `--fresh`, when there is no saved snapshot on this machine, and when the saved
+  one can't be used (the fix of both: `vcharon read C --to-me`, then the one-minute check).
+  To adapt: nothing; the new code and line come only with `--once`. The skill's text
   changed (its restart rule leaves `--once` out): `vcharon --update` rewrites the copies
   `vcharon skill install` wrote; after any other way of updating, run `vcharon skill install`
   (join, create and the watcher print a note while a copy is stale). Checked on Linux

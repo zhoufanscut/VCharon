@@ -992,7 +992,7 @@ def _watch(args, run):
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
                          % args.channel, "leave out --no-stream")
-        return watch_mod.watch_dir(os.path.abspath(os.path.expanduser(record["remote"])),
+        return watch_mod.watch_dir(channel_cmd.local_root(record),
                                    record["name"], args.every or watch_mod.DIR_EVERY,
                                    folder_limits=(channel_limits["max_mb"] * charter.MB,
                                                   channel_limits["max_files"]), **limits)

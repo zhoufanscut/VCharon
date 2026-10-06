@@ -82,6 +82,12 @@ ASK_USER = ("  note: if your user only asked you to join, ask them whether to wo
 # leave command after it is printed as the box runs vcharon (platform.runnable), not as written.
 CHANNEL_GONE_PREFIX = "the channel is closed, or your folder in it is gone: "
 CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + "vcharon leave %s %s"
+# join's and create's note when the watcher's snapshot (watch.first_look) couldn't be saved:
+# the command is done all the same, but the first start then takes a baseline, which takes what
+# came since as seen without printing it; read --to-me is what shows those entries
+SNAPSHOT_NOT_SAVED = ("  note: your watcher's snapshot couldn't be saved (%s): its first start "
+                      "takes what is there then as seen; once it runs, read what came: vcharon "
+                      "read %s --to-me %s")
 
 
 # --- names ---
@@ -446,6 +452,12 @@ def write_section(cfg, section, alias, name, leader, remote_text, limits):
 
 
 # --- locks ---
+
+def local_root(record):
+    """A local member's channel folder as its watcher is given it (and keys its snapshot by):
+    one spelling for the watch and for join's and create's first_look."""
+    return os.path.abspath(os.path.expanduser(record["remote"]))
+
 
 def watcher_snapshot(record_or_none, section, name, channel_dir=None):
     """The watcher's snapshot path of this membership, from the watcher's own snapshot_path
@@ -908,13 +920,17 @@ def _create_held(args, cfg, name, log, say, take):
         % (info["format"], charter.limit_text(info["limits"]["max_mb"] * charter.MB,
                                               info["limits"]["max_files"]),
            charter.size_text(info["limits"]["max_entry_kb"] * charter.KB)))
+    code = 0
     if server.ssh is not None:
         code = _run_section(args, section, full=True)
-        if code != 0:
-            say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
-                                  "--full %s again" % (channel, channel,
-                                                       name_flags(channel, name))))
-            return code
+    if code != 130:
+        # the leader's first watcher start then prints every member's JOIN, one the sync's
+        # down brought already too; a Ctrl-C stops everything at once, as in vcharon sync
+        _first_look(channel, name, section, say, log, created=True)
+    if code != 0:
+        say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
+                              "--full %s again" % (channel, channel, name_flags(channel, name))))
+        return code
     _say_next(channel, name, say, plan=True, first=args.fields["agent"] != CHECK_SKIPPED)
     say("OK  created %s; your folder is %s" % (channel, own))
     return 0
@@ -1144,9 +1160,13 @@ def _join_held(args, cfg, name, log, say, take):
             say(platform.runnable("vcharon: the sync failed; you are in %s: run vcharon sync %s "
                                   "--full %s again" % (channel, channel,
                                                        name_flags(channel, name))))
-    # 7. the member's first watcher start is a baseline and never prints these
+    # 7. the watcher's snapshot, then the entries it takes as seen: the first start goes on
+    # from there, so what lands after the look is printed by the watcher, once. A rejoin keeps
+    # a usable snapshot (its start prints what came while no watcher ran) and lists all
+    marks = _first_look(channel, name, section, say, log,
+                        keep=rejoin and record is not None)
     tree = os.path.dirname(own)
-    _print_entries(tree, name, leader, channel, say)
+    _print_entries(tree, name, leader, channel, say, marks=marks)
     if code == 0:
         _say_next(channel, name, say,
                   first=not rejoin and args.fields["agent"] != CHECK_SKIPPED)
@@ -1155,6 +1175,23 @@ def _join_held(args, cfg, name, log, say, take):
             say(ASK_USER)
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
+
+
+def _first_look(channel, name, section, say, log, created=False, keep=False):
+    """watch.first_look for this membership, under the watcher's lock the command holds: the
+    Marks it saved, or None (a usable snapshot kept, or the note when the save failed: the
+    command is done either way, and the first start takes a baseline, as a start with no
+    snapshot does)."""
+    # here, not at the top: the watch module imports this one
+    from .mailbox import watch
+    try:
+        return watch.first_look(read_record(channel, name), section, created=created,
+                                keep=keep)
+    except (OSError, VCharonError) as e:
+        why = (e.strerror or str(e)) if isinstance(e, OSError) else e.message
+        log.warn("couldn't save the watcher's snapshot of %s in %s: %s" % (name, channel, why))
+        say(platform.runnable(SNAPSHOT_NOT_SAVED % (why, channel, name_flags(channel, name))))
+        return None
 
 
 def _live_session(name, channel, record, server):
@@ -1381,13 +1418,18 @@ def _pull_own(server, remote_text, name, own, log, say):
         % (added, kept))
 
 
-def _print_entries(tree, name, leader, channel, say):
+def _print_entries(tree, name, leader, channel, say, marks=None):
     """The entries already in the other members' folders addressed to name, or to @all from
     the leader's. An entry whose ID names another member is one line, `WARN entry <id> in
     <folder>/: not its folder's`, as the watcher's (DESIGN, "Trust and access"), printed after
     the entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two
     files only the first in path order is shown, the copy read and the watcher keep. Every
-    line goes through pathrules.printable: the text is other members'."""
+    line goes through pathrules.printable: the text is other members'. marks: the watcher's
+    snapshot's (watch.first_look), or None for all: an entry or WARN line only for what they
+    take as seen; one that landed after that look is the watcher's to print, so it is printed
+    once."""
+    # here, not at the top: the watch module imports this one
+    from .mailbox import watch
     raw = say
 
     def say(line):
@@ -1419,6 +1461,8 @@ def _print_entries(tree, name, leader, channel, say):
                         continue
                     seen.add(e.id)
                 if "@" + name not in e.to and not (entries.ALL in e.to and folder == leader):
+                    continue
+                if marks is not None and not watch.marked(marks, folder, e):
                     continue
                 if e.name != folder:
                     if e.name is not None:

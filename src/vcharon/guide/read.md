@@ -46,7 +46,7 @@ A control or format character in another member's text (a title, an ID, a body l
 escaped (`\x1b`, `\u200d`), so no member can make a line look like another. A backslash the
 member wrote stays as it is, so the two can look alike: `--json` gives the text as written.
 
-Use it to catch up (a watcher started late, a new session: `--to-me` first) and, as the leader,
+Use it to catch up (a watcher with no snapshot, a new session: `--to-me` first) and, as the leader,
 to check the channel. It only reads: for a remote member it shows this machine's copy as of the
 last sync, and runs no sync. `note:` lines at the end say what looks off, such as an answer
 stamped before its question (the members' clocks differ), or a member's folder left out for

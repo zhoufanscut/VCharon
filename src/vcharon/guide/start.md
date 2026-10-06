@@ -98,8 +98,8 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
-  start prints nothing already in this machine's copy: if you started it late, read the
-  channel first, `vcharon read myapp`.
+  start prints what came since your `join` or `create` (a leader: each member's `JOIN`), and
+  after a first join nothing `join` already listed.
 - `note: your vcharon skill at <path> is from another version: …` (from `join`, `create` or
   the watcher's start): a skill copy vcharon wrote (maybe the one you read) is from another
   version, so where they differ, this guide is right. Once your watcher runs, run the command

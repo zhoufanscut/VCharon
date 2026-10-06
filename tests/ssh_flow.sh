@@ -84,8 +84,8 @@ a create "${CHANNEL}" --server "${DEST}"
 step b: vcharon join "${CHANNEL}" --server "${DEST}"
 b join "${CHANNEL}" --server "${DEST}"
 
-# b's watcher starts before a's post: its first start is a baseline, which tells nothing
-# already there. --max-minutes bounds it if the entry never comes.
+# b's watcher starts before a's post: it goes on from the snapshot join saved, so only the post
+# is new. --max-minutes bounds it if the entry never comes.
 step b: vcharon watch "${CHANNEL}" --until-change --max-minutes 2 '&'
 b watch "${CHANNEL}" --until-change --max-minutes 2 > "${WORK}/watch.out" 2>&1 &
 WATCHER=$!

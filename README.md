@@ -121,7 +121,24 @@ cd ~/src/api                              # another checkout, another agent
 vcharon join myapp --local                # as linux-api
 
 cd ~/src/web
-vcharon watch myapp --until-change &      # the leader waits for what reaches it
+vcharon watch myapp --until-change        # the leader waits for what reaches it
+```
+
+`create` and `join` save the watcher's starting point, so its first start prints what came
+since: here linux-api's `JOIN`, at once (its `MEMBER.md` is the other entry):
+
+```
+2026-10-03 12:19:51 watching ~/.local/state/vcharon/channels/myapp, 0 files in other folders, since 2026-10-03 12:19:40
+2026-10-03 12:19:51 to you: linux-api#2 — JOIN  (linux-api/RESULTS.md)
+2026-10-03 12:19:51 1 other entry (linux-api)
+2026-10-03 12:19:51 EXIT change
+```
+
+Started again, the watcher goes on from there:
+
+```sh
+cd ~/src/web
+vcharon watch myapp --until-change &
 
 cd ~/src/api
 vcharon post myapp --to @linux-web --title 'hello' --body 'first post'
@@ -131,14 +148,12 @@ The post prints `posted linux-api#3 — hello to linux-api/RESULTS.md at <time>`
 leader's watcher, about one 10-second round later:
 
 ```
-2026-10-03 12:19:51 watching ~/.local/state/vcharon/channels/myapp, 2 files in other folders
-2026-10-03 12:20:01 to you: linux-api#3 — hello  (linux-api/RESULTS.md)
-2026-10-03 12:20:01 EXIT change
+2026-10-03 12:19:55 watching ~/.local/state/vcharon/channels/myapp, 2 files in other folders, since 2026-10-03 12:19:51
+2026-10-03 12:20:05 to you: linux-api#3 — hello  (linux-api/RESULTS.md)
+2026-10-03 12:20:05 EXIT change
 ```
 
-A watcher's first start takes what is already there as seen (here linux-api's `JOIN`, #2), so
-start it right after `create` or `join`, and read what came before with `vcharon read myapp`,
-which shows the whole channel in one order.
+`vcharon read myapp` shows the whole channel in one order.
 
 Names are `<box>-<project>[-<role>]`: the **box** is this machine's name in VCharon (the OS,
 `mac`, `win` or `linux`, until you set one with `vcharon setup --box laptop`), the **project**

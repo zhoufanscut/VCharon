@@ -418,7 +418,7 @@ class NamedSectionTest(unittest.TestCase):
         [named] = re.findall(r'"([^"]+)"', channel_cmd.FIRST_CHECK)
         self.assertEqual(named, "The one-minute check")
         self.assertIn(named, have)
-        self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_FIRST)
+        self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_BAD_FIX)
 
     def test_references_in_the_guide(self):
         # `vcharon guide <topic>`, "<heading>": the heading must be in that topic

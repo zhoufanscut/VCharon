@@ -911,6 +911,291 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.run_cli("sync", "game", "--full")[0], 0)
 
 
+class FirstLookTest(ChannelCase):
+    """join and create save the member's watcher snapshot (watch.first_look): its first start
+    prints what came after the join or create, once, and nothing join listed (DESIGN, "Create,
+    join, leave, close")."""
+
+    def post(self, box, project, to, title):
+        self.use_box(box)
+        self.ok("post", "game", "--to", to, "--title", title, "--body", "b",
+                "--project", project)
+        self.use_box("mac")
+
+    def watch_local(self, box, name, once=False):
+        """(exit code, lines without their time) of one round of name's watcher, as vcharon
+        watch starts it."""
+        self.use_box(box)
+        record = channel_cmd.read_record("game", name)
+        limits = channel_cmd.channel_limits(record)
+        lines = []
+        code = watch.watch_dir(channel_cmd.local_root(record), name, 10, out=lines.append,
+                               sleep=lambda s: None, rounds=1, once=once,
+                               folder_limits=(limits["max_mb"] * charter.MB,
+                                              limits["max_files"]))
+        self.use_box("mac")
+        return code, [l[20:] for l in lines]
+
+    def watch_remote(self, box, name, project):
+        """watch_local's for a remote member: one round, whose sync runs in this process."""
+        self.use_box(box)
+        lines = []
+
+        def run(job, sync_args):
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = cli.sync_section(job)
+            return code, None if code == 0 else "ERROR the sync exited %d" % code, None
+
+        code = watch.watch_job("game." + name, ["game", "--project", project], 30,
+                               out=lines.append, sleep=lambda s: None, run=run, rounds=1)
+        self.use_box("mac")
+        return code, [l[20:] for l in lines]
+
+    @staticmethod
+    def told(lines):
+        return [l for l in lines if l.startswith(("to you: ", "to all: "))]
+
+    def snapshot(self, box, name, local=True):
+        self.use_box(box)
+        path = channel_cmd.watcher_snapshot(None, "game." + name, name,
+                                            os.path.join(self.root, "game") if local else None)
+        self.use_box("mac")
+        return path
+
+    def join_local(self, *extra):
+        self.use_box("linux")
+        out = self.ok("join", "game", "--local", "--project", "x", *extra)
+        self.use_box("mac")
+        return out
+
+    def test_a_local_member_and_leader(self):
+        self.lead(where=("--local",))
+        out = self.join_local()
+        self.assertIn("  laptop-ui/CHANNEL.md", out.splitlines())
+        self.post("laptop", "ui", "@linux-x", "step 1")
+        code, lines = self.watch_local("linux", "linux-x")
+        self.assertEqual(code, 0)
+        self.assertIn(", since ", lines[0])
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to you: laptop-ui#3 — step 1"])
+        # told once
+        self.assertEqual(self.told(self.watch_local("linux", "linux-x")[1]), [])
+        # the leader's first start: the JOIN that came after its create
+        lines = self.watch_local("laptop", "laptop-ui")[1]
+        self.assertEqual(self.told(lines), ["to you: linux-x#2 — JOIN  (linux-x/RESULTS.md)"])
+
+    def test_once_right_after_the_join(self):
+        self.lead(where=("--local",))
+        self.join_local()
+        code, lines = self.watch_local("linux", "linux-x", once=True)
+        self.assertEqual((code, lines[-1]), (watch.EXIT_NOTHING, "EXIT nothing new"))
+        self.post("laptop", "ui", "@linux-x", "step 1")
+        code, lines = self.watch_local("linux", "linux-x", once=True)
+        self.assertEqual((code, lines[-1]), (watch.EXIT_CHANGE, "EXIT change"))
+
+    def test_a_remote_member_after_a_sync_by_hand(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.post("laptop", "ui", "@mac-web", "step 1")
+        # the by-hand sync brings it before the first start
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        lines = self.watch_remote("mac", "mac-web", "web")[1]
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to you: laptop-ui#3 — step 1"])
+        self.use_box("laptop")
+        self.assertEqual(self.run_cli("sync", "game", "--project", "ui")[0], 0)
+        lines = self.watch_remote("laptop", "laptop-ui", "ui")[1]
+        self.assertEqual(self.told(lines), ["to you: mac-web#2 — JOIN  (mac-web/RESULTS.md)"])
+
+    def test_a_join_between_create_s_up_and_down(self):
+        real = channel_cmd._run_section
+        calls = []
+
+        def sync(args, section, full):
+            calls.append(section)
+            if len(calls) > 1:
+                return real(args, section, full)
+            code = self.run_jobs(section + ".up", "--full")[0]
+            self.use_box("mac")
+            self.ok("join", "game", "--server", "fake-dest")
+            self.use_box("laptop")
+            return code or self.run_jobs(section + ".down", "--full")[0]
+
+        self.use_box("laptop")
+        with mock.patch.object(channel_cmd, "_run_section", sync):
+            self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
+        self.assertEqual(calls, ["game.laptop-ui", "game.mac-web"])
+        # create's down brought the JOIN
+        self.assertTrue(os.path.exists(os.path.join(self.joined("game.laptop-ui"), "mac-web",
+                                                    "RESULTS.md")))
+        lines = self.watch_remote("laptop", "laptop-ui", "ui")[1]
+        self.assertEqual(self.told(lines), ["to you: mac-web#2 — JOIN  (mac-web/RESULTS.md)"])
+
+    def test_a_join_whose_sync_failed(self):
+        self.lead()
+        self.post("laptop", "ui", "@mac-web", "early")
+        with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
+            self.assertEqual(self.channel("join", "game", "--server", "fake-dest")[0], 4)
+        # the fix line's sync, then the first start
+        self.assertEqual(self.run_cli("sync", "game", "--full")[0], 0)
+        lines = self.watch_remote("mac", "mac-web", "web")[1]
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to all: laptop-ui#2 — channel game created",
+                          "to you: laptop-ui#3 — early"])
+
+    def test_an_entry_after_the_look_is_the_watcher_s(self):
+        self.lead(where=("--local",))
+        real = watch.first_look
+        own = os.path.join(self.root, "game", "laptop-ui")
+
+        def first_look(*a, **kw):
+            got = real(*a, **kw)
+            entries.post(os.path.join(own, "STEPS.md"), own, "laptop-ui", "late", ["@linux-x"])
+            return got
+
+        with mock.patch.object(watch, "first_look", first_look):
+            out = self.join_local()
+        self.assertIn("  laptop-ui/CHANNEL.md", out.splitlines())
+        self.assertNotIn("late", out)
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertEqual(self.told(lines), ["to you: laptop-ui#3 — late  (laptop-ui/STEPS.md)"])
+
+    def test_a_rejoin_keeps_its_snapshot(self):
+        self.lead(where=("--local",))
+        self.join_local()
+        self.watch_local("linux", "linux-x")
+        # while no watcher runs
+        self.post("laptop", "ui", "@linux-x", "while away")
+        self.post("laptop", "ui", "@win-y", "for someone else")
+        with open(os.path.join(self.root, "game", "laptop-ui", "notes2.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write("n")
+        out = self.join_local()
+        self.assertIn("took back game/linux-x", out)
+        self.assertIn("while away", out)
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertIn(", since ", lines[0])
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to you: laptop-ui#3 — while away"])
+        self.assertIn("1 other entry (laptop-ui)", lines)
+        self.assertIn("new laptop-ui/notes2.txt", lines)
+
+    def test_a_rejoin_without_a_usable_snapshot_saves_one(self):
+        self.lead(where=("--local",))
+        self.join_local()
+        path = self.snapshot("linux", "linux-x")
+        for spoil in (os.remove, lambda p: open(p, "w", encoding="utf-8").close()):
+            spoil(path)
+            self.post("laptop", "ui", "@linux-x", "listed")
+            self.assertIn("listed", self.join_local())
+            lines = self.watch_local("linux", "linux-x")[1]
+            self.assertIn(", since ", lines[0])
+            self.assertEqual(self.told(lines), [])
+
+    def test_a_first_join_replaces_a_leftover_snapshot(self):
+        self.lead(where=("--local",))
+        # an earlier channel's of the same name: its marks would take the new one's as seen
+        path = self.snapshot("linux", "linux-x")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        watch.save_snapshot(path, os.path.join(self.root, "game"), "linux-x", {},
+                            "2026-01-01 00:00:00",
+                            marks=watch.Marks({"laptop-ui": {"low": 10, "more": []}}))
+        self.join_local()
+        self.post("laptop", "ui", "@linux-x", "step 1")
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to you: laptop-ui#3 — step 1"])
+
+    def test_a_failed_save_is_a_note(self):
+        failed = mock.patch.object(watch, "save_snapshot",
+                                   side_effect=OSError(errno.ENOSPC, "No space left on device"))
+        self.use_box("laptop")
+        with failed:
+            out = self.ok("create", "game", "--local", "--project", "ui")
+        self.assertIn(platform.runnable(channel_cmd.SNAPSHOT_NOT_SAVED % (
+            "No space left on device", "game", "--project ui")), out.splitlines())
+        self.assertFalse(os.path.exists(self.snapshot("laptop", "laptop-ui")))
+        self.use_box("linux")
+        with failed:
+            out = self.ok("join", "game", "--local", "--project", "x")
+        self.assertIn(platform.runnable(channel_cmd.SNAPSHOT_NOT_SAVED % (
+            "No space left on device", "game", "--project x")), out.splitlines())
+        # listed whole, as before
+        self.assertIn("  laptop-ui/CHANNEL.md", out.splitlines())
+        self.assertIn("OK  in game as linux-x", out)
+        self.assertFalse(os.path.exists(self.snapshot("linux", "linux-x")))
+        # the first start is a baseline
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertNotIn(", since ", lines[0])
+
+    def test_an_interrupted_create_saves_nothing(self):
+        self.use_box("laptop")
+        with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 130):
+            code, _out, _err = self.channel("create", "game", "--server", "fake-dest",
+                                            "--project", "ui")
+        self.assertEqual(code, 130)
+        path = self.snapshot("laptop", "laptop-ui", local=False)
+        self.assertTrue(os.path.exists(path + ".lock"))
+        self.assertFalse(os.path.exists(path))
+
+    def test_a_leader_s_rejoin_keeps_create_s_snapshot(self):
+        # create's snapshot holds no file in another folder: still a usable one, so a new
+        # session's rejoin before the first start keeps it and the JOIN stays new
+        self.lead(where=("--local",))
+        self.join_local()
+        path = self.snapshot("laptop", "laptop-ui")
+        with open(path, "rb") as f:
+            created = f.read()
+        self.use_box("laptop")
+        out = self.ok("join", "game", "--local", "--project", "ui")
+        self.use_box("mac")
+        self.assertIn("took back game/laptop-ui", out)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), created)
+        lines = self.watch_local("laptop", "laptop-ui")[1]
+        self.assertEqual(self.told(lines), ["to you: linux-x#2 — JOIN  (linux-x/RESULTS.md)"])
+
+    def test_a_create_whose_sync_failed_saves_its_snapshot(self):
+        # the fix line's sync --full, a member's join and the leader's sync by hand all come
+        # before the leader's first start: the JOIN is still printed
+        self.use_box("laptop")
+        with mock.patch.object(channel_cmd, "_run_section", lambda *a, **kw: 4):
+            code, out, _err = self.channel("create", "game", "--server", "fake-dest",
+                                           "--project", "ui")
+        self.assertEqual(code, 4)
+        self.assertIn("the sync failed; game is created", out)
+        self.assertTrue(os.path.exists(self.snapshot("laptop", "laptop-ui", local=False)))
+        self.use_box("laptop")
+        code, out, err = self.run_cli("sync", "game", "--full", "--project", "ui")
+        self.assertEqual(code, 0, out + err)
+        self.use_box("mac")
+        self.ok("join", "game", "--server", "fake-dest")
+        self.use_box("laptop")
+        self.assertEqual(self.run_cli("sync", "game", "--project", "ui")[0], 0)
+        lines = self.watch_remote("laptop", "laptop-ui", "ui")[1]
+        self.assertIn(", since ", lines[0])
+        self.assertEqual(self.told(lines), ["to you: mac-web#2 — JOIN  (mac-web/RESULTS.md)"])
+
+    def test_a_rejoin_with_no_record_replaces_a_leftover_snapshot(self):
+        # no record on this machine: a snapshot there is no session's of this membership
+        self.lead(where=("--local",))
+        self.join_local()
+        self.use_box("linux")
+        os.remove(channel_cmd.record_path("game", "linux-x"))
+        self.use_box("mac")
+        path = self.snapshot("linux", "linux-x")
+        watch.save_snapshot(path, os.path.join(self.root, "game"), "linux-x", {},
+                            "2026-01-01 00:00:00",
+                            marks=watch.Marks({"laptop-ui": {"low": 10, "more": []}}))
+        out = self.join_local("--rejoin")
+        self.assertIn("took back game/linux-x", out)
+        self.post("laptop", "ui", "@linux-x", "step 1")
+        lines = self.watch_local("linux", "linux-x")[1]
+        self.assertEqual([l.split("  (")[0] for l in self.told(lines)],
+                         ["to you: laptop-ui#3 — step 1"])
+
+
 def _script(argv):
     return ("import sys\n"
             "sys.path[:0] = [%r]\n"
@@ -3695,20 +3980,26 @@ class OnceProcessTest(ChannelCase):
         with open(self.stamp, "rb") as f:
             self.assertEqual(f.read(), b"run 7\n")
 
-    def test_refused_then_quiet_then_a_post_once(self):
-        code, lines, err, _took = self.once()
-        self.assertEqual(code, 3, (lines, err))
-        self.assertIn("ERROR config: --once needs your watcher's saved snapshot: none has run "
-                      "for mac-web on this machine", err)
-        # the refusal saved no baseline over the entries it would have hidden
-        self.assertFalse(os.path.exists(self.state))
-        self.baseline()
+    def test_quiet_then_refused_then_a_post_once(self):
+        # join saved the watcher's snapshot: a check works at once
         code, lines, err, _took = self.once()
         self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
         self.assertEqual([l for l in lines if l.startswith("to ")], [])
         # the check stamped at its own pace, --no-stream's default
         with open(self.stamp, "rb") as f:
             self.assertEqual(f.read(), b"run 30\n")
+        os.remove(self.state)
+        code, lines, err, _took = self.once()
+        self.assertEqual(code, 3, (lines, err))
+        self.assertIn("ERROR config: --once needs your watcher's saved snapshot: there is none "
+                      "for mac-web on this machine", err)
+        # the refusal saved no baseline over the entries it would have hidden
+        self.assertFalse(os.path.exists(self.state))
+        # the watcher's own stamp, not the check's, tells baseline() its first round ran
+        os.remove(self.stamp)
+        self.baseline()
+        code, lines, err, _took = self.once()
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
         self.use_box("laptop")
         self.ok("post", "game", "--to", "@mac-web", "--title", "for web", "--body", "b",
                 "--project", "ui")

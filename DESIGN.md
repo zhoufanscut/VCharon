@@ -1077,7 +1077,14 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   tree and section, then a `--full` sync. A failure before the sync undoes what it wrote and
   releases the claim. Right after the claim it takes this machine's watcher lock for the name,
   as `join` does (held by another: `a live session holds <name> in C`, and the claim is
-  released), and holds it to the end, through the sync.
+  released), and holds it to the end, through the sync. Then (after a remote leader's sync, a
+  failed one too, but not one stopped by Ctrl-C), under that lock, it saves the leader's
+  watcher snapshot: the files at the top
+  of the channel and the check's warnings, and nothing of any member's folder, none of whose
+  entries is marked seen. Why: every member folder is newer than the claim, so the leader's
+  first watcher start prints every member's `JOIN`, one that a remote create's own down sync
+  (it runs after the up) already brought too; a baseline there would take it as seen. Saved
+  as in `join` (below), with the same note when it fails.
 - **`join C`**, in this order: (1) `channel.list`: the channel exists with exactly one
   `CHANNEL.md`, whose folder is the leader, and its format and limits pass; checked before the
   claim, so a refused join leaves nothing behind. (2) This machine's watcher lock for the name,
@@ -1111,8 +1118,27 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   rejoin first pulls its own folder from the server when this machine lost it (below). (7) A
   `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md`, then the sync, which sends it with
   `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the member's next sync.
-  Then the entries already addressed to the member or to all are printed (the sync brought the
-  others' folders), since the watcher's first start is a baseline that prints nothing. Each
+  Then (unless the sync was stopped by Ctrl-C) the watcher's snapshot, under the lock the join
+  holds: a first join, or a rejoin with no snapshot it can use, saves the one a watcher's start
+  with none would save, from one look at the tree (the same scan, folder limits, entries taken
+  as seen and warnings: one constructor builds both, since a snapshot that differs isn't caught
+  when it loads, and the first round would print a false `WARN` and count it as a change). A
+  rejoin with a usable snapshot keeps it, so its watcher still prints what came while none ran
+  (to-you, other-entry, edit and file lines). A first join always replaces one left there: it
+  can only be of an earlier channel or membership, whose marks would take the new channel's
+  entries of the same numbers as seen; so does a rejoin with no join record here (`--rejoin`),
+  for the same reason. Why: a start with no snapshot is a baseline, so an entry
+  posted between the join (or the create) and the watcher's first start was never printed, by
+  that start, by a later round, or by `--once`; and for a remote member any sync in between (by
+  hand, or the `--full` one a failed join's line asks for) made it so too. A save that fails
+  doesn't fail the join: `  note: your watcher's snapshot couldn't be saved (<why>): its first
+  start takes what is there then as seen; once it runs, read what came: vcharon read C --to-me
+  <flags>`, and the first start is a baseline as before. Then the entries already addressed to
+  the member or to all are printed (the sync brought the others' folders): with a snapshot just
+  saved, only those it takes as seen, so one that lands after the look is the watcher's to
+  print, and each is printed once; with a kept snapshot (or none), all of them, and the watcher
+  may print again what came while it was away. An entry edited between the look and the
+  listing shows its new text here, and the first round warns that it was edited. Each
   line is escaped as `read` escapes it; an entry whose ID names another member is one line,
   `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the
   entries, and one with no ID is left out, as the watcher leaves it. Of an ID in two files
@@ -1495,10 +1521,13 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   does, at `--no-stream`'s pace (`run 30`; a local member `local 10`): a foreground member's
   checks are its only sign of life.
   - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every` or
-    `--fresh`, and when no snapshot was saved yet (`ERROR config: --once needs your watcher's
-    saved snapshot: none has run for <name> on this machine`, its fix the one-minute check's
-    command). Why: a fresh or first start is a baseline, which takes what is there as seen and
-    prints none of it, so an entry to the member would be lost for good. Refused (exit 3) too,
+    `--fresh`, and when there is no snapshot (`ERROR config: --once needs your watcher's saved
+    snapshot: there is none for <name> on this machine (a join by an older vcharon or one
+    stopped early, or a snapshot that couldn't be saved or was removed)`, with the fix below).
+    Why: a fresh start, or one with no snapshot, is a baseline, which takes what is there as
+    seen and prints none of it, so an entry to the member would be lost for good. Join and
+    create save the snapshot, so a check works right after them, and a missing one means
+    something may already have been missed: hence `read --to-me` first. Refused (exit 3) too,
     before the lock, when a snapshot is there but can't be used (not JSON, another shape, can't
     be read, another root or member: the start's `note:` reasons), as `ERROR config: --once
     can't use your watcher's saved snapshot <path>: <why>`; its fix is `vcharon read C --to-me`
@@ -1538,10 +1567,13 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   small write every 30 s), and a restart's first round that changes nothing doesn't either. A
   restart goes on from it (`watching <dir>, <n> files in other folders, since <time>`, the
   time of the last round that changed it) and prints what came meanwhile; a saved error
-  that holds is printed again without counting, so a blocked member isn't woken in a loop. The first
-  start, or `--fresh`, is a baseline: the tree as it is before the first round (for a remote member,
-  this machine's copy as of its last sync), none of it printed; what the first round brings prints
-  and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT error`.
+  that holds is printed again without counting, so a blocked member isn't woken in a loop. Join
+  and create save the first one ([Create, join, leave, close](#create-join-leave-close)), so the
+  first start goes on from it too. A start with no snapshot (a join by an older vcharon or one
+  stopped by Ctrl-C, a save that failed, a snapshot removed), or `--fresh`, is a baseline: the
+  tree as it is before the first round (for a remote member, this machine's copy as of its last
+  sync), none of it printed; what the first round brings prints and counts as in any round. A
+  failed save with `--until-change` ends the watch with `EXIT error`.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>), or a create, join, leave or close of this member`:
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it

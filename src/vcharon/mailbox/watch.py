@@ -92,8 +92,10 @@ Lines; * marks the ones that count for --until-change:
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
-restart prints what came while no watcher ran; a round that changed nothing in it (its saved
-time aside) doesn't write it again, so its saved time, the watching line's `since`, is
+restart prints what came while no watcher ran. Join and create save the first one
+(first_look), so the first start, too, prints what came since: a start that has none takes
+what is there as seen and prints none of it (a baseline). A round that changed nothing in it
+(its saved time aside) doesn't write it again, so its saved time, the watching line's `since`, is
 that of the last round that changed it. Per member folder it holds the entry numbers
 seen (every number up to "low", and those in "more": a member's #8 can arrive before its #7),
 each ID's file and heading hash for the edit check, and the hashes of the entries that have no
@@ -215,11 +217,12 @@ CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don
                "again, then run: vcharon leave %s %s")
 # A --once check needs a saved snapshot: without one its round would be a baseline, which takes
 # what is there as seen and prints none of it, so an entry to the member would be lost for good.
-# The fix is the one-minute check, which saves one (vcharon guide watch).
-ONCE_NO_SNAPSHOT = ("--once needs your watcher's saved snapshot: none has run for %s on this "
-                    "machine")
-ONCE_FIRST = ("start your watcher first: vcharon watch %s --until-change --max-minutes 1 %s "
-              "(the one-minute check)")
+# Join and create save one (first_look), so a missing one means a join that couldn't, one by an
+# older vcharon, or a snapshot removed: something may already have been missed, and the fix is
+# ONCE_BAD_FIX's, read --to-me first.
+ONCE_NO_SNAPSHOT = ("--once needs your watcher's saved snapshot: there is none for %s on this "
+                    "machine (a join by an older vcharon or one stopped early, or a snapshot "
+                    "that couldn't be saved or was removed)")
 # A snapshot that is there but can't be used: a start would take a baseline in its place, and
 # what came since the last look would never be printed, so the check refuses and points at it
 ONCE_BAD_SNAPSHOT = "--once can't use your watcher's saved snapshot %s: %s"
@@ -925,18 +928,7 @@ class _Watch:
                     self.say("WARN %s" % text)
                 return True
         try:
-            # a folder over the limits already is a baseline too: held as it is now, its
-            # entries seen, so once it's back under only what came since is told
-            first = scan(self.root, self.me, self.fold)
-            self.snap, over = self._limited(first, first)
-            # the entries there already are a baseline: told to nobody
-            self.entries(self.snap, list(self.snap), baseline=True)
-            warns = self.check(self.root, self.me) if self.check is not None else []
-            warns = list(warns) + list(over)
-        except FileNotFoundError:
-            # not there yet: the first sync makes it
-            self.snap = {}
-            warns = []
+            warns = self._baseline()
         except OSError as e:
             # the start's own error, like its warnings, is a baseline: not a change
             self.status(*self._error(e), baseline=True)
@@ -949,6 +941,40 @@ class _Watch:
             self.say("WARN %s" % text)
         self.save()
         return False
+
+    def _baseline(self):
+        """The no-snapshot start's look, which join's first_look shares, so the snapshot join
+        saves is the one a start would: the tree as it is now into snap, its entries into the
+        marks, told to nobody. Returns the WARN texts. A root that isn't there gives an empty
+        snap; any other error on it raises OSError."""
+        try:
+            # a folder over the limits already is a baseline too: held as it is now, its
+            # entries seen, so once it's back under only what came since is told
+            first = scan(self.root, self.me, self.fold)
+            self.snap, over = self._limited(first, first)
+            # the entries there already are a baseline: told to nobody
+            self.entries(self.snap, list(self.snap), baseline=True)
+            warns = self.check(self.root, self.me) if self.check is not None else []
+            return list(warns) + list(over)
+        except FileNotFoundError:
+            # not there yet: the first sync makes it
+            self.snap = {}
+            return []
+
+    def _created(self):
+        """create's look: only the files at the top of the tree into snap, no entry marked,
+        and the check's WARN texts (returned). Every member folder is newer than the claim, so
+        each one's entries, a member's JOIN that create's own down sync brought too, are new to
+        the leader's first start; the top's files and warnings are not, else that start would
+        show them as new and count the warnings as a change."""
+        try:
+            self.snap = {p: v for p, v in scan(self.root, self.me, self.fold).items()
+                         if "/" not in p}
+            warns = self.check(self.root, self.me) if self.check is not None else []
+            return list(warns)
+        except FileNotFoundError:
+            self.snap = {}
+            return []
 
     def entries(self, files, paths, baseline=False):
         """Reads the entry files among paths into the marks; returns the round's Told. A file
@@ -1260,9 +1286,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     flags = channel_cmd.name_flags(os.path.basename(root), me) if once else None
     if once:
         _need_snapshot(state, root, me, os.path.basename(root), flags)
-    w = _Watch(root, me, out, clock, state=state, check=warnings, leader=leader, gone=gone,
-               folder_limits=folder_limits,
-               closing=closed_next(os.path.basename(root), me, leader))
+    w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
@@ -1292,6 +1316,70 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         lk.release()
 
 
+def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None):
+    """A local member's _Watch, for its watcher and for first_look: one place for the choices
+    the saved snapshot depends on (the check, the folder limits), so join saves the snapshot
+    the watcher's start would. A difference there isn't caught when it loads: the first round
+    would show a false WARN or held folder, and count it as a change."""
+    return _Watch(root, me, out, clock, state=snapshot_path(root, me), check=warnings,
+                  leader=leader, gone=gone, folder_limits=folder_limits,
+                  closing=closed_next(os.path.basename(root), me, leader))
+
+
+def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic, hold=None,
+               suffix=""):
+    """A remote member's _Watch, for its watcher and for first_look (_dir_watch says why
+    one place): the fold, and the check, which is the members its last pull left out for
+    their size, as the sync saved them after its down (a WARN each while it lasts, in both
+    modes: a streaming sync prints no notes)."""
+    return _Watch(local, me, out, clock, fold=FOLDS, state=snapshot_path(local, me, job),
+                  leader=leader, timer=timer, hold=hold, suffix=suffix,
+                  check=lambda root, me: charter.left_out_notes(job),
+                  closing=closed_next(channel, me, leader))
+
+
+def _discard(line):
+    pass
+
+
+def first_look(record, section, created=False, keep=False):
+    """join's and create's snapshot for the member's watcher, saved before its first start, so
+    that start goes on from the join (or create) and prints what came in between, even after a
+    sync by hand; with a start's own baseline it would be taken as seen and never printed.
+    Called with the watcher's lock held (join and create hold it to their end). record: the
+    member's; section its remote section (unused for a local member). A join's is the look a
+    start without a snapshot takes (_Watch._baseline); create's, _created's. keep: a rejoin's,
+    whose snapshot, if usable, is kept as it is, so its start still prints what came while no
+    watcher ran. Returns the Marks saved (the entries the snapshot takes as seen), or None when
+    it kept one. Raises OSError for a scan or a save that failed, VCharonError for a record or
+    section that can't be read. It never stamps the member's last-watched time: no watcher
+    ran."""
+    me = record["name"]
+    if record["ssh"] is None:
+        root = channel_cmd.local_root(record)
+        limits = channel_cmd.channel_limits(record)
+        w = _dir_watch(root, me, _discard, time.time, record["leader"],
+                       (limits["max_mb"] * charter.MB, limits["max_files"]))
+    else:
+        local, me, leader, channel = mailbox_of(section)
+        w = _job_watch(section, local, me, leader, channel, _discard, time.time)
+    if keep and load_snapshot(w.state, w.root, w.me)[0] is not None:
+        return None
+    warns = w._created() if created else w._baseline()
+    # save_snapshot itself, not w.save(), which shows a failure as a watcher's ERROR line
+    save_snapshot(w.state, w.root, w.me, w.snap, stamp(w.clock()), warns, marks=w.marks)
+    return w.marks
+
+
+def marked(marks, folder, entry):
+    """Whether marks (first_look's) take entry, read in folder's files, as seen: by its number
+    when it is folder's own, else by the key read_entries keeps for an entry without an ID of
+    its folder."""
+    if entry.name == folder:
+        return marks.has(folder, entry.number)
+    return _hex(folder + "/\0" + entry.heading) in marks.loose
+
+
 def _need_snapshot(state, root, me, channel, flags):
     """A --once check's refusal, before the lock (so a watcher holding it doesn't hide it) and
     again under it, before a start could save a baseline over it, when the snapshot state was
@@ -1300,7 +1388,8 @@ def _need_snapshot(state, root, me, channel, flags):
     if files is not None:
         return
     if note is None:
-        raise VCharonError("config", ONCE_NO_SNAPSHOT % me, ONCE_FIRST % (channel, flags))
+        raise VCharonError("config", ONCE_NO_SNAPSHOT % me,
+                           ONCE_BAD_FIX % (channel, flags, channel, flags))
     raise VCharonError("config", ONCE_BAD_SNAPSHOT % (state, note),
                        ONCE_BAD_FIX % (channel, flags, channel, flags))
 
@@ -1815,13 +1904,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     flags = " ".join(sync_args[1:])
     if once:
         _need_snapshot(state, local, me, sync_args[0], flags)
-    closing = closed_next(channel, me, leader)
-    # the members the pull left out for their size, as the sync saved them after its down:
-    # a WARN each while it lasts, in both modes (a streaming sync prints no notes)
-    w = _Watch(local, me, out, clock, fold=FOLDS, state=state, leader=leader, timer=timer,
-               hold=STREAM_HOLD if stream else None,
-               suffix=", streaming every %d s" % every if stream else "",
-               check=lambda root, me: charter.left_out_notes(job), closing=closing)
+    w = _job_watch(job, local, me, leader, channel, out, clock, timer=timer,
+                   hold=STREAM_HOLD if stream else None,
+                   suffix=", streaming every %d s" % every if stream else "")
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED

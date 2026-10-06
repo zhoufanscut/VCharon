@@ -889,6 +889,10 @@ HINTS = {
         # the topic, not a command to run as printed
         ("  note: first time, add --max-minutes 1 to that command and see how it ends "
          "(vcharon guide watch, \"The one-minute check\")", None),
+        # the note of join and create whose watcher's snapshot couldn't be saved
+        ("  note: your watcher's snapshot couldn't be saved (%s): its first start takes what "
+         "is there then as seen; once it runs, read what came: vcharon read %s --to-me %s",
+         ("no space", "game", FLAGS)),
         # the undo in the note of a project part join or create took from the folder
         ("if that is the wrong project: vcharon leave %s %s (then join again with "
          "--project P)", ("game", FLAGS)),
@@ -957,12 +961,10 @@ HINTS = {
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
         ("%s isn't there: your folder in the channel holds it, once vcharon join --local has "
          "written it", None),
-        # a --once check's: no saved snapshot yet; a busy sync
-        ("start your watcher first: vcharon watch %s --until-change --max-minutes 1 %s "
-         "(the one-minute check)", ("game", FLAGS)),
+        # a --once check's: a busy sync
         ("run vcharon watch %s --once %s again after your next step; 3 times in a row, tell "
          "your user", ("game", FLAGS)),
-        # a --once check's: a saved snapshot it can't use
+        # a --once check's: a saved snapshot it can't use, or none
         ("run vcharon read %s --to-me %s (what came to you may not all have been printed), "
          "then vcharon watch %s --until-change --max-minutes 1 %s (the one-minute check)",
          ("game", FLAGS, "game", FLAGS)),
