@@ -1168,8 +1168,9 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   Else, a remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with
   the rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
   member's is noted and nothing posted. Else it posts `LEAVE` (once: not again after a failed
-  try) and syncs; a failed sync stops before removing anything. Then it removes the local tree
-  (only when it is exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
+  try, while its folder shows it left by `whoami C`'s rule for `left`) and syncs; a failed
+  sync stops before removing anything. Then it removes the local tree (only when it is
+  exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
   state, the kept last-watched ages, logs, locks not held, the watcher's snapshot, the post
   lock, the record, the section file, and last the watcher's lock file, after the record, so a
   watcher started then finds no membership; deleted and released in the order a failed join
@@ -1612,8 +1613,20 @@ says so.
   time in the folder, local, to the second (`-` for none);
   `--json` gives them as `members`, null when the tree can't be listed (text: a `can't read`
   line, still exit 0, since who you are is shown). Why: the watcher's `<n> other entries
-  (<folders>)` doesn't say who the folders are, and `list` needs the server. It reads nothing
+  (<folders>)` doesn't say who the folders are, and `list` needs the server. It shows nothing
   else of a member's files, so no host name or path shows.
+- **Left**: a member whose folder has a `LEAVE` of it numbered after its last `JOIN` or
+  `REJOIN` (of the entry headings of every `.md` file in the folder but `MEMBER.md`, the files
+  `read` reads) shows `left` in place of the last-watched part below; a rejoin clears it.
+  Why: `leave` keeps the folder and its last-watched stamp, so without it a member that left
+  would read as a watcher whose age only grows. Only the headings are read, line by line, and
+  only the flag shows. A local member's whoami doesn't read the entries of another member's
+  folder over the channel's limits, as `read` leaves it out: its `left` is unknown and its
+  line keeps the last-watched part. When the join record's limits can't be read, every other
+  member's `left` is unknown, since whoami never fails on the channel.
+  `--json` gives `left` in `whoami C`'s `members` (true, false, or null for unknown) and in
+  `read`'s `member_info` (true or false, from the entries `read` already read; a folder it left
+  out isn't listed there).
 - **Last watched**: each member's line ends with `watched <age> ago (every <n> s)`, from the
   stamps ([The watcher in a channel](#the-watcher-in-a-channel)): the age in seconds under 2
   minutes, minutes under 2 hours, else hours; `watched -` for a member with no stamp; `watched ?
@@ -2211,13 +2224,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     "max_entry_kb"}`; each of `others` `{"name", "why"}`.
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "leads", "mode", "server",
     "folder", "tree", "box", "box_source", "members"}`, each member `{"name", "agent", "box",
-    "os", "leader", "newest", "watched", "watch_every"}`. `whoami` without C: `{"box",
+    "os", "leader", "newest", "watched", "watch_every", "left"}`. `whoami` without C: `{"box",
     "box_source", "project", "role", "name", "channels"}`, each channel as with C without
     `box`, `box_source` and `members`.
   - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
     "notes", "missing"}`; each of `member_info` `{"name", "box", "os", "agent", "project",
-    "vcharon", "watched", "watch_every"}`; each entry `{"time", "id", "name", "number", "to",
-    "re", "title", "file", "header", "body"}`.
+    "vcharon", "watched", "watch_every", "left"}`; each entry `{"time", "id", "name",
+    "number", "to", "re", "title", "file", "header", "body"}`.
   - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
     "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
     "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",

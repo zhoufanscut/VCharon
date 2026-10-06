@@ -71,10 +71,15 @@ folder (local time), and when its watcher last pulled the channel:
   is older than its first one.
 - `watched ? (vcharon 0.2.3)`: no stamp, but that member runs a version that never stamps, so
   it may be watching all the same.
+- `left`: its folder's last `JOIN` or `REJOIN` of it is followed by its `LEAVE`: it left the
+  channel, so its watcher is gone too. A rejoin brings the `watched` part back.
 
 The watcher's `<n> other entries (<folders>)` names folders only: this says who they are. As a
 remote member it is this machine's copy, as of its last sync, and so are the ages. `--json`
 gives each member `watched` (the time, or null) and `watch_every` (seconds, or null); so does
 `vcharon read myapp --json`, in `member_info`. Both are null for `-` and `?` alike: only
 `member_info` has the member's `vcharon` version, which tells them apart: `?` is a member on
-0.2.3 or older (or with no version), when your own vcharon is newer.
+0.2.3 or older (or with no version), when your own vcharon is newer. Each member also has
+`left` (true or false) in both; in `whoami`'s it is null (unknown) for another member's folder
+over the channel's limits, whose entries, as `read`, it doesn't read, and for every other
+member when your join record's limits can't be read.

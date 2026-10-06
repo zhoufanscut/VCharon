@@ -504,7 +504,8 @@ def _whoami(args, run):
         record, _ = _membership(args)
         doc = _member_doc(cfg, record)
         seen = _watched(record, doc["tree"])
-        members, unread = _members_of(doc["tree"], record["leader"], seen)
+        members, unread = _members_of(doc["tree"], record["leader"], seen,
+                                      _whoami_skip(record))
         if args.json:
             # the version is read's (member_info): whoami's members keep their fields
             shown = None if members is None else [
@@ -539,14 +540,30 @@ def _whoami(args, run):
     return 0
 
 
-def _members_of(tree, leader, seen):
+def _members_of(tree, leader, seen, skip=None):
     """(whoami C's members of the tree, read_mod.member_list's; None and why when the tree
     can't be read). whoami says who you are first: a tree it can't list is a line, not an
     error."""
     try:
-        return read_mod.member_list(tree, leader, seen), None
+        return read_mod.member_list(tree, leader, seen, skip), None
     except OSError as e:
         return None, e.strerror or str(e)
+
+
+def _whoami_skip(record):
+    """member_list's skip for whoami C: the folders whose entries it doesn't read for
+    "left", as read leaves them out. A remote member's copy: none (its pull left out a folder
+    over the limits already). A local member: another member's folder over the channel's
+    limits (_over_limit); when the record's limits can't be read, every other member's, since
+    whoami never fails on the channel and has no limit to go by."""
+    if record["ssh"] is not None:
+        return None
+    try:
+        limits = channel_cmd.channel_limits(record)
+    except VCharonError:
+        me = record["name"]
+        return lambda path, member: None if member == me else "no limits"
+    return _over_limit(limits, record["name"])
 
 
 def _watched(record, tree):
@@ -566,8 +583,9 @@ def _watched(record, tree):
 
 
 def _members_lines(doc, members, unread, seen):
-    """whoami C's members, one line each: who writes in the channel, without reading it all,
-    and when each one's watcher last pulled it (read_mod.watched_text). A remote member's are
+    """whoami C's members, one line each: who writes in the channel (of the members' files it
+    shows only MEMBER.md #1's fields, and of their entries only whether each one left), and
+    when each one's watcher last pulled it (read_mod.watched_text), or "left". A remote member's are
     this box's copy, the ages as of its last sync."""
     copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
     if members is None:
@@ -582,6 +600,8 @@ def _members_lines(doc, members, unread, seen):
             one["name"], " (%s)" % ", ".join(marks) if marks else "",
             ", ".join("%s %s" % (k, one[k] or "?") for k in read_mod.WHO_FIELDS),
             one["newest"] or "-",
+            # its stamp stays after a leave, and would show an age that only grows
+            "left" if one["left"] else
             read_mod.watched_text(seen, one["name"], one["vcharon"], now))))
 
 

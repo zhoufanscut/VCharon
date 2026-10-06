@@ -1552,7 +1552,7 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
             say("  note    %s has no %s: no LEAVE posted" % (own, entries.MEMBER_FILE))
             own = None
         # a leave whose run failed and is tried again posts no second LEAVE
-        if own is not None and not _left_already(own, name):
+        if own is not None and not entries.has_left(own, name):
             entries.post(os.path.join(own, "RESULTS.md"), own, name, "LEAVE",
                          ["@" + record["leader"]], body="%s left %s." % (name, channel))
         if record["ssh"] is not None:
@@ -1577,21 +1577,6 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                if others else ""))
     say("OK  %s %s" % ("closed" if close else "left", channel))
     return 0
-
-
-def _left_already(own, name):
-    """True if the own folder has a LEAVE of name after its last JOIN or REJOIN."""
-    last = {"LEAVE": 0, "JOIN": 0}
-    for path in entries.md_files(own) if os.path.isdir(own) else ():
-        try:
-            found = entries.parse_file(path)
-        except OSError:
-            continue
-        for e in found:
-            kind = "JOIN" if e.title == "REJOIN" else e.title
-            if e.name == name and kind in last and e.number > last[kind]:
-                last[kind] = e.number
-    return last["LEAVE"] > last["JOIN"]
 
 
 def _own_of(cfg, record, section):

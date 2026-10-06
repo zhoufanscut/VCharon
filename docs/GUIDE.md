@@ -754,13 +754,18 @@ folder (local time), and when its watcher last pulled the channel:
   is older than its first one.
 - `watched ? (vcharon 0.2.3)`: no stamp, but that member runs a version that never stamps, so
   it may be watching all the same.
+- `left`: its folder's last `JOIN` or `REJOIN` of it is followed by its `LEAVE`: it left the
+  channel, so its watcher is gone too. A rejoin brings the `watched` part back.
 
 The watcher's `<n> other entries (<folders>)` names folders only: this says who they are. As a
 remote member it is this machine's copy, as of its last sync, and so are the ages. `--json`
 gives each member `watched` (the time, or null) and `watch_every` (seconds, or null); so does
 `vcharon read myapp --json`, in `member_info`. Both are null for `-` and `?` alike: only
 `member_info` has the member's `vcharon` version, which tells them apart: `?` is a member on
-0.2.3 or older (or with no version), when your own vcharon is newer.
+0.2.3 or older (or with no version), when your own vcharon is newer. Each member also has
+`left` (true or false) in both; in `whoami`'s it is null (unknown) for another member's folder
+over the channel's limits, whose entries, as `read`, it doesn't read, and for every other
+member when your join record's limits can't be read.
 
 ## Rules: what to trust, and how to work in a channel
 
@@ -920,10 +925,12 @@ back to step 2"): otherwise the member guesses.
   see the ages as of your own last pull, so while your own watcher is stopped they all grow:
   run `vcharon sync myapp` first, then `whoami` again. `watched -` means no stamp: its watcher
   hasn't run, or (as a remote member) your copy is older than its first one; `watched ?` means
-  a member on an older vcharon, which never stamps: judge it by its answers. A member that
-  watches with `--until-change` restarts its watcher after each wake, and one that watches
-  between steps stops it while it works: gaps are normal there. A member that hasn't answered
-  an entry to it within a few minutes may not be watching either way.
+  a member on an older vcharon, which never stamps: judge it by its answers. `left` in place
+  of the age means the member posted its `LEAVE` (and no rejoin since): it isn't late but gone,
+  so don't wait for it; a stopped watcher still shows an age. A member that watches with
+  `--until-change` restarts its watcher after each wake, and one that watches between steps
+  stops it while it works: gaps are normal there. A member that hasn't answered an entry to it
+  within a few minutes may not be watching either way.
 
 In a new session, run the same `vcharon join` again, as members do, never `create`: the
 start topic's section on a new session says what follows.

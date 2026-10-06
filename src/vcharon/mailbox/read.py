@@ -59,15 +59,17 @@ true for a remote member's copy; "members" the member folders read; "member_info
 {"name", "box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it
 lacks; "vcharon" the version the member last joined or watched with), and "watched" (the time
 of its watcher's last pull, local, or null) and "watch_every" (that watcher's --every seconds,
-or null) from the members' last-watched stamps; "count" every entry in
-the tree, while "entries" holds the ones shown (--last, IDs, --to-me), in the view's order,
-each {"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}: "file" is
-the entry's file relative to the tree, with "/"; "time", "id", "name", "number" and "re" are
-null when the entry lacks them; "header" (a list of [key, value], key "" for a line without
-one) and "body" are null unless --full (or IDs). "notes" are the note lines' texts, without
+or null) from the members' last-watched stamps, and "left" (true when its own folder has a
+LEAVE of it after its last JOIN or REJOIN, entries.left_of); "count" every entry in the tree,
+while "entries" holds the ones shown (--last, IDs, --to-me), in the view's order, each
+{"time", "id", "name", "number", "to", "re", "title", "file", "header", "body"}: "file" is the
+entry's file relative to the tree, with "/"; "time", "id", "name", "number" and "re" are null
+when the entry lacks them; "header" (a list of [key, value], key "" for a line without one)
+and "body" are null unless --full (or IDs). "notes" are the note lines' texts, without
 "note: "; "missing" the IDs asked for that no placed entry has ([] without IDs).
 
-member_list is whoami C's: the member folders with their MEMBER.md's agent, box and os.
+member_list is whoami C's: the member folders with their MEMBER.md's agent, box and os, and
+whether each one left.
 """
 
 from __future__ import annotations
@@ -289,15 +291,22 @@ def _now():
 INFO_FIELDS = channels.LIST_FIELDS + ("vcharon",)
 
 
-def member_info(root, folders, seen=None):
-    """[{"name", "box", "os", "agent", "project", "vcharon", "watched", "watch_every"}] of the
-    member folders read, from each one's MEMBER.md #1; None for a field it lacks, or holds in
-    another shape. "watched" and "watch_every": watched_fields of seen."""
+def member_info(root, folders, seen=None, items=()):
+    """[{"name", "box", "os", "agent", "project", "vcharon", "watched", "watch_every",
+    "left"}] of the member folders read, from each one's MEMBER.md #1; None for a field it
+    lacks, or holds in another shape. "watched" and "watch_every": watched_fields of seen.
+    "left": entries.left_of the member's own entries in its folder among items (read_tree's,
+    already read: whoami's entries.has_left reads the same files)."""
+    headings = {}
+    for item in items:
+        headings.setdefault(item.folder, []).append((item.e.name, item.e.number,
+                                                     item.e.title))
     out = []
     for name in folders:
         found = channels.read_member(os.path.join(root, name), name)
         out.append(dict([("name", name)] + [(k, found.get(k)) for k in INFO_FIELDS]
-                        + watched_fields(seen, name)))
+                        + watched_fields(seen, name)
+                        + [("left", entries.left_of(headings.get(name, ()), name))]))
     return out
 
 
@@ -315,15 +324,18 @@ def watched_fields(seen, name):
 WHO_FIELDS = ("agent", "box", "os")
 
 
-def member_list(root, leader, seen=None):
+def member_list(root, leader, seen=None, skip=None):
     """whoami C's members: [{"name", "agent", "box", "os", "leader", "newest", "watched",
-    "watch_every", "vcharon"}], one per top-level folder of the tree root whose name can be a
-    member's (not a symlink, a stage dir or a stray name), in name order. "agent", "box",
-    "os" and "vcharon" come from the folder's MEMBER.md #1 (None for one it lacks): the only
-    text read from a member's files, so nothing else of its machine shows. "leader": whether
-    it is the leader's folder. "newest": the time of its newest file outside stage dirs,
-    local, to the second, or None. "watched", "watch_every": watched_fields of seen. OSError
-    when the root can't be read."""
+    "watch_every", "left", "vcharon"}], one per top-level folder of the tree root whose name
+    can be a member's (not a symlink, a stage dir or a stray name), in name order. "agent",
+    "box", "os" and "vcharon" come from the folder's MEMBER.md #1 (None for one it lacks):
+    the only text shown from a member's files, so nothing else of its machine shows.
+    "leader": whether it is the leader's folder. "newest": the time of its newest file
+    outside stage dirs, local, to the second, or None. "watched", "watch_every":
+    watched_fields of seen. "left": entries.has_left of the folder (its headings, read for
+    that flag only); None for a folder skip(path, name) leaves out (read's rule: a note, or
+    None to read it), whose files aren't read, so one over the channel's limits costs no
+    more than it does read. OSError when the root can't be read."""
     with os.scandir(root) as it:
         top = sorted(it, key=lambda d: d.name)
     out = []
@@ -336,10 +348,13 @@ def member_list(root, leader, seen=None):
             continue
         found = channels.read_member(d.path, d.name)
         newest = channels.newest_file(d.path)
+        left = (None if skip is not None and skip(d.path, d.name) is not None
+                else entries.has_left(d.path, d.name))
         out.append(dict([("name", d.name)] + [(k, found.get(k)) for k in WHO_FIELDS]
                         + [("leader", d.name == leader),
                            ("newest", None if newest is None else entries.stamp(newest))]
-                        + watched_fields(seen, d.name) + [("vcharon", found.get("vcharon"))]))
+                        + watched_fields(seen, d.name)
+                        + [("left", left), ("vcharon", found.get("vcharon"))]))
     return out
 
 
@@ -411,7 +426,7 @@ def _collect(root, now, skip=None, notes=(), seen=None):
         now = _now()
     ordered, minute_notes = order(items, now)
     notes = read_notes + [n for item in ordered for n in item.notes] + minute_notes
-    info = member_info(root, folders, seen)
+    info = member_info(root, folders, seen, items)
     versions = version_note(info)
     if versions is not None:
         notes.append(versions)

@@ -183,6 +183,61 @@ class NumbersTest(EntriesCase):
                                              top=os.path.join(self.tmp, "tree")))
 
 
+class LeftTest(EntriesCase):
+    """has_left: a LEAVE of the member numbered after its last JOIN or REJOIN, in any .md file
+    of its folder but MEMBER.md; headings only."""
+
+    def heads(self, *titles, name="mac-a"):
+        return "".join("## t \u2014 %s#%d \u2014 %s\nto: @x\n\nb\n" % (name, n, t)
+                       for n, t in enumerate(titles, 2)).encode()
+
+    def left(self):
+        return entries.has_left(self.own, "mac-a")
+
+    def test_left_and_back(self):
+        cases = [((), False), (("JOIN",), False), (("JOIN", "step", "LEAVE"), True),
+                 (("JOIN", "LEAVE", "REJOIN"), False), (("JOIN", "LEAVE", "REJOIN", "LEAVE"),
+                                                        True)]
+        for titles, left in cases:
+            with self.subTest(titles=titles):
+                write_tree(self.own, {"RESULTS.md": self.heads(*titles)})
+                self.assertEqual(self.left(), left)
+
+    def test_by_number_across_files(self):
+        # no RESULTS.md: a LEAVE in another file, then a REJOIN numbered later in a deeper one
+        write_tree(self.own, {"NOTES.md": "## t \u2014 mac-a#3 \u2014 LEAVE\n".encode()})
+        self.assertTrue(self.left())
+        write_tree(self.own, {"sub/A.md": "## t \u2014 mac-a#4 \u2014 REJOIN\r\n".encode()})
+        self.assertFalse(self.left())
+
+    def test_number_not_file_order(self):
+        # A.md is read before RESULTS.md, but the higher number decides
+        for first, second, left in (("REJOIN", "LEAVE", False), ("LEAVE", "REJOIN", True)):
+            with self.subTest(first=first):
+                write_tree(self.own, {
+                    "A.md": ("## t \u2014 mac-a#4 \u2014 %s\n" % first).encode(),
+                    "RESULTS.md": ("## t \u2014 mac-a#3 \u2014 %s\n" % second).encode()})
+                self.assertEqual(self.left(), left)
+
+    def test_what_doesnt_count(self):
+        write_tree(self.own, {
+            # another member's LEAVE, one in a body, one in MEMBER.md, one in a .txt
+            "RESULTS.md": self.heads("JOIN") + self.heads("LEAVE", name="win-b")
+            + "\n> ## t \u2014 mac-a#9 \u2014 LEAVE\n".encode(),
+            "MEMBER.md": "## t \u2014 mac-a#8 \u2014 LEAVE\n".encode(),
+            "x.txt": "## t \u2014 mac-a#9 \u2014 LEAVE\n".encode()})
+        self.assertFalse(self.left())
+        # a missing folder has left nothing
+        self.assertFalse(entries.has_left(os.path.join(self.tmp, "none"), "mac-a"))
+
+    def test_another_members_leave(self):
+        # numbered after this member's JOIN, in its folder: still not this member's leave
+        write_tree(self.own, {"RESULTS.md": self.heads("JOIN")
+                              + "## t \u2014 win-b#7 \u2014 LEAVE\n".encode()})
+        self.assertFalse(self.left())
+        self.assertTrue(entries.has_left(self.own, "win-b"))
+
+
 class LockTest(EntriesCase):
     def test_lock_is_per_own_folder(self):
         self.assertNotEqual(entries.lock_path(self.own),

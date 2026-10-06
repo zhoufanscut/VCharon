@@ -164,9 +164,10 @@ class WhoamiTest(ChannelCase):
         newest = [m.pop("newest") for m in members]
         self.assertEqual(members, [
             {"name": "laptop-ui", "agent": "other", "box": "laptop", "os": platform.os_word(),
-             "leader": True, "watched": None, "watch_every": None},
+             "leader": True, "watched": None, "watch_every": None, "left": False},
             {"name": "mac-web-b", "agent": "other", "box": "mac", "os": platform.os_word(),
-             "leader": False, "watched": None, "watch_every": None}])
+             "leader": False, "watched": None, "watch_every": None,
+             "left": False}])
         for n in newest:
             self.assertRegex(n, r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\Z")
         code, out, err = self.run_cli("whoami", "game", "--role", "b")
@@ -255,9 +256,10 @@ class WhoamiMembersTest(ChannelCase):
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
         self.assertEqual(self.members(), [
             {"name": "linux-api", "agent": None, "box": None, "os": None, "leader": False,
-             "newest": when, "watched": None, "watch_every": None},
+             "newest": when, "watched": None, "watch_every": None, "left": False},
             {"name": "linux-d", "agent": "other", "box": "linux", "os": platform.os_word(),
-             "leader": True, "newest": when, "watched": None, "watch_every": None}])
+             "leader": True, "newest": when, "watched": None, "watch_every": None,
+             "left": False}])
         lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
         self.assertEqual(lines[-3:], [
             "  members  2",
@@ -270,7 +272,8 @@ class WhoamiMembersTest(ChannelCase):
         write_tree(self.tree, {"linux-api/": None})
         self.assertEqual(self.members()[0], {"name": "linux-api", "agent": None, "box": None,
                                              "os": None, "leader": False, "newest": None,
-                                             "watched": None, "watch_every": None})
+                                             "watched": None, "watch_every": None,
+                                             "left": False})
         lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
         self.assertEqual(lines[-2], "    linux-api  agent ?, box ?, os ?  newest file -  "
                          "watched ? (vcharon unknown)")
@@ -310,6 +313,122 @@ class WhoamiMembersTest(ChannelCase):
             lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
         self.assertTrue(lines[-4].endswith("  watched -"), lines[-4])
         self.assertTrue(lines[-1].endswith("  watched ? (vcharon 0.2.0)"), lines[-1])
+
+    def test_left(self):
+        # a local member joins, is stamped as watching, and leaves: its stamp stays
+        self.use_box("mac")
+        self.ok("join", "docs", "--local", "--project", "web")
+        channels.stamp_seen(self.root, "docs", "mac-web", "local 10", now=time.time() - 60)
+        self.ok("leave", "docs", "--project", "web")
+        self.use_box("linux")
+        got = {m["name"]: (m["left"], m["watched"] is not None) for m in self.members()}
+        self.assertEqual(got, {"linux-d": (False, False), "mac-web": (True, True)})
+        lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertTrue(lines[-2].endswith("  " + UNWATCHED), lines[-2])
+        self.assertRegex(lines[-1],
+                         r"\A    mac-web  agent other, .*  newest file \S+ \S+  left\Z")
+        # read --json says the same
+        doc = json.loads(self.run_cli("read", "docs", "--project", "d", "--json")[1])
+        self.assertEqual([(m["name"], m["left"]) for m in doc["member_info"]],
+                         [("linux-d", False), ("mac-web", True)])
+        # a rejoin clears it
+        self.use_box("mac")
+        self.ok("join", "docs", "--local", "--project", "web", "--rejoin")
+        self.use_box("linux")
+        self.assertEqual([m["left"] for m in self.members()], [False, False])
+        lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertRegex(lines[-1], r"  watched \d+ s ago \(every 10 s\)\Z")
+
+    def test_left_from_the_files(self):
+        # an older member (whose version never stamps) that left; one that never left; a
+        # folder without RESULTS.md, whose LEAVE is in another file; one with no entries
+        head = "## t \u2014 %s#%d \u2014 %s\nto: @linux-d\n"
+        member = "# MEMBER\n\n" + head + "vcharon: 0.2.0\n"
+        write_tree(self.tree, {
+            "linux-old/MEMBER.md": (member % ("linux-old", 1, "member")).encode(),
+            "linux-old/RESULTS.md": "".join(head % ("linux-old", n, t) for n, t in
+                                            ((2, "JOIN"), (3, "done"), (4, "LEAVE"))).encode(),
+            "linux-on/RESULTS.md": "".join(head % ("linux-on", n, t) for n, t in
+                                           ((2, "JOIN"), (3, "done"))).encode(),
+            "linux-x/sub/NOTES.md": (head % ("linux-x", 5, "LEAVE")).encode(),
+            "linux-y/": None})
+        got = {m["name"]: m["left"] for m in self.members()}
+        self.assertEqual(got, {"linux-d": False, "linux-old": True, "linux-on": False,
+                               "linux-x": True, "linux-y": False})
+        lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        ends = [line.rsplit("  ", 1)[-1] for line in lines[-5:]]
+        self.assertEqual(ends, [UNWATCHED, "left", "watched ? (vcharon unknown)", "left",
+                                "watched ? (vcharon unknown)"])
+        doc = json.loads(self.run_cli("read", "docs", "--project", "d", "--json")[1])
+        self.assertEqual({m["name"]: m["left"] for m in doc["member_info"]}, got)
+
+    def test_a_folder_over_the_limits_is_not_read(self):
+        # read leaves another local member's folder over the limits out; whoami doesn't read
+        # its entries either, so it can't say
+        write_tree(self.tree, {"linux-big/RESULTS.md": "## t \u2014 linux-big#2 \u2014 LEAVE\n"
+                               .encode()})
+        with mock.patch.object(channel_cmd, "channel_limits",
+                               return_value={"max_mb": 1, "max_files": 0,
+                                             "max_entry_kb": 64}):
+            got = {m["name"]: m["left"] for m in self.members()}
+            lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
+        self.assertEqual(got, {"linux-big": None, "linux-d": False})
+        self.assertTrue(lines[-2].endswith("  watched ? (vcharon unknown)"), lines[-2])
+        self.assertEqual({m["name"]: m["left"] for m in self.members()},
+                         {"linux-big": True, "linux-d": False})
+
+    def test_limits_that_cant_be_read(self):
+        # whoami never fails on the channel: with no limits to go by it reads no other
+        # member's entries, so another member's left is unknown and its line keeps the
+        # last-watched part; its own folder is still read
+        self.use_box("mac")
+        self.ok("join", "docs", "--local", "--project", "web")
+        self.ok("leave", "docs", "--project", "web")
+        self.use_box("linux")
+        self.assertEqual({m["name"]: m["left"] for m in self.members()},
+                         {"linux-d": False, "mac-web": True})
+        with mock.patch.object(channel_cmd, "channel_limits",
+                               side_effect=VCharonError("channel", "no limits")):
+            got = {m["name"]: m["left"] for m in self.members()}
+            code, out, err = self.run_cli("whoami", "docs", "--project", "d")
+        self.assertEqual(got, {"linux-d": False, "mac-web": None})
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertTrue(lines[-1].startswith("    mac-web  "), lines[-1])
+        self.assertTrue(lines[-1].endswith("  " + UNWATCHED), lines[-1])
+
+
+class WhoamiLeftRemoteTest(ChannelCase):
+    """whoami C's left as a remote member: from its synced copy, every folder read (its pull
+    already left out a folder over the limits), and the same as read --json's."""
+
+    def test_a_member_that_left_over_the_fake_ssh(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.use_box("linux")
+        self.ok("join", "game", "--server", "fake-dest", "--project", "api")
+        self.ok("leave", "game", "--project", "api")
+        self.use_box("mac")
+        # the copy is as of the last sync: the leave isn't in it yet
+        doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
+        self.assertEqual({m["name"]: m["left"] for m in doc["members"]},
+                         {"laptop-ui": False, "mac-web": False})
+        self.assertEqual(self.run_cli("sync", "game")[0], 0)
+        doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
+        want = {"laptop-ui": False, "linux-api": True, "mac-web": False}
+        self.assertEqual({m["name"]: m["left"] for m in doc["members"]}, want)
+        lines = self.run_cli("whoami", "game")[1].splitlines()
+        self.assertRegex(lines[-2], r"\A    linux-api  .*  left\Z")
+        self.assertTrue(lines[-1].endswith("  " + UNWATCHED), lines[-1])
+        info = json.loads(self.run_cli("read", "game", "--json")[1])["member_info"]
+        self.assertEqual({m["name"]: m["left"] for m in info}, want)
+        # limits it would leave a local member's folder out by: a remote member's copy is
+        # read all the same
+        with mock.patch.object(channel_cmd, "channel_limits",
+                               return_value={"max_mb": 1, "max_files": 0,
+                                             "max_entry_kb": 64}):
+            doc = json.loads(self.run_cli("whoami", "game", "--json")[1])
+        self.assertEqual({m["name"]: m["left"] for m in doc["members"]}, want)
 
 
 class SetupTest(ChannelCase):

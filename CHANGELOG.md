@@ -9,6 +9,15 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `whoami C` shows `left` in place of a member's `watched …` part when that member's folder has
+  its `LEAVE` after its last `JOIN` or `REJOIN` (a rejoin clears it): `leave` keeps the member's
+  last-watched stamp, which showed as an age that only grew. `whoami C --json`'s `members` and
+  `read --json`'s `member_info` gain `left` (true or false; in `whoami`'s, null for another
+  member's folder over the channel's limits, whose entries a local member's whoami doesn't
+  read, as `read` leaves it out, and for every other member when the join record's limits
+  can't be read). To adapt: nothing; a script that compares whoami's member lines as
+  whole text sees `left` for a member that left. Checked on Linux (measured): unit tests with
+  hand-written folders and a local join, leave and rejoin. Not run: macOS and Windows.
 - `vcharon watch C --once`: one watcher round at once from the saved snapshot, then exit, for
   an agent with no background commands to check between its steps (the guide's watch topic,
   "Checking between steps"). It prints what came since the last look as a watcher round does

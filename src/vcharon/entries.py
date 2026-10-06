@@ -266,6 +266,41 @@ def next_number(own, name):
     return high + 1
 
 
+def left_of(headings, name):
+    """Whether headings ((name, number, title) of entries) hold a LEAVE of name numbered after
+    its last JOIN or REJOIN: the member left and hasn't come back. By number, not by file
+    order: join and leave post into RESULTS.md, but a hand edit can move an entry."""
+    last = {"LEAVE": 0, "JOIN": 0}
+    for who, number, title in headings:
+        kind = "JOIN" if title == "REJOIN" else title
+        if who == name and kind in last and number > last[kind]:
+            last[kind] = number
+    return last["LEAVE"] > last["JOIN"]
+
+
+def has_left(folder, name):
+    """left_of the entry headings of every .md file of the member's folder but its MEMBER.md
+    (only its #1: post refuses that file), the files vcharon read reads, so the two agree.
+    Headings only, line by line: a file's bodies are never held, only its "## " lines, split
+    on "\n" as split_lines splits. A file that can't be read counts as none."""
+    member = os.path.join(folder, MEMBER_FILE)
+    headings = []
+    for path in md_files(folder) if os.path.isdir(folder) else ():
+        if path == member:
+            continue
+        found = []
+        try:
+            with open(path, "rb") as f:
+                for raw in f:
+                    if raw.startswith(b"## "):
+                        line = raw.decode("utf-8", "replace").removesuffix("\n")
+                        found.append(parse_heading(line.removesuffix("\r")[3:])[1:])
+        except OSError:
+            continue
+        headings.extend(found)
+    return left_of(headings, name)
+
+
 # --- appending, under the own folder's lock ---
 
 def lock_path(own):

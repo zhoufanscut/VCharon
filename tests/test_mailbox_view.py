@@ -311,7 +311,7 @@ class OutputTest(ViewCase):
             "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
             "member_info": [{"name": n, "box": None, "os": None, "agent": None,
                              "project": None, "vcharon": None, "watched": None,
-                             "watch_every": None} for n in ("aa", "bb")],
+                             "watch_every": None, "left": False} for n in ("aa", "bb")],
             "count": 4, "notes": [], "missing": [],
             "entries": [
                 {"time": "2026-10-02 10:01:00", "id": "aa#2", "name": "aa", "number": 2,
@@ -387,7 +387,7 @@ class VersionTest(ViewCase):
         self.assertEqual(doc["member_info"][0], {"name": "aa", "box": "mac", "os": None,
                                                  "agent": None, "project": "web",
                                                  "vcharon": "0.1.0", "watched": None,
-                                                 "watch_every": None})
+                                                 "watch_every": None, "left": False})
         self.assertEqual(doc["notes"][-1], lines[-2].removeprefix("note: "))
 
     def test_quiet_unless_two_known_versions_differ(self):
