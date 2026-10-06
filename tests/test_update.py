@@ -861,18 +861,115 @@ class ApplyTest(UpdateCase):
                 mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": "/opt/mine/lib"}, clear=True):
             self.assertEqual(update.child_env(), {"LD_LIBRARY_PATH": "/opt/mine/lib"})
 
-    def test_the_check_goes_through_fsops_run(self):
-        # as vcharon runs every program: an argument list, a timeout, the clean environment
+    def fake_run(self, out):
+        """Replaces fsops.run; returns the list its calls go to."""
         calls = []
 
-        def run(argv, timeout, new_session=False, env=None):
-            calls.append((argv, timeout, env))
-            return update.fsops.Ran(0, b"9.9.9\n", b"")
+        def run(argv, timeout, new_session=False, env=None, term_wait=0):
+            calls.append((argv, timeout, new_session, env, term_wait))
+            return update.fsops.Ran(0, out, b"")
 
         self.patch(update.fsops, "run", new=run)
+        return calls
+
+    def test_the_check_goes_through_fsops_run(self):
+        # as vcharon runs every program: an argument list, a timeout, the clean environment;
+        # in a session of its own with the grace, so a timeout ends a binary's whole group and
+        # its bootloader removes its unpack folder
+        calls = self.fake_run(b"9.9.9\n")
         update._smoke_test("/x/vcharon.new", "9.9.9")
         self.assertEqual(calls, [([sys.executable, "/x/vcharon.new", "--version"],
-                                  update.SMOKE_TIMEOUT, update.child_env())])
+                                  update.SMOKE_TIMEOUT, True, update.child_env(),
+                                  update.fsops.TERM_WAIT)])
+
+    def test_the_skill_rewrite_goes_through_fsops_run_the_same_way(self):
+        calls = self.fake_run(b"")
+        self.assertIsNone(update.refresh_skills("/x/vcharon", ["claude"]))
+        self.assertEqual(calls, [(["/x/vcharon", "skill", "install", "--claude"],
+                                  update.SMOKE_TIMEOUT, True, update.child_env(),
+                                  update.fsops.TERM_WAIT)])
+
+
+@unittest.skipIf(os.name == "nt", "process groups")
+class HangingBinaryTest(UpdateCase):
+    """The new binary hanging past SMOKE_TIMEOUT, as a one-file binary does: a stand-in
+    bootloader makes an unpack folder and starts a child, which holds the pipes; on SIGTERM it
+    waits for the child, removes the folder and leaves a mark. A kill of the stand-in alone
+    would leave the child running and the folder behind (DESIGN, "Self-update")."""
+
+    def setUp(self):
+        super().setUp()
+        self.unpack = os.path.join(self.tmp, "_MEI")
+        self.ready = os.path.join(self.tmp, "ready")
+        self.termed = os.path.join(self.tmp, "termed")
+        self.patch(update, "SMOKE_TIMEOUT", new=2)
+        self.addCleanup(self.kill_left)
+
+    def bootloader(self):
+        """The stand-in's source, run with this Python."""
+        child = "import time\ntime.sleep(60)\n"
+        return ("import os, signal, subprocess, sys, time\n"
+                "os.mkdir(%r)\n"
+                "child = subprocess.Popen([sys.executable, '-c', %r])\n"
+                "def term(*a):\n"
+                "    child.wait()\n"
+                "    os.rmdir(%r)\n"
+                "    open(%r, 'w').close()\n"
+                "    sys.exit(0)\n"
+                "signal.signal(signal.SIGTERM, term)\n"
+                "with open(%r + '.tmp', 'w') as f:\n"
+                "    f.write('%%d %%d' %% (os.getpid(), child.pid))\n"
+                "os.rename(%r + '.tmp', %r)\n"
+                "time.sleep(60)\n"
+                % (self.unpack, child, self.unpack, self.termed, self.ready, self.ready,
+                   self.ready)).encode("utf-8")
+
+    def pids(self):
+        with open(self.ready) as f:
+            return [int(pid) for pid in f.read().split()]
+
+    def kill_left(self):
+        # a failing run can leave the stand-in or its child behind: never let them run on
+        if os.path.exists(self.ready):
+            for pid in self.pids():
+                with contextlib.suppress(OSError):
+                    os.kill(pid, 9)
+
+    def assert_cleaned_up(self):
+        # the stand-in was reached by SIGTERM and cleaned up before the kill
+        self.assertTrue(os.path.exists(self.ready), "the stand-in never got ready")
+        self.assertTrue(os.path.exists(self.termed), "the stand-in got no SIGTERM")
+        self.assertFalse(os.path.exists(self.unpack))
+        # an orphan is reaped by init: wait for it to vanish, not just to die
+        end = time.monotonic() + 5
+        for pid in self.pids():
+            while True:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                self.assertLess(time.monotonic(), end, "pid %d still there" % pid)
+                time.sleep(0.05)
+
+    def test_a_hanging_check_ends_the_whole_group(self):
+        net, release = self.serving(binary=self.bootloader())
+        self.serve(net)
+        with self.assertRaises(update.UpdateError) as caught:
+            update.apply_update(release, self.inst)
+        self.assertEqual(caught.exception.kind, "smoke_failed")
+        self.assert_untouched()
+        self.assert_cleaned_up()
+
+    def test_a_hanging_skill_rewrite_ends_the_whole_group(self):
+        binary = os.path.join(self.tmp, "vcharon.new")
+        with open(binary, "wb") as f:
+            f.write(self.bootloader())
+        real = update.skill_argv
+        self.patch(update, "skill_argv",
+                   new=lambda binary, agents: [sys.executable] + real(binary, agents))
+        self.assertEqual(update.refresh_skills(binary, ["claude"]),
+                         "it didn't finish within 2 s")
+        self.assert_cleaned_up()
 
 
 class SmokeArgvTest(unittest.TestCase):

@@ -736,6 +736,9 @@ Ran = collections.namedtuple("Ran", "rc out err")
 
 # How long run() waits for a killed program's output after its timeout.
 KILL_WAIT = 5
+# The grace a caller passes as run()'s term_wait for a program that may be a one-file binary:
+# up to this long after SIGTERM, so its bootloader removes its unpack folder before the kill.
+TERM_WAIT = 3
 
 
 def _kill(proc, group):

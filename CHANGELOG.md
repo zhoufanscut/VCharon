@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon --update` runs the new binary (its `--version` check and the skill rewrite) in a
+  session of its own on macOS and Linux: past the 90 s limit, or on a Ctrl-C, its whole
+  process group gets SIGTERM, then SIGKILL once the bootloader ended or 3 s passed. Before, the
+  bootloader alone got SIGKILL, and the binary's Python process ran on and its unpack folder
+  (about 20 MB) stayed in the temp folder. To adapt: nothing. Windows unchanged. Checked on
+  Linux (measured): unit tests that both runs ask `fsops.run` for the session and the grace,
+  and that a stand-in bootloader's whole group ends; a real one-file binary with a 2 s limit,
+  its `skill install` held on a FIFO: before, its Python process and one unpack folder were
+  left and the run took 7 s; now neither, in 2 s. Its `--version` at a 0.15 s limit left one
+  unpack folder before, none now. Not run: macOS, Windows.
 - `whoami C` shows `left` in place of a member's `watched …` part when that member's folder has
   its `LEAVE` after its last `JOIN` or `REJOIN` (a rejoin clears it): `leave` keeps the member's
   last-watched stamp, which showed as an age that only grew. `whoami C --json`'s `members` and

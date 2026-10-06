@@ -1963,9 +1963,9 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
   session; on its timeout or a Ctrl-C, `fsops.run` sends SIGTERM to the whole group, waits up
   to the same 3 s for the bootloader without reaping it, then sends SIGKILL to what is left,
   so the bootloader removes its unpack folder (PyInstaller's docs: it cleans up whenever its
-  child exits, but can't once it is killed itself). Only that caller asks for the grace:
-  `fsops.run`'s other callers (the ssh probes, `doctor`, `vcharon key`, macOS's `ioreg`,
-  `--update`'s runs of the new binary) still kill at once. The session's own ssh, started in a
+  child exits, but can't once it is killed itself). `--update`'s runs of the new binary get
+  the same ([Self-update](#self-update)); `fsops.run`'s other callers (the ssh probes,
+  `doctor`, `vcharon key`, macOS's `ioreg`) still kill at once. The session's own ssh, started in a
   session of its own, isn't in the group: it ends at its stdin's end, or on a dead link after
   ssh's keepalive gives up (inferred). Why: the Python process holds the pipes, so the watcher
   would wait on it with no end (no `EXIT` line, `--max-minutes` unable to fire, the lock held),
@@ -2041,6 +2041,18 @@ version check at start-up.
   left alone. A failure there doesn't fail the update (it is done): a `note:` line with the
   error's first line and the command to run, exit 0. Why: an agent reads the skill before the
   guide, and an old skill can name what the new version changed.
+- **Running the new binary** (`--version`, then `skill install`): through `fsops.run`, at most
+  90 s each, and on POSIX in a session of its own with the 3 s grace a `--no-stream` sync gets
+  ([Running watchers](#running-watchers)): on the timeout or a Ctrl-C its whole process group
+  gets SIGTERM, then SIGKILL once the bootloader ended or 3 s passed. Why: the new binary is a
+  one-file binary, a bootloader and the Python process it starts; a SIGKILL to the bootloader
+  alone leaves that process running and its unpack folder (about 20 MB) in the temp folder.
+  Neither run needs the controlling terminal a new session lacks: stdin is an empty pipe and
+  neither command prompts. Windows: no group and no grace; `TerminateProcess` ends the
+  bootloader alone, and the binary's Python process then ends itself (the bullet "A Windows
+  binary ends with its bootloader, at once" in Running watchers); its unpack folder stays. A
+  release built before that bullet's thread, which `--force` can install, has no such check:
+  its Python process runs on until its command ends.
 - **Exit codes**: 0 done, nothing newer, or "no"; 1 every failure, with the `update` error
   code; 3 a usage error.
 - **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;

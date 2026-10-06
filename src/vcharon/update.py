@@ -746,13 +746,22 @@ def skill_argv(binary, agents):
     return [binary, "skill", "install"] + ["--" + agent for agent in agents]
 
 
+def run_new(argv):
+    """Runs the new binary (argv from smoke_argv or skill_argv) through fsops.run: SMOKE_TIMEOUT,
+    child_env, and on POSIX a session of its own with fsops.TERM_WAIT's grace, so a timeout or
+    a Ctrl-C ends the bootloader's whole group and it removes its unpack folder (DESIGN,
+    "Self-update")."""
+    return fsops.run(argv, SMOKE_TIMEOUT, new_session=True, env=child_env(),
+                     term_wait=fsops.TERM_WAIT)
+
+
 def refresh_skills(binary, agents):
     """Runs the installed binary's vcharon skill install for agents, the ones whose copy carries
     vcharon's marker (found before the swap), as the --version check runs it: this process is
     the old version and would write the old text. None when it worked, else why not. Never
     raises: the update is done either way, and the fix is to run that command by hand."""
     try:
-        ran = fsops.run(skill_argv(binary, agents), SMOKE_TIMEOUT, env=child_env())
+        ran = run_new(skill_argv(binary, agents))
     except OSError as e:
         return "it wouldn't run: %s" % e
     if ran.rc is None:
@@ -764,11 +773,11 @@ def refresh_skills(binary, agents):
 
 
 def _smoke_test(binary, expected):
-    """Runs the downloaded binary's --version (through fsops.run, as vcharon runs every
-    program) and requires the release's version back."""
+    """Runs the downloaded binary's --version (through run_new) and requires the release's
+    version back."""
     fix = SMOKE_FIX_LINUX if platform.os_name() == "linux" else SMOKE_FIX
     try:
-        ran = fsops.run(smoke_argv(binary), SMOKE_TIMEOUT, env=child_env())
+        ran = run_new(smoke_argv(binary))
     except OSError as e:
         raise UpdateError("smoke_failed", "the downloaded binary wouldn't run (%s); nothing "
                           "was installed" % e, fix) from e

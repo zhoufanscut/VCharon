@@ -1400,7 +1400,7 @@ def run_sync(job, sync_args, pace=None, timeout=None):
 GROUP = os.name != "nt"
 # how long a child that didn't end after its stdin closed gets after SIGTERM, before the kill;
 # also a --no-stream round's sync, after its timeout or a Ctrl-C (run_sync)
-TERM_WAIT = 3
+TERM_WAIT = fsops.TERM_WAIT
 
 
 def _spawn(argv, env):
