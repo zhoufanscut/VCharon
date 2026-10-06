@@ -7,7 +7,36 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.3.0 — 2026-10-06
+
+Watchers that stop and members that leave can now be seen, and a binary that vcharon stops
+leaves less behind. `whoami C` shows when each member's watcher last pulled the channel, and
+`left` for a member who left. `vcharon watch C --once` is one check between steps for an agent
+with no background commands (a new exit code 16). `join` and `create` save the watcher's
+snapshot, so its first start prints what came in between. A Windows binary's process exits at
+once when its bootloader is killed (a real Windows binary was not run). On Linux and macOS, a
+`--no-stream` sync past its limit or cut by Ctrl-C, and `--update`'s runs of the new binary
+(from the update after this one, since the old binary runs them), get SIGTERM before SIGKILL, so
+the unpack folder is removed (measured on Linux; macOS inferred). The channel format is
+unchanged (`format: 1`), so members on older versions can share a channel with 0.3.0 ones
+(inferred from the format; a mixed-version channel was not run); a member on 0.2.3 or older
+shows `watched ?` in a newer member's `whoami`.
+
+**Updating from 0.2.3:** `vcharon --update` also rewrites the skill copies `vcharon skill
+install` wrote (the skill's text changed). After any other way of updating, run `vcharon skill
+install`; join, create and the watcher (not `--once`) print a note while a copy is stale. A
+leader's watcher started after a member joined now prints that member's `JOIN` as `to you:`;
+with `--until-change` it then exits `EXIT change` at once. In "Stable", 0.3.0 only adds:
+`watch --once`, exit code 16 with `EXIT nothing new`, and the `--json` fields `watched`,
+`watch_every` and `left`; nothing is removed or renamed. Scripts that take join's, create's or
+whoami's lines by position or as whole text see new parts (the items say which).
+
+**Checked:** the unit suite in CI on Linux, macOS and Windows with Python 3.13 and 3.14, and the
+ssh flow on Linux to localhost (measured, CI run 37408604324). The run before it (37406543310,
+same source) failed one test on Linux with 3.14, on a race in the test itself: it killed the
+watcher before its snapshot was saved, which a 1 s delay put before that save reproduced here;
+the test now waits for the save. Not checked on a real Windows or macOS box (the new code ran
+on those OSes only in CI's tests), nor over ssh between two machines.
 
 - `join` and `create` save the member's watcher snapshot, so the watcher's first start goes on
   from the join or create (`watching <dir>, <n> files in other folders, since <time>`, then
@@ -23,9 +52,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   couldn't be saved or was removed)`, with `vcharon read C --to-me` then the one-minute check
   as its fix. A save that fails doesn't fail the command: `  note: your watcher's snapshot
   couldn't be saved (<why>): its first start takes what is there then as seen; once it runs,
-  read what came: vcharon read C --to-me <flags>`. To adapt: the leader's watcher
-  (`--until-change` too), started after a member joined, now prints the `JOIN` (and `1 other
-  entry` for its `MEMBER.md`) and exits `EXIT change` at once; a script that takes join's
+  read what came: vcharon read C --to-me <flags>`. To adapt: the leader's watcher, started
+  after a member joined, now prints the `JOIN` (and `1 other entry` for its `MEMBER.md`), and
+  with `--until-change` exits `EXIT change` at once; a script that takes join's
   lines by position may see the note. The snapshot's format, the watcher's lines and
   exit codes, and `--fresh` are unchanged. Checked on Linux (measured): unit tests (local and
   remote members over the fake ssh, a by-hand sync and a failed join sync before the first
@@ -112,8 +141,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   (about 20 MB) stays in the temp folder at each such kill, and ssh under the ended process
   ends on its own (at its stdin's end, or about 45 s on a dead link; inferred). POSIX, and
   Python installs on any OS, are unchanged. Checked by unit tests with a stand-in `_winapi` on
-  Linux (measured); the test with the real `_winapi` and a Python stand-in bootloader runs only
-  on Windows, and was not run; a real Windows binary was not run.
+  Linux (measured); the test with the real `_winapi` and a Python stand-in bootloader passed in
+  CI on Windows with Python 3.13 and 3.14 (measured, run 37406543310); a real Windows binary
+  was not run.
 
 ## 0.2.3 — 2026-10-05
 
