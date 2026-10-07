@@ -420,7 +420,7 @@ class DownJobTest(unittest.TestCase):
     def test_a_lobbys_down_has_no_delete_limit(self):
         def jobs(extra):
             parser = config._parse(("[lobby.mac-web]\nssh = devbox\nmailbox.me = mac-web\n"
-                                    "mailbox.leader = linux-web\nmailbox.local = /tmp/x\n"
+                                    "mailbox.leader = linux-web\nmailbox.local = ~/x\n"
                                     "mailbox.remote = ~/c/lobby\n" + extra).encode("utf-8"),
                                    "f", "f", "fix")
             return config._read_mailbox(parser, "lobby.mac-web", "f", "fix", config.Settings())
