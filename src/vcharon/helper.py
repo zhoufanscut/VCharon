@@ -412,15 +412,23 @@ def channel_list(h, call_id, args):
 
 
 def channel_claim(h, call_id, args):
-    _check_args("channel.claim", args, {"channel": _is_str, "name": _is_str,
-                                        "create": _is_bool})
+    # lobby: sent only for a lobby's first join; a work channel's call has no such key
+    checks = {"channel": _is_str, "name": _is_str, "create": _is_bool}
+    if "lobby" in args:
+        checks["lobby"] = _is_bool
+    _check_args("channel.claim", args, checks)
     h.ok(call_id, channels.claim(channels.root_path(), args["channel"], args["name"],
-                                 args["create"], h.tick))
+                                 args["create"], h.tick, lobby=args.get("lobby", False)))
 
 
 def channel_release(h, call_id, args):
-    _check_args("channel.release", args, {"channel": _is_str, "name": _is_str})
-    h.ok(call_id, channels.release(channels.root_path(), args["channel"], args["name"], h.tick))
+    # keep_charter: sent only for a lobby's join
+    checks = {"channel": _is_str, "name": _is_str}
+    if "keep_charter" in args:
+        checks["keep_charter"] = _is_bool
+    _check_args("channel.release", args, checks)
+    h.ok(call_id, channels.release(channels.root_path(), args["channel"], args["name"], h.tick,
+                                   keep_charter=args.get("keep_charter", False)))
 
 
 def channel_remove(h, call_id, args):

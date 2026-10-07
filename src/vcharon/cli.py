@@ -41,6 +41,7 @@ from . import (
 )
 
 # `run` is the name of _Run objects here.
+from . import kind as kinds
 from . import run as engine
 from .log import HeldLog, Log
 from .mailbox import post as post_mod
@@ -201,15 +202,19 @@ def _parser():
     one.add_argument("--takeover", action="store_true", help="with --rejoin: take the folder "
                      "though another machine's id holds it; only when the user confirms this "
                      "is that machine")
-    one = verb("leave", "leave a channel (a member; the leader closes it)", "vcharon leave myapp")
+    one = verb("leave", "leave a channel (a member; in a work channel the leader closes it)",
+               "vcharon leave myapp")
     channel(one)
     ident(one)
-    one = verb("close", "close and delete a channel (its leader only)", "vcharon close myapp")
+    one = verb("close", "close and delete a work channel (its leader only)",
+               "vcharon close myapp")
     channel(one)
     ident(one)
     one = verb("whoami", "your name, folder, local or remote, server; without C, every "
                "channel you joined from this project", "vcharon whoami myapp --json")
     one.add_argument("channel", metavar="C", nargs="?", help="the channel's name")
+    one.add_argument("--all", action="store_true", help="in a lobby: also the members not "
+                     "seen in 24 h")
     ident(one)
     as_json(one)
 
@@ -218,15 +223,17 @@ def _parser():
                "vcharon post myapp --to @mac-myapp --title \"step 2 done\" --body \"tests pass\"")
     channel(one)
     one.add_argument("--to", nargs="+", required=True, metavar="@NAME",
-                     help="@<name> ..., or @all (the leader only); one argument or several")
+                     help="@<name> ..., or @all (in a work channel, the leader only); one "
+                     "argument or several")
     one.add_argument("--title", required=True, help="the entry's title, one line")
     one.add_argument("--re", metavar="NAME#N", help="the entry this answers")
     one.add_argument("--body", metavar="TEXT", help="the body; without it, stdin is the body. "
                      "A body line that starts like a Markdown heading gets '> ' in front")
     one.add_argument("--file", metavar="NAME.md", help="the .md file in your own folder, a "
-                     "subfolder's with a / (default: RESULTS.md)")
+                     "subfolder's with a / (default: RESULTS.md; in a lobby, the day's "
+                     "chat-YYYY-MM-DD.md)")
     one.add_argument("--steps", action="store_true", help="the leader's plan: --file STEPS.md, "
-                     "the leader only")
+                     "the leader of a work channel only")
     one.add_argument("--no-sync", action="store_true", help="a remote member: don't send the "
                      "entry to the server now; your watcher or the next sync sends it")
     ident(one)
@@ -478,34 +485,50 @@ def _member_doc(cfg, record):
         # the section is gone; where it would be
         tree = plugin.Ctx("local").resolve(channel_cmd.local_text(_section(record)),
                                            "mailbox.local")
+    kind_ = kinds.of(record)
+    # in a lobby, leader is its founder, who leads nothing
     return {"channel": record["channel"], "name": name, "project": record["project"],
             "role": record["role"], "leader": record["leader"],
-            "leads": record["leader"] == name,
+            "leads": record["leader"] == name and kind_.can_close,
             "mode": "local" if record["ssh"] is None else "remote", "server": record["ssh"],
-            "folder": os.path.join(tree, name), "tree": tree}
+            "folder": os.path.join(tree, name), "tree": tree, "kind": kind_.name}
 
 
 def _whoami(args, run):
-    """vcharon whoami [C] [--json]. With C, one object: {"channel", "name", "project", "role",
-    "leader", "leads", "mode", "server", "folder", "tree", "box", "box_source", "members"}:
+    """vcharon whoami [C] [--all] [--json]. With C, one object: {"channel", "name", "project",
+    "role", "leader", "leads", "mode", "server", "folder", "tree", "kind", "box",
+    "box_source", "members"}: "kind" is "work" or "lobby", whose "leader" is its founder,
+    who "leads" nothing;
     "mode" is "local" or "remote", "server" the alias (null for a local member), "folder" your own
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
     without one. "box" is this machine's box now (a membership keeps the name it joined
     with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
     With C only, "members": read_mod.member_list's of the tree but its "vcharon", null when
-    it can't be read.
+    it can't be read; in a lobby each with "presence" too (_presence), every "leader" false.
+    The text of a lobby's lists only the members seen in 24 h, unless --all (_lobby_lines).
     Without C: {"box", "box_source", "project", "role", "name", "channels"}: "name" is the
     name a join from here would take, "channels" every membership of this project on this box
     (of this role too, with --role), each an object as with C, without "box", "box_source"
     and "members"."""
+    if args.all and args.channel is None:
+        raise _usage("--all goes with a lobby's name", "give the lobby's name, or leave out "
+                     "--all")
     cfg = load_config()
     box = {"box": cfg.box_name, "box_source": cfg.box_source}
     if args.channel is not None:
         record, _ = _membership(args)
+        lobby = kinds.of(record) is kinds.LOBBY
+        if args.all and not lobby:
+            raise _usage("--all is for a lobby; %s is a work channel" % args.channel,
+                         "leave out --all")
         doc = _member_doc(cfg, record)
         seen = _watched(record, doc["tree"])
-        members, unread = _members_of(doc["tree"], record["leader"], seen,
+        members, unread = _members_of(doc["tree"], None if lobby else record["leader"], seen,
                                       _whoami_skip(record))
+        now = time.time()
+        if lobby and members is not None:
+            for one in members:
+                one["presence"] = _presence(one, seen, now)
         if args.json:
             # the version is read's (member_info): whoami's members keep their fields
             shown = None if members is None else [
@@ -516,7 +539,10 @@ def _whoami(args, run):
         _say("  box      %s" % cfg.box_text())
         # the version this box runs: vcharon read notes when the members' differ
         _say("  vcharon  %s" % VERSION)
-        _members_lines(doc, members, unread, seen)
+        if lobby and members is not None:
+            _lobby_lines(doc, members, seen, args.all)
+        else:
+            _members_lines(doc, members, unread, seen)
         return 0
     channel_cmd.check_role(args.role)
     project = channel_cmd.project_part(args.project)
@@ -605,9 +631,59 @@ def _members_lines(doc, members, unread, seen):
             read_mod.watched_text(seen, one["name"], one["vcharon"], now))))
 
 
+# a lobby's members whoami lists without --all: those seen in this many seconds
+SEEN_DAY = 24 * 3600
+
+
+def _presence(one, seen, now):
+    """A lobby member's mark (DESIGN, "The lobby"), the first that holds: left
+    (a LEAVE after its last JOIN, and its newest file at most SEEN_DAY old; a left that is
+    unknown counts as not left), here (its stamp at most 2 x its --every + 120 s old, the lead
+    guide's rule), away (a stamp, or with none its newest file, at most SEEN_DAY old), else
+    gone. now: this box's time."""
+    t, every = (seen or {}).get(one["name"], (None, None))
+    newest = entries.parse_time(one["newest"])
+    fresh = newest is not None and now - newest.timestamp() <= SEEN_DAY
+    if one["left"]:
+        return "left" if fresh else "gone"
+    if t is not None and now - t <= 2 * every + 120:
+        return "here"
+    if (now - t <= SEEN_DAY) if t is not None else fresh:
+        return "away"
+    return "gone"
+
+
+def _lobby_lines(doc, members, seen, everyone):
+    """whoami lobby's members: by last watched, newest first (no stamp last), each with its
+    presence; a gone one only with everyone (--all), else one closing count line."""
+    copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
+    _say("  members  %d%s" % (len(members), copy))
+    now = time.time()
+
+    def last(one):
+        t = (seen or {}).get(one["name"], (None, None))[0]
+        return (t is None, -(t or 0), one["name"])
+
+    hidden = 0
+    for one in sorted(members, key=last):
+        if one["presence"] == "gone" and not everyone:
+            hidden += 1
+            continue
+        _say(pathrules.printable("    %s%s  %s  %s  newest file %s  %s" % (
+            one["name"], " (you)" if one["name"] == doc["name"] else "", one["presence"],
+            ", ".join("%s %s" % (k, one[k] or "?") for k in read_mod.WHO_FIELDS),
+            one["newest"] or "-",
+            read_mod.watched_text(seen, one["name"], one["vcharon"], now))))
+    if hidden:
+        _say("  +%d not seen in 24 h (--all)" % hidden)
+
+
 def _whoami_lines(doc):
-    _say("  channel  %s, led by %s%s" % (doc["channel"], doc["leader"],
-                                          " (you)" if doc["leads"] else ""))
+    if doc["kind"] == kinds.LOBBY.name:
+        _say("  channel  %s (a lobby, founded by %s)" % (doc["channel"], doc["leader"]))
+    else:
+        _say("  channel  %s, led by %s%s" % (doc["channel"], doc["leader"],
+                                              " (you)" if doc["leads"] else ""))
     _say("  name     %s  (--project %s%s)" % (doc["name"], doc["project"] or "?",
                                               " --role %s" % doc["role"] if doc["role"] else ""))
     _say("  mode     %s" % ("local, on this machine" if doc["mode"] == "local"
@@ -633,8 +709,9 @@ def _stdin_is_terminal():
 
 
 def _post(args, run):
-    """vcharon post C: an entry into a .md file of your own folder: RESULTS.md, --file's, or
-    the leader's STEPS.md (--steps). post() checks the file (mailbox/post.py)."""
+    """vcharon post C: an entry into a .md file of your own folder: RESULTS.md (a lobby's day
+    file), --file's, or the leader's STEPS.md (--steps). post() checks the file
+    (mailbox/post.py)."""
     to, title, re_ = post_mod.check_args(args.to, args.title, args.re, args.body, args.file)
     if args.steps and args.file is not None:
         raise _usage("--steps is --file %s: give one of them" % post_mod.STEPS_FILE,
@@ -648,6 +725,15 @@ def _post(args, run):
                      "stdin: a file, or a quoted heredoc (<<'EOF')")
     cfg = load_config()
     record, flags = _membership(args)
+    kind_ = kinds.of(record)
+    if args.steps and not kind_.has_plan:
+        raise channel_cmd.channels.refused("a lobby has no plan", "post without --steps")
+    # a lobby's day file is named here from this clock reading, for post()'s checks; the
+    # entry goes into the one of its heading's date, chosen under the post lock
+    today = kind_.day_file(entries.stamp(time.time()))
+    day = args.file is None and not args.steps and today is not None
+    if day:
+        parts = [today]
     if args.no_sync and record["ssh"] is None:
         raise _usage("--no-sync is for a remote member; you are a local member of %s"
                      % args.channel, "leave out --no-sync")
@@ -668,10 +754,18 @@ def _post(args, run):
     path = (post_mod.file_below(own, parts) if os.path.isdir(own)
             else os.path.join(own, *parts))
     body = args.body if args.body is not None else post_mod.body_from(_stdin_bytes())
+    done = {}
     id_, when = post_mod.post(path, name, to, title, re_, body, limits=limits,
-                              channel=args.channel)
+                              channel=args.channel, kind_=kind_, day=day, done=done)
+    if day:
+        parts = [os.path.basename(done["path"])]
     print("posted %s — %s to %s at %s" % (id_, title, "/".join([name] + parts), when))
+    for removed in done["removed"]:
+        print(channel_cmd.REMOVED_OLD % (removed, kinds.KEEP_DAYS))
     sys.stdout.flush()
+    for failed, why in done["failed"]:
+        print(channel_cmd.REMOVE_FAILED % (failed, kinds.KEEP_DAYS, why), file=sys.stderr)
+    sys.stderr.flush()
     _warn_hosts(cfg, record, tree, id_, title, body)
     if record["ssh"] is not None and not args.no_sync:
         _send_post(args.channel, record, flags)
@@ -880,7 +974,7 @@ def _read(args, run):
     skip = None if synced else _over_limit(limits, record["name"])
     # a remote member: the members its last pull left out, whose copy here is as it was
     notes = charter.left_out_notes(_section(record)) if synced else []
-    mine = (record["name"], record["leader"]) if args.to_me else None
+    mine = (record["name"], record["leader"], kinds.of(record)) if args.to_me else None
     # only the reading is in the try: a closed stdout is _guarded's to handle
     try:
         if args.json:
@@ -988,6 +1082,9 @@ def _watch(args, run):
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
               "max_errors": args.max_errors or 10, "updated": dog.changed,
               "orphaned": lambda: run.orphaned("watch"), "once": args.once}
+    if kinds.of(record) is not kinds.WORK:
+        # the record's kind; a work channel's watch gets none, and reads its record
+        limits["kind_"] = kinds.of(record)
     if record["ssh"] is None:
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"

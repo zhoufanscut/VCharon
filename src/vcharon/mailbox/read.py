@@ -81,6 +81,7 @@ import os
 import re
 
 from .. import VERSION, channels, entries, pathrules
+from .. import kind as kinds
 
 INDENT = "    "
 
@@ -433,21 +434,22 @@ def _collect(root, now, skip=None, notes=(), seen=None):
     return folders, ordered, notes, info
 
 
-def to_me(item, me, leader):
+def to_me(item, me, leader, kind_=kinds.WORK):
     """Whether the watcher of me would print item as `to you:` or `to all:`: a placed entry in
-    another member's folder addressed to @<me>, or to @all from the leader. Its own folder is
-    never watched, and a member's @all is ignored, so neither is here either."""
+    another member's folder addressed to @<me>, or to @all from the leader (in a lobby, from
+    any member: kind_.may_post_all). Its own folder is never watched, and a work channel
+    member's @all is ignored, so neither is here either."""
     e = item.e
     if not item.placed or item.folder == me:
         return False
-    return "@" + me in e.to or (entries.ALL in e.to and item.folder == leader)
+    return "@" + me in e.to or (entries.ALL in e.to and kind_.may_post_all(item.folder, leader))
 
 
 def pick(ordered, last=None, ids=None, mine=None):
     """(the items shown, in the view's order; the IDs asked for that no placed entry has).
     ids: only the placed entries with those IDs (a forged copy in another folder is never
-    taken for the entry); mine: (me, leader), only the entries to_me; last: the newest N of
-    what is left."""
+    taken for the entry); mine: (me, leader[, kind]), only the entries to_me; last: the newest
+    N of what is left."""
     shown = ordered
     missing = []
     if ids:

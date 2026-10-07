@@ -53,6 +53,7 @@ class Mailbox:
     channel: str = None   # the section name's first part
     max_mb: int = charter.DEFAULT_MAX_MB          # mailbox.max_mb
     max_files: int = charter.DEFAULT_MAX_FILES    # mailbox.max_files
+    kind: str = None      # mailbox.kind: "lobby", or None for a work channel
 
     @property
     def own_folder(self):
@@ -165,6 +166,9 @@ MAILBOX_JOBS = (".up", ".down")
 # the channel's folder limits (charter), as join writes them from the record; a section
 # without them takes the defaults
 MAILBOX_LIMITS = {"mailbox.max_mb": "max_mb", "mailbox.max_files": "max_files"}
+# "lobby" in a lobby member's section, written by join; absent: a work channel. Its down job has
+# no max_deletes limit (DESIGN, "The lobby")
+MAILBOX_KIND = "mailbox.kind"
 # so S.down stays a job name
 MAILBOX_NAME_MAX = 64 - len(".down")
 # [vcharon] box: at most this long, so a member's name <box>-<project>-<role> fits 32
@@ -602,7 +606,7 @@ def _read_mailbox(parser, section, name, hint, base):
     settings = dataclasses.replace(base)
     values = {}
     for key, value in parser.items(section):
-        if key == "ssh" or key in MAILBOX_KEYS or key in MAILBOX_LIMITS:
+        if key == "ssh" or key in MAILBOX_KEYS or key in MAILBOX_LIMITS or key == MAILBOX_KIND:
             values[key] = value
         elif key in JOB_SETTINGS:
             _setting(settings, key, value, "%s [%s] %s" % (name, section, key), hint)
@@ -655,8 +659,11 @@ def _read_mailbox(parser, section, name, hint, base):
                 and low <= int(text) <= high):
             refuse(key, "a whole number, %d to %d" % (low, high))
         limits[name_] = int(text)
+    kind = values.get(MAILBOX_KIND)
+    if kind is not None and kind != charter.LOBBY_KIND:
+        refuse(MAILBOX_KIND, "%s, or no such key for a work channel" % charter.LOBBY_KIND)
     box = Mailbox(section, me, local, remote, leader, channel, limits["max_mb"],
-                  limits["max_files"])
+                  limits["max_files"], kind)
     # up refuses to push an own folder over them; down leaves out each other member's folder
     # over them (the path source's max_bytes and max_files)
     sizes = {"max_bytes": str(box.max_mb * charter.MB), "max_files": str(box.max_files)}
@@ -670,9 +677,14 @@ def _read_mailbox(parser, section, name, hint, base):
     # mailbox_me: down plans only the other writers' folders at the top of the tree, and leaves out
     # everything else there, <me>/ in any case included (DESIGN, "The path source", "Channel
     # sections")
+    sink = {"path": local, "create": "yes"}
+    if kind == charter.LOBBY_KIND:
+        # a member away long gets every member's old day files deleted at once, which could
+        # pass the dir sink's default; down never deletes the own folder (mailbox_me)
+        sink["max_deletes"] = "0"
     down = Job(section + ".down", values["ssh"],
                Side("remote", "path", dict({"path": remote, "mailbox_me": me, "prune": "yes",
                                             "allow_empty": "yes"}, **sizes)),
-               Side("local", "dir", {"path": local, "create": "yes"}),
+               Side("local", "dir", sink),
                settings, "remote:path", "local:dir", box)
     return [up, down]

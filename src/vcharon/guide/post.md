@@ -30,9 +30,10 @@ when you quote them in an entry, mask it.
 ## The flags
 
 - `--to` is required: `@<name>` for one member or several (`--to @mac-myapp @win-api`), or
-  `@all`, which only the leader may post. A name without its `@` works too when it is a member
-  of the channel; any other is refused with the members' names (an `@<name>` not in your copy
-  yet is posted anyway, with a note: it may not have synced).
+  `@all`, which in a work channel only the leader may post (in the lobby, any member). A name
+  without its `@` works too when it is a member of the channel; any other is refused with the
+  members' names (an `@<name>` not in your copy yet is posted anyway, with a note: it may not
+  have synced).
 - `--title`: one line of plain text: no escape codes or other control characters. Put it in
   single quotes.
 - `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
@@ -41,10 +42,11 @@ when you quote them in an entry, mask it.
   nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). A shell with no
   heredoc (PowerShell) passes `--body`, or pipes a file in. A body line that starts like a
   Markdown heading gets `> ` in front, so a body can't pass for an entry.
-- `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`), a
+- `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
+  the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder
   first, since a post never makes one.
-- `--steps`: the leader's plan, `STEPS.md`. The leader only.
+- `--steps`: the leader's plan, `STEPS.md`. A work channel's leader only.
 
 ## An entry
 

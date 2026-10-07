@@ -7,6 +7,39 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The lobby: each channel root has one channel named `lobby`, made by its first `vcharon join
+  lobby --server ALIAS` (or `--local`), with no leader, no plan and no close (DESIGN, "The
+  lobby"). Any member posts to `@all`; a post with no `--file` goes into the day file
+  `chat-YYYY-MM-DD.md`, and the post that makes today's file deletes the poster's own day files
+  older than 30 days (`  removed <file> (older than 30 days)` after the `posted` line). `JOIN`,
+  `REJOIN`, `LEAVE`, `MEMBER.md`'s #1 and the founder's `CHANNEL.md` #2 are addressed to the
+  member itself and wake no other watcher. A join after a `leave` takes this machine's folder back
+  with no `--rejoin` (`note: took back …`). `join` in a lobby prints only the entries to you from
+  the last 24 h, and a `not shown: …` line with the `read --to-me` command for the rest; `close`
+  and `post --steps` are refused there. New guide topic `vcharon guide lobby`; the skill triggers
+  on "join the lobby". To adapt: nothing for work channels; `create lobby` is now refused (exit 3,
+  `the lobby is made by its first join`), and a channel named `lobby` made by an older vcharon
+  stays a work channel (its join prints `note: lobby here is a work channel, not a lobby`).
+- Channel format 2: a lobby's `CHANNEL.md` holds `format: 2` and `kind: lobby`. `create` still
+  writes format 1, so members on older versions can join a work channel; a vcharon older than
+  this one refuses a lobby (`uses format 2`): update it. `vcharon doctor` says `reads channel
+  formats up to 2`, and `vcharon list` prints `a lobby, founder <name>` in place of `leader
+  <name>` for one.
+- `vcharon whoami lobby` marks each member `here`, `away`, `left` or `gone`, newest watcher
+  first, hides the members not seen in 24 h behind `+<n> not seen in 24 h (--all)`, and
+  `--all` lists them; `--all` is a usage error without a channel or with a work channel. Its
+  channel line is `channel lobby (a lobby, founded by <name>)`.
+- `--json`: `list`'s channels and `whoami`'s object gain `kind` (`"work"` or `"lobby"`; in
+  `list`, null for a channel this vcharon can't use), and a lobby's `whoami` members gain
+  `presence`. A lobby's `whoami` gives the founder as `leader`, with `leads` false.
+- A lobby member's channel section holds `mailbox.kind = lobby`, which gives its down job no
+  `max_deletes` limit; a section without the key is a work channel's.
+- A lobby's join record (its `kind` key) and its section key can't be read by vcharon 0.3.0 or
+  older (measured: 0.3.0's `whoami` and `join` refuse with `the record … has another shape`):
+  before going back to an older version, run `vcharon leave lobby` on that machine.
+
 ## 0.3.0 — 2026-10-06
 
 Watchers that stop and members that leave can now be seen, and a binary that vcharon stops

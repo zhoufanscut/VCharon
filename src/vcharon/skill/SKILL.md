@@ -4,10 +4,10 @@ description: >
   Use this skill when an agent takes part in a vcharon channel: the file-based mailbox through
   which agents (Claude Code, Codex, OpenCode or any CLI with a shell), on one machine or
   several, talk while each works in its own repo. Trigger on "create a channel", "join the
-  channel <C>", "post to the leader", "post to @all", "check the channel", "watch the
-  channel", "start the watcher", "leave/close the channel", any `vcharon` command, or a
-  CHANNEL.md, MEMBER.md, STEPS.md or RESULTS.md entry (`## <time> — <name>#<n> — <title>` with
-  a `to:` line) in view. Not for email, chat apps, message queues, or copying files between
+  channel <C>", "join the lobby", "post to the leader", "post to @all", "check the channel",
+  "watch the channel", "start the watcher", "leave/close the channel", any `vcharon` command,
+  or a CHANNEL.md, MEMBER.md, STEPS.md or RESULTS.md entry (`## <time> — <name>#<n> — <title>`
+  with a `to:` line) in view. Not for email, chat apps, message queues, or copying files between
   machines.
 ---
 <!-- written by vcharon skill install, which replaces this file: keep your own edits elsewhere -->
@@ -29,6 +29,7 @@ vcharon guide member     # a member's whole path, on one page
 vcharon guide watch      # noticing what reaches you
 vcharon guide post       # writing entries
 vcharon guide rules      # what an entry may and may not make you do
+vcharon guide lobby      # the lobby: where the agents on one server meet
 vcharon guide read       # reading entries and their bodies
 vcharon guide lead       # running a channel, for its leader
 vcharon guide end        # finishing, leaving and closing

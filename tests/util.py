@@ -250,9 +250,9 @@ OLD_SKILL = "---\nname: vcharon\n---\n%s\nold text\n" % skill.MARKER
 
 
 def record_format(limits=None):
-    """A join record's format and limits, as join writes them: this vcharon's format, and
+    """A join record's format and limits, as join writes them: a work channel's format, and
     the default limits unless limits ({max_mb, max_files, max_entry_kb}) are given."""
-    return {"format": charter.FORMAT, "limits": dict(limits or charter.default_limits())}
+    return {"format": charter.WORK_FORMAT, "limits": dict(limits or charter.default_limits())}
 
 
 _REAL_READ_JOBS = config._read_jobs

@@ -10,7 +10,9 @@ The leader's CHANNEL.md entry #2, written by create, carries them in its header:
     max files: 1000
     max entry kb: 1000
 
-Sizes are decimal, as the sync's lines print them: 1 MB is 1,000,000 bytes, 1 kB 1,000."""
+A lobby's (format 2) holds `kind: lobby` right after format:, and the lobby's fixed limits
+(DESIGN, "The lobby"). Sizes are decimal, as the sync's lines print them: 1 MB is 1,000,000
+bytes, 1 kB 1,000."""
 
 from __future__ import annotations
 
@@ -23,9 +25,15 @@ import tempfile
 from . import entries, pathrules, platform
 from .proto import VCharonError
 
-# The newest channel format this vcharon reads and writes. Raised only for a change an older
-# vcharon would misread, never for a new field an older one can ignore.
-FORMAT = 1
+# The newest channel format this vcharon reads. Raised only for a change an older vcharon
+# would misread, never for a new field an older one can ignore.
+FORMAT = 2
+# what each kind of channel is written in: create still writes 1, so a member on an older
+# vcharon can join a work channel; only a lobby is 2, which an older one would misread
+WORK_FORMAT = 1
+LOBBY_FORMAT = 2
+# CHANNEL.md's kind: value for a lobby; a channel without one is a work channel
+LOBBY_KIND = "lobby"
 # The limits' defaults: a guess, not measured; to tune once real channels have run.
 DEFAULT_MAX_MB = 50
 DEFAULT_MAX_FILES = 1000
@@ -36,6 +44,9 @@ DEFAULT_MAX_ENTRY_KB = 1000
 # entry file whole, which bounds max_entry_kb.
 BOUNDS = {"max_mb": (1, 10000), "max_files": (10, 100000), "max_entry_kb": (1, 10000)}
 LIMIT_KEYS = ("max_mb", "max_files", "max_entry_kb")
+# a lobby's, fixed: nothing sets them (create lobby is refused, join has no limit flags). An
+# entry file is a day file there, so it holds a whole day
+LOBBY_LIMITS = {"max_mb": 50, "max_files": 1000, "max_entry_kb": 10000}
 # each limit's key in CHANNEL.md's header
 HEADER_KEYS = {"max_mb": "max mb", "max_files": "max files", "max_entry_kb": "max entry kb"}
 MB = 1000 * 1000
@@ -45,6 +56,23 @@ READ_MAX = 64 << 10
 UPDATE_HINT = "ask your user to run: vcharon --update"
 NO_FORMAT_HINT = ("ask your user which channel to join; to use this one, its leader closes it "
                   "and creates it again")
+# a kind no vcharon writes: a lobby has no leader to close it, so the hint names none
+NO_KIND_HINT = "ask your user which channel to join"
+
+
+# CHANNEL.md's rules: header, for every member who reads it
+RULES = "vcharon guide rules"
+
+
+def charter_entry(channel, name, version, limits, now, kind=None):
+    """(title, to, header) of CHANNEL.md's #2 by name: create's, to @all, and a lobby's
+    claim's (kind LOBBY_KIND), to the founder itself: in a lobby an entry to its own poster
+    wakes no one, and every new member would be told of it. No host name of either end: a
+    channel's files are shared."""
+    to = ["@" + name] if kind == LOBBY_KIND else [entries.ALL]
+    return ("channel %s created" % channel, to,
+            [("leader", name), ("created", entries.stamp(now)), ("rules", RULES)]
+            + header(version, limits, kind))
 
 
 def default_limits():
@@ -52,9 +80,14 @@ def default_limits():
             "max_entry_kb": DEFAULT_MAX_ENTRY_KB}
 
 
-def header(version, limits):
-    """The header lines create writes into CHANNEL.md's #2, after leader: and created:."""
-    return [("format", str(FORMAT)), ("created by", "vcharon %s" % version)] + [
+def header(version, limits, kind=None):
+    """The header lines create (and a lobby's claim) writes into CHANNEL.md's #2, after
+    leader: and created:; kind LOBBY_KIND for a lobby's, None for a work channel's."""
+    if kind == LOBBY_KIND:
+        lines = [("format", str(LOBBY_FORMAT)), ("kind", LOBBY_KIND)]
+    else:
+        lines = [("format", str(WORK_FORMAT))]
+    return lines + [("created by", "vcharon %s" % version)] + [
         (HEADER_KEYS[k], str(limits[k])) for k in LIMIT_KEYS]
 
 
@@ -66,11 +99,15 @@ def _number(value):
 
 def parse(text, leader):
     """{"format", "limits"} from CHANNEL.md's text: the header of the leader's entry #2;
-    "format" an int or None, "limits" {max_mb, max_files, max_entry_kb}, each an int or None.
-    Not checked here: the client does that (check)."""
+    "format" an int or None, "limits" {max_mb, max_files, max_entry_kb}, each an int or None;
+    and "kind", the kind: line's text, only when it has one (a work channel's has none). Not
+    checked here: the client does that (check)."""
     found = entries.header_of(text, leader, 2)
-    return {"format": _number(found.get("format")),
-            "limits": {k: _number(found.get(HEADER_KEYS[k])) for k in LIMIT_KEYS}}
+    out = {"format": _number(found.get("format")),
+           "limits": {k: _number(found.get(HEADER_KEYS[k])) for k in LIMIT_KEYS}}
+    if found.get("kind") is not None:
+        out["kind"] = found["kind"]
+    return out
 
 
 def read(member_folder, leader):
@@ -110,9 +147,11 @@ def limits_problem(limits):
 
 
 def check(channel, info, limits_hint=None):
-    """The channel's limits (a dict) from info ({"format", "limits"}: a channel.list or
-    channel.claim reply's, or a join record's), or refused: no format (not a VCharon
-    channel), a newer format than this vcharon reads, or limits that aren't a channel's.
+    """The channel's limits (a dict) from info ({"format", "kind", "limits"}: a channel.list or
+    channel.claim reply's, or a join record's, where a missing kind is a work channel's), or
+    refused: no format (not a VCharon channel), a newer format than this vcharon reads, a kind
+    no vcharon writes (format 2 without kind: lobby, or any other kind), or limits that aren't
+    a channel's.
     limits_hint: the fix for those limits (a join record's: the rejoin); by default, the
     leader's CHANNEL.md."""
     fmt = info.get("format") if isinstance(info, dict) else None
@@ -123,6 +162,14 @@ def check(channel, info, limits_hint=None):
     if fmt > FORMAT:
         raise VCharonError("channel", "%s uses format %d; this vcharon reads up to %d"
                            % (channel, fmt, FORMAT), UPDATE_HINT)
+    kind = info.get("kind")
+    if (kind not in (None, LOBBY_KIND)
+            or (kind == LOBBY_KIND) != (fmt == LOBBY_FORMAT)):
+        raise VCharonError("channel", "%s's %s says format %d%s, which no vcharon writes"
+                           % (channel, entries.CHANNEL_FILE, fmt,
+                              " with no kind:" if kind is None
+                              else " and kind: %s" % pathrules.show(str(kind))),
+                           NO_KIND_HINT)
     limits = info.get("limits")
     problem = limits_problem(limits)
     if problem:

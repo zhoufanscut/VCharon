@@ -26,9 +26,11 @@ rounds.
 Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
 it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
 addressed to <me>, or to @all from the leader (the section's mailbox.leader; in server mode
-the record's, else MEMBER.md's). Every line starts with the local time, `YYYY-mm-dd HH:MM:SS `,
-and goes through pathrules.printable: titles, IDs and file names come from other members, and
-a control character in one could forge a line or drive the terminal.
+the record's, else MEMBER.md's), in a lobby from any member. In a lobby an entry addressed
+only to its own poster (a JOIN, REJOIN, LEAVE, a MEMBER.md #1) prints nothing at all. Every
+line starts with the local time, `YYYY-mm-dd HH:MM:SS `, and goes through pathrules.printable:
+titles, IDs and file names come from other members, and a control character in one could forge
+a line or drive the terminal.
 Lines; * marks the ones that count for --until-change:
 
     watching <dir>, <n> files in other folders
@@ -59,7 +61,7 @@ Lines; * marks the ones that count for --until-change:
                                    the leader, wakes nobody); one line a round; `1 other entry
                                    (<folder>)` for one
     note: @all from <folders>, not the leader: ignored
-                                   one line a round
+                                   one line a round; in a work channel only
     new | changed | gone <path>    a file that isn't a .md file in a member's folder
   * WARN <text>                    server mode: another member's folder over the
                                    channel's limits, held as it was until it is back under;
@@ -99,13 +101,15 @@ what is there as seen and prints none of it (a baseline). A round that changed n
 that of the last round that changed it. Per member folder it holds the entry numbers
 seen (every number up to "low", and those in "more": a member's #8 can arrive before its #7),
 each ID's file and heading hash for the edit check, and the hashes of the entries that have no
-ID of their folder ("loose"), so each is told once. It holds the warnings shown too: a restart
-prints them again right after the watching line, and only a new one counts. It holds the ERROR
-line shown and its fix line, and the keys of the errors that counted in the failing streak: a
-restart whose first round fails with the saved text prints it again without counting it, so a
-blocked client isn't woken in a loop. With --until-change, a round whose save failed ends the
-watch with EXIT error (exit 11). A lock on it keeps a second watcher of the same membership from
-starting (exit 12).
+ID of their folder ("loose"), so each is told once. A lobby never ends, so its watcher keeps them
+short (_Watch._prune): the heads of entries whose file is gone are dropped, and each folder's
+numbers below the smallest still in its day files are taken as seen. It holds the warnings shown
+too: a restart prints them again right after the watching line, and only a new one counts. It
+holds the ERROR line shown and its fix line, and the keys of the errors that counted in the
+failing streak: a restart whose first round fails with the saved text prints it again without
+counting it, so a blocked client isn't woken in a loop. With --until-change, a round whose save
+failed ends the watch with EXIT error (exit 11). A lock on it keeps a second watcher of the same
+membership from starting (exit 12).
 
 Each round that read the channel stamps the member's last-watched time at the channel's
 machine (channels.stamp_seen, beside the channel root, never in the channel): a local member's
@@ -144,6 +148,7 @@ from .. import (
     platform,
     plugin,
 )
+from .. import kind as kinds
 from ..lock import Lock
 from ..proto import VCharonError
 
@@ -445,6 +450,17 @@ class Marks:
         self.loose = set(loose)
         self.dups = set()
 
+    def raise_low(self, folder, n):
+        """Every number of folder up to n taken as seen."""
+        s = self.seen.setdefault(folder, [0, set()])
+        if n <= s[0]:
+            return
+        s[0] = n
+        s[1] = {k for k in s[1] if k > n}
+        while s[0] + 1 in s[1]:
+            s[0] += 1
+            s[1].discard(s[0])
+
     def has(self, folder, n):
         s = self.seen.get(folder)
         return s is not None and (n <= s[0] or n in s[1])
@@ -496,10 +512,13 @@ class Told:
         return len(self.entries) + len(self.edited)
 
 
-def read_entries(root, paths, marks, me, leader, baseline=False, present=None, closing=None):
+def read_entries(root, paths, marks, me, leader, baseline=False, present=None, closing=None,
+                 kind_=kinds.WORK):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
-    member's is ignored, since any member can write anything into its own folder. present:
+    member's is ignored, since any member can write anything into its own folder; in a lobby
+    (kind_) any member's is to all, and an entry addressed only to its poster is told to
+    nobody, not even as an other entry (kind_.silent). present:
     every file in the tree now (None: all those the marks name); an ID's head in a file gone
     from it, or in a file that no longer holds the ID, gives way to the next copy seen.
     closing: the line printed right after the leader's CLOSED to @all (CLOSED_NEXT), or None
@@ -575,12 +594,15 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
             # the leader's end of the channel, to @all (with @<me> too, it prints as to you)
             after = ([closing] if closing is not None and folder == leader
                      and entries.ALL in e.to and e.title.strip() == CLOSED_TITLE else [])
+            if kind_.silent(e, folder):
+                # every agent rejoins at each session: a wake is a turn for every member
+                continue
             if path == "%s/%s" % (folder, entries.MEMBER_FILE):
                 # a member's #1, addressed to the leader by design: its JOIN is what tells
                 told.others.append(folder)
             elif "@" + me in e.to:
                 told.entries.append((e.time or "", path, e.line, ["to you: " + where] + after))
-            elif entries.ALL in e.to and folder == leader:
+            elif entries.ALL in e.to and kind_.may_post_all(folder, leader):
                 told.entries.append((e.time or "", path, e.line, ["to all: " + where] + after))
             elif entries.ALL in e.to:
                 told.all_from.append(folder)
@@ -839,9 +861,12 @@ class _Watch:
 
     def __init__(self, root, me, out, clock, fold=False, state=None, check=None, leader=None,
                  gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None,
-                 closing=None):
+                 closing=None, kind_=kinds.WORK):
         self.root = root
         self.me = me
+        # the channel's kind: whose @all is to all, what is told to nobody, and whether the
+        # marks are kept short (_prune)
+        self.kind = kind_
         # a local member's: (max bytes, max files) of each other member's folder; one over
         # them is held as it was (hold_over), with a WARN line while it lasts
         self.folder_limits = folder_limits
@@ -979,11 +1004,46 @@ class _Watch:
     def entries(self, files, paths, baseline=False):
         """Reads the entry files among paths into the marks; returns the round's Told. A file
         that couldn't be read leaves files, so the next round reads it again."""
+        # each folder's highest number seen before this round: the cap of _prune's floor
+        prior = {f: max([s[0]] + list(s[1])) for f, s in self.marks.seen.items()}
         told = read_entries(self.root, [p for p in paths if is_entry_file(p)], self.marks,
-                            self.me, self.leader, baseline, files, self.closing)
+                            self.me, self.leader, baseline, files, self.closing, self.kind)
         for path in told.unread:
             files.pop(path, None)
+        if self.kind.prune_heads:
+            self._prune(files, told.unread, prior)
         return told
+
+    def _prune(self, files, unread, prior):
+        """A lobby's marks kept short, for a channel that never ends (DESIGN, "The lobby"):
+        the head of an entry whose file isn't in files (the whole tree now) is dropped, since a
+        day file deleted after 30 days doesn't come back; and in each folder, the numbers below
+        the smallest one in its day files, up to the highest one seen before this round
+        (prior), are taken as seen. The cleanup deletes the oldest day files first, so a gap it
+        leaves closes one round after the watcher first sees past it; the cap lets an entry that
+        lags one round behind a higher-numbered day-file entry still be printed. A folder with
+        a file that couldn't be read (unread) is skipped. Only day files count: a founder's
+        CHANNEL.md #2, or an old --file file, stays for good and would pin the low mark. Else a
+        member that joins after another's cleanup keeps every later number of that folder in
+        its list for good."""
+        low = {}
+        for i, head in list(self.marks.heads.items()):
+            path = head[0]
+            if path is None:
+                continue
+            if path not in files:
+                del self.marks.heads[i]
+                continue
+            folder, _, name = path.partition("/")
+            if kinds.day_of(name) is None:
+                continue
+            found = entries.parse_id(i)
+            if found is not None and (folder not in low or found[1] < low[folder]):
+                low[folder] = found[1]
+        skip = {path.partition("/")[0] for path in unread}
+        for folder, n in low.items():
+            if folder not in skip:
+                self.marks.raise_low(folder, min(n - 1, prior.get(folder, 0)))
 
     def round(self):
         """Prints what reached the member since the last good scan. Returns (the error line of
@@ -1260,12 +1320,14 @@ def _locked(w, state):
 
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
-              max_errors=10, folder_limits=None, updated=None, orphaned=None, once=False):
+              max_errors=10, folder_limits=None, updated=None, orphaned=None, once=False,
+              kind_=None):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
     WARN line. updated, orphaned: _loop's. once: a --once check (_once), refused (VCharonError)
-    with no usable saved snapshot. Returns the exit code. Refused (VCharonError) unless
+    with no usable saved snapshot. kind_: the channel's, from the caller's record; None reads
+    it as the leader is read (server_kind). Returns the exit code. Refused (VCharonError) unless
     root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
     closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
@@ -1281,12 +1343,14 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         # there, but not a folder or not readable: server_leader says what's wrong
         pass
     leader = server_leader(root, me)
+    if kind_ is None:
+        kind_ = server_kind(root, me, leader)
     state = snapshot_path(root, me)
     # only a check prints them (its refusal and fix lines)
     flags = channel_cmd.name_flags(os.path.basename(root), me) if once else None
     if once:
         _need_snapshot(state, root, me, os.path.basename(root), flags)
-    w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone)
+    w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone, kind_=kind_)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
@@ -1316,18 +1380,18 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         lk.release()
 
 
-def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None):
+def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kinds.WORK):
     """A local member's _Watch, for its watcher and for first_look: one place for the choices
-    the saved snapshot depends on (the check, the folder limits), so join saves the snapshot
-    the watcher's start would. A difference there isn't caught when it loads: the first round
-    would show a false WARN or held folder, and count it as a change."""
+    the saved snapshot depends on (the check, the folder limits, the kind), so join saves the
+    snapshot the watcher's start would. A difference there isn't caught when it loads: the
+    first round would show a false WARN or held folder, and count it as a change."""
     return _Watch(root, me, out, clock, state=snapshot_path(root, me), check=warnings,
                   leader=leader, gone=gone, folder_limits=folder_limits,
-                  closing=closed_next(os.path.basename(root), me, leader))
+                  closing=closed_next(os.path.basename(root), me, leader, kind_), kind_=kind_)
 
 
 def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic, hold=None,
-               suffix=""):
+               suffix="", kind_=kinds.WORK):
     """A remote member's _Watch, for its watcher and for first_look (_dir_watch says why
     one place): the fold, and the check, which is the members its last pull left out for
     their size, as the sync saved them after its down (a WARN each while it lasts, in both
@@ -1335,7 +1399,7 @@ def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic
     return _Watch(local, me, out, clock, fold=FOLDS, state=snapshot_path(local, me, job),
                   leader=leader, timer=timer, hold=hold, suffix=suffix,
                   check=lambda root, me: charter.left_out_notes(job),
-                  closing=closed_next(channel, me, leader))
+                  closing=closed_next(channel, me, leader, kind_), kind_=kind_)
 
 
 def _discard(line):
@@ -1355,14 +1419,15 @@ def first_look(record, section, created=False, keep=False):
     section that can't be read. It never stamps the member's last-watched time: no watcher
     ran."""
     me = record["name"]
+    kind_ = kinds.of(record)
     if record["ssh"] is None:
         root = channel_cmd.local_root(record)
         limits = channel_cmd.channel_limits(record)
         w = _dir_watch(root, me, _discard, time.time, record["leader"],
-                       (limits["max_mb"] * charter.MB, limits["max_files"]))
+                       (limits["max_mb"] * charter.MB, limits["max_files"]), kind_=kind_)
     else:
         local, me, leader, channel = mailbox_of(section)
-        w = _job_watch(section, local, me, leader, channel, _discard, time.time)
+        w = _job_watch(section, local, me, leader, channel, _discard, time.time, kind_=kind_)
     if keep and load_snapshot(w.state, w.root, w.me)[0] is not None:
         return None
     warns = w._created() if created else w._baseline()
@@ -1852,6 +1917,16 @@ def server_leader(root, me):
                        % (member, me, channel), "ask the user")
 
 
+def server_kind(root, me, leader):
+    """The kind of a local member's channel: its record's, else (no record: server_leader
+    read the leader from MEMBER.md) the one the leader's CHANNEL.md says."""
+    channel = os.path.basename(root)
+    record = None if pathrules.writer_problem(channel) else channel_cmd.read_record(channel, me)
+    if record is not None:
+        return kinds.of(record)
+    return kinds.of_name(charter.read(os.path.join(root, leader), leader).get("kind"))
+
+
 def gone_fix(root, me):
     """A local member's fix line for a channel folder that's gone: the sync's text for a
     closed channel, with the leave command's flags from me's record (a placeholder without
@@ -1861,11 +1936,12 @@ def gone_fix(root, me):
                              % (channel, channel_cmd.name_flags(channel, me)))
 
 
-def closed_next(channel, me, leader):
+def closed_next(channel, me, leader, kind_=kinds.WORK):
     """The line after the leader's CLOSED to @all: the leave command with the flags from me's
     record (a placeholder without one, as gone_fix), as this box runs vcharon. None for the
-    leader, who closes instead (its own folder is never read anyway)."""
-    if me == leader:
+    leader, who closes instead (its own folder is never read anyway), and in a lobby, where a
+    CLOSED is chat."""
+    if me == leader or not kind_.closing_line:
         return None
     return platform.runnable(CLOSED_NEXT % (channel, channel_cmd.name_flags(channel, me)))
 
@@ -1884,7 +1960,7 @@ def is_gone(fix):
 def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
-              updated=None, orphaned=None, once=False):
+              updated=None, orphaned=None, once=False, kind_=kinds.WORK):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
     membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
@@ -1893,7 +1969,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
     way. orphaned: _loop's. once: a --once check (_once): one sync, never streamed, capped at
     ONCE_TIMEOUT; refused (VCharonError) with no usable saved snapshot. run: run_sync with the
-    watcher's pace, unless a test gives one."""
+    watcher's pace, unless a test gives one. kind_: the channel's, from the caller's record."""
     stream = stream and not once
     if run is None:
         def run(job, sync_args):
@@ -1906,7 +1982,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         _need_snapshot(state, local, me, sync_args[0], flags)
     w = _job_watch(job, local, me, leader, channel, out, clock, timer=timer,
                    hold=STREAM_HOLD if stream else None,
-                   suffix=", streaming every %d s" % every if stream else "")
+                   suffix=", streaming every %d s" % every if stream else "", kind_=kind_)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED

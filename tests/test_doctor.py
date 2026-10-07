@@ -162,7 +162,7 @@ class DoctorTest(DoctorCase):
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
         self.assertEqual(lines.pop(1), "  ok    vcharon    %s, protocol 3, reads channel "
-                         "formats up to 1; runs as %s"
+                         "formats up to 2; runs as %s"
                          % (vcharon.VERSION, platform.self_command()))
         # how it was installed: what vcharon --update touches
         self.assertEqual(lines.pop(1), "  ok    install    a checkout, %s: vcharon --update "
@@ -227,7 +227,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual((doc["helper_bundle"]["modules"], doc["helper_bundle"]["has_helper"]),
                          (len(modules), True))
         self.assertGreater(doc["helper_bundle"]["bytes"], 8)
-        self.assertEqual(doc["format"], 1)
+        self.assertEqual(doc["format"], 2)
         # the folders vcharon writes, as the dirs line names them
         self.assertEqual(doc["dirs"], {
             "state": os.path.join(self.vcharon_home, "state"),

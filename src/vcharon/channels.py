@@ -11,7 +11,7 @@ import stat
 import tempfile
 import time
 
-from . import charter, fsops, pathrules, platform
+from . import VERSION, charter, entries, fsops, pathrules, platform
 from .entries import CHANNEL_FILE, MEMBER_FILE, header_of
 from .proto import VCharonError
 
@@ -192,11 +192,11 @@ def _close_all(*handles):
 
 def list_channels(root, tick=_no_tick):
     """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "format",
-    "limits"}], "others": [{"name", "why"}]}, in name order. fields: for each member, {"box",
-    "os", "agent", "project"} from its MEMBER.md (None each when it's missing); leaders: the
-    members whose folder holds CHANNEL.md; newest: the newest file's mtime, or None; format
-    and limits: from the one leader's CHANNEL.md (charter.parse), unchecked. A missing root
-    holds no channel."""
+    "kind", "limits"}], "others": [{"name", "why"}]}, in name order. fields: for each member,
+    {"box", "os", "agent", "project"} from its MEMBER.md (None each when it's missing);
+    leaders: the members whose folder holds CHANNEL.md; newest: the newest file's mtime, or
+    None; format, kind (a lobby's only) and limits: from the one leader's CHANNEL.md
+    (charter.parse), unchecked. A missing root holds no channel."""
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
@@ -270,8 +270,8 @@ def _channel_info(path, name, tick):
 
 
 def _charter(path, leaders):
-    """{"format", "limits"} from the one leader's CHANNEL.md (charter.parse); no format when
-    the channel has no leader or several."""
+    """{"format", "limits"}, and "kind" for a lobby, from the one leader's CHANNEL.md
+    (charter.parse); no format when the channel has no leader or several."""
     if len(leaders) != 1:
         return charter.parse("", "")
     return charter.read(os.path.join(path, leaders[0]), leaders[0])
@@ -293,14 +293,19 @@ def _leaders(path):
 
 # --- channel.claim, channel.release ---
 
-def claim(root, channel, name, create, tick=_no_tick):
+def claim(root, channel, name, create, tick=_no_tick, lobby=False):
     """mkdir <root>/<channel>/<name>, and with create <root>/<channel> first (and the root's
     missing parents): one mkdir each, so of two creators or two joiners with one name only one
-    wins. Returns {"existed": the member folder was there already, "machine", "root": the
-    root as a section's mailbox.remote spells it, "claimer": the claimer: of the existing
-    folder's MEMBER.md, or None (a new folder, no MEMBER.md, none in it), "format" and
-    "limits": the channel's, as list_channels gives them}. Never a host name: the reply's
-    values go into the channel's files."""
+    wins. With create and lobby (a lobby's first join), then <name>/CHANNEL.md with the
+    lobby's header and limits, in this one call: a CHANNEL.md sent only by the founder's first
+    sync would leave the lobby without one until then, and every other join would be refused
+    (DESIGN, "The lobby"); a write that fails removes <name>/ and then <channel>/. Returns
+    {"existed": the member folder was there already, "machine", "root": the root as a
+    section's mailbox.remote spells it, "claimer": the claimer: of the existing folder's
+    MEMBER.md, or None (a new folder, no MEMBER.md, none in it), "format", "limits" (and
+    "kind" for a lobby): the channel's, as list_channels gives them}, and for a lobby made
+    "charter": the CHANNEL.md's text, which a remote founder writes into its local tree as it
+    is. Never a host name: the reply's values go into the channel's files."""
     _check_names(channel, name)
     if create:
         try:
@@ -345,19 +350,46 @@ def claim(root, channel, name, create, tick=_no_tick):
         claimer = _claimer_of(ch, name) if existed else None
     finally:
         _close_all(ch, top)
+    made = create and lobby and _write_charter(root, channel, name)
     if not existed:
         # a stamp left by an earlier member of this name isn't this member's
         drop_seen(root, channel, name)
     sweep_seen(root)
     reply = {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
              "claimer": claimer}
-    # a new channel's CHANNEL.md isn't written yet: create writes it after the claim
+    if made:
+        reply["charter"] = made
+    # a new work channel's CHANNEL.md isn't written yet: create writes it after the claim
     path = os.path.join(root, channel)
     try:
         reply.update(_charter(path, _leaders(path)))
     except OSError:
         reply.update(charter.parse("", ""))
     return reply
+
+
+def _write_charter(root, channel, name):
+    """A lobby's CHANNEL.md in the just-made <root>/<channel>/<name>/, as create writes a
+    work channel's (entries.post); its text. On a failure, the file, the member's folder and
+    the channel's folder go again, as a failed member mkdir removes the channel's."""
+    own = os.path.join(root, channel, name)
+    path = os.path.join(own, CHANNEL_FILE)
+    title, to, header = charter.charter_entry(channel, name, VERSION, charter.LOBBY_LIMITS,
+                                              time.time(), charter.LOBBY_KIND)
+    try:
+        entries.post(path, own, name, title, to, header=header, number=2)
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8")
+    except BaseException as e:
+        for undo in (lambda: os.remove(path), lambda: os.rmdir(own),
+                     lambda: os.rmdir(os.path.join(root, channel))):
+            try:
+                undo()
+            except OSError:
+                pass
+        if isinstance(e, OSError):
+            raise fsops.error(e, path) from None
+        raise
 
 
 def _claimer_of(ch, name):
@@ -374,10 +406,13 @@ def _claimer_of(ch, name):
     return member_fields(data, name)["claimer"] if data is not None else None
 
 
-def release(root, channel, name, tick=_no_tick):
+def release(root, channel, name, tick=_no_tick, keep_charter=False):
     """Removes <root>/<channel>/<name> while it's empty or holds only MEMBER.md and
     CHANNEL.md (what a failed join or create put there), then <root>/<channel> if that left it
-    empty. Returns {"removed": bool}."""
+    empty. Returns {"removed": bool}. keep_charter (a lobby's): a folder holding CHANNEL.md in
+    a channel with anything else in it keeps CHANNEL.md, and so itself; only its MEMBER.md
+    goes, and the reply adds "kept": True. Other members may have joined the lobby since the
+    claim, and a lobby without CHANNEL.md is refused at every join."""
     _check_names(channel, name)
     top = _open_root(root)
     if top is None:
@@ -393,6 +428,10 @@ def release(root, channel, name, tick=_no_tick):
         names = member.listdir()
         if set(names) - RELEASABLE or not all(_is_file(member, n) for n in names):
             return {"removed": False}
+        if keep_charter and CHANNEL_FILE in names and set(ch.listdir()) != {name}:
+            if MEMBER_FILE in names:
+                member.unlink(MEMBER_FILE)
+            return {"removed": False, "kept": True}
         for n in names:
             member.unlink(n)
         member.close()

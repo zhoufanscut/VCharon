@@ -463,18 +463,27 @@ def set_header(path, own, name, number, key, value, wait=LOCK_WAIT):
 
 
 def post(path, own, name, title, to, re_=None, body="", header=(), clock=time.time,
-         number=None, check=None):
+         number=None, check=None, path_for=None, after=None):
     """Appends one entry of name to path, in the own folder own, under its lock; the number is
     the next one (or number, for MEMBER.md's #1 and CHANNEL.md's #2). Returns (id, time).
-    check(path, the file's size after the append): called under the lock before anything is
-    written; it refuses by raising."""
+    path_for(the heading's time text): the file to append to in place of path, chosen under
+    the lock from the heading's own clock reading (a lobby's day file: an entry posted at
+    midnight goes into the file of its heading's day). check(the path, the file's size after
+    the append): called under the lock before anything is written; it refuses by raising.
+    after(the path, whether this post created it): called under the lock once the entry is
+    written (a lobby's cleanup)."""
     with lock(own):
         n = number if number is not None else next_number(own, name)
         when = stamp(clock())
+        if path_for is not None:
+            path = path_for(when)
         text = build(when, name, n, title, to, re_, header, body)
+        created = after is not None and not os.path.lexists(path)
         if check is not None:
             check(path, size_after(path, text))
         append(path, text)
+        if after is not None:
+            after(path, created)
     return "%s#%d" % (name, n), when
 
 

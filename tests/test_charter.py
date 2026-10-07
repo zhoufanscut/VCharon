@@ -74,15 +74,15 @@ class CharterTest(unittest.TestCase):
             self.assertIsNone(charter.read(os.path.join(self.tmp, "linked"), "lead")["format"])
 
     def test_check_same_older_newer_none(self):
-        # the same format, and an older one (this vcharon reading format 2 at most)
+        # the same format, and an older one (this vcharon reading format 3 at most)
         self.assertEqual(charter.check("game", {"format": 1, "limits": LIMITS}), LIMITS)
-        with mock.patch.object(charter, "FORMAT", 2):
+        with mock.patch.object(charter, "FORMAT", 3):
             self.assertEqual(charter.check("game", {"format": 1, "limits": LIMITS}), LIMITS)
         # newer
         with self.assertRaises(VCharonError) as cm:
-            charter.check("game", {"format": 2, "limits": LIMITS})
+            charter.check("game", {"format": 3, "limits": LIMITS})
         self.assertEqual((cm.exception.code, cm.exception.message, cm.exception.hint),
-                         ("channel", "game uses format 2; this vcharon reads up to 1",
+                         ("channel", "game uses format 3; this vcharon reads up to 2",
                           "ask your user to run: vcharon --update"))
         # none: not a channel vcharon made
         for info in ({"format": None, "limits": LIMITS}, {}, None, {"format": True},
@@ -142,7 +142,7 @@ class FormatTest(ChannelCase):
 
     def test_newer_or_no_format_refused_at_join(self):
         for fmt, want in (
-                ("2", ("ERROR channel: game uses format 2; this vcharon reads up to 1",
+                ("3", ("ERROR channel: game uses format 3; this vcharon reads up to 2",
                        "ask your user to run: vcharon --update")),
                 (None, ("ERROR channel: game has no format: line in its CHANNEL.md, so it isn't "
                         "a channel this vcharon made", charter.NO_FORMAT_HINT))):
@@ -156,13 +156,13 @@ class FormatTest(ChannelCase):
                     self.assertEqual(channel_cmd.records(), [])
 
     def test_same_and_older_format_join(self):
-        # the same format; then this vcharon reading up to 2, a format-1 channel
+        # the same format; then this vcharon reading up to 3, a format-1 channel
         self.server_channel("1", dict(LIMITS, max_mb=7))
         self.ok("join", "game", "--server", "fake-dest")
         record = self.record("game.mac-web")
         self.assertEqual((record["format"], record["limits"]), (1, dict(LIMITS, max_mb=7)))
         self.use_box("linux")
-        with mock.patch.object(charter, "FORMAT", 2):
+        with mock.patch.object(charter, "FORMAT", 3):
             self.ok("join", "game", "--server", "fake-dest")
         self.assertEqual(self.record("game.linux-web")["format"], 1)
 
@@ -172,8 +172,8 @@ class FormatTest(ChannelCase):
         self.server_channel("1")
         real = channels.claim
         for reply, want in (
-                ({"format": 2}, ("ERROR channel: game uses format 2; this vcharon reads up to "
-                                 "1", "ask your user to run: vcharon --update")),
+                ({"format": 3}, ("ERROR channel: game uses format 3; this vcharon reads up to "
+                                 "2", "ask your user to run: vcharon --update")),
                 ({"limits": dict(LIMITS, max_mb=7)},
                  ("ERROR channel: game's format or limits changed during the join (format 1, "
                   "then 1)", "run the join again"))):
@@ -212,7 +212,7 @@ class FormatTest(ChannelCase):
                                    r"\S+ \S+  format 1\Z")
         [new] = [l for l in lines if l.startswith("  new  ")]
         self.assertTrue(new.endswith("  format 3"), new)
-        self.assertIn("    note: new uses format 3; this vcharon reads up to 1; ask your user "
+        self.assertIn("    note: new uses format 3; this vcharon reads up to 2; ask your user "
                       "to run: vcharon --update", lines)
         [old] = [l for l in lines if l.startswith("  old  ")]
         self.assertTrue(old.endswith("  format -"), old)
@@ -231,14 +231,14 @@ class FormatTest(ChannelCase):
         path = channel_cmd.record_path("game", "mac-web")
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
-        doc["format"] = 2
+        doc["format"] = 3
         with open(path, "w", encoding="utf-8") as f:
             json.dump(doc, f)
         for argv in (("post", "game", "--to", "@laptop-ui", "--title", "t", "--body", "b"),
                      ("read", "game"), ("watch", "game", "--until-change"), ("sync", "game")):
             with self.subTest(argv=argv[0]):
                 self.assertEqual(self.refusal(*argv), (
-                    "ERROR channel: game uses format 2; this vcharon reads up to 1",
+                    "ERROR channel: game uses format 3; this vcharon reads up to 2",
                     "ask your user to run: vcharon --update"))
 
 

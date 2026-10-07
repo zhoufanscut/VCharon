@@ -6,8 +6,9 @@ post topic).
     vcharon post game --to @mac-ui --title "log" --file logs/run.md < run.md
 
 A member posts into RESULTS.md in its own folder: results, questions, DONE, and the leader's
-answers too. The leader's plan goes into STEPS.md (--steps, the leader only); any other .md
-file of the own folder, a subfolder's too, with --file (NOTES.md, logs/run.md). vcharon writes
+answers too; in a lobby, into the day file chat-YYYY-MM-DD.md of the heading's date. In a work
+channel the leader's plan goes into STEPS.md (--steps, the leader only); any other .md file of
+the own folder, a subfolder's too, with --file (NOTES.md, logs/run.md). vcharon writes
 MEMBER.md and CHANNEL.md itself. The command line finds the own folder from your membership
 (DESIGN, "Which membership"); post() below takes the file's path, and checks it. It appends
 
@@ -23,18 +24,18 @@ one more than the largest <name>#<n> in any entry heading of any .md file of the
 read, the append and the swap, so two posts at once can't take one number or lose an entry.
 The time is the clock's when it writes: an agent never types a time.
 
---to is required: @<name> separated by spaces, or @all, which only the leader posts (the
-leader MEMBER.md names). An @<name> that isn't a folder in the local tree is posted anyway, with
-a note on stderr: it may not have synced yet. A bare <name> (no @) is taken as @<name> when it
-is a member's folder in the tree; any other is refused with the members' names, since a typo
-there would go to nobody. --re is optional, an ID (<name>#<n>, an @ in front taken off),
-checked for its form only. The body comes from --body or from stdin, in UTF-8, and is never
-interpreted: give it a file or a quoted heredoc (<<'EOF'), and the shell can't run any of it
-either. It goes after the header's blank line, its line ends made LF (a lone CR too), and a
-body line that starts like a Markdown heading (`# `, `## ` … `###### `) gets `> ` in front, so
-a body can't forge a header or a heading. A title holding a line break, or any other control or
-format character but tab, is refused (vcharon read shows a body's escaped). An option's text
-that isn't valid UTF-8 is refused too.
+--to is required: @<name> separated by spaces, or @all, which in a work channel only the leader
+posts (the leader MEMBER.md names), and in a lobby any member. An @<name> that isn't a folder in
+the local tree is posted anyway, with a note on stderr: it may not have synced yet. A bare <name>
+(no @) is taken as @<name> when it is a member's folder in the tree; any other is refused with the
+members' names, since a typo there would go to nobody. --re is optional, an ID (<name>#<n>, an @
+in front taken off), checked for its form only. The body comes from --body or from stdin, in
+UTF-8, and is never interpreted: give it a file or a quoted heredoc (<<'EOF'), and the shell can't
+run any of it either. It goes after the header's blank line, its line ends made LF (a lone CR
+too), and a body line that starts like a Markdown heading (`# `, `## ` … `###### `) gets `> ` in
+front, so a body can't forge a header or a heading. A title holding a line break, or any other
+control or format character but tab, is refused (vcharon read shows a body's escaped). An option's
+text that isn't valid UTF-8 is refused too.
 
 It refuses, writing nothing: a body bigger than the channel's entry limit (1 MB unless its
 leader set another); an entry file that would grow past it, and an own folder that would hold
@@ -62,6 +63,7 @@ import sys
 import time
 
 from .. import charter, entries, fsops, pathrules, platform
+from .. import kind as kinds
 from ..proto import VCharonError
 
 # the files post writes: a member's, and the leader's plan (--steps)
@@ -342,9 +344,11 @@ BODY_HINT = ("shorten it: put long output in a file outside the channel, and say
 FILE_HINT = "post into a new file of your own folder: add --file NAME.md (RESULTS-2.md, say)"
 
 
-def limit_check(own, limits):
+def limit_check(own, limits, freed=None):
     """entries.post's check for the channel's limits (charter): the entry file and the own
-    folder, as they would be after the post. Refused (too_big) over either."""
+    folder, as they would be after the post. Refused (too_big) over either. freed(path): the
+    files a post that creates path deletes after it (a lobby's cleanup), counted out of the
+    folder: else a folder near its limit would refuse the very post that makes room."""
     max_entry = limits["max_entry_kb"] * charter.KB
     max_bytes, max_files = limits["max_mb"] * charter.MB, limits["max_files"]
 
@@ -359,6 +363,12 @@ def limit_check(own, limits):
             size -= st.st_size
         except FileNotFoundError:
             files += 1
+            for gone in freed(path) if freed is not None else ():
+                try:
+                    size -= os.lstat(gone).st_size
+                    files -= 1
+                except OSError:
+                    continue
         text = charter.over(size + after, files, max_bytes, max_files)
         if text is not None:
             raise _too_big("with this entry your folder %s would hold %s" % (own, text),
@@ -367,13 +377,19 @@ def limit_check(own, limits):
     return check
 
 
-def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channel=None):
+def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channel=None,
+         kind_=kinds.WORK, day=False, done=None):
     """Posts one entry as me into the .md file path, in me's own folder; to and title as
     check_args returns them. Returns (the entry's ID, its time). Refuses (VCharonError)
     as the module's docstring says, writing nothing. clock: time.time, looked up when it
     posts (tests fake it). limits: the channel's (charter); a body bigger than its entry
     limit is refused first, the entry file and the own folder as they would be after the post
-    under the folder's lock."""
+    under the folder's lock. kind_: the channel's (kind), whose @all rule applies. day: path
+    names a day file of kind_ (a lobby post with no --file), whose checks hold for every
+    date: the entry goes into the day file of its heading's date, chosen under the lock, and
+    the post that creates it then runs the cleanup (kind.cleanup_for). done: a dict, if
+    given, gets "path" (the file written), "removed" (the names the cleanup deleted) and
+    "failed" ([(name, why)] of the deletes that failed)."""
     if limits is not None:
         max_entry = limits["max_entry_kb"] * charter.KB
         size = len(body.encode("utf-8"))
@@ -422,7 +438,7 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     to = resolve_to(to, tree, channel)
     if entries.ALL in to:
         leader = leader_of(own)
-        if leader != name:
+        if not kind_.may_post_all(name, leader):
             raise _refuse("@all is the leader's (%s)" % (leader or "MEMBER.md names none"),
                           "address members by name: --to @<name> ...")
     for token in to:
@@ -431,9 +447,37 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
                   % (token, tree), file=sys.stderr)
     if found is not None:
         print("note: %s" % found[1], file=sys.stderr)
-    check = limit_check(own, limits) if limits is not None else None
+    if done is None:
+        done = {}
+    done.update(path=path, removed=[], failed=[])
+    path_for = after = None
+    if day:
+        def path_for(when):
+            done["path"] = os.path.join(own, kind_.day_file(when))
+            # by name the pattern's checks above hold; a link or a folder in its place, never
+            # written through, is refused as file_below refuses one
+            st = _lstat(done["path"])
+            if st is not None and fsops.kind(st) != fsops.FILE:
+                raise VCharonError("unsafe_path", "%s isn't a regular file" % done["path"],
+                                   "remove it from your own folder, then post again")
+            return done["path"]
+
+        def after(written, created):
+            removed, failed = kinds.cleanup(kind_.cleanup_for(own, written, created))
+            done["removed"] += removed
+            done["failed"] += failed
+
+    freed = (lambda p: kind_.cleanup_for(own, p, True)) if day else None
+    check = limit_check(own, limits, freed) if limits is not None else None
     try:
         return entries.post(path, own, name, title, to, re_, body, clock=clock or time.time,
-                            check=check)
+                            check=check, path_for=path_for, after=after)
     except OSError as e:
-        raise fsops.error(e, path)
+        raise fsops.error(e, done["path"])
+
+
+def _lstat(path):
+    try:
+        return os.lstat(path)
+    except FileNotFoundError:
+        return None

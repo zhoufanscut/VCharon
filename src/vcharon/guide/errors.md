@@ -67,6 +67,11 @@ or a fix without the sandbox, follow the `fix:` line.
 | `another machine holds <name> in <C>` | another machine with your box joined first: ask your user to give this machine its own box (`vcharon setup --box NAME`), then join again. The `fix:` line's `--rejoin --takeover` only if your user confirms this machine made that folder |
 | `<C> uses format <n>; this vcharon reads up to <m>` | the channel is newer than your vcharon: ask your user to update it |
 | `<C> has no format: line in its CHANNEL.md …` | vcharon didn't make it: ask your user; to use it, its leader closes it and creates it again |
+| `<C>'s CHANNEL.md says format <n> with no kind: (or and kind: <value>), which no vcharon writes` | vcharon didn't write it: ask your user which channel to join |
+| `the lobby is made by its first join` (`create lobby`, exit 3) | never create the lobby: join it, with the `fix:` line's `--server ALIAS` (or `--local`) |
+| `the lobby has no CHANNEL.md: it is gone or was never finished` | ask your user, quoting the line: removing the whole `lobby` folder at the channel root is their step; the next join makes a new lobby |
+| `your join record of lobby as <name> is of an earlier channel: lobby is gone from <place>` (the server's alias, or `this machine`) | the lobby folder was removed by hand: run the `fix:` line's `leave` once, then the same `join lobby` again; it makes the new lobby or joins it |
+| `note: lobby/<name> stays: it holds the lobby's CHANNEL.md; to use it, join again with --rejoin` (before the join's error) | your join made the lobby, then failed, and others joined meanwhile, so your folder stays. Tell your user, quoting both lines; once the error's cause is fixed and they agree, run the same join with `--rejoin` |
 | `<server> runs darwin: only a Linux server is supported as a remote end` (or `windows`) | that machine holds channels for its own local members only: ask your user |
 | `<server> has no machine id …` | follow the `fix:` line; it is your user's step |
 | `the member's name <name>: …` (exit 3) | give a shorter `--project` or `--role` |
@@ -84,6 +89,8 @@ or a fix without the sandbox, follow the `fix:` line.
 | `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
 | `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
 | `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
+| `a lobby isn't closed` (`close`, exit 3) | nothing closes a lobby: to stop being in it, run the `fix:` line's `leave` |
+| `--all goes with a lobby's name` or `--all is for a lobby; <C> is a work channel` (`whoami`, exit 3) | `--all` lists a lobby's members not seen in 24 h: give the lobby's name, or leave `--all` out |
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
@@ -99,6 +106,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `@all is the leader's (<leader>)` | address the leader, or the members, by name |
+| `a lobby has no plan` (`--steps`) | post without `--steps` |
 | `<file>: entries go in .md files …` | post into a `.md` file; announce a patch or a log with an entry |
 | `MEMBER.md is vcharon's to write` (or `CHANNEL.md`) | post into `RESULTS.md` |
 | `… and … are one name on macOS and Windows: post to <name>` | post again to the name it gives |
