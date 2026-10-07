@@ -1043,8 +1043,9 @@ so a record can't share a name with a job's state file:
   absolute path (local member). `machine`: the server's (or this machine's) id from the claim.
 - `project` and `role` rebuild the name for `fix:` lines.
 - `format` and `limits` are the channel's, stored at `join`/`create` ([Formats](#formats)).
-- Written through a temp file and `os.replace`. A record that can't be read is an error, never a
-  guess: VCharon never guesses which server a membership is on.
+- Written through a temp file and `os.replace`; a write the file system refuses is its error
+  (`permission`, `no_space`, …) with its fix line, as any other write's. A record that can't be
+  read is an error, never a guess: VCharon never guesses which server a membership is on.
 - `leave` and `close` take the server from the record, never from flags.
 
 ### Which membership

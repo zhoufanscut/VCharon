@@ -911,6 +911,24 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(self.run_cli("sync", "game", "--full")[0], 0)
 
 
+    @unittest.skipIf(os.name == "nt", "a folder's write permission is POSIX's")
+    def test_a_record_that_cant_be_written_is_a_permission_error(self):
+        # the file system's refusal, with its fix line, never "a bug in vcharon"; and the
+        # claim is released, as for any failure before the record
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root writes any folder")
+        self.use_box("laptop")
+        self.ok("create", "first", "--local", "--project", "ui")
+        records = os.path.join(os.environ["VCHARON_HOME"], "state", "channels")
+        os.chmod(records, 0o500)
+        try:
+            line, fix = self.refusal("create", "game", "--local", "--project", "api")
+        finally:
+            os.chmod(records, 0o700)
+        self.assertTrue(line.startswith("ERROR permission: %s: " % records), line)
+        self.assertEqual(fix, "check the owner and permissions of %s" % records)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
+
 class FirstLookTest(ChannelCase):
     """join and create save the member's watcher snapshot (watch.first_look): its first start
     prints what came after the join or create, once, and nothing join listed (DESIGN, "Create,

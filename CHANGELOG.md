@@ -9,6 +9,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A join record or channel section that can't be written (a folder without write permission, a
+  full disk) is now refused with the file system's code and fix line (`ERROR permission: <folder>:
+  …`, `fix: check the owner and permissions of <folder>`), not `ERROR internal … this is a bug in
+  vcharon`.
 - The lobby: each channel root has one channel named `lobby`, made by its first `vcharon join
   lobby --server ALIAS` (or `--local`), with no leader, no plan and no close (DESIGN, "The
   lobby"). Any member posts to `@all`; a post with no `--file` goes into the day file

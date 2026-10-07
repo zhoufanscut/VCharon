@@ -413,9 +413,10 @@ def channel_limits(record):
 
 def _write_atomic(path, data, temp):
     """data to path through the temp file temp in the same folder, flushed, then os.replace:
-    a crash leaves the old file or the new one."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    a crash leaves the old file or the new one. An OSError is the file system's (a folder
+    that can't be written, a full disk): raised as fsops.error's code and fix, not as a bug."""
     try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(temp, "wb") as f:
             f.write(data)
             f.flush()
@@ -424,6 +425,9 @@ def _write_atomic(path, data, temp):
             fsops.retry_in_use(os.replace, temp, path, codes=fsops.HELD_CODES)
         else:
             os.replace(temp, path)
+    except OSError as e:
+        _remove(temp)
+        raise fsops.error(e, path) from e
     except BaseException:
         _remove(temp)
         raise
@@ -435,8 +439,12 @@ def write_record(doc):
     data = json.dumps({k: doc[k] for k in keys},
                       ensure_ascii=False,
                       indent=1).encode("utf-8") + b"\n"
-    fd, temp = tempfile.mkstemp(dir=_made(records_dir()), prefix=".", suffix=".tmp")
-    os.close(fd)
+    try:
+        fd, temp = tempfile.mkstemp(dir=_made(records_dir()), prefix=".", suffix=".tmp")
+        os.close(fd)
+    except OSError as e:
+        # the records folder itself: name it, not the temp file's random name
+        raise fsops.error(e, records_dir()) from e
     _write_atomic(path, data, temp)
 
 
@@ -478,9 +486,12 @@ def write_section(cfg, section, alias, name, leader, remote_text, limits, kind_=
     if kind_ is kinds.LOBBY:
         text += "mailbox.kind   = %s\n" % charter.LOBBY_KIND
     path = section_path(cfg, section)
+    try:
+        folder = _made(os.path.dirname(path))
+    except OSError as e:
+        raise fsops.error(e, os.path.dirname(path)) from e
     # .<name>.ini.tmp: no reader takes it for a section
-    _write_atomic(path, text.encode("utf-8"),
-                  os.path.join(_made(os.path.dirname(path)), ".%s.ini.tmp" % section))
+    _write_atomic(path, text.encode("utf-8"), os.path.join(folder, ".%s.ini.tmp" % section))
 
 
 # --- locks ---
