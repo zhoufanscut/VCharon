@@ -3900,8 +3900,8 @@ class SeenWatchProcessTest(ChannelCase):
         return os.path.join(self.home, "seen", *parts)
 
     def watch_until_stamped(self, *flags):
-        """Runs vcharon watch game <flags> until seen/game/mac-web exists; (its text, the
-        watcher's output)."""
+        """Runs vcharon watch game <flags> until seen/game/mac-web exists and the member's own
+        copy of the ages holds it; (its text, the watcher's output)."""
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
         # the sync children are new processes: they reach the fake server through ssh_path
@@ -3919,9 +3919,15 @@ class SeenWatchProcessTest(ChannelCase):
                                     stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, env=env, start_new_session=True)
         stamp = self.seen("game", "mac-web")
+
+        # the server stamps during the plan, the client keeps the ages after it: a watcher
+        # stopped in between leaves the copy without them
+        def done():
+            return os.path.exists(stamp) and "mac-web" in charter.load_seen("game.mac-web")
+
         try:
             deadline = time.monotonic() + 60
-            while not os.path.exists(stamp) and time.monotonic() < deadline:
+            while not done() and time.monotonic() < deadline:
                 self.assertIsNone(proc.poll(), "the watcher ended early")
                 time.sleep(0.2)
         finally:
