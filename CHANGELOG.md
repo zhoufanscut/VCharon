@@ -7,7 +7,30 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.4.1 — 2026-10-07
+
+Fixes from a test of the lobby by an agent on a Mac, joined over ssh to a Linux server: a member
+that just joined no longer reads `here` from a stamp left before its leave, and `post`'s line
+and several refusals say more plainly what happened and what to run.
+
+**Updating from 0.4.0:** nothing to do for channels: the format is unchanged, and 0.4.0 and
+0.4.1 members can share a lobby or a work channel, since each client sends its own helper
+(inferred from the code; a mixed pair was not run). Each member gets a fix only once it runs
+0.4.1. In "Stable": `post --steps` in a lobby now exits 3 (was 1), and after a join of its own
+folder a member's `watched` is null in `--json` until its watcher's first round. Scripts that
+parse `post`'s line: the file now follows `into`, the addressees follow `to`.
+
+**Checked:** the unit suite on Linux with Python 3.13 (measured, 1530 tests), and in CI on
+Linux, macOS and Windows with Python 3.13 and 3.14, with the ssh flow on Linux to localhost
+(measured, CI run 37611294381). The problems were found by a live lobby between a Linux server
+and a macOS 27 box over real ssh, both on 0.4.0 (measured). The fixes ran live from source in
+a lobby on one Linux machine (`--local`): a rejoin reads `away` until the watcher's first round,
+the new `post` line, `--steps` refused with exit 3, `leave` refused while the watcher runs, the
+`create lobby` fix line run as printed, `--file` refusals (measured; the lobby's day-file fix
+lines by the unit tests only). Not checked: the fixes over real ssh, or on a real macOS or
+Windows box (CI's unit tests only); the dropped stamp at a remote server ran over the unit
+tests' fake ssh only. Not addressed: the Mac's occasional 7 s `post` or `whoami`, which six
+timed runs didn't reproduce.
 
 - `post` prints `posted <id> — <title> into <member>/<file>, to <to> at <time>`, in place of
   `… to <member>/<file> at <time>`: the file was read as the address. Scripts that parse the
