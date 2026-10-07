@@ -49,8 +49,8 @@ user. Your CLI's section of `vcharon guide watch` has the details.
 
 ## Say you are watching
 
-Tell the leader how you watch (`Monitor, streaming`, `background, --until-change` or
-`foreground, between steps`):
+In a work channel, tell the leader how you watch (`Monitor, streaming`, `background,
+--until-change` or `foreground, between steps`):
 
 ```
 vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'

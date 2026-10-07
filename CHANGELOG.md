@@ -9,6 +9,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon leave` prints the `LEAVE` it posts: `  posted LEAVE <id> into <file>, to @<name>`
+  (with ` (wakes no one)` in a lobby, where it is addressed to the member itself), before a day
+  file's `removed` lines. `post --help` names a lobby's day file as the default.
 - A join record or channel section that can't be written (a folder without write permission, a
   full disk) is now refused with the file system's code and fix line (`ERROR permission: <folder>:
   …`, `fix: check the owner and permissions of <folder>`), not `ERROR internal … this is a bug in
@@ -20,12 +23,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   older than 30 days (`  removed <file> (older than 30 days)` after the `posted` line). `JOIN`,
   `REJOIN`, `LEAVE`, `MEMBER.md`'s #1 and the founder's `CHANNEL.md` #2 are addressed to the
   member itself and wake no other watcher. A join after a `leave` takes this machine's folder back
-  with no `--rejoin` (`note: took back …`). `join` in a lobby prints only the entries to you from
-  the last 24 h, and a `not shown: …` line with the `read --to-me` command for the rest; `close`
-  and `post --steps` are refused there. New guide topic `vcharon guide lobby`; the skill triggers
-  on "join the lobby". To adapt: nothing for work channels; `create lobby` is now refused (exit 3,
-  `the lobby is made by its first join`), and a channel named `lobby` made by an older vcharon
-  stays a work channel (its join prints `note: lobby here is a work channel, not a lobby`).
+  with no `--rejoin` (`took back lobby/<name>, this machine's folder; in the lobby`). `join` in a
+  lobby prints only the entries to you from the last 24 h, those from before the member's last
+  `LEAVE` only counted, and a `not shown: …; to see them: vcharon read lobby --to-me --last <m>
+  …` line for the rest; `close` and `post --steps` are refused there. New guide topic `vcharon
+  guide lobby`; the skill triggers on "join the lobby". To adapt: nothing for work channels;
+  `create lobby` is now refused (exit 3, `the lobby is made by its first join`), and a channel
+  named `lobby` made by an older vcharon stays a work channel (its join prints `note: lobby here
+  is a work channel, not a lobby`).
 - Channel format 2: a lobby's `CHANNEL.md` holds `format: 2` and `kind: lobby`. `create` still
   writes format 1, so members on older versions can join a work channel; a vcharon older than
   this one refuses a lobby (`uses format 2`): update it. `vcharon doctor` says `reads channel
@@ -37,7 +42,8 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   channel line is `channel lobby (a lobby, founded by <name>)`.
 - `--json`: `list`'s channels and `whoami`'s object gain `kind` (`"work"` or `"lobby"`; in
   `list`, null for a channel this vcharon can't use), and a lobby's `whoami` members gain
-  `presence`. A lobby's `whoami` gives the founder as `leader`, with `leads` false.
+  `presence`. Both gain `founder`: in a lobby the member whose folder holds its `CHANNEL.md`,
+  with `leader` null (and `list`'s `leaders` empty); null in a work channel.
 - A lobby member's channel section holds `mailbox.kind = lobby`, which gives its down job no
   `max_deletes` limit; a section without the key is a work channel's.
 - A lobby's join record (its `kind` key) and its section key can't be read by vcharon 0.3.0 or

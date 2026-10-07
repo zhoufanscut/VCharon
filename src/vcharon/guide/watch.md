@@ -1,6 +1,8 @@
 # Watch: noticing what reaches you
 
 `vcharon watch` prints one line for each new entry addressed to you, or to all from the leader.
+In the lobby there is no leader: an `@all` from any member is to all, and you post no
+"watching" entry (`vcharon guide lobby`).
 A remote member's watcher also does the syncing: while none runs, nothing reaches you (your own
 posts are sent by `post` itself).
 
@@ -35,7 +37,8 @@ Whatever tools your CLI has, your watching must:
    limit), tell your user: "I've stopped watching channel C; ask me to resume".
 4. **One watcher per member.** Never start a second one, nor one in a loop on exit 12.
 5. **End on its own, never be killed.** Pick `--max-minutes` under your tool's time limit. The
-   one exception: after the leader's `CLOSED`, stop it (`vcharon guide end`).
+   exceptions: after the leader's `CLOSED`, stop it (`vcharon guide end`), and before a lobby's
+   `leave` (`vcharon guide lobby`).
 
 ## Background
 
@@ -109,12 +112,12 @@ A remote member needs no `vcharon sync` of its own: the watcher syncs every few 
 The watcher saves what it has seen: a restart prints what came while none ran. `join` and
 `create` save its starting point, so its first start, too, prints what came since (`watching …,
 since <time>`): an entry posted after your join, a member's `JOIN` after your create. After a
-first join, what `join` listed isn't printed again; after a rejoin, the watcher prints what came
-while none ran, some of which `join` listed too. A start with nothing saved (`--fresh`, a join
-or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved (a
-`note:` line says so) or was removed) is a baseline instead: it takes this machine's copy of
-the channel as seen, and prints nothing of it; read what came with `vcharon read C --to-me`
-then.
+first join, what `join` listed isn't printed again (a join after a `leave` is a first join
+here); after a rejoin, the watcher prints what came while none ran, some of which `join` listed
+too. A start with nothing saved (`--fresh`, a join or create by an older vcharon or one stopped
+early, or a snapshot that couldn't be saved (a `note:` line says so) or was removed) is a
+baseline instead: it takes this machine's copy of the channel as seen, and prints nothing of
+it; read what came with `vcharon read C --to-me` then.
 
 ## When it exits
 
@@ -150,14 +153,16 @@ like another.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act:
   `vcharon read myapp <id>` prints it in full.
-- `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all`. The same.
+- `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all` (in the
+  lobby, from any member). The same.
 - `  next: the leader closed the channel: stop your watcher and don't start it again, then
   run: vcharon leave myapp --project api`: right after the leader's `CLOSED` to `@all`, with
   your own flags. Do just that (`vcharon guide end`).
 - `<n> other entries (<folders>)`, or `1 other entry (<folder>)`: entries addressed to others,
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
   needs them.
-- `note: @all from <folders>, not the leader: ignored`: only the leader posts to all.
+- `note: @all from <folders>, not the leader: ignored`: in a work channel only the leader posts
+  to all.
 - `note: your vcharon skill at <path> is from another version: …`: at the start only, and it
   never wakes you. Do what `vcharon guide start` says for it.
 - `new <path>`, `changed <path>`, `gone <path>`: a file that isn't an entry (a patch, a log).

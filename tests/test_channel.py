@@ -1702,6 +1702,7 @@ class LeaveCloseTest(ChannelCase):
         # the LEAVE entry reached the server before the removal
         results = entries.parse_file(os.path.join(self.root, "game", "mac-web",
                                                   "RESULTS.md"))
+        self.assertIn("  posted LEAVE %s into RESULTS.md, to @laptop-ui\n" % results[-1].id, out)
         self.assertEqual([(e.title, e.to) for e in results],
                          [("JOIN", ("@laptop-ui",)), ("LEAVE", ("@laptop-ui",))])
         gone = sorted(before - set(self.box_files()))

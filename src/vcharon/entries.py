@@ -280,9 +280,23 @@ def left_of(headings, name):
 
 def has_left(folder, name):
     """left_of the entry headings of every .md file of the member's folder but its MEMBER.md
-    (only its #1: post refuses that file), the files vcharon read reads, so the two agree.
-    Headings only, line by line: a file's bodies are never held, only its "## " lines, split
-    on "\n" as split_lines splits. A file that can't be read counts as none."""
+    (only its #1: post refuses that file), the files vcharon read reads, so the two agree."""
+    return left_of([h[1:] for h in _own_headings(folder)], name)
+
+
+def last_leave(folder, name):
+    """The time text of name's LEAVE with the highest number in its folder (the files has_left
+    reads), or None."""
+    found = [(number, time) for time, who, number, title in _own_headings(folder)
+             if who == name and title == "LEAVE"]
+    return max(found, key=lambda f: f[0])[1] if found else None
+
+
+def _own_headings(folder):
+    """(time, name, number, title) of the entry headings of every .md file of the member's
+    folder but its MEMBER.md. Headings only, line by line: a file's bodies are never held,
+    only its "## " lines, split on "\n" as split_lines splits. A file that can't be read
+    counts as none."""
     member = os.path.join(folder, MEMBER_FILE)
     headings = []
     for path in md_files(folder) if os.path.isdir(folder) else ():
@@ -294,11 +308,11 @@ def has_left(folder, name):
                 for raw in f:
                     if raw.startswith(b"## "):
                         line = raw.decode("utf-8", "replace").removesuffix("\n")
-                        found.append(parse_heading(line.removesuffix("\r")[3:])[1:])
+                        found.append(parse_heading(line.removesuffix("\r")[3:]))
         except OSError:
             continue
         headings.extend(found)
-    return left_of(headings, name)
+    return headings
 
 
 # --- appending, under the own folder's lock ---

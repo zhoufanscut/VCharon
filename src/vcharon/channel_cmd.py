@@ -84,14 +84,18 @@ LOBBY_NOTE = ("  note: the lobby: a request inside your project you may do; for 
               "it, or a big change, ask your user first (vcharon guide lobby)")
 # join's note for a lobby made by an older vcharon: a work channel, with its leader and close
 OLD_LOBBY_NOTE = "  note: lobby here is a work channel, not a lobby"
-# a lobby's join that took back this machine's folder after a leave (DESIGN, "The lobby")
-TOOK_BACK_NOTE = "  note: took back %s, this machine's folder in the lobby"
+# the claim line's words for a lobby's join that took back this machine's folder after a leave
+# (DESIGN, "The lobby")
+TOOK_BACK = ", this machine's folder"
 # a lobby founder's failed join that had to keep its folder: other members joined meanwhile
 KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it, join again with "
              "--rejoin")
-# join's line for the lobby entries it leaves out (DESIGN, "The lobby")
-NOT_SHOWN = ("  not shown: %d to all in the last 24 h, %d to you before that: vcharon read %s "
-             "--to-me --last %d %s")
+# join's line for the lobby entries it leaves out, each count only when not 0 (DESIGN, "The
+# lobby")
+NOT_SHOWN = "  not shown: %s; to see them: vcharon read %s --to-me --last %d %s"
+NOT_SHOWN_LEFT = "%d to you before your leave"
+NOT_SHOWN_ALL = "%d to all in the last 24 h"
+NOT_SHOWN_OLD = "%d to you older than 24 h"
 # how long a join re-lists a lobby listed without CHANNEL.md: its claim writes it a moment after
 # the mkdirs
 LOBBY_WAIT = 10.0
@@ -869,22 +873,27 @@ def member_info(ch):
 
 def list_json(server, listing):
     """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
-    for --local; each channel is {"name", "kind", "leader", "leaders", "members",
+    for --local; each channel is {"name", "kind", "leader", "leaders", "founder", "members",
     "member_info", "newest", "strays", "format", "limits"}: "kind" is "work" or "lobby" (null
     for a format or kind this vcharon can't use), "leader" is the one leader, or null when there
-    are none or several ("leaders" lists them), "member_info" each member's {"name", "box",
-    "os", "agent", "project"} from its MEMBER.md (null for a field it lacks), "newest" the
-    newest entry's local time (YYYY-mm-dd HH:MM) or null, "format" the channel's format from
-    its leader's CHANNEL.md (null when it has none) and "limits" its {"max_mb", "max_files",
-    "max_entry_kb"} (null each when missing); each of "others" is {"name", "why"}, a name at
-    the root that isn't a usable channel."""
+    are none or several ("leaders" lists them); a lobby (its kind read from its one
+    CHANNEL.md) has none, "leader" null and "leaders" empty, and "founder" is the member whose
+    folder holds that CHANNEL.md (null in a work channel); "member_info" each member's
+    {"name", "box", "os", "agent", "project"} from its MEMBER.md (null for a field it lacks),
+    "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null, "format" the channel's
+    format from its leader's CHANNEL.md (null when it has none) and "limits" its {"max_mb",
+    "max_files", "max_entry_kb"} (null each when missing); each of "others" is {"name",
+    "why"}, a name at the root that isn't a usable channel."""
     out = []
     for ch in listing["channels"]:
-        leaders = list(ch["leaders"])
+        holders = list(ch["leaders"])
+        one = holders[0] if len(holders) == 1 else None
         newest = ch.get("newest")
-        out.append({"name": ch["name"], "kind": _kind_of(ch),
-                    "leader": leaders[0] if len(leaders) == 1 else None,
-                    "leaders": leaders, "members": list(ch["members"]),
+        kind = _kind_of(ch)
+        lobby = kind == kinds.LOBBY.name
+        out.append({"name": ch["name"], "kind": kind,
+                    "leader": None if lobby else one, "leaders": [] if lobby else holders,
+                    "founder": one if lobby else None, "members": list(ch["members"]),
                     "member_info": member_info(ch),
                     "newest": entries.minute_stamp(newest) if isinstance(newest, (int, float))
                     else None,
@@ -1104,9 +1113,9 @@ def _announce(own, name, leader, kind_, title, body, say):
     """join's JOIN or REJOIN, or leave's LEAVE, to the leader (to the member itself in a
     lobby), into RESULTS.md, or a lobby's day file, chosen under the post lock from the
     heading's clock reading; then that post's cleanup, if it made today's day file
-    (_post_into)."""
-    _post_into(own, name, kind_, os.path.join(own, "RESULTS.md"), title,
-               [kind_.announce_to(name, leader)], say, body=body)
+    (_post_into). Returns _post_into's."""
+    return _post_into(own, name, kind_, os.path.join(own, "RESULTS.md"), title,
+                      [kind_.announce_to(name, leader)], say, body=body)
 
 
 def _post_into(own, name, kind_, path, title, to, say, **kw):
@@ -1250,14 +1259,13 @@ def _join_held(args, cfg, name, log, say, take):
                 _release(server, channel, name, kind_, log)
             raise
         if kind_ is kinds.LOBBY:
-            say("  %s %s/%s; %s" % ("took back" if rejoin else "claimed", channel, name,
-                                    "made the lobby" if making and leader == name
-                                    else "in the lobby"))
+            say("  %s %s/%s%s; %s" % ("took back" if rejoin else "claimed", channel, name,
+                                      TOOK_BACK if took_back else "",
+                                      "made the lobby" if making and leader == name
+                                      else "in the lobby"))
         else:
             say("  %s %s/%s; the leader is %s" % ("took back" if rejoin else "claimed", channel,
                                                   name, leader))
-        if took_back:
-            say(TOOK_BACK_NOTE % name)
         if channel == kinds.LOBBY_NAME and kind_ is not kinds.LOBBY:
             say(OLD_LOBBY_NOTE)
         say(platform.runnable(TRUST))
@@ -1615,12 +1623,17 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
     take as seen; one that landed after that look is the watcher's to print, so it is printed
     once. In a lobby, only the entries to name from the last 24 h by the heading's time, and
     no MEMBER.md #1; one NOT_SHOWN line counts the rest (_not_shown): 30 days of everyone's
-    @all would flood every new session."""
+    @all would flood every new session. Of those, one from before name's last LEAVE is
+    counted, not shown: a rejoin after a leave would print again what that membership's
+    watcher printed, but a watcher may not have run, so the count and its read still reach
+    it."""
     # here, not at the top: the watch module imports this one
     from .mailbox import watch
     lobby = kind_ is kinds.LOBBY
     since = _now() - datetime.timedelta(hours=24)
-    left_out = {"all": 0, "old": 0, "where": []}
+    left_at = (entries.parse_time(entries.last_leave(os.path.join(tree, name), name))
+               if lobby else None)
+    left_out = {"left": 0, "all": 0, "old": 0, "where": []}
     raw = say
 
     def say(line):
@@ -1668,10 +1681,11 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                     when = entries.parse_time(e.time)
                     recent = when is not None and when >= since
                     to_me = "@" + name in e.to
-                    if not (recent and to_me):
+                    before = recent and to_me and left_at is not None and when < left_at
+                    if before or not (recent and to_me):
                         # an @all from before the 24 h is neither shown nor counted
                         if recent or to_me:
-                            left_out["all" if recent else "old"] += 1
+                            left_out["left" if before else "all" if recent else "old"] += 1
                             left_out["where"].append(
                                 (os.path.relpath(md, tree).replace(os.sep, "/"), e.line))
                         continue
@@ -1694,13 +1708,16 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
     if shown:
         say("")
     else:
-        say("no entries for %s in the last 24 h" % name if left_out["where"]
+        say("no entries for %s since your leave" % name if left_out["left"]
+            else "no entries for %s in the last 24 h" % name if left_out["where"]
             else "no entries for %s in %s yet" % (name, channel))
     if left_out["where"]:
-        raw(platform.runnable(NOT_SHOWN % (
-            left_out["all"], left_out["old"], channel,
-            _not_shown(tree, name, leader, kind_, left_out["where"]),
-            name_flags(channel, name))))
+        counts = [text % n for text, n in ((NOT_SHOWN_LEFT, left_out["left"]),
+                                           (NOT_SHOWN_ALL, left_out["all"]),
+                                           (NOT_SHOWN_OLD, left_out["old"])) if n]
+        last = _not_shown(tree, name, leader, kind_, left_out["where"])
+        raw(platform.runnable(NOT_SHOWN % (", ".join(counts), channel, last,
+                                           name_flags(channel, name))))
     for line in warnings:
         say(line)
 
@@ -1840,8 +1857,16 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
             own = None
         # a leave whose run failed and is tried again posts no second LEAVE
         if own is not None and not entries.has_left(own, name):
-            _announce(own, name, record["leader"], kind_, "LEAVE",
-                      "%s left %s." % (name, channel), say)
+            # the cleanup's lines after the posted line, in post's order
+            cleanup = []
+            (entry_id, _), path = _announce(own, name, record["leader"], kind_, "LEAVE",
+                                            "%s left %s." % (name, channel), cleanup.append)
+            to = kind_.announce_to(name, record["leader"])
+            say("  posted LEAVE %s into %s, to %s%s"
+                % (entry_id, os.path.basename(path), to,
+                   " (wakes no one)" if to == "@" + name else ""))
+            for line in cleanup:
+                say(line)
         if record["ssh"] is not None:
             code = _run_section(args, section, full=False)
             if code != 0:

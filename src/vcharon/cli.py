@@ -218,8 +218,8 @@ def _parser():
     ident(one)
     as_json(one)
 
-    one = verb("post", "post an entry to a .md file in your own folder, RESULTS.md unless "
-               "--file names another",
+    one = verb("post", "post an entry to a .md file in your own folder: the one --file names, "
+               "else RESULTS.md (in a lobby, the day's chat-YYYY-MM-DD.md)",
                "vcharon post myapp --to @mac-myapp --title \"step 2 done\" --body \"tests pass\"")
     channel(one)
     one.add_argument("--to", nargs="+", required=True, metavar="@NAME",
@@ -486,9 +486,11 @@ def _member_doc(cfg, record):
         tree = plugin.Ctx("local").resolve(channel_cmd.local_text(_section(record)),
                                            "mailbox.local")
     kind_ = kinds.of(record)
-    # in a lobby, leader is its founder, who leads nothing
+    # a lobby has no leader: the record's leader is its founder, who leads nothing
+    lobby = kind_ is kinds.LOBBY
     return {"channel": record["channel"], "name": name, "project": record["project"],
-            "role": record["role"], "leader": record["leader"],
+            "role": record["role"], "leader": None if lobby else record["leader"],
+            "founder": record["leader"] if lobby else None,
             "leads": record["leader"] == name and kind_.can_close,
             "mode": "local" if record["ssh"] is None else "remote", "server": record["ssh"],
             "folder": os.path.join(tree, name), "tree": tree, "kind": kind_.name}
@@ -496,9 +498,10 @@ def _member_doc(cfg, record):
 
 def _whoami(args, run):
     """vcharon whoami [C] [--all] [--json]. With C, one object: {"channel", "name", "project",
-    "role", "leader", "leads", "mode", "server", "folder", "tree", "kind", "box",
-    "box_source", "members"}: "kind" is "work" or "lobby", whose "leader" is its founder,
-    who "leads" nothing;
+    "role", "leader", "founder", "leads", "mode", "server", "folder", "tree", "kind", "box",
+    "box_source", "members"}: "kind" is "work" or "lobby"; a lobby's "leader" is null and
+    "founder" the member whose folder holds its CHANNEL.md, who "leads" nothing; a work
+    channel's "founder" is null;
     "mode" is "local" or "remote", "server" the alias (null for a local member), "folder" your own
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
     without one. "box" is this machine's box now (a membership keeps the name it joined
@@ -680,7 +683,7 @@ def _lobby_lines(doc, members, seen, everyone):
 
 def _whoami_lines(doc):
     if doc["kind"] == kinds.LOBBY.name:
-        _say("  channel  %s (a lobby, founded by %s)" % (doc["channel"], doc["leader"]))
+        _say("  channel  %s (a lobby, founded by %s)" % (doc["channel"], doc["founder"]))
     else:
         _say("  channel  %s, led by %s%s" % (doc["channel"], doc["leader"],
                                               " (you)" if doc["leads"] else ""))

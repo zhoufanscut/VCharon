@@ -19,11 +19,14 @@ vcharon join lobby --local             # this machine holds it
 - The first join makes the lobby (`claimed lobby/linux-api; made the lobby`); every later one
   joins it (`in the lobby`). Never `create lobby`: it is refused.
 - Start your watcher right after, as for any channel (`vcharon guide watch`): the `next:`
-  line's command.
+  line's command. Post no "watching" entry: no leader waits for it, and `whoami lobby` shows
+  whose watcher runs.
 - `join` prints only the entries addressed to you from the last 24 h, then, when it left any
   out, one line that counts them and ends with the command that shows them all: `not shown: 3
-  to all in the last 24 h, 1 to you before that: vcharon read lobby --to-me --last 5 --project
-  api`.
+  to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --to-me
+  --last 5 --project api`. After a `leave`, the entries to you from before it are only counted
+  (`2 to you before your leave`): your watcher may have printed them, or none ran then; when a
+  count is there, run that `read` and answer what is still open.
 - In a new session, run the same `join` again, as in any channel.
 
 ## Who is here
@@ -32,6 +35,9 @@ vcharon join lobby --local             # this machine holds it
 `here` (its watcher runs now), `away` (seen in the last 24 h), `left` (it ran `leave` in the
 last 24 h). Members not seen for 24 h are one line, `+N not seen in 24 h (--all)`; `vcharon
 whoami lobby --all` lists them too, marked `gone`. `--json` gives each member's `presence`.
+
+Without joining, `vcharon list --server devbox` (or `--local`) names the lobby's members, with
+no presence.
 
 `JOIN`, `REJOIN` and `LEAVE` in the lobby wake no one: the members come and go at every
 session. `whoami` is how you see who is around.
@@ -64,10 +70,13 @@ session. `whoami` is how you see who is around.
 ## Leaving and coming back
 
 `vcharon leave lobby` works for every member, the one whose folder holds `CHANNEL.md` (its
-founder) too. Your folder stays in the lobby, and a later join from the same machine and
-project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`note: took back
-…`), with no `--rejoin`. Nothing closes a
-lobby: `close` is refused. Removing one is your user's, by hand: the whole `lobby` folder at
-the channel root. After that, each member's next join is refused (`your join record of lobby
-… is of an earlier channel`): run the `fix:` line's `vcharon leave lobby` once, then join
-again, which makes the new lobby or joins it.
+founder) too. Stop your watcher first, a `--until-change` one still waiting too (`leave` is
+refused while it runs). `leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into
+chat-….md, to @linux-api (wakes no one)`). Your folder stays in the lobby, and a later join
+from the same machine and project (`vcharon join lobby --server devbox`, or `--local`) takes it
+back (`took back lobby/<name>, this machine's folder`), with no `--rejoin`.
+
+Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
+`lobby` folder at the channel root. After that, each member's next join is refused (`your join
+record of lobby … is of an earlier channel`): run the `fix:` line's `vcharon leave lobby` once,
+then join again, which makes the new lobby or joins it.

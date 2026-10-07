@@ -291,11 +291,16 @@ class JoinTest(LobbyCase):
         self.ok("join", "lobby", "--local")
         out = self.ok("leave", "lobby")
         self.assertIn("OK  left lobby", out)
+        day = day_name(time.time())
+        [_, left] = entries.parse_file(os.path.join(self.lobby_folder(), day))
+        self.assertIn("  posted LEAVE %s into %s, to @mac-web (wakes no one)\n" % (left.id, day),
+                      out)
         out = self.ok("join", "lobby", "--local")
-        self.assertIn("  took back lobby/mac-web; in the lobby\n", out)
-        self.assertIn(channel_cmd.TOOK_BACK_NOTE % "mac-web", out)
+        # one line says it: no note repeats it
+        self.assertEqual([l for l in out.splitlines() if "took back" in l],
+                         ["  took back lobby/mac-web, this machine's folder; in the lobby"])
         titles = [e.title for e in entries.parse_file(
-            os.path.join(self.lobby_folder(), day_name(time.time())))]
+            os.path.join(self.lobby_folder(), day))]
         self.assertEqual(titles, ["JOIN", "LEAVE", "REJOIN"])
         # another machine's folder (another claimer): refused as in any channel
         self.ok("leave", "lobby")
@@ -307,6 +312,17 @@ class JoinTest(LobbyCase):
         os.remove(os.path.join(self.lobby_folder(), "MEMBER.md"))
         line, _ = self.refusal("join", "lobby", "--local")
         self.assertEqual(line, "ERROR channel: the name mac-web is taken in lobby")
+
+    def test_the_leaves_cleanup_follows_its_posted_line(self):
+        self.join("linux")
+        self.ok("join", "lobby", "--local")
+        day = day_name(time.time())
+        old = day_name(time.time() - 40 * 86400)
+        os.rename(os.path.join(self.lobby_folder(), day),
+                  os.path.join(self.lobby_folder(), old))
+        lines = self.ok("leave", "lobby").splitlines()
+        i = next(n for n, l in enumerate(lines) if l.startswith("  posted LEAVE "))
+        self.assertEqual(lines[i + 1], "  removed %s (older than 30 days)" % old)
 
     def test_the_founder_leaves_and_close_is_refused(self):
         self.ok("join", "lobby", "--local")
@@ -806,10 +822,18 @@ class WhoamiTest(LobbyCase):
         self.assertIn("    old-web  gone  ", out)
         self.assertNotIn("not seen", out)
         doc = json.loads(self.ok("whoami", "lobby", "--json"))
-        self.assertEqual((doc["kind"], doc["leader"], doc["leads"]), ("lobby", "mac-web", False))
+        self.assertEqual((doc["kind"], doc["leader"], doc["founder"], doc["leads"]),
+                         ("lobby", None, "mac-web", False))
         self.assertEqual({m["name"]: (m["presence"], m["leader"]) for m in doc["members"]}, {
             "linux-web": ("here", False), "laptop-web": ("left", False),
             "win-web": ("away", False), "mac-web": ("away", False), "old-web": ("gone", False)})
+        self.assertIn("  channel  lobby (a lobby, founded by mac-web)\n",
+                      self.ok("whoami", "lobby"))
+        # list too: no leader, the founder by its own key
+        [ch] = [c for c in json.loads(self.ok("list", "--local", "--json"))["channels"]
+                if c["name"] == "lobby"]
+        self.assertEqual((ch["kind"], ch["leader"], ch["leaders"], ch["founder"]),
+                         ("lobby", None, [], "mac-web"))
 
     def test_all_is_a_lobbys(self):
         self.assertEqual(self.refused("whoami", "--all", code=3),
@@ -843,8 +867,8 @@ class JoinPrintTest(LobbyCase):
         # neither counted nor listed. read --to-me lists from #10, the oldest of them, on:
         # #10, #11 (an @all from before the 24 h, neither shown nor counted), #12, #13
         self.assertEqual(line, [channel_cmd.platform.runnable(
-            "  not shown: 1 to all in the last 24 h, 1 to you before that: vcharon read lobby "
-            "--to-me --last 4 --project web")])
+            "  not shown: 1 to all in the last 24 h, 1 to you older than 24 h; to see them: "
+            "vcharon read lobby --to-me --last 4 --project web")])
         listed = self.ok("read", "lobby", "--to-me")
         for n in ("#10", "#11", "#12", "#13"):
             self.assertIn("linux-web%s" % n, listed)
@@ -867,9 +891,59 @@ class JoinPrintTest(LobbyCase):
             .encode("utf-8")})
         lines = self.ok("join", "lobby", "--local").splitlines()
         i = lines.index("no entries for mac-web in the last 24 h")
-        self.assertTrue(lines[i + 1].startswith("  not shown: 1 to all in the last 24 h, 0 to "
-                                                "you before that: "), lines[i + 1])
+        # a count of 0 isn't printed
+        self.assertTrue(lines[i + 1].startswith("  not shown: 1 to all in the last 24 h; to "
+                                                "see them: "), lines[i + 1])
 
+    def test_a_join_after_a_leave_counts_what_came_before_it(self):
+        self.join("linux")
+        # two leaves: the later one decides
+        for _ in range(2):
+            self.ok("join", "lobby", "--local")
+            self.ok("leave", "lobby")
+        now = time.time()
+        own = self.lobby_folder()
+        [day] = [f for f in os.listdir(own) if f.startswith("chat-")]
+        path = os.path.join(own, day)
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        [first, second] = [e for e in entries.parse_file(path) if e.title == "LEAVE"]
+        self.assertLess(first.number, second.number)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text.replace("## %s — %s — LEAVE" % (first.time, first.id),
+                                 "## %s — %s — LEAVE" % (entries.stamp(now - 7200), first.id)))
+        write_tree(self.root, {"lobby/linux-web/notes.md": (
+            "# notes\n"
+            + entries.build(entries.stamp(now - 25 * 3600), "linux-web", 8, "old", ["@mac-web"])
+            + entries.build(entries.stamp(now - 3600), "linux-web", 9, "missed", ["@mac-web"])
+            + entries.build(entries.stamp(now - 1800), "linux-web", 10, "to all", ["@all"])
+            + entries.build(entries.stamp(now + 60), "linux-web", 11, "new", ["@mac-web"]))
+            .encode("utf-8")})
+        out = self.ok("join", "lobby", "--local")
+        self.assertIn("— linux-web#11 — new", out)
+        # #9, to mac-web before its last LEAVE, may have come while no watcher ran: counted,
+        # and the read reaches it; #10 is any @all of the last 24 h; #8, older than 24 h, is
+        # counted as that, before the LEAVE or not
+        self.assertNotIn("linux-web#9 ", out)
+        self.assertNotIn("linux-web#10 ", out)
+        line = [l for l in out.splitlines() if l.startswith("  not shown: ")]
+        self.assertEqual(line, [channel_cmd.platform.runnable(
+            "  not shown: 1 to you before your leave, 1 to all in the last 24 h, 1 to you older "
+            "than 24 h; to see them: vcharon read lobby --to-me --last 4 --project web")])
+        self.assertIn("linux-web#9  @mac-web  missed",
+                      self.ok("read", "lobby", "--to-me", "--last", "4"))
+
+    def test_none_shown_since_the_leave(self):
+        self.join("linux")
+        self.ok("join", "lobby", "--local")
+        self.ok("leave", "lobby")
+        write_tree(self.root, {"lobby/linux-web/notes.md": (
+            "# notes\n" + entries.build(entries.stamp(time.time() - 3600), "linux-web", 9,
+                                        "missed", ["@mac-web"])).encode("utf-8")})
+        lines = self.ok("join", "lobby", "--local").splitlines()
+        i = lines.index("no entries for mac-web since your leave")
+        self.assertTrue(lines[i + 1].startswith("  not shown: 1 to you before your leave; "),
+                        lines[i + 1])
 
 if __name__ == "__main__":
     unittest.main()

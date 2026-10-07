@@ -157,7 +157,8 @@ class WhoamiTest(ChannelCase):
         members = doc.pop("members")
         self.assertEqual(doc, {
             "channel": "game", "name": "mac-web-b", "project": "web", "role": "b",
-            "leader": "laptop-ui", "leads": False, "mode": "remote", "server": "fake-dest",
+            "leader": "laptop-ui", "founder": None, "leads": False, "mode": "remote",
+            "server": "fake-dest",
             "folder": os.path.join(tree, "mac-web-b"), "tree": tree, "kind": "work",
             "box": "mac", "box_source": "config"})
         # a remote member's: this box's copy, the leader's folder as the last sync brought it
@@ -601,14 +602,15 @@ class ListJsonTest(ChannelCase):
         self.assertEqual(sorted(doc), ["channels", "others", "server"])
         self.assertEqual(doc["server"], "fake-dest")
         [ch] = doc["channels"]
-        self.assertEqual(sorted(ch), ["format", "kind", "leader", "leaders", "limits",
+        self.assertEqual(sorted(ch), ["format", "founder", "kind", "leader", "leaders", "limits",
                                       "member_info", "members", "name", "newest", "strays"])
         self.assertEqual(ch["kind"], "work")
         self.assertEqual((ch["format"], ch["limits"]),
                          (1, {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}))
-        self.assertEqual((ch["name"], ch["leader"], ch["leaders"], ch["members"], ch["strays"]),
-                         ("game", "laptop-ui", ["laptop-ui"], ["laptop-ui", "mac-web", "old"],
-                          ["Stray"]))
+        self.assertEqual((ch["name"], ch["leader"], ch["leaders"], ch["founder"], ch["members"],
+                          ch["strays"]),
+                         ("game", "laptop-ui", ["laptop-ui"], None,
+                          ["laptop-ui", "mac-web", "old"], ["Stray"]))
         osw = platform.os_word()
         self.assertEqual(ch["member_info"], [
             {"name": "laptop-ui", "box": "laptop", "os": osw, "agent": "other",
@@ -896,8 +898,8 @@ HINTS = {
         ("  note: the lobby: a request inside your project you may do; for anything outside "
          "it, or a big change, ask your user first (vcharon guide lobby)", None),
         # a lobby join's count of the entries it doesn't print
-        ("  not shown: %d to all in the last 24 h, %d to you before that: vcharon read %s "
-         "--to-me --last %d %s", (2, 1, "lobby", 3, FLAGS)),
+        ("  not shown: %s; to see them: vcharon read %s --to-me --last %d %s",
+         ("2 to all in the last 24 h", "lobby", 3, FLAGS)),
         # the next steps join and create print
         ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
