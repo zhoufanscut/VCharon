@@ -63,13 +63,13 @@ back to step 2"): otherwise the member guesses.
   30 s`): post to that member, and tell your user if it stays silent. As a remote member you
   see the ages as of your own last pull, so while your own watcher is stopped they all grow:
   run `vcharon sync myapp` first, then `whoami` again. `watched -` means no stamp: its watcher
-  hasn't run, or (as a remote member) your copy is older than its first one; `watched ?` means
-  a member on an older vcharon, which never stamps: judge it by its answers. `left` in place
-  of the age means the member posted its `LEAVE` (and no rejoin since): it isn't late but gone,
-  so don't wait for it; a stopped watcher still shows an age. A member that watches with
-  `--until-change` restarts its watcher after each wake, and one that watches between steps
-  stops it while it works: gaps are normal there. A member that hasn't answered an entry to it
-  within a few minutes may not be watching either way.
+  hasn't run since its join, or (as a remote member) your copy is older than its first one;
+  `watched ?` means a member on an older vcharon, which never stamps: judge it by its answers.
+  `left` in place of the age means the member posted its `LEAVE` (and no rejoin since): it isn't
+  late but gone, so don't wait for it; a stopped watcher still shows an age. A member that
+  watches with `--until-change` restarts its watcher after each wake, and one that watches
+  between steps stops it while it works: gaps are normal there. A member that hasn't answered an
+  entry to it within a few minutes may not be watching either way.
 
 In a new session, run the same `vcharon join` again, as members do, never `create`: the
 start topic's section on a new session says what follows.

@@ -250,6 +250,15 @@ def resolve_to(to, tree, channel=None):
     return out
 
 
+def default_fix(kind_):
+    """A refused --file's way out: where a post without --file goes, RESULTS.md, or in a lobby
+    the day file, which RESULTS.md isn't."""
+    if kind_ is kinds.LOBBY:
+        return "leave out --file: a lobby post goes into your day file %sYYYY-MM-DD.md" % (
+            kinds.DAY_PREFIX)
+    return "post into %s" % RESULTS_FILE
+
+
 def file_parts(file):
     """--file's name as path parts below the own folder: a name, or a subfolder's file with /
     (or \\). A usage error for an absolute path, an empty part, . or .., which would leave
@@ -260,7 +269,8 @@ def file_parts(file):
             or any(p in ("", ".", "..") for p in parts)):
         raise VCharonError("config", "--file %s: a file of your own folder, as a name below "
                            "it (RESULTS.md, notes/run.md)" % pathrules.show(file),
-                           hint="give --file as a .md file's name in your own folder")
+                           hint="give --file as a .md file's name in your own folder; the "
+                           "body comes from --body or stdin, never from --file")
     for part in parts:
         for osn in ("windows", "darwin"):
             problem = pathrules.part_problem(part, osn)
@@ -288,12 +298,13 @@ def check_own(own, tree=None):
                                "one there), then post again")
 
 
-def file_below(own, parts):
+def file_below(own, parts, kind_=kinds.WORK):
     """The path of --file's parts below the existing own folder own, checked part by part
     with lstat: a symlink anywhere on the way, or something that isn't a folder, is refused
     (unsafe_path), since the post would write through it, outside the tree, and the numbering
     (entries.md_files) never reads through a link. A missing subfolder is refused too: make it
-    first. The file itself may be missing; there, it must be a regular file."""
+    first. The file itself may be missing; there, it must be a regular file. kind_: the
+    channel's, for the fix (default_fix)."""
     path = own
     for i, part in enumerate(parts):
         path = os.path.join(path, part)
@@ -305,8 +316,8 @@ def file_below(own, parts):
                 return path
             sub = "/".join(parts[:i + 1])
             raise _refuse("%s/ isn't in your own folder %s" % (sub, own),
-                          "make %s/ in your own folder first, or post into %s"
-                          % (sub, RESULTS_FILE))
+                          "make %s/ in your own folder first, or %s"
+                          % (sub, default_fix(kind_)))
         except OSError as e:
             raise fsops.error(e, path)
         kind = fsops.kind(st)
@@ -388,8 +399,8 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     names a day file of kind_ (a lobby post with no --file), whose checks hold for every
     date: the entry goes into the day file of its heading's date, chosen under the lock, and
     the post that creates it then runs the cleanup (kind.cleanup_for). done: a dict, if
-    given, gets "path" (the file written), "removed" (the names the cleanup deleted) and
-    "failed" ([(name, why)] of the deletes that failed)."""
+    given, gets "path" (the file written), "to" (the to: tokens written), "removed" (the names
+    the cleanup deleted) and "failed" ([(name, why)] of the deletes that failed)."""
     if limits is not None:
         max_entry = limits["max_entry_kb"] * charter.KB
         size = len(body.encode("utf-8"))
@@ -407,7 +418,7 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
                       "join the channel again, with the --project and --role you joined with")
     base = os.path.basename(path)
     if base.casefold() in (entries.MEMBER_FILE.casefold(), entries.CHANNEL_FILE.casefold()):
-        raise _refuse("%s is vcharon's to write" % base, "post into %s" % RESULTS_FILE)
+        raise _refuse("%s is vcharon's to write" % base, default_fix(kind_))
     # then a twin refusal, which points at the folder or file to use, wherever it is
     found = twin(path)
     if found is not None and found[0] == "refuse":
@@ -422,7 +433,7 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     name = os.path.basename(own)
     if not base.endswith(".md"):
         raise _refuse("%s: entries go in .md files (the watcher and the numbering read only "
-                      "those)" % base, "post into %s" % RESULTS_FILE)
+                      "those)" % base, default_fix(kind_))
     if pathrules.writer_problem(name) is not None:
         raise _refuse("%s: the own folder's name %s isn't a member's name" % (shown, name),
                       "ask the user")
@@ -449,7 +460,7 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
         print("note: %s" % found[1], file=sys.stderr)
     if done is None:
         done = {}
-    done.update(path=path, removed=[], failed=[])
+    done.update(path=path, to=to, removed=[], failed=[])
     path_for = after = None
     if day:
         def path_for(when):

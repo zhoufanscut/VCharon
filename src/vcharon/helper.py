@@ -412,13 +412,17 @@ def channel_list(h, call_id, args):
 
 
 def channel_claim(h, call_id, args):
-    # lobby: sent only for a lobby's first join; a work channel's call has no such key
+    # lobby: sent only for a lobby's first join; a work channel's call has no such key.
+    # claimer: sent by a join, whose own stale stamp the claim drops
     checks = {"channel": _is_str, "name": _is_str, "create": _is_bool}
     if "lobby" in args:
         checks["lobby"] = _is_bool
+    if "claimer" in args:
+        checks["claimer"] = _is_str
     _check_args("channel.claim", args, checks)
     h.ok(call_id, channels.claim(channels.root_path(), args["channel"], args["name"],
-                                 args["create"], h.tick, lobby=args.get("lobby", False)))
+                                 args["create"], h.tick, lobby=args.get("lobby", False),
+                                 claimer=args.get("claimer")))
 
 
 def channel_release(h, call_id, args):

@@ -9,9 +9,9 @@ What I ran, and its output, quoted.
 EOF
 ```
 
-It prints `posted linux-api#7 — step 3 done to linux-api/RESULTS.md at <time>`. A remote
-member's post then sends your folder to the server at once and prints `sent to devbox`; while
-your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
+It prints `posted linux-api#7 — step 3 done into linux-api/RESULTS.md, to @linux-web at <time>`.
+A remote member's post then sends your folder to the server at once and prints `sent to devbox`;
+while your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
 the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
 server can't be reached (or a file changed during the send), the fix says the entry goes with
 your watcher or the next `vcharon sync`. Any other error (the channel closed, a name the server
@@ -45,7 +45,8 @@ when you quote them in an entry, mask it.
 - `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
   the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder
-  first, since a post never makes one.
+  first, since a post never makes one. `--file` names where the entry goes, never where its
+  body comes from: a body in a file goes on stdin (`< report.md`).
 - `--steps`: the leader's plan, `STEPS.md`. A work channel's leader only.
 
 ## An entry

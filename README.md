@@ -145,8 +145,8 @@ cd ~/src/api
 vcharon post myapp --to @linux-web --title 'hello' --body 'first post'
 ```
 
-The post prints `posted linux-api#3 — hello to linux-api/RESULTS.md at <time>`, and the
-leader's watcher, about one 10-second round later:
+The post prints `posted linux-api#3 — hello into linux-api/RESULTS.md, to @linux-web at <time>`,
+and the leader's watcher, about one 10-second round later:
 
 ```
 2026-10-03 12:19:55 watching ~/.local/state/vcharon/channels/myapp, 2 files in other folders, since 2026-10-03 12:19:51

@@ -293,7 +293,7 @@ def _leaders(path):
 
 # --- channel.claim, channel.release ---
 
-def claim(root, channel, name, create, tick=_no_tick, lobby=False):
+def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None):
     """mkdir <root>/<channel>/<name>, and with create <root>/<channel> first (and the root's
     missing parents): one mkdir each, so of two creators or two joiners with one name only one
     wins. With create and lobby (a lobby's first join), then <name>/CHANNEL.md with the
@@ -305,7 +305,12 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False):
     MEMBER.md, or None (a new folder, no MEMBER.md, none in it), "format", "limits" (and
     "kind" for a lobby): the channel's, as list_channels gives them}, and for a lobby made
     "charter": the CHANNEL.md's text, which a remote founder writes into its local tree as it
-    is. Never a host name: the reply's values go into the channel's files."""
+    is. claimer: the joining machine's; an existing folder whose MEMBER.md names it loses its
+    last-watched stamp too, since the join holds its state dir's watcher lock, so that
+    watcher doesn't run: a stamp from before a leave would otherwise read "here" after the
+    rejoin. Another state dir on the same machine has the same claimer, and a watcher there
+    stamps again at its next round. Never a host name: the reply's values go into the
+    channel's files."""
     _check_names(channel, name)
     if create:
         try:
@@ -347,16 +352,17 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False):
                 raise fsops.error(e, os.path.join(root, channel, name))
             raise
         _real_dir(ch, name, "%s/%s" % (channel, name))
-        claimer = _claimer_of(ch, name) if existed else None
+        owner = _claimer_of(ch, name) if existed else None
     finally:
         _close_all(ch, top)
     made = create and lobby and _write_charter(root, channel, name)
-    if not existed:
-        # a stamp left by an earlier member of this name isn't this member's
+    if not existed or (owner is not None and owner == claimer):
+        # a stamp left by an earlier member of this name isn't this member's, and this
+        # state dir's own is from a watcher the join's lock keeps stopped
         drop_seen(root, channel, name)
     sweep_seen(root)
     reply = {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
-             "claimer": claimer}
+             "claimer": owner}
     if made:
         reply["charter"] = made
     # a new work channel's CHANNEL.md isn't written yet: create writes it after the claim
@@ -705,8 +711,8 @@ def list_seen(root, channel, now=None):
 
 
 def drop_seen(root, channel, name):
-    """Removes seen/<channel>/<name>, a stamp left by an earlier member of that name (a new
-    claim of it). Best effort: never raises."""
+    """Removes seen/<channel>/<name>: a stamp left by an earlier member of that name, or by
+    this member's watcher before its join (claim). Best effort: never raises."""
     if channel_problem(channel) or pathrules.writer_problem(name) is not None:
         return
     top = seen_root(root)

@@ -67,8 +67,8 @@ type a time from memory.
 folder (local time), and when its watcher last pulled the channel:
 
 - `watched 40 s ago (every 2 s)`: its watcher's last round, and that watcher's `--every`.
-- `watched -`: no stamp: its watcher hasn't run, or, as a remote member, this machine's copy
-  is older than its first one.
+- `watched -`: no stamp: its watcher hasn't run since its join, or, as a remote member, this
+  machine's copy is older than its first one.
 - `watched ? (vcharon 0.2.3)`: no stamp, but that member runs a version that never stamps, so
   it may be watching all the same.
 - `left`: its folder's last `JOIN` or `REJOIN` of it is followed by its `LEAVE`: it left the

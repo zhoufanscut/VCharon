@@ -606,16 +606,20 @@ def _check_locks(record, section, channel):
     else:
         snapshot = watcher_snapshot(record, section, record["name"])
 
-    def refusal(path):
-        return channels.refused("%s is held (a watcher, a sync, or a create, join, leave or "
-                                "close of %s in %s)" % (path, record["name"], channel),
+    # the watcher's lock names the watcher first: it is what an agent forgets to stop
+    def watching():
+        return channels.refused("your watcher of %s in %s is running, or a create, join, leave "
+                                "or close of it (%s.lock is held)"
+                                % (record["name"], channel, snapshot),
                                 "stop the watcher first, or wait for that command to end")
 
-    lk = hold_watcher(snapshot, lambda: refusal(snapshot + ".lock"))
+    lk = hold_watcher(snapshot, watching)
     try:
         for path in _job_locks(section) if record["ssh"] is not None else ():
             if held(path):
-                raise refusal(path)
+                raise channels.refused("a sync of %s in %s is running (%s is held)"
+                                       % (record["name"], channel, path),
+                                       "wait for that sync to end, then run this again")
     except BaseException:
         lk.release()
         raise
@@ -638,10 +642,12 @@ class _Remote:
     def list(self):
         return _listing(self.session.call("channel.list", {}))
 
-    def claim(self, channel, name, create, lobby=False):
+    def claim(self, channel, name, create, lobby=False, claimer=None):
         args = {"channel": channel, "name": name, "create": create}
         if lobby:
             args["lobby"] = True
+        if claimer is not None:
+            args["claimer"] = claimer
         return self.session.call("channel.claim", args)
 
     def release(self, channel, name, keep_charter=False):
@@ -668,8 +674,8 @@ class _Local:
     def list(self):
         return _listing(channels.list_channels(self.root))
 
-    def claim(self, channel, name, create, lobby=False):
-        return channels.claim(self.root, channel, name, create, lobby=lobby)
+    def claim(self, channel, name, create, lobby=False, claimer=None):
+        return channels.claim(self.root, channel, name, create, lobby=lobby, claimer=claimer)
 
     def release(self, channel, name, keep_charter=False):
         return channels.release(self.root, channel, name, keep_charter=keep_charter)
@@ -784,9 +790,10 @@ def main(args, run):
             if args.channel == kinds.LOBBY_NAME:
                 # one fixed name: "join the lobby in devbox" is then a whole instruction
                 raise VCharonError("config", "the lobby is made by its first join",
-                                   hint="join it with --server ALIAS (or --local on the machine "
-                                   "that holds the channel root): vcharon join %s --server ALIAS"
-                                   % kinds.LOBBY_NAME)
+                                   hint="join it: vcharon join %s %s %s"
+                                   % (kinds.LOBBY_NAME, "--local" if args.local
+                                      else "--server %s" % args.server,
+                                      flags(project, args.role)))
             return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
     record = membership(args.channel, args.project, args.role)
@@ -1215,7 +1222,7 @@ def _join_held(args, cfg, name, log, say, take):
                 raise _stale_refusal(channel, name, record, "%s on %s %s"
                                      % (channel, server.where, stale), "join")
             # 3. one mkdir
-            got = server.claim(channel, name, False)
+            got = server.claim(channel, name, False, claimer=args.fields["claimer"])
         rejoin = got["existed"]
         kind_ = kinds.of_name(info.get("kind"))
         # the claim's own reading of CHANNEL.md is the one that counts: checked as the list's

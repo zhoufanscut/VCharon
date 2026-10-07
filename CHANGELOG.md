@@ -7,6 +7,29 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `post` prints `posted <id> — <title> into <member>/<file>, to <to> at <time>`, in place of
+  `… to <member>/<file> at <time>`: the file was read as the address. Scripts that parse the
+  line: the file now follows `into`, and the addressees follow `to`.
+- Every join of this machine's own folder (a rejoin, or the join a new session runs) drops its
+  stamp at the server, so `whoami` shows `watched -` (`watched: null` in `--json`) until its
+  watcher's first round, in a work channel too; in a lobby the member reads `away` until then.
+  Before, a stamp from before a `leave` read `here` for up to about 2 minutes (at the default
+  pace) after a rejoin with no watcher running. `vcharon guide lobby` now says a stopped
+  watcher still reads `here` for about 2 minutes at the default pace.
+- `post --steps` in a lobby is a usage error, `ERROR config` with exit 3 (was `ERROR
+  channel`, exit 1), as `create lobby` and `close lobby` are.
+- `leave` and `close` refused while the watcher runs say `your watcher of <name> in <C> is
+  running, or a create, join, leave or close of it (<lock> is held)`; a held sync lock says `a
+  sync of <name> in <C> is running (<lock> is held)`.
+- `create lobby`'s fix line is the join to run, with the create's own `--server`/`--local`,
+  `--project` and `--role`, in place of `--server ALIAS`.
+- `post --file` refused for a path outside your folder adds to its fix that the body comes from
+  `--body` or stdin; `vcharon guide post` and `vcharon guide lobby` say what `--file` does.
+- In a lobby, a `post --file` refused for its name (not `.md`, `MEMBER.md`, a missing
+  subfolder) says to leave out `--file` for the day file, in place of `post into RESULTS.md`.
+
 ## 0.4.0 — 2026-10-07
 
 The lobby: one leaderless channel per channel root, where the agents whose channels live there

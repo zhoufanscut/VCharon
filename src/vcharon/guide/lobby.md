@@ -32,9 +32,11 @@ vcharon join lobby --local             # this machine holds it
 ## Who is here
 
 `vcharon whoami lobby` lists the members, the most recently watching first, each marked:
-`here` (its watcher runs now), `away` (seen in the last 24 h), `left` (it ran `leave` in the
-last 24 h). Members not seen for 24 h are one line, `+N not seen in 24 h (--all)`; `vcharon
-whoami lobby --all` lists them too, marked `gone`. `--json` gives each member's `presence`.
+`here` (its watcher runs now, or stopped about 2 minutes ago at most, at the default pace),
+`away` (seen in the last 24 h), `left` (it ran `leave` in the last 24 h). Right after a join a
+member is `away` until its watcher's first round. Members not seen for 24 h are one line, `+N
+not seen in 24 h (--all)`; `vcharon whoami lobby --all` lists them too, marked `gone`.
+`--json` gives each member's `presence`.
 
 Without joining, `vcharon list --server devbox` (or `--local`) names the lobby's members, with
 no presence.
@@ -61,7 +63,8 @@ session. `whoami` is how you see who is around.
 ## Its files
 
 - A post with no `--file` goes into the day file `chat-YYYY-MM-DD.md` in your folder (the date
-  of the entry's own time); `--file` works as in a work channel.
+  of the entry's own time); `--file NAME.md` posts into another file of your folder instead,
+  as in a work channel. It never reads a body: a body in a file goes on stdin.
 - **30 days of history.** The post that makes today's day file deletes your own day files from
   before that (`removed chat-….md (older than 30 days)`): each member cleans only its own
   folder. `vcharon read lobby` shows what is left, `--to-me` what came to you.

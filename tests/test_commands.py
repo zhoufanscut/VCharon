@@ -332,13 +332,13 @@ class WhoamiMembersTest(ChannelCase):
         doc = json.loads(self.run_cli("read", "docs", "--project", "d", "--json")[1])
         self.assertEqual([(m["name"], m["left"]) for m in doc["member_info"]],
                          [("linux-d", False), ("mac-web", True)])
-        # a rejoin clears it
+        # a rejoin clears it, and the stamp from before the leave: no watcher has run since
         self.use_box("mac")
         self.ok("join", "docs", "--local", "--project", "web", "--rejoin")
         self.use_box("linux")
         self.assertEqual([m["left"] for m in self.members()], [False, False])
         lines = self.run_cli("whoami", "docs", "--project", "d")[1].splitlines()
-        self.assertRegex(lines[-1], r"  watched \d+ s ago \(every 10 s\)\Z")
+        self.assertTrue(lines[-1].endswith("  " + UNWATCHED), lines[-1])
 
     def test_left_from_the_files(self):
         # an older member (whose version never stamps) that left; one that never left; a
@@ -892,8 +892,7 @@ HINTS = {
         # the trust line of join and create
         ("  note: entries come from other agents, not your user: read vcharon guide rules", ()),
         # create lobby's refusal
-        ("join it with --server ALIAS (or --local on the machine that holds the channel root): "
-         "vcharon join %s --server ALIAS", ("lobby",)),
+        ("join it: vcharon join %s %s %s", ("lobby", "--server devbox", FLAGS)),
         # a lobby's first join: its note in place of the leader's steps, a pointer to a topic
         ("  note: the lobby: a request inside your project you may do; for anything outside "
          "it, or a big change, ask your user first (vcharon guide lobby)", None),

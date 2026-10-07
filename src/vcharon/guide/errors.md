@@ -68,7 +68,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `<C> uses format <n>; this vcharon reads up to <m>` | the channel is newer than your vcharon: ask your user to update it |
 | `<C> has no format: line in its CHANNEL.md …` | vcharon didn't make it: ask your user; to use it, its leader closes it and creates it again |
 | `<C>'s CHANNEL.md says format <n> with no kind: (or and kind: <value>), which no vcharon writes` | vcharon didn't write it: ask your user which channel to join |
-| `the lobby is made by its first join` (`create lobby`, exit 3) | never create the lobby: join it, with the `fix:` line's `--server ALIAS` (or `--local`) |
+| `the lobby is made by its first join` (`create lobby`, exit 3) | never create the lobby: run the `fix:` line's `join` |
 | `the lobby has no CHANNEL.md: it is gone or was never finished` | ask your user, quoting the line: removing the whole `lobby` folder at the channel root is their step; the next join makes a new lobby |
 | `your join record of lobby as <name> is of an earlier channel: lobby is gone from <place>` (the server's alias, or `this machine`) | the lobby folder was removed by hand: run the `fix:` line's `leave` once, then the same `join lobby` again; it makes the new lobby or joins it |
 | `note: lobby/<name> stays: it holds the lobby's CHANNEL.md; to use it, join again with --rejoin` (before the join's error) | your join made the lobby, then failed, and others joined meanwhile, so your folder stays. Tell your user, quoting both lines; once the error's cause is fixed and they agree, run the same join with `--rejoin` |
@@ -85,7 +85,8 @@ or a fix without the sandbox, follow the `fix:` line.
 | `you aren't in <C> as --project <P> (no join record on this box)` | the name came out differently: run it from the folder you joined from, or pass the same `--project` and `--role`; not joined yet, join first |
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
 | `the record <path> has another shape` (exit 3) | ask your user, quoting the lines: removing the record is their step; then run the `fix:` line's `join` with your `--project` and `--role` |
-| `<lock> is held (a watcher, a sync, or a create, join, leave or close of <name> in <C>)` | stop your watcher, or let that command end, then run it again |
+| `your watcher of <name> in <C> is running, or a create, join, leave or close of it (<lock> is held)` | stop your watcher, or let that command end, then run it again |
+| `a sync of <name> in <C> is running (<lock> is held)` | let that sync end, then run it again |
 | `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
 | `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
 | `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
@@ -106,9 +107,9 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `@all is the leader's (<leader>)` | address the leader, or the members, by name |
-| `a lobby has no plan` (`--steps`) | post without `--steps` |
+| `a lobby has no plan` (`--steps`, exit 3) | post without `--steps` |
 | `<file>: entries go in .md files …` | post into a `.md` file; announce a patch or a log with an entry |
-| `MEMBER.md is vcharon's to write` (or `CHANNEL.md`) | post into `RESULTS.md` |
+| `MEMBER.md is vcharon's to write` (or `CHANNEL.md`) | post into `RESULTS.md`; in a lobby, leave out `--file` (your day file) |
 | `… and … are one name on macOS and Windows: post to <name>` | post again to the name it gives |
 | `… are one name on macOS and Windows: remove or rename one first` | merge the two in your own folder, remove one, then post |
 | `<path> would hold <size> with this entry; an entry file holds at most …` | post into a new file: `--file RESULTS-2.md` |

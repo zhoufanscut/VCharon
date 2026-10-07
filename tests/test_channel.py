@@ -1768,12 +1768,13 @@ class LeaveCloseTest(ChannelCase):
             "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
         release(child)
         self.use_box("mac")
-        for held in locks:
+        # the watcher's lock names the watcher; a job's names a sync
+        for held, text in zip(locks, ("your watcher of mac-web in game is running, or a create, "
+                                      "join, leave or close of it (%s.lock is held)",
+                                      "a sync of mac-web in game is running (%s.lock is held)")):
             with self.subTest(lock=held):
                 child = hold(self, held + ".lock")
-                line = self.refused("leave", "game")
-                self.assertTrue(line.startswith("ERROR channel: %s.lock is held" % held), line)
-                self.assertTrue(line.endswith("of mac-web in game)"), line)
+                self.assertEqual(self.refused("leave", "game"), "ERROR channel: " + text % held)
                 release(child)
         # close's: not the leader; its fix is text too (a member leaves after CLOSED)
         self.assertEqual(self.refusal("close", "game"),
@@ -2176,7 +2177,8 @@ class PostSendTest(ChannelCase):
         code, out, err = self.post()
         self.assertEqual((code, err), (0, ""))
         lines = out.splitlines()
-        self.assertRegex(lines[0], r"\Aposted mac-web#\d+ — done to mac-web/RESULTS.md at ")
+        self.assertRegex(lines[0], r"\Aposted mac-web#\d+ — done into mac-web/RESULTS.md, "
+                                   r"to @laptop-ui at ")
         self.assertEqual(lines[1:], ["sent to fake-dest"])
         self.assertEqual(self.titles().count("done"), 2)
 
@@ -3662,6 +3664,28 @@ class SeenTest(ChannelCase):
         channels.remove(self.root, "docs", "lead")
         self.assertFalse(os.path.exists(self.seen("docs")))
         self.assertTrue(os.path.exists(self.seen("game", "a")))
+
+    def test_a_join_drops_its_own_stamp(self):
+        # this machine's join of its own folder holds its watcher lock, so no watcher of it
+        # runs: a stamp from before a leave would read "here" after the rejoin
+        self.ok("join", "lobby", "--server", "fake-dest")
+        channels.stamp_seen(self.root, "lobby", "mac-web", "stream 2")
+        self.ok("leave", "lobby")
+        self.assertTrue(os.path.exists(self.seen("lobby", "mac-web")))
+        self.assertIn("took back lobby/mac-web", self.ok("join", "lobby", "--server", "fake-dest"))
+        self.assertFalse(os.path.exists(self.seen("lobby", "mac-web")))
+        # another machine's claim of the folder (refused by the join after it) leaves it
+        channels.stamp_seen(self.root, "lobby", "mac-web", "stream 2")
+        got = channels.claim(self.root, "lobby", "mac-web", False, claimer="0" * 16)
+        self.assertNotEqual(got["claimer"], "0" * 16)
+        self.assertTrue(os.path.exists(self.seen("lobby", "mac-web")))
+        # the helper takes the claimer as an optional argument
+        s = self.session()
+        s.open()
+        got = s.call("channel.claim", {"channel": "lobby", "name": "mac-web", "create": False,
+                                       "claimer": got["claimer"]})
+        self.assertTrue(got["existed"])
+        self.assertFalse(os.path.exists(self.seen("lobby", "mac-web")))
 
     def plan(self, s, path, **more):
         args = {"plugin": "path", "options": {"path": path, "mailbox_me": "a", "prune": "yes",

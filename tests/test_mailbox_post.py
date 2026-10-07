@@ -119,8 +119,8 @@ class PostTest(PostCase):
     def test_creates_then_appends(self):
         code, out, err = self.main(POST + ["--title", "step 7 done", "--body", "one line"] + TO)
         self.assertEqual((code, out, err),
-                         (0, "posted windows#2 — step 7 done to windows/RESULTS.md at "
-                          "2026-10-01 09:05:46\n", ""))
+                         (0, "posted windows#2 — step 7 done into windows/RESULTS.md, "
+                          "to @debian at 2026-10-01 09:05:46\n", ""))
         first = ("# RESULTS\n\n## 2026-10-01 09:05:46 — windows#2 — step 7 done\nto: @debian\n\n"
                  "one line\n")
         self.assertEqual(self.content(), first)
@@ -241,11 +241,12 @@ class PostTest(PostCase):
         # a .md file of the own folder, a subfolder's too; RESULTS.md without it
         code, out, err = self.post("--file", "NOTES.md")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted windows#2 — t to windows/NOTES.md at 2026-10-01 09:05:46\n")
+        self.assertEqual(out, "posted windows#2 — t into windows/NOTES.md, to @debian at "
+                              "2026-10-01 09:05:46\n")
         os.makedirs(os.path.join(self.folder, "logs"))
         code, out, err = self.post("--file", "logs/run.md")
-        self.assertEqual(out, "posted windows#3 — t to windows/logs/run.md at 2026-10-01 "
-                              "09:05:46\n")
+        self.assertEqual(out, "posted windows#3 — t into windows/logs/run.md, to @debian at "
+                              "2026-10-01 09:05:46\n")
         # never outside the own folder, nor a name it can't be
         for name in ("../debian/STEPS.md", "/tmp/x.md", "a//b.md", "./x.md", "C:x.md", "",
                      # names a Windows member can't hold: its sync would refuse the tree
@@ -256,6 +257,9 @@ class PostTest(PostCase):
                 self.assertEqual((code, out), (3, ""))
                 self.assertTrue(err.startswith("ERROR config: --file "), err)
                 self.assertIn("\n  fix: ", err)
+        # a body file given as --file: the fix says where a body comes from
+        self.assertIn("the body comes from --body or stdin, never from --file",
+                      self.post("--file", "/tmp/x.md")[2])
         self.assertEqual(sorted(os.listdir(self.folder)), ["MEMBER.md", "NOTES.md", "logs"])
         # a subfolder that isn't there: make it first (never a rejoin, which wakes the leader)
         code, out, err = self.post("--file", "nope/x.md")
@@ -565,7 +569,8 @@ class ChannelTest(PostCase):
         code, out, err = self.main(LEADER + ["--steps", "--to", "@all", "--title", "plan",
                                              "--body", "1. do"])
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted debian#2 — plan to debian/STEPS.md at 2026-10-01 09:05:46\n")
+        self.assertEqual(out, "posted debian#2 — plan into debian/STEPS.md, to @all at "
+                              "2026-10-01 09:05:46\n")
         self.assertEqual(entries.parse_file(steps)[0].to, ("@all",))
         # and its answers into its own RESULTS.md
         code, out, err = self.main(LEADER + ["--to", "@windows", "--title", "a", "--body", "b"])
@@ -592,7 +597,8 @@ class ChannelTest(PostCase):
         self.assertEqual(util.read_tree(self.tree), dict(before, **{"debian/sub/": None}))
         code, out, err = self.post()
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "posted windows#2 — t to windows/RESULTS.md at 2026-10-01 09:05:46\n")
+        self.assertEqual(out, "posted windows#2 — t into windows/RESULTS.md, to @debian at "
+                              "2026-10-01 09:05:46\n")
 
     def test_an_unknown_name_is_a_note(self):
         code, _out, err = self.post("--to", "@debian", "@mac-x")
@@ -659,7 +665,7 @@ class RealRunTest(PostCase):
                             env={"PYTHONIOENCODING": "gbk"})
         after = time.time()
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertTrue(ran.stdout.decode("utf-8").startswith("posted windows#2 — mañana to "),
+        self.assertTrue(ran.stdout.decode("utf-8").startswith("posted windows#2 — mañana into "),
                         ran.stdout)
         self.assertTrue(self.content().endswith("— mañana\nto: @debian\n\nseñal 完成\n"),
                         self.content())

@@ -730,7 +730,8 @@ def _post(args, run):
     record, flags = _membership(args)
     kind_ = kinds.of(record)
     if args.steps and not kind_.has_plan:
-        raise channel_cmd.channels.refused("a lobby has no plan", "post without --steps")
+        # a flag the lobby has no use for: a usage error, as close and create of it are
+        raise _usage("a lobby has no plan", "post without --steps")
     # a lobby's day file is named here from this clock reading, for post()'s checks; the
     # entry goes into the one of its heading's date, chosen under the post lock
     today = kind_.day_file(entries.stamp(time.time()))
@@ -754,7 +755,7 @@ def _post(args, run):
     _check_tree(record, tree, synced, own)
     post_mod.check_own(own, tree if synced else None)
     # a remote member's missing own folder is post()'s to refuse, with the rejoin as its fix
-    path = (post_mod.file_below(own, parts) if os.path.isdir(own)
+    path = (post_mod.file_below(own, parts, kind_) if os.path.isdir(own)
             else os.path.join(own, *parts))
     body = args.body if args.body is not None else post_mod.body_from(_stdin_bytes())
     done = {}
@@ -762,7 +763,10 @@ def _post(args, run):
                               channel=args.channel, kind_=kind_, day=day, done=done)
     if day:
         parts = [os.path.basename(done["path"])]
-    print("posted %s — %s to %s at %s" % (id_, title, "/".join([name] + parts), when))
+    # "into" the file, "to" the addressees, as leave's LEAVE line, so the file isn't read as
+    # an address
+    print("posted %s — %s into %s, to %s at %s" % (id_, title, "/".join([name] + parts),
+                                                   " ".join(done["to"]), when))
     for removed in done["removed"]:
         print(channel_cmd.REMOVED_OLD % (removed, kinds.KEEP_DAYS))
     sys.stdout.flush()

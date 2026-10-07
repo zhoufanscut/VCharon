@@ -418,7 +418,7 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 | `sink.abort` | – | `{}` | – |
 | `job.reset` | – | `{}` | – |
 | `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "format", "limits"}], "others": [{"name", "why"}]}` | – |
-| `channel.claim` | `channel`, `name`, `create` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
+| `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
 | `channel.release` | `channel`, `name` | `{"removed"}` | – |
 | `channel.remove` | `channel`, `name` | `{"closed", "deleted"}` | – |
 | `bye` | – | `{}` | – |
@@ -443,8 +443,17 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   the root, and never follows a symlink. `--local` calls the same functions in-process.
   `claim`, `release` (undoing a failed claim) and `remove` also sweep `seen/` beside the root: each
   `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed, and a
-  new member's claim drops an earlier member's stamp of its name. Why there: those calls end or
-  reuse channels, and the stamps of a channel that is gone are nobody's.
+  new member's claim drops an earlier member's stamp of its name. A join's claim sends the
+  joining machine's `claimer`, and an existing folder whose `MEMBER.md` names it loses its stamp
+  too: the join holds its state dir's watcher lock, so the stamp is from a watcher that isn't
+  running. Another state dir on the same machine (another `VCHARON_HOME` or OS user) has the
+  same claimer: a watcher of the folder there stamps again at its next round, and a `sync
+  --repeat` child a stopped watcher left can stamp once more in the round it finishes. Every
+  join of this machine's own folder drops it, in a work channel too (a `--takeover` keeps the
+  earlier machine's stamp): `whoami` shows `watched -` until the watcher's first round. Matched
+  by claimer, not dropped by every claim: another machine's join, refused after the claim, must
+  not blank a live member. Why there: those calls end or reuse channels, and the stamps of a
+  channel that is gone are nobody's.
 - `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`);
   `claimer` is the `claimer:` of an existing folder's `MEMBER.md`, or null; `format` and
   `limits` are the channel's, read from its leader's `CHANNEL.md`. No reply carries a host name.
@@ -1238,8 +1247,9 @@ other agent's. Two records for one (C, project, role) are refused: ask the user.
   sync ran alongside it. Measured on Linux (seven overlaps seen): the watcher's round was
   skipped as busy, and once the join's own sync lost the job lock (`ERROR busy`, exit 2). Held,
   a watcher started meanwhile exits 12 at once. The refusal of `leave` and `close` names
-  every holder: `<lock> is held (a watcher, a sync, or a create, join, leave or close of
-  <name> in C)`.
+  the watcher first, since a running watcher is what an agent forgets to stop: `your watcher of
+  <name> in C is running, or a create, join, leave or close of it (<lock> is held)`; a job's
+  lock held is `a sync of <name> in C is running (<lock> is held)`.
 
 ### The lobby
 
@@ -1256,11 +1266,12 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   watcher with no record (it reads the leader from `MEMBER.md`) reads the kind from
   `CHANNEL.md`. Why the record: a remote member has no `CHANNEL.md` until its first pull.
 - **The name.** `lobby` is reserved: `create lobby` is refused, exit 3, `the lobby is made by
-  its first join`, `fix: join it with --server ALIAS (or --local on the machine that holds the
-  channel root): vcharon join lobby --server ALIAS`. A channel named `lobby` that has no
-  `kind:` (made by an older vcharon) stays a work channel, with its leader and its close; a
-  join of it prints `  note: lobby here is a work channel, not a lobby`. Why one fixed name:
-  "join the lobby in devbox" is then a whole instruction, with nothing to agree on first.
+  its first join`, `fix: join it: vcharon join lobby <--server ALIAS | --local> <flags>`, with
+  the create's own place and membership flags: the agent runs it as printed. A channel named
+  `lobby` that has no `kind:` (made by an older vcharon) stays a work channel, with its leader
+  and its close; a join of it prints `  note: lobby here is a work channel, not a lobby`. Why
+  one fixed name: "join the lobby in devbox" is then a whole instruction, with nothing to agree
+  on first.
 - **The first join makes it.** `join lobby` on a root with no `lobby` makes it with one
   `channel.claim` that, for a lobby, also writes `CHANNEL.md` at the root: `mkdir
   <root>/lobby`, `mkdir <root>/lobby/<name>`, then `<name>/CHANNEL.md` with the lobby's header
@@ -1298,9 +1309,10 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   `MEMBER.md` yet: another machine's member whose first push hasn't landed may be making it):
   that one needs `--rejoin`, on the user's word: only the user knows whose folder it is.
 - **Anyone posts to all.** Every member may post `@all`; in a lobby the watcher, `read
-  --to-me` and join's count line take any member's `@all` as to all. `--steps` is refused, `a lobby
-  has no plan`, `fix: post without --steps`. The watcher never prints the `next:` line after a
-  `CLOSED` entry in a lobby: there it is chat.
+  --to-me` and join's count line take any member's `@all` as to all. `--steps` is refused,
+  exit 3, `a lobby has no plan`, `fix: post without --steps`: a usage error, as `create lobby`
+  and `close lobby` are. The watcher never prints the `next:` line after a `CLOSED` entry in a
+  lobby: there it is chat.
 - **Day files.** A lobby post with no `--file` goes into `chat-YYYY-MM-DD.md` in the own folder:
   the date is the poster's local one, taken under the post lock from the same clock reading as
   the heading's time, so an entry posted at midnight is in the file of its heading's day. So do
@@ -1412,7 +1424,10 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   a local member's folder over the limits, counts as not left):
   - `left` ([Reading a channel](#reading-a-channel)), when its newest file is at most 24 h old:
     first, since its stamp stays after a `leave` and would read `here` for a while;
-  - `here`: its stamp's age at most twice its `--every` plus 2 minutes (the lead guide's rule);
+  - `here`: its stamp's age at most twice its `--every` plus 2 minutes (the lead guide's rule),
+    so a watcher stopped a moment ago still reads `here` for up to that long (the guide says
+    so). A join drops the member's own stamp ([Calls](#calls)): a stamp from before a
+    `leave` would otherwise read `here` after the rejoin, with no watcher started yet;
   - `away`: a stamp at most 24 h old, or no stamp and a newest file at most 24 h old.
 
   Every other member (`gone`: a stamp, or with none its newest file, older than 24 h; a member
@@ -1486,6 +1501,8 @@ re: linux-api#3
   `@name` when it is a member's folder in the tree, and refused otherwise, with the members'
   names: without the `@` it is more likely a typo than a member not synced yet. `--re` drops an
   `@` in front of the ID.
+- It prints `posted <id> — <title> into <member>/<file>, to <to> at <time>`: "into" the file,
+  "to" the addressees, as `leave`'s `posted LEAVE` line, so the file isn't read as the address.
 - A remote member's post then runs the section's up job in the same process (`--no-sync` skips
   it), so the entry reaches the server without waiting for a watcher. It prints `sent to
   <server>`; when the job's lock is held (the watcher's round) a `note:`, since that round or

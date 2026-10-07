@@ -205,9 +205,7 @@ class JoinTest(LobbyCase):
         before = self.server_tree()
         self.assertEqual(self.refusal("create", "lobby", "--local", "--project", "x", code=3), (
             "ERROR config: the lobby is made by its first join",
-            channel_cmd.platform.runnable(
-                "join it with --server ALIAS (or --local on the machine that holds the channel "
-                "root): vcharon join lobby --server ALIAS")))
+            channel_cmd.platform.runnable("join it: vcharon join lobby --local --project x")))
         self.assertEqual(self.server_tree(), before)
 
     def command(self):
@@ -455,15 +453,24 @@ class PostTest(LobbyCase):
     def test_the_day_file_and_anyones_all(self):
         code, out, err = self.post(T0, "--to", "@all")
         self.assertEqual((code, err), (0, ""))
-        self.assertRegex(out, r"\Aposted mac-web#\d+ — hi to mac-web/%s at 2026-11-20 "
+        self.assertRegex(out, r"\Aposted mac-web#\d+ — hi into mac-web/%s, to @all at 2026-11-20 "
                               r"12:00:00\n\Z" % TODAY)
         [e] = entries.parse_file(os.path.join(self.lobby_folder(), TODAY))
         self.assertEqual(e.to, ("@all",))
         # --file as in a work channel; --steps refused
         code, out, _ = self.post(T0, "--to", "@linux-web", "--file", "notes.md")
-        self.assertIn(" to mac-web/notes.md at ", out)
-        self.assertEqual(self.post(T0, "--to", "@all", "--steps")[2].splitlines()[:2],
-                         ["ERROR channel: a lobby has no plan", "  fix: post without --steps"])
+        self.assertIn(" into mac-web/notes.md, to @linux-web at ", out)
+        # a refused --file points at the day file, not a work channel's RESULTS.md
+        day_fix = "leave out --file: a lobby post goes into your day file chat-YYYY-MM-DD.md"
+        for name, fix in (("x.txt", day_fix), ("MEMBER.md", day_fix),
+                          ("nope/x.md", "make nope/ in your own folder first, or " + day_fix)):
+            with self.subTest(name=name):
+                code, _, err = self.post(T0, "--to", "@linux-web", "--file", name)
+                self.assertEqual((code, err.splitlines()[1]), (1, "  fix: " + fix))
+        # a usage error (exit 3), as create lobby and close lobby are
+        code, _, err = self.post(T0, "--to", "@all", "--steps")
+        self.assertEqual((code, err.splitlines()[:2]),
+                         (3, ["ERROR config: a lobby has no plan", "  fix: post without --steps"]))
 
     def test_midnight(self):
         # the command named the day file at 23:59:59.999 (the path given); the heading's
