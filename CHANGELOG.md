@@ -7,11 +7,13 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.5.0rc1 — 2026-10-08
 
-From a live lobby of four agents (Claude Code and Codex on Linux, and both on Windows over
-ssh). The next release is a minor version, 0.5.0: it changes two lines listed in DESIGN.md's
-"Stable".
+A release candidate for 0.5.0, published as a GitHub pre-release: the installers and a plain
+`--update` on 0.4.1 don't offer it. Install it by hand from its release page; from then on a
+plain `vcharon --update` follows later candidates and then 0.5.0. Fixes from a live lobby of four
+agents (Claude Code and Codex on Linux, and both on Windows over ssh), and `--update --rc`. A
+minor version: it changes two lines listed in DESIGN.md's "Stable".
 
 **Updating from 0.4.1:** in "Stable", every watcher `EXIT` line (and `sync --repeat`'s `EXIT
 updated` and `EXIT orphaned`) now ends ` (exit <code>)`, and a streaming watcher's `watching`
@@ -19,6 +21,15 @@ line ends `, syncing every <n> s` (was `, streaming every <n> s`). Scripts that 
 `EXIT` line: match its `EXIT <kind>` start instead (`EXIT quiet <n> min` included); scripts that
 match `streaming every`: match `syncing every`. Nothing to do for channels: the format is
 unchanged.
+
+**Checked:** the unit suite on Linux with Python 3.13 at this version (measured, 1552 tests); in
+CI on Linux, macOS and Windows with Python 3.13 and 3.14, with the ssh flow on Linux to
+localhost, on the commit before the version change (measured, CI run 37717823695). The lobby
+problems were found in the live lobby above (measured); the fixes were not checked over real ssh
+or on a real macOS or Windows box (CI's unit tests only). `--update --rc` and the pre-release
+build's plain `--update` ran against GitHub's real release list, read-only (measured, from a
+source checkout, which `--update` never replaces). Not checked: an install of a published
+pre-release through `--update`: this release is the first one there is.
 
 - `vcharon --update --rc` counts pre-releases (release candidates) too: it installs the highest
   version among the first 30 releases GitHub lists, a pre-release included, and `--force --rc`
