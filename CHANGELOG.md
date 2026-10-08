@@ -7,10 +7,17 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.5.0rc2 — 2026-10-08
 
-Fixes from a lobby test of 0.5.0rc1 (Claude Code and Codex on Linux, and both on Windows over
-ssh). It adds a watcher `EXIT` line and an exit code to the ones DESIGN.md lists under "Stable".
+The second release candidate for 0.5.0, published as a GitHub pre-release: a plain
+`vcharon --update` on 0.5.0rc1 offers it. Fixes from a lobby test of 0.5.0rc1 (Claude Code and
+Codex on Linux, and both on Windows over ssh). It adds a watcher `EXIT` line and an exit code to
+the ones DESIGN.md lists under "Stable".
+
+Checked: the unit suite on Linux (measured); CI on Linux, macOS and Windows with Python 3.13 and
+3.14 (measured, run 37734815398); on Linux, Claude Code's `TaskStop` ending a watcher with `EXIT
+interrupted (exit 143)`, and a built binary signalled in each of its processes (measured). The
+Windows stop text is inferred from the source, not run on Windows.
 
 **Updating from 0.5.0rc1:** a script that lists every `EXIT <kind>` should add `EXIT
 interrupted`; one that lists exit codes, 143 (a SIGTERM to `watch` or `sync --repeat`).
