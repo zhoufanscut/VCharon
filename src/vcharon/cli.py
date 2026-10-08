@@ -11,6 +11,7 @@ import json
 import os
 import posixpath
 import re
+import signal
 import string
 import sys
 import threading
@@ -58,12 +59,16 @@ from .proto import VCharonError
 # A dry run's listing shows this many paths, then "… and N more".
 LIST_MAX = 50
 
+# a Ctrl-C's exit code, and a SIGTERM's in watch and sync --repeat (_Run.stoppable): the
+# shell's 128 + the signal's number
+EXIT_INTERRUPTED = 130
+EXIT_TERMINATED = 143
+
 EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 3 usage or config,
-  4 couldn't connect or start the helper, 130 Ctrl-C.
+  4 couldn't connect or start the helper, 130 Ctrl-C, 143 SIGTERM (watch, sync --repeat).
   watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher (or a create,
-  join, leave or close of the member) runs, 13 the channel is closed,
-  14 vcharon was updated (start it again), 15 a binary's bootloader process was killed,
-  16 nothing new (--once).
+  join, leave or close of the member) runs, 13 closed, 14 vcharon was updated (start it again),
+  15 a binary's bootloader process was killed, 16 nothing new (--once).
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -109,8 +114,9 @@ def _parser():
     # --update is a flag, not a verb: the verbs are what agents run, and an agent never
     # updates (DESIGN, "Self-update"). Its options have their own dests, so a verb's --json
     # can't be taken for its.
+    # one line each, like --check's: the top help is one screen
     parser.add_argument("--update", action="store_true", help="update this binary from "
-                        "GitHub releases, asking first; alone or with the four below")
+                        "GitHub releases, asking first")
     parser.add_argument("--yes", dest="update_yes", action="store_true",
                         help="with --update: install without asking")
     parser.add_argument("--force", dest="update_force", action="store_true",
@@ -119,6 +125,8 @@ def _parser():
                         help="with --update: print one JSON object; installs only with --yes")
     parser.add_argument("--rc", dest="update_rc", action="store_true",
                         help="with --update: count pre-releases too")
+    parser.add_argument("--check", dest="update_check", action="store_true",
+                        help="with --update: only say if a newer one is out")
     commands = parser.add_subparsers(dest="command", metavar="<command>")
 
     def verb(name, text, example):
@@ -341,7 +349,7 @@ def main(argv=None):
 
 
 # what may come with --update
-UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc")
+UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc", "--check")
 
 
 def _main(argv, run):
@@ -397,17 +405,24 @@ def _update_alone(words):
         return
     others = [w for w in words if w not in UPDATE_FLAGS]
     if others:
-        raise _usage("--update runs on its own, with only --yes, --force, --json and --rc: not "
-                     "with %s" % " ".join(others), "run vcharon --update by itself; then the rest")
+        raise _usage("--update runs on its own, with only --yes, --force, --json, --rc and "
+                     "--check: not with %s" % " ".join(others),
+                     "run vcharon --update by itself; then the rest")
 
 
 def _update_flags(args):
-    """--yes, --force, --json and --rc before a verb are --update's: without it, refused
-    rather than ignored."""
+    """--yes, --force, --json, --rc and --check before a verb are --update's: without it,
+    refused rather than ignored. --check, which never installs, refuses --yes and --force."""
     if args.update:
+        if args.update_check:
+            for flag, on in (("--yes", args.update_yes), ("--force", args.update_force)):
+                if on:
+                    raise _usage("--check never installs, so it doesn't go with %s" % flag,
+                                 "leave out %s, or --check" % flag)
         return
     for flag, on in (("--yes", args.update_yes), ("--force", args.update_force),
-                     ("--json", args.update_json), ("--rc", args.update_rc)):
+                     ("--json", args.update_json), ("--rc", args.update_rc),
+                     ("--check", args.update_check)):
         if not on:
             continue
         if flag == "--json" and args.command is not None:
@@ -432,10 +447,22 @@ def _guarded(fn, run):
         _stdout_to_devnull()
         return 1
     except KeyboardInterrupt:
-        # The session has killed ssh on its way out.
-        run.log_line("error", "interrupted")
+        # The session has killed ssh on its way out; a watch has stopped its sync child. A
+        # SIGTERM to watch or sync --repeat arrives as this too (_Run.stoppable), with 143.
+        code = run.stop_code or EXIT_INTERRUPTED
+        run.log_line("error", "interrupted" if code == EXIT_INTERRUPTED
+                     else "stopped by SIGTERM")
         sys.stderr.write("vcharon: interrupted\n")
-        return 130
+        if run.stop_say is not None and not run.exit_said:
+            # their last line, as for every other way they end; not after one they printed
+            # already (a stop that came while the watch stopped its child after EXIT change)
+            try:
+                run.stop_say(watch_mod.exit_line("interrupted", code))
+            except (OSError, ValueError):
+                # a reader that is gone (a closed pipe) gets none; the line left in stdout's
+                # buffer must not fail Python's own flush at exit, which would change the code
+                _stdout_to_devnull()
+        return code
     except Exception as e:  # noqa: BLE001
         if run.watchdog is not None and run.watchdog.after_crash():
             # a long-running command's binary was swapped under it: the error may be a read
@@ -523,7 +550,8 @@ def _whoami(args, run):
     with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
     With C only, "members": read_mod.member_list's of the tree but its "vcharon", null when
     it can't be read; in a lobby each with "presence" too (_presence), every "leader" false.
-    The text of a lobby's lists only the members seen in 24 h, unless --all (_lobby_lines).
+    The text of a lobby's lists only the members seen in 24 h, unless --all (_lobby_lines);
+    the text with C names this project's other memberships of C on this box ("also").
     Without C: {"box", "box_source", "project", "role", "name", "channels"}: "name" is the
     name a join from here would take, "channels" every membership of this project on this box
     (of this role too, with --role), each an object as with C, without "box", "box_source"
@@ -554,6 +582,13 @@ def _whoami(args, run):
             return _print_json(dict(doc, members=shown, **box))
         _say("vcharon: whoami %s" % args.channel)
         _whoami_lines(doc)
+        # two agents can work in one folder (one with --role): a plain whoami shows the
+        # role-less membership, so the others are named here, each with the flags that find it
+        for other in channel_cmd.records(args.channel, skip_unreadable=True):
+            if (other["project"] == record["project"]
+                    and (other["role"] or None) != (record["role"] or None)):
+                _say("  also     %s  (%s): this project's other membership of %s here"
+                     % (other["name"], channel_cmd.record_flags(other), args.channel))
         _say("  box      %s" % cfg.box_text())
         # the version this box runs: vcharon read notes when the members' differ
         _say("  vcharon  %s" % VERSION)
@@ -1079,6 +1114,20 @@ def _over_limit(limits, me):
 def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
     its synced copy; the watcher's own exit codes."""
+    # every line the watch prints goes through out, so a later Ctrl-C knows whether an EXIT
+    # line came already
+    out = run.noting_exit(watch_mod.say, len(watch_mod.stamp(time.time())) + 1)
+
+    def say(line):
+        out("%s %s" % (watch_mod.stamp(time.time()), line))
+
+    with run.stoppable(say):
+        return _watch_member(args, run, say, out)
+
+
+def _watch_member(args, run, say, out):
+    """_watch's work; say prints a line with the time in front, as every watcher line; out,
+    watch_dir's and watch_job's, a line that has it already."""
     if args.once:
         # each would change what one round means: a deadline, a pace, an error streak, and
         # --fresh a baseline, which would take what came as seen without printing it
@@ -1128,8 +1177,7 @@ def _watch(args, run):
         watch_mod.say("%s %s" % (watch_mod.stamp(time.time()), pathrules.printable(note)))
     if tree is not None:
         channel_cmd.refresh_version(os.path.join(tree, record["name"]), record["name"])
-    dog = run.watch_code(lambda line: watch_mod.say("%s %s" % (watch_mod.stamp(time.time()),
-                                                               line)))
+    dog = run.watch_code(say)
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
               "max_minutes": args.max_minutes or (25 if args.until_change else None),
@@ -1143,7 +1191,7 @@ def _watch(args, run):
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
                          % args.channel, "leave out --no-stream")
         return watch_mod.watch_dir(channel_cmd.local_root(record),
-                                   record["name"], args.every or watch_mod.DIR_EVERY,
+                                   record["name"], args.every or watch_mod.DIR_EVERY, out=out,
                                    folder_limits=(channel_limits["max_mb"] * charter.MB,
                                                   channel_limits["max_files"]), **limits)
     # a --once check runs one sync, never the streaming child, at --no-stream's pace (the pace
@@ -1153,7 +1201,8 @@ def _watch(args, run):
         raise _usage("--every: 1 to %d seconds when streaming" % watch_mod.STREAM_EVERY_MAX,
                      "give a smaller --every, or add --no-stream")
     every = args.every or (watch_mod.STREAM_EVERY if stream else watch_mod.RUN_EVERY)
-    return watch_mod.watch_job(_section(record), [args.channel] + flags, every, stream=stream,
+    return watch_mod.watch_job(_section(record), [args.channel] + flags, every, out=out,
+                               stream=stream,
                                **limits)
 
 
@@ -1263,16 +1312,18 @@ def _skill(args):
 
 
 def _update(args, run):
-    """vcharon --update [--yes] [--force] [--json] [--rc] (DESIGN, "Self-update"): the
-    latest release from GitHub, and this binary replaced with it once the user says yes. With
-    --rc, or when this build is a pre-release, the newest pre-release counts too. A pipx,
+    """vcharon --update [--yes] [--force] [--json] [--rc] [--check] (DESIGN, "Self-update"):
+    the latest release from GitHub, and this binary replaced with it once the user says yes.
+    With --rc, or when this build is a pre-release, the newest pre-release counts too. A pipx,
     uv, pip or source install gets the command that updates it, and nothing changes. Exit 0
-    when it's done, there is nothing newer, or the answer is no; 1 on every failure.
+    when it's done, there is nothing newer, or the answer is no; 1 on every failure. --check
+    stops once the release is read: it reports, never asks, never installs, exit 0.
 
-    --json prints one object on stdout, a failure's too: {"current", "install", "path"},
-    then, once the release is read, {"latest", "tag", "prerelease", "rc", "update_available",
-    "url", "changed", "confirmed"}, "prerelease" being whether that release is one and "rc"
-    whether pre-releases were counted and why ("flag", "current" or false); "ok"; a failure's
+    --json prints one object on stdout, a failure's too: {"current", "install", "path", "rc",
+    "update_available"}, "rc" being whether pre-releases are counted and why ("flag",
+    "current" or false), "update_available" null until the release is read; then {"latest",
+    "tag", "prerelease", "url", "changed", "confirmed"}, "prerelease" being whether that
+    release is one, and "update_available" true or false; "ok"; a failure's
     {"error", "message", "fix"}; a refusal for another install kind's "command"; an install's
     {"previous", "installed", "verified", "skills"}, "skills" being {"paths", "ok", "fix"}: the
     skill copies the new binary was run for, whether that worked, and the command to run when it
@@ -1283,7 +1334,12 @@ def _update(args, run):
 
     as_json = args.update_json
     inst = install.detect()
-    doc = {"current": VERSION, "install": inst.kind, "path": inst.path}
+    # pre-releases count with --rc, and on a pre-release build: rc1 goes to rc2, then to the
+    # final, with a plain --update; a final build reads full releases only
+    rc = "flag" if args.update_rc else "current" if update_mod.is_prerelease(VERSION) else False
+    # rc is known before the read, so a failed read's object has it too
+    doc = {"current": VERSION, "install": inst.kind, "path": inst.path, "rc": rc,
+           "update_available": None}
 
     def fail(kind, message, fix):
         fix = platform.runnable(fix)
@@ -1304,12 +1360,9 @@ def _update(args, run):
             return fail("failed", "%s: %s" % (type(e).__name__, e),
                         "this is a bug in vcharon; see the log")
 
-    # pre-releases count with --rc, and on a pre-release build: rc1 goes to rc2, then to the
-    # final, with a plain --update; a final build reads full releases only
-    rc = "flag" if args.update_rc else "current" if update_mod.is_prerelease(VERSION) else False
     release = guarded(lambda: update_mod.latest_release(pre=bool(rc)))
     available = update_mod.is_newer(release.tag, VERSION)
-    doc.update(latest=release.version, tag=release.tag, prerelease=release.prerelease, rc=rc,
+    doc.update(latest=release.version, tag=release.tag, prerelease=release.prerelease,
                update_available=available, url=release.url, changed=False, confirmed=False)
     if not as_json:
         _say("vcharon: update")
@@ -1320,6 +1373,10 @@ def _update(args, run):
         _say("  latest   %s (%s%s)" % (release.version,
                                        "pre-release, " if release.prerelease else "",
                                        release.url))
+    if args.update_check:
+        # the read is all: an agent may run this without its user's word
+        return _update_check(doc, release, inst, available, rc, as_json,
+                             update_mod.compare(VERSION, release.version) == 0)
     if not available and not args.update_force:
         same = update_mod.compare(VERSION, release.version) == 0
         if as_json:
@@ -1369,6 +1426,29 @@ def _update(args, run):
         _say("  skill rewritten by %s: %s" % (result.version, ", ".join(t for _, t in skills)))
     _say("  note: running watchers end with EXIT updated (exit %d); start them again"
          % install.EXIT_UPDATED)
+    _say("OK")
+    return 0
+
+
+def _update_check(doc, release, inst, available, rc, as_json, same):
+    """--update --check's end, once the release is read: whether it is newer, and the command
+    that would install it (another install kind's own, as "command" in --json too). same:
+    whether the release is this version. Exit 0."""
+    if as_json:
+        if available and not inst.self_updatable:
+            doc["command"] = inst.command_for(release.tag)
+        return _print_json(dict(doc, ok=True))
+    what = "release or pre-release" if rc else "release"
+    if available:
+        # a binary's spelling for a binary, as the question's line has it
+        command = ("%s --update%s" % (platform.self_command(), " --rc" if rc == "flag" else "")
+                   if inst.self_updatable else inst.command_for(release.tag))
+        # the install is the user's to decide (the guide's rule), so the line says whose
+        _say("  %s is newer; your user can install it: %s" % (release.version, command))
+    elif same:
+        _say("  %s is the latest %s" % (VERSION, what))
+    else:
+        _say("  %s is ahead of the latest %s" % (VERSION, what))
     _say("OK")
     return 0
 
@@ -1428,6 +1508,50 @@ class _Run:
         self.orphaned_line = None
         # a Windows binary's bootloader (install.exit_with_parent); None elsewhere
         self.parent = None
+        # watch and sync --repeat: how they print EXIT interrupted, and the exit code a
+        # SIGTERM set (stoppable); None for the others, and before a SIGTERM
+        self.stop_say = None
+        self.stop_code = None
+        # whether this run printed an EXIT line (noting_exit)
+        self.exit_said = False
+
+    def noting_exit(self, out, skip=0):
+        """out, noting in exit_said each line that is an EXIT line once its first skip
+        characters (a watcher's time and its space) are left out."""
+        def say(line):
+            if line[skip:].startswith(watch_mod.EXIT_PREFIX):
+                self.exit_said = True
+            out(line)
+        return say
+
+    @contextlib.contextmanager
+    def stoppable(self, say):
+        """While watch or sync --repeat runs: a Ctrl-C or, on POSIX, a SIGTERM ends it with
+        EXIT interrupted, printed by say once the KeyboardInterrupt has unwound the command
+        (its sync child stopped, its lock released) (_guarded): exit 130 for a Ctrl-C, 143 for
+        a SIGTERM. So an agent whose tool stops the watcher sees its last line, and output
+        that just ends means a kill nothing can catch (DESIGN, "The watcher in a channel").
+        The SIGTERM handler is this process's only while the command runs; Windows has no
+        SIGTERM to catch."""
+        self.stop_say = say
+        installed = (os.name != "nt"
+                     and threading.current_thread() is threading.main_thread())
+        if installed:
+            before = signal.signal(signal.SIGTERM, self._terminated)
+        try:
+            yield
+        finally:
+            # after a SIGTERM, SIG_IGN stays: a second one must not cut short the EXIT line
+            # (_guarded) or the exit after it
+            if installed and self.stop_code is None:
+                signal.signal(signal.SIGTERM, signal.SIG_DFL if before is None else before)
+
+    def _terminated(self, signum, frame):
+        # once: further SIGTERMs (a binary's bootloader passes one on, and a user may end
+        # both of its processes) are ignored, so they can't cut short the stop of the child
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        self.stop_code = EXIT_TERMINATED
+        raise KeyboardInterrupt
 
     def watch_code(self, say):
         """Starts the watchdog of a long-running command (watch, sync --repeat); say prints
@@ -1953,7 +2077,19 @@ def _repeat(args, run, todo):
     every round; rounds until stdin ends (exit 0, after the round under way) or a round's
     error breaks the connection (exit with that round's code). Between rounds it waits
     SECONDS from the end of a round."""
-    dog = run.watchdog or run.watch_code(_say)
+    if watch_mod.WATCH_ENV in os.environ:
+        # a watcher's own streaming child: the watcher stops it (stdin, then SIGTERM) and
+        # tells a SIGTERM from outside by its silent exit (DESIGN, "The watcher in a
+        # channel"), so neither signal prints an EXIT line here
+        return _repeat_rounds(args, run, todo, _say)
+    say = run.noting_exit(_say)
+    with run.stoppable(say):
+        return _repeat_rounds(args, run, todo, say)
+
+
+def _repeat_rounds(args, run, todo, say):
+    """_repeat's rounds; say prints its EXIT lines."""
+    dog = run.watchdog or run.watch_code(say)
     ended = threading.Event()
     _watch_stdin(ended)
     conn = _Conn()

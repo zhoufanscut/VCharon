@@ -1661,6 +1661,58 @@ class RepeatTest(FakeSshCase):
                       self.job_log("mb.windows.up"))
         self.assert_locks_free("mb.windows.up", "mb.windows.down")
 
+    @unittest.skipIf(os.name == "nt", "no signal to send a child but the kill")
+    def test_a_signal_ends_a_child_with_exit_interrupted(self):
+        # a SIGTERM (a tool that stops the watcher, or the watcher's own stop) or a Ctrl-C:
+        # the last line says so, with the exit code, and the job's locks are free
+        for signum, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+            with self.subTest(signal=signum):
+                child = self.child(*self.channel() + ["--repeat", "1"])
+                try:
+                    lines = [util.readline(child.stdout)]
+                    os.kill(child.pid, signum)
+                    # stdin stays open: its end would stop the child too
+                    child.wait(60)
+                    out = util.read_all(child.stdout)
+                    err = util.read_all(child.stderr)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
+                    for stream in (child.stdin, child.stdout, child.stderr):
+                        stream.close()
+                self.assertEqual((child.returncode, err), (code, b"vcharon: interrupted\n"))
+                lines = ([line.rstrip(b"\r\n") for line in lines]
+                         + out.replace(b"\r", b"").splitlines())
+                self.assertEqual(lines[0], b"ROUND 0")
+                self.assertEqual(lines[-1], b"EXIT interrupted (exit %d)" % code)
+                self.assert_locks_free("mb.windows.up", "mb.windows.down")
+
+    @unittest.skipIf(os.name == "nt", "no signal to send a child but the kill")
+    def test_a_watchers_own_child_prints_no_exit_interrupted(self):
+        # the watcher stops its child itself, and tells a SIGTERM from outside by the child's
+        # silent exit: as a watcher's child (the watcher's mark in its environment), SIGTERM
+        # kills it with no word and a Ctrl-C says only vcharon: interrupted
+        for signum, code, said in ((signal.SIGTERM, -signal.SIGTERM, b""),
+                                   (signal.SIGINT, 130, b"vcharon: interrupted\n")):
+            with self.subTest(signal=signum), \
+                    mock.patch.dict(os.environ, {"VCHARON_WATCHER": "stream 1"}):
+                child = self.child(*self.channel() + ["--repeat", "1"])
+                try:
+                    util.readline(child.stdout)
+                    os.kill(child.pid, signum)
+                    child.wait(60)
+                    out = util.read_all(child.stdout)
+                    err = util.read_all(child.stderr)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait()
+                    for stream in (child.stdin, child.stdout, child.stderr):
+                        stream.close()
+                self.assertEqual((child.returncode, err), (code, said))
+                self.assertNotIn(b"EXIT", out)
+
     def test_end_of_stdin_in_a_child(self):
         # the real stdin thread: the child syncs rounds until its stdin ends, then says bye
         child = self.child(*self.channel() + ["--repeat", "1"])

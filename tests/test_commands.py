@@ -90,9 +90,13 @@ class IdentityTest(ChannelCase):
         self.assertEqual(out.splitlines()[:2], [
             also % "mac-web-b (--project web --role b)",
             also % "mac-web (--project web, no --role)"])
-        # a rejoin of a membership found by its record: nothing to note
+        # a rejoin of a membership found by its record notes them too: a session that joins
+        # again with the other agent's flags learns it only here
         out = self.ok("join", "game", "--server", "fake-dest", "--role", "c")
-        self.assertNotIn("also holds", out)
+        self.assertEqual(out.splitlines()[:3], [
+            also % "mac-web-b (--project web --role b)",
+            also % "mac-web (--project web, no --role)",
+            "vcharon: join game  as mac-web-c on fake-dest"])
         # another project's memberships aren't this one's
         out = self.ok("join", "game", "--server", "fake-dest", "--project", "api")
         self.assertNotIn("also holds", out)
@@ -147,6 +151,28 @@ class IdentityTest(ChannelCase):
 
 
 class WhoamiTest(ChannelCase):
+    def test_the_other_memberships_of_the_project(self):
+        # two agents in one folder: a plain whoami is the role-less one's, and names the
+        # other, with the flags that find it; that one's names the role-less one
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        self.ok("join", "game", "--server", "fake-dest", "--role", "codex")
+        # another project's membership isn't this one's
+        self.ok("join", "game", "--server", "fake-dest", "--project", "api")
+        lines = self.run_cli("whoami", "game")[1].splitlines()
+        self.assertEqual(lines[2], "  name     mac-web  (--project web)")
+        self.assertEqual([line for line in lines if line.startswith("  also ")], [
+            "  also     mac-web-codex  (--project web --role codex): this project's other "
+            "membership of game here"])
+        self.assertTrue(lines[lines.index("  folder   %s" % os.path.join(
+            self.joined("game.mac-web"), "mac-web")) + 1].startswith("  also "), lines)
+        lines = self.run_cli("whoami", "game", "--role", "codex")[1].splitlines()
+        self.assertEqual([line for line in lines if line.startswith("  also ")], [
+            "  also     mac-web  (--project web, no --role): this project's other membership "
+            "of game here"])
+        lines = self.run_cli("whoami", "game", "--project", "api")[1].splitlines()
+        self.assertEqual([line for line in lines if line.startswith("  also ")], [])
+
     def test_a_membership(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest", "--role", "b")

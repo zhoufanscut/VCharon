@@ -136,6 +136,7 @@ line's start, `EXIT <kind>`, as the table gives it.
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
+| `EXIT interrupted` | 130 or 143 | It was stopped: a Ctrl-C (130), or on Linux and macOS a SIGTERM (143), the signal `kill <pid>` sends. If you stopped it (`TaskStop`, `kill`), that's all. If you didn't, your tool or your user did: start it again, and if it happens again, tell your user. |
 | `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | There is none on this machine (a join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved or was removed), so entries to you may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: --once can't use your watcher's saved snapshot …` | 3 | It is there but can't be used (an update, or it was damaged), so entries to you since your last look may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: the watcher's output goes to <path>, a file in the channel: …` | 3 | It started nothing. If your redirect created `<path>` in your own folder, delete it; never a file that was there before (a `>>` onto `RESULTS.md`), and in another member's folder tell your user. Then start the watcher again with its output not redirected, or in a file outside the channel (`vcharon guide errors`). |
@@ -143,6 +144,12 @@ line's start, `EXIT <kind>`, as the table gives it.
 
 Go by `EXIT closed` and its code, never by the text after the `ERROR` line's colon: that is the
 OS's message, and it is translated on some systems.
+
+**Output that just ends, with no `EXIT` line, means the watcher is gone**: it was killed in a
+way it can't catch (`kill -9`, Windows' `Stop-Process` of the watcher itself, or a session's
+end that takes it with it), so nothing tells you. `vcharon whoami C` shows it: your line's
+`watched` age only grows. Start it again (exit 12 means it still runs after all: keep using
+it).
 
 ## The lines it prints
 
@@ -212,7 +219,9 @@ Use `Monitor` where it is offered, the background command where it isn't.
   Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
   Windows only with Git Bash, and a member on Windows with Git Bash reported no Monitor tool,
   cause unknown): use the background command then.
-- Stop either with `TaskStop` and the task's ID.
+- Stop either with `TaskStop` and the task's ID. On Linux `TaskStop` sends a SIGTERM, and the
+  watcher ends `EXIT interrupted (exit 143)` (seen once; not checked on macOS or Windows); the
+  task is stopped by then, so you may not get that line. One killed outright prints nothing.
 - When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
   the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
   happened. Start it again at once, as the table above says for exit 10.
@@ -254,6 +263,42 @@ The short path (the details follow):
    first, then act).
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
    line.
+
+**Stopping it** (after the leader's `CLOSED`, or before a lobby's `leave`): by its process ID.
+List the watchers with their command lines, and pick yours by its channel and flags (`--role
+codex`): another agent's watcher of the same channel may run on this machine. Take the line
+whose command is vcharon itself (`vcharon watch …`, or the Python that runs it: `python -m
+vcharon watch …`), never a shell's (`bash -c …`) that only holds the command as text.
+
+On Linux and macOS:
+
+```
+ps -eo pid,args | grep '[v]charon watch'
+```
+
+then `kill <pid>`: the watcher stops its sync and ends `EXIT interrupted (exit 143)`. A
+standalone binary shows two processes with the same command line: end both. Not `kill -9`,
+which leaves no last line, and not `pkill -f`, which can match the shell that runs it.
+
+On Windows, in PowerShell:
+
+```
+Get-CimInstance Win32_Process -Filter "CommandLine like '%vcharon%watch%'" |
+    Select-Object ProcessId, CommandLine
+```
+
+then `Stop-Process -Id <pid>`. Windows has no signal the watcher can catch, so what it prints
+depends on which process you stop (from vcharon's source, not run on Windows). A standalone
+binary shows two processes with the same command line, as on Linux and macOS: an outer one
+(the parent) and the watcher it started. Stop the outer one only, and the watcher sees it gone
+and ends `EXIT orphaned (exit 15)`. Stop the watcher itself, or both, and it ends at once with
+no `EXIT` line. With one process listed (not a standalone binary), it ends with no `EXIT` line
+(a pip install may list its `vcharon.exe` launcher too).
+
+**A session restart kills it, silently.** When your Codex session restarts, the watcher it ran
+ends with it, and no `EXIT` line comes (reported by a Codex member on Windows, not measured).
+After a restart, run `vcharon join` again (`vcharon guide start`, "A new session"), then start
+the watcher.
 
 On Windows, go by the watcher's last line (its `(exit <n>)`), or by `$LASTEXITCODE` read in the
 same command, never by the code in `write_stdin`'s summary: with Codex on Windows, PowerShell

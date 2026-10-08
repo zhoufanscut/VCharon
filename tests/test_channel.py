@@ -11,6 +11,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1457,6 +1458,31 @@ class ProjectNoteTest(ChannelCase):
         where = "  note: project web is the checkout %s (.git)" % here
         self.assertEqual(lines[1], where + "; " + self.undo("join", "--project web"))
         lines, _ = self.run_in(self.project, "join", "game", "--local")
+        self.assertEqual(lines[1], where)
+        self.assertIn("  took back game/mac-web; the leader is laptop-ui", lines)
+
+    def test_a_join_that_takes_back_its_folder_has_no_undo(self):
+        # after a leave there is no record, but the folder this machine left is still in the
+        # channel: the join takes it back, its name settled at the first join, so no leave
+        # is offered. The lobby gives it back by itself, a work channel with --rejoin
+        lines, here = self.run_in(self.project, "join", "lobby", "--local")
+        where = "  note: project web is the checkout %s (.git)" % here
+        self.assertEqual(lines[1], where + "; " + platform.runnable(
+            "if that is the wrong project: vcharon leave lobby --project web (then join again "
+            "with --project P)"))
+        self.run_in(self.project, "leave", "lobby")
+        lines, _ = self.run_in(self.project, "join", "lobby", "--local")
+        self.assertEqual(lines[1], where)
+        self.assertTrue(lines[2].startswith("  took back lobby/mac-web"), lines)
+        self.lead(where=("--local",))
+        self.run_in(self.project, "join", "game", "--local")
+        self.run_in(self.project, "leave", "game")
+        # refused before anything is written: no note, and no undo for a join that didn't
+        # happen
+        code, out, _ = self.channel("join", "game", "--local")
+        self.assertEqual(code, 1)
+        self.assertNotIn("note: project", out)
+        lines, _ = self.run_in(self.project, "join", "game", "--local", "--rejoin")
         self.assertEqual(lines[1], where)
         self.assertIn("  took back game/mac-web; the leader is laptop-ui", lines)
 
@@ -3901,7 +3927,8 @@ class SeenWatchProcessTest(ChannelCase):
 
     def watch_until_stamped(self, *flags):
         """Runs vcharon watch game <flags> until seen/game/mac-web exists and the member's own
-        copy of the ages holds it; (its text, the watcher's output)."""
+        copy of the ages holds it, then stops it with SIGTERM; (its text, the watcher's
+        output). Its exit code is kept as self.watch_code."""
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
         # the sync children are new processes: they reach the fake server through ssh_path
@@ -3937,6 +3964,7 @@ class SeenWatchProcessTest(ChannelCase):
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, 9)
                 proc.wait()
+        self.watch_code = proc.returncode
         with open(out_path, encoding="utf-8", errors="replace") as f:
             said = f.read()
         self.assertTrue(os.path.exists(stamp), said)
@@ -3952,11 +3980,52 @@ class SeenWatchProcessTest(ChannelCase):
         self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
         self.assertNotIn("watched", said)
 
+    def test_a_stopped_watcher_says_so(self):
+        # SIGTERM, as a tool that stops a background command sends it: the sync child is
+        # stopped first (its locks are free), then the last line says why, with the code
+        _, said = self.watch_until_stamped("--every", "3")
+        self.assertEqual(self.watch_code, 143, said)
+        lines = said.splitlines()
+        self.assertRegex(lines[-1], r" EXIT interrupted \(exit 143\)$")
+        self.assertIn("vcharon: interrupted", lines)
+        for job in ("game.mac-web.up", "game.mac-web.down"):
+            state.lock(job).release()
+
     def test_a_no_stream_watcher_stamps(self):
         text, said = self.watch_until_stamped("--no-stream", "--every", "7")
         self.assertEqual(text, b"run 7\n")
         self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 7)
         self.assertNotIn("watched", said)
+
+
+@unittest.skipIf(os.name == "nt", "no signal to send a child but the kill")
+class StoppedWatchProcessTest(ChannelCase):
+    """A real vcharon watch process of a local member whose output's reader is gone when it is
+    stopped: the EXIT line can't be written, and the exit code is still the signal's."""
+
+    def test_a_closed_stdout_keeps_the_code(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local", "--project", "web")
+        env = dict(os.environ, PYTHONPATH=VCHARON_DIR)
+        env.pop(watch.WATCH_ENV, None)
+        for signum, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+            with self.subTest(signal=signum):
+                proc = subprocess.Popen([sys.executable, "-m", "vcharon", "watch", "game",
+                                         "--project", "web"], stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                try:
+                    self.assertIn(b" watching ", util.readline(proc.stdout))
+                    # the reader goes away; a quiet watch writes nothing until it is stopped
+                    proc.stdout.close()
+                    os.kill(proc.pid, signum)
+                    proc.wait(60)
+                    err = util.read_all(proc.stderr)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+                    proc.stderr.close()
+                self.assertEqual((proc.returncode, err), (code, b"vcharon: interrupted\n"))
 
 
 @unittest.skipIf(sys.platform == "win32", "the fake ssh is reached through a shell script")

@@ -79,10 +79,11 @@ session. `whoami` is how you see who is around.
 
 `vcharon leave lobby` works for every member, the one whose folder holds `CHANNEL.md` (its
 founder) too. Stop your watcher first, a `--until-change` one still waiting too (`leave` is
-refused while it runs). `leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into
-chat-….md, to @linux-api (wakes no one)`). Your folder stays in the lobby, and a later join
-from the same machine and project (`vcharon join lobby --server devbox`, or `--local`) takes it
-back (`took back lobby/<name>, this machine's folder`), with no `--rejoin`.
+refused while it runs); Codex stops it by its process ID (`vcharon guide watch`, "Codex").
+`leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into chat-….md, to @linux-api
+(wakes no one)`). Your folder stays in the lobby, and a later join from the same machine and
+project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`took back
+lobby/<name>, this machine's folder`), with no `--rejoin`.
 
 Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
 `lobby` folder at the channel root. After that, each member's next join is refused (`your join

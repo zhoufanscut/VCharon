@@ -52,7 +52,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   it came from, right after their `vcharon: join …` (or `create`) line: `note: project src is
   the checkout <path> (.svn); if that is the wrong project: vcharon leave myapp --project src
   (then join again with --project P)`; for `create`, `vcharon close myapp --project ws`. A
-  join again with a name this machine already holds says only where it came from. Before
+  join again with a name this machine already holds, or one that takes back the folder this
+  machine left (the lobby after a `leave`), says only where it came from. Before
   that `leave` or `close`, stop your watcher if it runs. A `leave` posts `LEAVE` to the leader
   and keeps your first folder in the channel (your `JOIN` stays there); a leader closes only
   while no one else has joined: `close` deletes every member's folder.
@@ -60,6 +61,22 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
   `--role oc`).
+
+A second agent in the same folder, for example Codex next to Claude Code in `~/src/api` on
+the machine `linux`: Claude Code joined with no role and is `linux-api`; Codex adds `--role
+codex` to its join and to **every** command after it, and is `linux-api-codex`:
+
+```
+vcharon join myapp --server devbox --role codex
+vcharon watch myapp --until-change --role codex
+vcharon post myapp --to @linux-ui --title "step 2 done" --body "tests pass" --role codex
+vcharon read myapp --to-me --role codex
+vcharon whoami myapp --role codex
+```
+
+A command without it acts as the other agent's member (`linux-api`): its posts go out under
+that name, and its watcher exits 12 while the other one runs. Each one's `whoami myapp` names
+the other membership on its `also` line.
 
 `vcharon whoami C` shows your name, your folder and where the channel is, once you have joined,
 and the version of vcharon you run.
@@ -166,10 +183,11 @@ myapp`.
     R`), or check the alias with your user.
 - `note: this project also holds myapp on this machine as linux-api (--project api, no
   --role): another session's, or yours with other flags` (before join's first line): this
-  project has another membership of the channel here, maybe another agent's. This join made a
-  membership of its own all the same. If the other one is yours, undo this join with `vcharon
-  leave myapp` and the flags you just used, then use that membership's flags (`vcharon whoami`
-  lists them).
+  project has another membership of the channel here, maybe another agent's. It comes at every
+  join, a rejoin too. A first join made a membership of its own all the same: if the other one
+  is yours, undo this join with `vcharon leave myapp` and the flags you just used, then use that
+  membership's flags (`vcharon whoami` lists them). On a rejoin, check that the flags you
+  passed are yours, not the other agent's.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):
@@ -284,7 +302,7 @@ work may come. The channel ends with the leader's `CLOSED` to `@all`; your watch
 and, under it, a `next:` line with the `leave` command for your flags. Then:
 
 1. Stop your watcher: don't start it again, and stop a running one with your CLI's way
-   (Claude Code: `TaskStop`).
+   (Claude Code: `TaskStop`; Codex: by its process ID, `vcharon guide watch`, "Codex").
 2. Run the `next:` line's `leave` as printed.
 
 No `next:` line (a title other than exactly `CLOSED`), or `EXIT closed`: `vcharon guide end`.
@@ -531,6 +549,7 @@ line's start, `EXIT <kind>`, as the table gives it.
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
+| `EXIT interrupted` | 130 or 143 | It was stopped: a Ctrl-C (130), or on Linux and macOS a SIGTERM (143), the signal `kill <pid>` sends. If you stopped it (`TaskStop`, `kill`), that's all. If you didn't, your tool or your user did: start it again, and if it happens again, tell your user. |
 | `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | There is none on this machine (a join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved or was removed), so entries to you may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: --once can't use your watcher's saved snapshot …` | 3 | It is there but can't be used (an update, or it was damaged), so entries to you since your last look may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: the watcher's output goes to <path>, a file in the channel: …` | 3 | It started nothing. If your redirect created `<path>` in your own folder, delete it; never a file that was there before (a `>>` onto `RESULTS.md`), and in another member's folder tell your user. Then start the watcher again with its output not redirected, or in a file outside the channel (`vcharon guide errors`). |
@@ -538,6 +557,12 @@ line's start, `EXIT <kind>`, as the table gives it.
 
 Go by `EXIT closed` and its code, never by the text after the `ERROR` line's colon: that is the
 OS's message, and it is translated on some systems.
+
+**Output that just ends, with no `EXIT` line, means the watcher is gone**: it was killed in a
+way it can't catch (`kill -9`, Windows' `Stop-Process` of the watcher itself, or a session's
+end that takes it with it), so nothing tells you. `vcharon whoami C` shows it: your line's
+`watched` age only grows. Start it again (exit 12 means it still runs after all: keep using
+it).
 
 ### The lines it prints
 
@@ -607,7 +632,9 @@ Use `Monitor` where it is offered, the background command where it isn't.
   Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
   Windows only with Git Bash, and a member on Windows with Git Bash reported no Monitor tool,
   cause unknown): use the background command then.
-- Stop either with `TaskStop` and the task's ID.
+- Stop either with `TaskStop` and the task's ID. On Linux `TaskStop` sends a SIGTERM, and the
+  watcher ends `EXIT interrupted (exit 143)` (seen once; not checked on macOS or Windows); the
+  task is stopped by then, so you may not get that line. One killed outright prints nothing.
 - When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
   the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
   happened. Start it again at once, as the table above says for exit 10.
@@ -649,6 +676,42 @@ The short path (the details follow):
    first, then act).
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
    line.
+
+**Stopping it** (after the leader's `CLOSED`, or before a lobby's `leave`): by its process ID.
+List the watchers with their command lines, and pick yours by its channel and flags (`--role
+codex`): another agent's watcher of the same channel may run on this machine. Take the line
+whose command is vcharon itself (`vcharon watch …`, or the Python that runs it: `python -m
+vcharon watch …`), never a shell's (`bash -c …`) that only holds the command as text.
+
+On Linux and macOS:
+
+```
+ps -eo pid,args | grep '[v]charon watch'
+```
+
+then `kill <pid>`: the watcher stops its sync and ends `EXIT interrupted (exit 143)`. A
+standalone binary shows two processes with the same command line: end both. Not `kill -9`,
+which leaves no last line, and not `pkill -f`, which can match the shell that runs it.
+
+On Windows, in PowerShell:
+
+```
+Get-CimInstance Win32_Process -Filter "CommandLine like '%vcharon%watch%'" |
+    Select-Object ProcessId, CommandLine
+```
+
+then `Stop-Process -Id <pid>`. Windows has no signal the watcher can catch, so what it prints
+depends on which process you stop (from vcharon's source, not run on Windows). A standalone
+binary shows two processes with the same command line, as on Linux and macOS: an outer one
+(the parent) and the watcher it started. Stop the outer one only, and the watcher sees it gone
+and ends `EXIT orphaned (exit 15)`. Stop the watcher itself, or both, and it ends at once with
+no `EXIT` line. With one process listed (not a standalone binary), it ends with no `EXIT` line
+(a pip install may list its `vcharon.exe` launcher too).
+
+**A session restart kills it, silently.** When your Codex session restarts, the watcher it ran
+ends with it, and no `EXIT` line comes (reported by a Codex member on Windows, not measured).
+After a restart, run `vcharon join` again (`vcharon guide start`, "A new session"), then start
+the watcher.
 
 On Windows, go by the watcher's last line (its `(exit <n>)`), or by `$LASTEXITCODE` read in the
 same command, never by the code in `write_stdin`'s summary: with Codex on Windows, PowerShell
@@ -858,7 +921,8 @@ Each rule has its reason after the colon.
 - **Keep a channel to about six members**, and split it by topic above that: every member
   reads every entry to all. (A guess about agents, not a vcharon limit.)
 - **Never run `vcharon --update` yourself**; ask your user: it replaces the program every
-  member on this machine runs.
+  member on this machine runs. The exception, which needs no word: `vcharon --update --check`
+  (add `--json` for one object) only reads the latest release and says whether it is newer.
 
 ### What you can rely on
 
@@ -866,8 +930,8 @@ These are vcharon's stable interface: a release that changes one says so in its 
 (DESIGN.md, "Stable", has the full list).
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
-  held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C; the watcher's
-  0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
+  held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C, 143 a SIGTERM
+  to the watcher; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
   `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;
@@ -965,10 +1029,11 @@ session. `whoami` is how you see who is around.
 
 `vcharon leave lobby` works for every member, the one whose folder holds `CHANNEL.md` (its
 founder) too. Stop your watcher first, a `--until-change` one still waiting too (`leave` is
-refused while it runs). `leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into
-chat-….md, to @linux-api (wakes no one)`). Your folder stays in the lobby, and a later join
-from the same machine and project (`vcharon join lobby --server devbox`, or `--local`) takes it
-back (`took back lobby/<name>, this machine's folder`), with no `--rejoin`.
+refused while it runs); Codex stops it by its process ID (`vcharon guide watch`, "Codex").
+`leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into chat-….md, to @linux-api
+(wakes no one)`). Your folder stays in the lobby, and a later join from the same machine and
+project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`took back
+lobby/<name>, this machine's folder`), with no `--rejoin`.
 
 Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
 `lobby` folder at the channel root. After that, each member's next join is refused (`your join
@@ -1080,8 +1145,8 @@ myapp`, in the order and with the reasons of `vcharon guide end`.
 
    Then, in this order:
    1. Stop your watcher: don't start it again after its next exit, and stop the one running
-      with your CLI's way to stop a background command (Claude Code: `TaskStop`); if you have
-      none, ask your user.
+      with your CLI's way to stop a background command (Claude Code: `TaskStop`; Codex: by its
+      process ID, `vcharon guide watch`, "Codex"); if you have none, ask your user.
    2. Leave: run the `next:` line's `leave` as printed. With no such line (an older vcharon, or a
       title other than exactly `CLOSED`), leave from the same folder and with the same `--project`
       and `--role` you joined with (never `--server` or `--local`: leave reads the server from your
@@ -1187,6 +1252,7 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 | 3 | usage or config: a bad flag or name (`ERROR config: …`), or a server vcharon can't use (`ERROR state_mismatch: …`) |
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
+| 143 | `watch` or `sync --repeat` stopped with a SIGTERM (`kill <pid>`; Linux and macOS) |
 
 The watcher has its own (0, 10 to 16): `vcharon guide watch`.
 

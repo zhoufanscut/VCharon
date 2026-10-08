@@ -7,6 +7,44 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+Fixes from a lobby test of 0.5.0rc1 (Claude Code and Codex on Linux, and both on Windows over
+ssh). It adds a watcher `EXIT` line and an exit code to the ones DESIGN.md lists under "Stable".
+
+**Updating from 0.5.0rc1:** a script that lists every `EXIT <kind>` should add `EXIT
+interrupted`; one that lists exit codes, 143 (a SIGTERM to `watch` or `sync --repeat`).
+
+- `watch` and `sync --repeat` end with `EXIT interrupted (exit 130)` after a Ctrl-C, and on
+  Linux and macOS with `EXIT interrupted (exit 143)` after a SIGTERM (`kill <pid>`, a tool that
+  stops a background command), once the sync child is stopped as before. Before, a Ctrl-C
+  printed only `vcharon: interrupted` on stderr and a SIGTERM printed nothing, so a stopped
+  watcher looked like a dead one. A SIGKILL still prints nothing, and on Windows neither does
+  `Stop-Process` of the watcher itself; stopping only a standalone binary's outer process gives
+  `EXIT orphaned (exit 15)` (inferred from the source, not run on Windows). Output that just
+  ends means the watcher is gone (`vcharon guide watch`). A `sync --repeat` run as a watcher's
+  own child is unchanged: no `EXIT interrupted`, so the watcher still reports a child killed
+  from outside as `ERROR vcharon sync of <C>.<name> exited with <n>`.
+- `vcharon --update --check [--rc] [--json]` says whether a newer release is out: it reads the
+  latest, prints the current and latest versions and whether the latest is newer, and never
+  asks or installs; exit 0 once the read worked, 1 when it failed. Refused with `--yes` or
+  `--force`. The skill's and the guide's rule ("never `--update` without your user's word") now
+  name it as the exception.
+- `--update --json` has `"rc"` from the start, and `"update_available": null` until the release
+  is read, so a failed read's object has both.
+- `vcharon whoami C` names this project's other memberships of C on this machine, each with its
+  flags: `  also     <name>  (--project P --role R): this project's other membership of C
+  here`. A plain `whoami lobby` showed the role-less membership and nothing of `--role codex`'s.
+- `join` prints `note: this project also holds C on this machine as …` at every join, a rejoin
+  of a membership it has a record of too; before, only a join that made a new membership did.
+- A `join` that takes back a folder this machine left (the lobby after a `leave`, or
+  `--rejoin`) no longer offers `if that is the wrong project: vcharon leave …`: its name was
+  settled at the first join. A join with no record here prints the project note once its claim
+  is made, still right after its `vcharon: join` line; a join refused before that prints none.
+- The watch guide says how Codex stops its watcher (by its process ID) and that a session
+  restart ends it with no `EXIT` line; the start guide has a worked example of a second agent in
+  the same folder (`--role codex` on its join and every command after it).
+
 ## 0.5.0rc1 — 2026-10-08
 
 A release candidate for 0.5.0, published as a GitHub pre-release: the installers and a plain

@@ -92,6 +92,9 @@ Lines; * marks the ones that count for --until-change:
                                    (cli.py): start it again, which runs the new one;
                                    EXIT orphaned when a binary's bootloader process is gone
                                    (killed with SIGKILL): no one is left to read the watcher
+    EXIT interrupted               the last line after a Ctrl-C (exit 130) or, on POSIX, a
+                                   SIGTERM (exit 143), once the sync child is stopped
+                                   (cli.py); a SIGKILL prints nothing
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a

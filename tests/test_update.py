@@ -2161,8 +2161,10 @@ class UpdateFlagTest(FakeSshCase):
         code, doc, err = self.run_json("--update", "--json")
         self.assertEqual((code, doc["ok"], doc["error"], doc["fix"]),
                          (1, False, "network", update.NETWORK_FIX))
+        # rc is known before the read; whether one is newer isn't
         self.assertEqual(sorted(doc), ["current", "error", "fix", "install", "message", "ok",
-                                       "path"])
+                                       "path", "rc", "update_available"])
+        self.assertEqual((doc["rc"], doc["update_available"]), (False, None))
         self.assertEqual(err.splitlines(), ["ERROR update: couldn't reach api.github.com: no "
                                             "route", "  fix: " + update.NETWORK_FIX])
 
@@ -2302,6 +2304,62 @@ class UpdateFlagTest(FakeSshCase):
         code, doc, _ = self.run_json("--update", "--force", "--yes", "--json")
         self.assertEqual((code, doc["changed"], doc["installed"]), (0, True, "0.0.1"))
 
+    def test_check_reports_and_never_asks(self):
+        self.patch(update, "apply_update", new=never_called)
+        self.tty(AssertionError("--check never asks"))
+        code, out, err = self.run_cli("--update", "--check")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines(), [
+            "vcharon: update", "  current  %s (binary, %s)" % (vcharon.VERSION, self.target),
+            "  latest   9.9.9 (https://github.com/%s/releases/tag/v9.9.9)" % update.REPO,
+            "  9.9.9 is newer; your user can install it: vcharon --update", "OK"])
+        code, doc, err = self.run_json("--update", "--check", "--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(sorted(doc), list(self.BASE_KEYS))
+        self.assertEqual((doc["ok"], doc["update_available"], doc["changed"], doc["confirmed"],
+                          doc["rc"]), (True, True, False, False, False))
+        self.assert_untouched()
+
+    def test_check_up_to_date_and_ahead(self):
+        self.serve(Net({update.API_LATEST: json.dumps(release_json(tag="v" + vcharon.VERSION))}))
+        code, out, _ = self.run_cli("--update", "--check")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[-2:], ["  %s is the latest release" % vcharon.VERSION,
+                                                 "OK"])
+        self.serve(Net({update.API_LATEST: json.dumps(release_json(tag="v0.0.1"))}))
+        code, doc, _ = self.run_json("--update", "--check", "--json")
+        self.assertEqual((code, doc["ok"], doc["update_available"]), (0, True, False))
+
+    def test_check_with_rc_counts_pre_releases(self):
+        self.patch(update, "apply_update", new=never_called)
+        self.serve_list(release_json("v99.0.0rc1", prerelease=True))
+        code, out, _ = self.run_cli("--update", "--check", "--rc")
+        self.assertEqual(code, 0)
+        self.assertIn("  99.0.0rc1 is newer; your user can install it: vcharon --update --rc",
+                      out.splitlines())
+        code, doc, _ = self.run_json("--update", "--rc", "--check", "--json")
+        self.assertEqual((doc["rc"], doc["prerelease"], doc["update_available"]),
+                         ("flag", True, True))
+
+    def test_check_of_another_install_kind_gives_its_command(self):
+        # nothing is refused: only an install would be
+        self.patch(install, "detect", return_value=install.Install("pipx"))
+        command = 'pipx install --force "git+https://github.com/zhoufanscut/VCharon@v9.9.9"'
+        code, out, err = self.run_cli("--update", "--check")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("  9.9.9 is newer; your user can install it: " + command, out.splitlines())
+        code, doc, _ = self.run_json("--update", "--check", "--json")
+        self.assertEqual((code, doc["ok"], doc["command"]), (0, True, command))
+
+    def test_check_failed_read_is_1(self):
+        self.serve(Net({update.API_LATEST: update.UpdateError("rate_limited", "GitHub said "
+                                                              "403", "set GITHUB_TOKEN")}))
+        code, doc, err = self.run_json("--update", "--check", "--json")
+        self.assertEqual((code, doc["ok"], doc["error"], doc["rc"], doc["update_available"]),
+                         (1, False, "rate_limited", False, None))
+        self.assertEqual(err.splitlines(), ["ERROR update: GitHub said 403",
+                                            "  fix: set GITHUB_TOKEN"])
+
     def test_it_isnt_a_verb(self):
         code, _, err = self.run_cli("update")
         self.assertEqual(code, 3)
@@ -2313,10 +2371,13 @@ class UpdateFlagTest(FakeSshCase):
         for topic in guide.TOPICS:
             text = guide.text(topic)
             for line in text.splitlines():
-                if "--update" in line:
+                # --update --check only reads: the one an agent may run
+                if re.search(r"--update(?! --check)", line):
                     with self.subTest(topic=topic, line=line):
                         self.assertRegex(line, r"(?i)never run `vcharon --update` yourself|"
                                          r"ask your user")
+        # and the rule names that one
+        self.assertIn("`vcharon --update --check`", guide.text("rules"))
 
     def test_it_is_in_the_help(self):
         code, out, _ = self.run_cli("--help")
@@ -2350,8 +2411,8 @@ class FlagRefusalTest(FakeSshCase):
                            (["--update", "--version"], "--version")):
             with self.subTest(argv=argv):
                 self.assertEqual(self.refused(*argv), [
-                    "ERROR config: --update runs on its own, with only --yes, --force, --json "
-                    "and --rc: not with " + rest,
+                    "ERROR config: --update runs on its own, with only --yes, --force, --json, "
+                    "--rc and --check: not with " + rest,
                     "  fix: run vcharon --update by itself; then the rest"])
 
     def test_after_a_verb_its_unknown(self):
@@ -2366,16 +2427,26 @@ class FlagRefusalTest(FakeSshCase):
                            (["--rc", "doctor"], "--rc goes only with --update"),
                            (["--yes", "doctor"], "--yes goes only with --update"),
                            (["--force", "whoami"], "--force goes only with --update"),
+                           (["--check"], "--check goes only with --update"),
+                           (["--check", "doctor"], "--check goes only with --update"),
                            (["--json", "doctor"], "--json goes after the verb: vcharon doctor "
                                                   "... --json")):
             with self.subTest(argv=argv):
                 self.assertEqual(self.refused(*argv)[0], "ERROR config: " + want)
 
+    def test_check_never_goes_with_an_install(self):
+        for argv, flag in ((["--update", "--check", "--yes"], "--yes"),
+                           (["--update", "--force", "--check", "--json"], "--force")):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.refused(*argv), [
+                    "ERROR config: --check never installs, so it doesn't go with " + flag,
+                    "  fix: leave out %s, or --check" % flag])
+
     def test_the_legitimate_ones_get_past_the_check(self):
         # the network is a test failure here: each gets as far as asking GitHub
         for argv in (["--update"], ["--update", "--yes", "--json"], ["--update", "--force"],
                      ["--json", "--update"], ["--update", "--rc", "--yes", "--force", "--json"],
-                     ["--rc", "--update"]):
+                     ["--rc", "--update"], ["--update", "--check", "--rc", "--json"]):
             with self.subTest(argv=argv):
                 code, _, err = self.run_cli(*argv)
                 self.assertEqual(code, 1, err)

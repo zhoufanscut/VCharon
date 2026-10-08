@@ -962,9 +962,13 @@ member's folder name.
   machine runs vcharon, with flags built from the project and `--role` (the record isn't
   written yet). The note names the undo, never just `--project P`: by then the name is taken,
   and a second join with `--project` makes a second membership; a second create is refused.
-  Only a new membership (no record here) gets the undo; a join whose record is found keeps
-  just where the name came from: a member that joins again at each session isn't offered a
-  leave each time.
+  Only a new name gets the undo: a join whose record is found, and one that takes back a
+  folder already in the channel (a lobby's after a `leave`, or `--rejoin`), keep just where
+  the name came from: a member that joins again at each session, or comes back to the lobby,
+  isn't offered a leave each time. A join with no record here learns that from its claim, so
+  its note comes once the claim is made (still right after the `vcharon: join` line, which is
+  all a join prints before it); a join refused before that prints none, so no undo is offered
+  for a membership that was never made.
   Why: in a folder of checkouts the name changes with the folder the agent starts in,
   silently. On this box's stdout only, which already names its folders (the `OK` line's): no
   channel file holds it.
@@ -1080,9 +1084,16 @@ In order:
 would block a legitimate role-less join, so instead `join` and `create` print `note: this
 project also holds C on this machine as <name> (--project P --role R): another session's, or
 yours with other flags` (`--project P, no --role` for one without a role) for each other
-membership of C the project has. It names the membership and never calls it the reader's: two
-agents can work in one folder (a leader and a member, say), and the other membership may be the
-other agent's. Two records for one (C, project, role) are refused: ask the user.
+membership of C the project has, at every join, a rejoin of a found record too: a session that
+joins again with the other agent's flags is told nowhere else. It names the membership and
+never calls it the reader's: two agents can work in one folder (a leader and a member, say),
+and the other membership may be the other agent's. Two records for one (C, project, role) are
+refused: ask the user.
+
+`whoami C`'s text names the same: after the membership's own lines, `  also     <name>  (--project
+P --role R): this project's other membership of C here` for each other membership of C this
+project has on this machine. Why: a plain `whoami C` shows the role-less membership, and an
+agent in a folder another agent shares saw nothing of the other one's.
 
 ### Create, join, leave, close
 
@@ -1757,11 +1768,11 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   - `ERROR …`, then its `  fix: …` (and `  log: …`) lines, once while the text holds; `ok again`
     after the first good round;
   - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
-    | EXIT nothing new` as the last line, each followed by ` (exit <code>)`, the process's exit
-    code: `EXIT quiet 1 min (exit 10)`. `sync --repeat`'s `EXIT updated` and `EXIT orphaned`
-    carry it too. Why: an agent's tool may report another code than the process's (Codex's
-    summary said exit 1 for a watcher's 10), so the line says it. Readers match on the `EXIT
-    <kind>` start.
+    | EXIT nothing new | EXIT interrupted` as the last line, each followed by ` (exit <code>)`,
+    the process's exit code: `EXIT quiet 1 min (exit 10)`. `sync --repeat`'s `EXIT updated`,
+    `EXIT orphaned` and `EXIT interrupted` carry it too. Why: an agent's tool may report another
+    code than the process's (Codex's summary said exit 1 for a watcher's 10), so the line says
+    it. Readers match on the `EXIT <kind>` start.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
   `to all`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok again` after one.
   Without it the watch runs on (for a streaming tool such as Claude Code's Monitor).
@@ -1810,6 +1821,29 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   Transport, `vanished` and `aborted` count only once they have held 60 s in a row (two rounds
   with `--no-stream`), so a network blip wakes nobody. `--max-errors N` (default 10) exits 11
   with `EXIT error` after N rounds (streaming, N × 30 s) of failing that woke nobody.
+- **`EXIT interrupted`**: a Ctrl-C (exit 130) or, on POSIX, a SIGTERM (exit 143) ends `watch`
+  and `sync --repeat` with it, after `vcharon: interrupted` on stderr. A SIGTERM handler,
+  installed only while those two run, raises the same `KeyboardInterrupt` a Ctrl-C does, so
+  every way out runs as for a Ctrl-C: the sync child is stopped as on any way out of the watch,
+  the lock released, then the line is printed; a closed pipe drops it, and stdout then goes to
+  devnull so the exit's own flush can't fail and change the code. Further SIGTERMs are
+  ignored from then on: a binary's bootloader passes one on, and a user may end both of its
+  processes, and neither may cut the child's stop short. Why: an agent's tool that stops a
+  background command (Claude Code's `TaskStop`) gave no last line, so a stopped watcher looked
+  like a dead one. A SIGKILL, or a session's end that takes the process with it, prints
+  nothing: output that just ends means the watcher is gone, which `whoami C`'s `watched`
+  shows. Windows has no SIGTERM to catch: there only a Ctrl-C prints it. `TerminateProcess`
+  (`Stop-Process`, a harness's stop) of the watcher's own process ends it with no line; in a
+  binary, one of the bootloader alone makes the watcher print `EXIT orphaned (exit 15)` ([Running
+  watchers](#running-watchers), "A Windows binary ends with its bootloader, at once"), and one of
+  both, no line (inferred from the source, not run on Windows). A `sync --repeat` that is a
+  watcher's streaming child (`VCHARON_WATCHER` in its environment) installs no SIGTERM handler
+  and prints no `EXIT interrupted`: the watcher stops it by its stdin, then SIGTERM, and a child
+  killed from outside stays silent, so the watcher still says `ERROR vcharon sync of
+  <C>.<name> exited with <n>` with its fix naming the logs; a Ctrl-C to it alone says only
+  `vcharon: interrupted`, as before. After a SIGTERM, SIG_IGN stays in place to the exit. When
+  the run printed an `EXIT` line already (a Ctrl-C while the watch stops its child after `EXIT
+  change`), no second one comes; the exit code is the interrupt's.
 - **`EXIT closed`** (13): as soon as a round sees the channel gone (a remote member's sync error
   whose `fix:` starts with the channel-gone text; a local member's channel folder missing), after
   the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays gone. Why
@@ -1994,7 +2028,7 @@ Messages
 Other
   vcharon guide  [TOPIC] [--project P] [--role R]
   vcharon --version
-  vcharon --update [--yes] [--force] [--json] [--rc]
+  vcharon --update [--yes] [--force] [--json] [--rc] [--check]
 ```
 
 Every verb also takes `-v` (log lines to stderr too).
@@ -2070,6 +2104,7 @@ OK  2 jobs  (0.7 s)
 | 3 | usage or config: a bad flag, name or config, a plugin option, a state mismatch |
 | 4 | couldn't connect, or couldn't start the helper |
 | 130 | Ctrl-C |
+| 143 | SIGTERM, in `watch` and `sync --repeat` (POSIX) |
 
 The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher (or a `create`,
 `join`, `leave` or `close` of the member) runs, 13 closed, 14 updated (VCharon was replaced
@@ -2276,14 +2311,24 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
 
 ### Self-update
 
-`vcharon --update [--yes] [--force] [--json] [--rc]` replaces a standalone binary with the latest
-GitHub release. It is the only network call VCharon makes besides ssh, and only when it is run: no
-version check at start-up.
+`vcharon --update [--yes] [--force] [--json] [--rc] [--check]` replaces a standalone binary with
+the latest GitHub release. It is the only network call VCharon makes besides ssh, and only when
+it is run: no version check at start-up.
 
 - **A flag, not a verb**: the verbs are what agents run, and an agent never updates (the guide
   says to ask the user: it replaces the program every member on the machine runs). Refused, as a
-  usage error (3), with a verb or any flag but `--yes`, `--force`, `--json` and `--rc`; those four
-  are refused without it.
+  usage error (3), with a verb or any flag but `--yes`, `--force`, `--json`, `--rc` and
+  `--check`; those five are refused without it.
+- **`--check`**: reads the latest as `--update` does (`--rc` and a pre-release build count
+  pre-releases the same way), prints the `current` and `latest` lines, then `<latest> is
+  newer; your user can install it: <command>` (this binary's `--update [--rc]`, or another
+  install kind's own command), `<version> is the latest release` or `is ahead of the latest
+  release`, then `OK`. It never asks and never installs, and refuses nothing for another
+  install kind: exit 0 once the release is read, 1 when the read fails. Refused (3) with
+  `--yes` or `--force`, which only an install uses. Why: an agent asked "is there a newer
+  vcharon?" refused the scripted check `--update --json`, since the guide's rule names
+  `--update` with no exception; `--check` is the one an agent may run without its user's word,
+  and the guide says so.
 - **It asks first**: it reads `releases/latest` (GitHub leaves out drafts and pre-releases),
   prints the current and the latest version, and with nothing newer and no `--force` says so and
   exits 0. Else `Update now? [y/N]`. No terminal, `--json`, Ctrl-C or anything but `y`/`yes` is
@@ -2361,11 +2406,13 @@ version check at start-up.
   its Python process runs on until its command ends.
 - **Exit codes**: 0 done, nothing newer, or "no"; 1 every failure, with the `update` error
   code; 3 a usage error.
-- **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;
-  once the release is read `latest`, `tag`, `prerelease` (whether that release is a GitHub
-  pre-release), `rc` (whether pre-releases were counted, and why: `"flag"` for `--rc`, which wins,
-  `"current"` for a pre-release build, else `false`), `update_available`, `url`, `changed`,
-  `confirmed`;
+- **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`,
+  `rc` (whether pre-releases are counted, and why: `"flag"` for `--rc`, which wins, `"current"`
+  for a pre-release build, else `false`; known before the read, so a failed read has it too),
+  `update_available` (null until the release is read, so a failed read has null; then true or
+  false); once the release is read `latest`, `tag`, `prerelease` (whether that release is a
+  GitHub pre-release), `url`, `changed`, `confirmed`; with `--check` and another install kind
+  whose release is newer, its `command`;
   `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
   `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `bad_token`,
   `checksum_mismatch`, `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …),
@@ -2516,7 +2563,7 @@ maintainer asks before tagging.
 Agents parse VCharon's output and scripts call its flags, so these are a contract:
 
 - **Verbs and flags**: the command line above, with each flag's meaning.
-- **Exit codes**: 0, 1, 2, 3, 4 and 130 ([Exit codes](#exit-codes)); the watcher's 0 (change),
+- **Exit codes**: 0, 1, 2, 3, 4, 130 and 143 ([Exit codes](#exit-codes)); the watcher's 0 (change),
   10 (quiet), 11 (error), 12 (another watcher, or a create, join, leave or close of the
   member, runs), 13 (closed), 14 (updated), 15 (orphaned) and 16 (nothing new).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
@@ -2534,8 +2581,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
   - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
-    orphaned`, `EXIT nothing new`, each followed by ` (exit <code>)` (match on the `EXIT <kind>`
-    start); `ERROR another watcher is running on this mailbox (<lock>), or a
+    orphaned`, `EXIT nothing new`, `EXIT interrupted`, each followed by ` (exit <code>)` (match
+    on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12 (older versions end it at `(<lock>)`:
     match on that start). The text after an `ERROR` line's colon is the OS's message and may be
     translated: match on the prefix.

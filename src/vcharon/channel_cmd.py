@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import functools
 import json
 import os
 import posixpath
@@ -164,8 +165,9 @@ PROJECT_UNDO = {
 
 def project_note(verb, channel, project, role, cwd=None, undo=True):
     """The line join and create (verb) print when the project part comes from the folder, not
-    --project: where it came from, and, with undo (a new membership), the command that undoes
-    it; a rejoin's name is settled, so its member isn't offered a leave at each session. In a
+    --project: where it came from, and, with undo (a new name), the command that undoes it; a
+    rejoin's name is settled, and so is that of a join that takes back a folder this machine
+    left (a lobby's), so its member isn't offered a leave at each session. In a
     workspace of checkouts, the name changes with the folder the agent starts in, and nothing
     else says so. Printed on this box only: it may name a path, which no channel file may
     hold. The flags are built here: the record isn't written yet."""
@@ -763,19 +765,25 @@ def main(args, run):
             if args.project is None:
                 check_not_home()
             name = member_parts(cfg, project, args.role)[0]
-            # a role forgotten, or one too many: said, never refused (only its step 1). The
-            # other membership may be another agent's session in this folder (the leader's,
-            # say), so the note names it, never calls it the reader's
-            for other in records(args.channel):
-                if other["project"] == project and (other["role"] or None) != args.role:
-                    say("note: this project also holds %s on this machine as %s (%s): another "
-                        "session's, or yours with other flags"
-                        % (args.channel, other["name"], record_flags(other)))
+        # a role forgotten, or one too many: said, never refused (only its step 1); at every
+        # join, a rejoin too, since a session that joins again with other flags than the
+        # other agent's is told only here. The other membership may be another agent's
+        # session in this folder (the leader's, say), so the note names it, never calls it
+        # the reader's
+        for other in records(args.channel):
+            if other["project"] == project and (other["role"] or None) != args.role:
+                say("note: this project also holds %s on this machine as %s (%s): another "
+                    "session's, or yours with other flags"
+                    % (args.channel, other["name"], record_flags(other)))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}
-        args.project_note = (project_note(args.command, args.channel, project, args.role,
-                                          undo=record is None)
-                             if args.project is None else None)
+        # the undo, for a new name only: join with no record here (a lobby's after a leave)
+        # learns from its claim whether the folder was there already (_join_held)
+        args.project_note = None
+        if args.project is None:
+            args.project_note = functools.partial(project_note, args.command, args.channel,
+                                                  project, args.role)
+        args.has_record = record is not None
         if getattr(args, "takeover", False) and not args.rejoin:
             raise VCharonError("config", "--takeover goes with --rejoin",
                                hint="add --rejoin, and only when your user confirms that this "
@@ -977,7 +985,7 @@ def _create_held(args, cfg, name, log, say, take):
                                  % (channel, server.where), "create")
         say("vcharon: create %s  as %s on %s" % (channel, name, server.where))
         if args.project_note is not None:
-            say(args.project_note)
+            say(args.project_note(undo=not args.has_record))
         got = server.claim(channel, name, True)
         made = []
         try:
@@ -1182,8 +1190,9 @@ def _join_held(args, cfg, name, log, say, take):
         # before any claim: a client-id file that can't be read or made stops here
         args.fields["claimer"] = platform.claimer(args.channel)
         say("vcharon: join %s  as %s on %s" % (channel, name, server.where))
-        if args.project_note is not None:
-            say(args.project_note)
+        if args.project_note is not None and args.has_record:
+            # a name settled already: where it came from, no undo
+            say(args.project_note(undo=False))
         # 1. the leader, before any claim: a refused join leaves nothing behind. The root's
         # lobby, when there is none, is made by this join's claim below (DESIGN, "The lobby")
         found = _find(server.list(), channel, server.where)
@@ -1251,6 +1260,11 @@ def _join_held(args, cfg, name, log, say, take):
             raise channels.refused("the name %s is taken in %s" % (name, channel),
                                    "pass --role R to join as another member; --rejoin only when "
                                    "the user says that folder is yours")
+        if args.project_note is not None and not args.has_record:
+            # once the claim says whether the folder was there: one taken back (a lobby's after
+            # a leave, --rejoin) has its name settled, so no undo; still right after the join's
+            # first line, which is all a claim prints before it
+            say(args.project_note(undo=not rejoin))
         if rejoin:
             # before the record: a MEMBER.md that is a link fails here, not halfway through
             _check_member_file(_own_path(server, got, channel, name, section))

@@ -41,6 +41,7 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 | 3 | usage or config: a bad flag or name (`ERROR config: …`), or a server vcharon can't use (`ERROR state_mismatch: …`) |
 | 4 | couldn't connect to the server, or start vcharon there |
 | 130 | stopped with Ctrl-C |
+| 143 | `watch` or `sync --repeat` stopped with a SIGTERM (`kill <pid>`; Linux and macOS) |
 
 The watcher has its own (0, 10 to 16): `vcharon guide watch`.
 

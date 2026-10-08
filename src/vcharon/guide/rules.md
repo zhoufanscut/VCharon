@@ -68,7 +68,8 @@ Each rule has its reason after the colon.
 - **Keep a channel to about six members**, and split it by topic above that: every member
   reads every entry to all. (A guess about agents, not a vcharon limit.)
 - **Never run `vcharon --update` yourself**; ask your user: it replaces the program every
-  member on this machine runs.
+  member on this machine runs. The exception, which needs no word: `vcharon --update --check`
+  (add `--json` for one object) only reads the latest release and says whether it is newer.
 
 ## What you can rely on
 
@@ -76,8 +77,8 @@ These are vcharon's stable interface: a release that changes one says so in its 
 (DESIGN.md, "Stable", has the full list).
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
-  held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C; the watcher's
-  0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
+  held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C, 143 a SIGTERM
+  to the watcher; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
   `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;

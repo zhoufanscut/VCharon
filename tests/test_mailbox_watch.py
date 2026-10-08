@@ -3023,6 +3023,69 @@ class CommandTest(WatchCase):
         with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
             self.assertEqual(cli.main(["watch"]), 3)
 
+    # the last line a stopped watcher prints, after its time
+    INTERRUPTED = r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d EXIT interrupted \(exit %d\)"
+
+    def test_ctrl_c_ends_with_exit_interrupted(self):
+        for target, project in (("watch_dir", "q"), ("watch_job", "p")):
+            with self.subTest(target=target), \
+                    mock.patch.object(watch, target, side_effect=KeyboardInterrupt):
+                code, out, err = self.cli(project=project)
+                self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
+                self.assertRegex(out.splitlines()[-1], self.INTERRUPTED % 130)
+
+    @unittest.skipIf(os.name == "nt", "Windows has no SIGTERM to catch")
+    def test_sigterm_ends_with_exit_interrupted(self):
+        # the test's own handler: a SIGTERM the watch doesn't catch fails the test, not the
+        # whole run, and the watch must put it back when it ends
+        def uncaught(signum, frame):
+            raise AssertionError("SIGTERM reached the test's handler")
+
+        before = signal.signal(signal.SIGTERM, uncaught)
+        self.addCleanup(signal.signal, signal.SIGTERM, before)
+        stops = []
+
+        def terminated(*args, **kw):
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                # the handler runs at the next bytecode; never reached
+                time.sleep(5)
+            except KeyboardInterrupt:
+                # a second SIGTERM, while the watch stops its child, changes nothing
+                os.kill(os.getpid(), signal.SIGTERM)
+                stops.append(signal.getsignal(signal.SIGTERM))
+                raise
+
+        for target, project in (("watch_dir", "q"), ("watch_job", "p")):
+            with self.subTest(target=target), mock.patch.object(watch, target, terminated):
+                code, out, err = self.cli(project=project)
+                self.assertEqual((code, err), (143, "vcharon: interrupted\n"))
+                self.assertRegex(out.splitlines()[-1], self.INTERRUPTED % 143)
+                # SIG_IGN stays to the exit: a second SIGTERM can't cut the EXIT line short.
+                # The next run's must reach the test's handler again
+                self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
+                signal.signal(signal.SIGTERM, uncaught)
+        self.assertEqual(stops, [signal.SIG_IGN] * 2)
+        # a run that got no SIGTERM puts the handler before it back
+        with mock.patch.object(watch, "watch_dir", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.cli()[0], 130)
+        self.assertIs(signal.getsignal(signal.SIGTERM), uncaught)
+        # the run ended: a later command's Ctrl-C is 130 again
+        with mock.patch.object(watch, "watch_dir", side_effect=KeyboardInterrupt):
+            self.assertEqual(self.cli()[0], 130)
+
+    def test_no_second_exit_line(self):
+        # a Ctrl-C while the watch stops its child after its own EXIT line: that line stays
+        # the last one, with the code of the interrupt
+        def ended_then_interrupted(*args, out, **kw):
+            out("2026-10-08 12:00:00 EXIT change (exit 0)")
+            raise KeyboardInterrupt
+
+        with mock.patch.object(watch, "watch_job", ended_then_interrupted):
+            code, out, err = self.cli(project="p")
+        self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
+        self.assertEqual(out.splitlines()[-1], "2026-10-08 12:00:00 EXIT change (exit 0)")
+
     def test_modes_and_ctrl_c(self):
         calls = []
 
@@ -3031,6 +3094,8 @@ class CommandTest(WatchCase):
             # check, false outside a binary
             self.assertIsInstance(kw.pop("updated").__self__, install.Watchdog)
             self.assertFalse(kw.pop("orphaned")())
+            # the run's printer, which notes an EXIT line (test_no_second_exit_line)
+            self.assertTrue(callable(kw.pop("out")))
             calls.append((args, kw))
             raise KeyboardInterrupt
 

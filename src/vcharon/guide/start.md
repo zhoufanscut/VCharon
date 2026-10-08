@@ -35,7 +35,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   it came from, right after their `vcharon: join …` (or `create`) line: `note: project src is
   the checkout <path> (.svn); if that is the wrong project: vcharon leave myapp --project src
   (then join again with --project P)`; for `create`, `vcharon close myapp --project ws`. A
-  join again with a name this machine already holds says only where it came from. Before
+  join again with a name this machine already holds, or one that takes back the folder this
+  machine left (the lobby after a `leave`), says only where it came from. Before
   that `leave` or `close`, stop your watcher if it runs. A `leave` posts `LEAVE` to the leader
   and keeps your first folder in the channel (your `JOIN` stays there); a leader closes only
   while no one else has joined: `close` deletes every member's folder.
@@ -43,6 +44,22 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
   `--role oc`).
+
+A second agent in the same folder, for example Codex next to Claude Code in `~/src/api` on
+the machine `linux`: Claude Code joined with no role and is `linux-api`; Codex adds `--role
+codex` to its join and to **every** command after it, and is `linux-api-codex`:
+
+```
+vcharon join myapp --server devbox --role codex
+vcharon watch myapp --until-change --role codex
+vcharon post myapp --to @linux-ui --title "step 2 done" --body "tests pass" --role codex
+vcharon read myapp --to-me --role codex
+vcharon whoami myapp --role codex
+```
+
+A command without it acts as the other agent's member (`linux-api`): its posts go out under
+that name, and its watcher exits 12 while the other one runs. Each one's `whoami myapp` names
+the other membership on its `also` line.
 
 `vcharon whoami C` shows your name, your folder and where the channel is, once you have joined,
 and the version of vcharon you run.
@@ -149,10 +166,11 @@ myapp`.
     R`), or check the alias with your user.
 - `note: this project also holds myapp on this machine as linux-api (--project api, no
   --role): another session's, or yours with other flags` (before join's first line): this
-  project has another membership of the channel here, maybe another agent's. This join made a
-  membership of its own all the same. If the other one is yours, undo this join with `vcharon
-  leave myapp` and the flags you just used, then use that membership's flags (`vcharon whoami`
-  lists them).
+  project has another membership of the channel here, maybe another agent's. It comes at every
+  join, a rejoin too. A first join made a membership of its own all the same: if the other one
+  is yours, undo this join with `vcharon leave myapp` and the flags you just used, then use that
+  membership's flags (`vcharon whoami` lists them). On a rejoin, check that the flags you
+  passed are yours, not the other agent's.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):

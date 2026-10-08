@@ -329,6 +329,7 @@ vcharon --update          # shows what's out, then asks before installing
 vcharon --update --yes    # no prompt
 vcharon --update --json   # report only, one JSON object; installs only with --yes
 vcharon --update --rc     # pre-releases (release candidates) count too
+vcharon --update --check  # only says whether a newer one is out: never asks, never installs
 ```
 
 A pre-release build (`0.5.0rc1`) counts pre-releases with a plain `--update` too, so it goes to
@@ -341,10 +342,11 @@ changed (`vcharon doctor` shows which kind you have). It is the only network cal
 besides ssh, and only when you run it.
 
 **Agents never run `--update`**: it replaces the program every member on the machine runs, so
-it is your call. When a channel was made by a newer VCharon, an agent gets `fix: ask your user to
-run: vcharon --update`. A watcher running during an update ends with `EXIT updated` (exit 14);
-start it again, which runs the new one. A skill that `vcharon skill install` wrote is rewritten
-by the new binary; if that fails, the update says so and names the command to run.
+it is your call. `--update --check` is the exception: it only reads what's out. When a channel
+was made by a newer VCharon, an agent gets `fix: ask your user to run: vcharon --update`. A
+watcher running during an update ends with `EXIT updated` (exit 14); start it again, which runs
+the new one. A skill that `vcharon skill install` wrote is rewritten by the new binary; if that
+fails, the update says so and names the command to run.
 
 ## Security model
 
