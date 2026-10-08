@@ -20,6 +20,15 @@ line ends `, syncing every <n> s` (was `, streaming every <n> s`). Scripts that 
 match `streaming every`: match `syncing every`. Nothing to do for channels: the format is
 unchanged.
 
+- `vcharon --update --rc` counts pre-releases (release candidates) too: it installs the highest
+  version among the first 30 releases GitHub lists, a pre-release included, and `--force --rc`
+  installs it even when it is this version or older. A pre-release build counts them with a
+  plain `--update`, so `0.5.0rc1` goes to rc2 and then to the final; a final build reads full
+  releases only, as before. The `latest` line marks a pre-release `(pre-release, <url>)`;
+  `--update --json` adds `"prerelease"` (the release's) and `"rc"` (`"flag"`, `"current"` or
+  `false`: whether pre-releases were counted, and why). `--rc` without `--update` is refused,
+  as `--yes` is. 0.4.1 and older have no `--rc`: install the first pre-release by hand from its
+  release page.
 - Every watcher `EXIT` line ends with the process's exit code: `EXIT change (exit 0)`, `EXIT
   quiet 1 min (exit 10)`, `EXIT error (exit 11)`, `EXIT closed (exit 13)`, `EXIT updated (exit
   14)`, `EXIT orphaned (exit 15)`, `EXIT nothing new (exit 16)`; `sync --repeat`'s `EXIT updated`

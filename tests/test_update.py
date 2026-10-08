@@ -53,17 +53,21 @@ ZIP = WIN_ASSET + ".zip"
 ZIP_URL = "https://github.com/%s/releases/download/v9.9.9/%s" % (update.REPO, ZIP)
 ZIP_SUMS = ZIP_URL + ".sha256"
 OLD = b"old binary\n"
+# the real one: UpdateFlagTest replaces it, so the suite runs the same on a pre-release build
+IS_PRERELEASE = update.is_prerelease
 
 
-def release_json(tag="v9.9.9", with_checksum=True, assets=True):
-    """The part of GitHub's releases/latest reply that latest_release reads."""
+def release_json(tag="v9.9.9", with_checksum=True, assets=True, prerelease=False, draft=False):
+    """The part of GitHub's releases/latest reply that latest_release reads; one entry of
+    the releases list too."""
     files = []
     if assets:
         files.append({"name": TARBALL, "browser_download_url": DOWNLOAD})
         if with_checksum:
             files.append({"name": TARBALL + ".sha256", "browser_download_url": SUMS})
     return {"tag_name": tag, "html_url": "https://github.com/%s/releases/tag/%s"
-            % (update.REPO, tag), "published_at": "2026-07-31T00:00:00Z", "assets": files}
+            % (update.REPO, tag), "published_at": "2026-07-31T00:00:00Z", "assets": files,
+            "prerelease": prerelease, "draft": draft}
 
 
 def fake_binary(version="9.9.9", prints=None, exit_code=0):
@@ -217,6 +221,13 @@ class VersionTest(unittest.TestCase):
             with self.subTest(candidate=candidate, current=current):
                 self.assertIs(update.is_newer(candidate, current), want)
 
+    def test_which_builds_are_pre_releases(self):
+        # what makes a plain --update count pre-releases: a post-release is a final's
+        for text, want in (("0.5.0rc1", True), ("v0.5.0b2", True), ("0.5.0.dev1", True),
+                           ("0.5.0", False), ("0.5.0.post1", False), ("nightly", False)):
+            with self.subTest(text=text):
+                self.assertIs(update.is_prerelease(text), want)
+
 
 class PlatformAssetTest(unittest.TestCase):
     def test_matrix(self):
@@ -350,6 +361,49 @@ class LatestReleaseTest(UpdateCase):
     def test_one_leading_v_only(self):
         self.serve(Net({update.API_LATEST: json.dumps(release_json(tag="vv1.0"))}))
         self.assertEqual(update.latest_release().version, "v1.0")
+
+    def test_without_pre_only_releases_latest(self):
+        net = self.serve(Net({update.API_LATEST: json.dumps(release_json())}))
+        release = update.latest_release(pre=False)
+        self.assertEqual((release.tag, release.prerelease), ("v9.9.9", False))
+        self.assertEqual(net.urls, [update.API_LATEST])
+
+    def newest(self, *entries):
+        net = self.serve(Net({update.API_RELEASES: json.dumps(list(entries))}))
+        release = update.latest_release(pre=True)
+        self.assertEqual(net.urls, [update.API_RELEASES])
+        return release
+
+    def test_with_pre_the_highest_version_not_the_first(self):
+        # GitHub doesn't document the order: a fix tagged after an rc can come first
+        release = self.newest(release_json("v0.4.2"), release_json("v0.5.0rc1", prerelease=True),
+                              release_json("v0.4.1"))
+        self.assertEqual((release.tag, release.version, release.prerelease),
+                         ("v0.5.0rc1", "0.5.0rc1", True))
+        self.assertEqual(release.assets[TARBALL], DOWNLOAD)
+        release = self.newest(release_json("v0.5.0rc2", prerelease=True), release_json("v0.5.0"),
+                              release_json("v0.5.0rc1", prerelease=True))
+        self.assertEqual((release.tag, release.prerelease), ("v0.5.0", False))
+
+    def test_with_pre_drafts_and_bad_tags_are_skipped(self):
+        bare = release_json("v0.1.0")
+        del bare["tag_name"]
+        release = self.newest(release_json("v9.0.0", draft=True), release_json("nightly"),
+                              release_json(""), bare, "not an object", release_json("v0.3.0"),
+                              release_json("v0.2.0rc1", prerelease=True))
+        self.assertEqual(release.tag, "v0.3.0")
+
+    def test_with_pre_nothing_usable(self):
+        for entries in ([], [release_json("v9.0.0", draft=True)], [release_json("latest")]):
+            with self.subTest(entries=entries), self.assertRaises(update.UpdateError) as caught:
+                self.newest(*entries)
+            self.assertEqual(caught.exception.kind, "no_release")
+
+    def test_with_pre_the_list_must_be_a_list(self):
+        self.serve(Net({update.API_RELEASES: json.dumps(release_json())}))
+        with self.assertRaises(update.UpdateError) as caught:
+            update.latest_release(pre=True)
+        self.assertEqual(caught.exception.kind, "bad_response")
 
     def test_missing_tag(self):
         self.serve(Net({update.API_LATEST: json.dumps({"assets": []})}))
@@ -1890,6 +1944,8 @@ class UpdateFlagTest(FakeSshCase):
         # no terminal unless a test gives one
         self.patch(cli, "_stdin_is_terminal", return_value=False)
         self.patch(platform, "self_command", return_value="vcharon")
+        # a final build, whatever this one is; the pre-release build's tests say otherwise
+        self.patch(update, "is_prerelease", return_value=False)
 
     patch = UpdateCase.patch
     serve = UpdateCase.serve
@@ -1941,6 +1997,106 @@ class UpdateFlagTest(FakeSshCase):
         self.assertEqual((doc["install"], doc["path"], doc["current"]),
                          ("binary", self.target, vcharon.VERSION))
         self.assert_untouched()
+
+    RC_URL = "https://github.com/%s/releases/tag/v99.0.0rc1" % update.REPO
+
+    def serve_list(self, *entries, binary_version=None):
+        """GitHub with the releases list entries, and releases/latest as in setUp; the archive
+        holds a binary that prints binary_version."""
+        tarball = make_tarball(os.path.join(self.tmp, "list.tar.gz"),
+                               fake_binary(binary_version or "9.9.9"))
+        return self.serve(Net({update.API_LATEST: json.dumps(release_json()),
+                               update.API_RELEASES: json.dumps(list(entries)),
+                               DOWNLOAD: read(tarball),
+                               SUMS: "%s  %s\n" % (sha256(tarball), TARBALL)}))
+
+    def as_build(self, version):
+        self.patch(cli, "VERSION", new=version)
+        self.patch(update, "is_prerelease", new=IS_PRERELEASE)
+
+    def test_a_final_build_reads_only_full_releases(self):
+        # a final VERSION: the release job runs the suite at the tag, which may be an rc
+        self.as_build("1.0.0")
+        self.patch(update, "apply_update", new=never_called)
+        net = self.serve_list(release_json("v99.0.0rc1", prerelease=True))
+        code, doc, _ = self.run_json("--update", "--json")
+        self.assertEqual((code, doc["latest"], doc["prerelease"], doc["rc"]),
+                         (0, "9.9.9", False, False))
+        code, out, _ = self.run_cli("--update")
+        self.assertEqual(code, 0)
+        self.assertIn("  latest   9.9.9 (https://github.com/%s/releases/tag/v9.9.9)"
+                      % update.REPO, out.splitlines())
+        self.assertNotIn("pre-release", out)
+        self.assertEqual(net.urls, [update.API_LATEST] * 2)
+
+    def test_rc_offers_a_pre_release(self):
+        self.patch(update, "apply_update", new=never_called)
+        net = self.serve_list(release_json("v9.9.9"),
+                              release_json("v99.0.0rc1", prerelease=True))
+        code, doc, _ = self.run_json("--update", "--rc", "--json")
+        self.assertEqual({k: doc[k] for k in ("latest", "tag", "prerelease", "rc",
+                                              "update_available", "changed")},
+                         {"latest": "99.0.0rc1", "tag": "v99.0.0rc1", "prerelease": True,
+                          "rc": "flag", "update_available": True, "changed": False})
+        self.assertEqual(sorted(doc), list(self.BASE_KEYS))
+        code, out, err = self.run_cli("--update", "--rc")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[1:], [
+            "  current  %s (binary, %s)" % (vcharon.VERSION, self.target),
+            "  latest   99.0.0rc1 (pre-release, %s)" % self.RC_URL,
+            "  99.0.0rc1 is available; to install it: vcharon --update --rc --yes"])
+        self.assertEqual(net.urls, [update.API_RELEASES] * 2)
+        self.assert_untouched()
+
+    def test_rc_installs_with_yes_and_force(self):
+        self.serve_list(release_json("v99.0.0rc1", prerelease=True),
+                        binary_version="99.0.0rc1")
+        code, doc, err = self.run_json("--update", "--rc", "--yes", "--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((doc["changed"], doc["installed"], doc["rc"]), (True, "99.0.0rc1", "flag"))
+        self.assertEqual(read(self.target), fake_binary("99.0.0rc1"))
+        # --force with --rc: an older pre-release can be installed
+        self.serve_list(release_json("v0.0.1rc1", prerelease=True), binary_version="0.0.1rc1")
+        code, out, _ = self.run_cli("--update", "--rc", "--force")
+        self.assertEqual((code, out.splitlines()[-1]),
+                         (0, "  0.0.1rc1 can be installed: vcharon --update --rc --force --yes"))
+        code, doc, _ = self.run_json("--update", "--force", "--rc", "--yes", "--json")
+        self.assertEqual((code, doc["installed"], doc["prerelease"]), (0, "0.0.1rc1", True))
+
+    def test_a_pre_release_build_counts_pre_releases(self):
+        self.as_build("0.5.0rc1")
+        self.patch(update, "apply_update", new=never_called)
+        rc2 = release_json("v0.5.0rc2", prerelease=True)
+        net = self.serve_list(release_json("v0.4.2"), rc2)
+        code, doc, _ = self.run_json("--update", "--json")
+        self.assertEqual((code, doc["latest"], doc["prerelease"], doc["rc"],
+                          doc["update_available"]), (0, "0.5.0rc2", True, "current", True))
+        code, out, _ = self.run_cli("--update")
+        self.assertEqual(out.splitlines()[2:4], [
+            "  note: this build is a pre-release, so pre-releases count too",
+            "  latest   0.5.0rc2 (pre-release, https://github.com/%s/releases/tag/v0.5.0rc2)"
+            % update.REPO])
+        # with the flag too, the flag is the reason given
+        code, doc, _ = self.run_json("--update", "--rc", "--json")
+        self.assertEqual((doc["latest"], doc["rc"]), ("0.5.0rc2", "flag"))
+        code, out, _ = self.run_cli("--update", "--rc")
+        self.assertNotIn("  note: this build", out)
+        # the final, once out, is newer than every rc
+        net = self.serve_list(release_json("v0.5.0"), rc2)
+        code, doc, _ = self.run_json("--update", "--json")
+        self.assertEqual((doc["latest"], doc["prerelease"], doc["rc"]), ("0.5.0", False, "current"))
+        self.assertEqual(net.urls, [update.API_RELEASES])
+
+    def test_a_pre_release_build_up_to_date(self):
+        self.as_build("0.5.0rc2")
+        self.serve_list(release_json("v0.5.0rc2", prerelease=True))
+        code, out, _ = self.run_cli("--update")
+        self.assertEqual((code, out.splitlines()[-2:]),
+                         (0, ["  0.5.0rc2 is the latest release or pre-release", "OK"]))
+        self.serve_list(release_json("v0.5.0rc1", prerelease=True))
+        code, out, _ = self.run_cli("--update")
+        self.assertIn("  0.5.0rc2 is ahead of the latest release or pre-release",
+                      out.splitlines())
 
     def test_no_terminal_reports_and_says_how(self):
         self.patch(update, "apply_update", new=never_called)
@@ -2046,8 +2202,8 @@ class UpdateFlagTest(FakeSshCase):
         self.assertEqual(err.splitlines()[1], "  fix: " + update.PIPX_FIX)
         self.assert_untouched()
 
-    BASE_KEYS = ("changed", "confirmed", "current", "install", "latest", "ok", "path", "tag",
-                 "update_available", "url")
+    BASE_KEYS = ("changed", "confirmed", "current", "install", "latest", "ok", "path",
+                 "prerelease", "rc", "tag", "update_available", "url")
 
     def test_end_to_end(self):
         code, doc, err = self.run_json("--update", "--yes", "--json")
@@ -2170,7 +2326,7 @@ class UpdateFlagTest(FakeSshCase):
 
 
 class FlagRefusalTest(FakeSshCase):
-    """--update runs alone; --yes, --force and --json before a verb mean something only with
+    """--update runs alone; --yes, --force, --json and --rc before a verb mean something only with
     it: each other way is a usage error (3) with a fix line, never ignored."""
 
     def setUp(self):
@@ -2194,8 +2350,8 @@ class FlagRefusalTest(FakeSshCase):
                            (["--update", "--version"], "--version")):
             with self.subTest(argv=argv):
                 self.assertEqual(self.refused(*argv), [
-                    "ERROR config: --update runs on its own, with only --yes, --force and "
-                    "--json: not with " + rest,
+                    "ERROR config: --update runs on its own, with only --yes, --force, --json "
+                    "and --rc: not with " + rest,
                     "  fix: run vcharon --update by itself; then the rest"])
 
     def test_after_a_verb_its_unknown(self):
@@ -2206,6 +2362,8 @@ class FlagRefusalTest(FakeSshCase):
         for argv, want in ((["--yes"], "--yes goes only with --update"),
                            (["--force"], "--force goes only with --update"),
                            (["--json"], "--json goes only with --update"),
+                           (["--rc"], "--rc goes only with --update"),
+                           (["--rc", "doctor"], "--rc goes only with --update"),
                            (["--yes", "doctor"], "--yes goes only with --update"),
                            (["--force", "whoami"], "--force goes only with --update"),
                            (["--json", "doctor"], "--json goes after the verb: vcharon doctor "
@@ -2216,7 +2374,8 @@ class FlagRefusalTest(FakeSshCase):
     def test_the_legitimate_ones_get_past_the_check(self):
         # the network is a test failure here: each gets as far as asking GitHub
         for argv in (["--update"], ["--update", "--yes", "--json"], ["--update", "--force"],
-                     ["--json", "--update"]):
+                     ["--json", "--update"], ["--update", "--rc", "--yes", "--force", "--json"],
+                     ["--rc", "--update"]):
             with self.subTest(argv=argv):
                 code, _, err = self.run_cli(*argv)
                 self.assertEqual(code, 1, err)

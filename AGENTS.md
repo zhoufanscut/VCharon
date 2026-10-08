@@ -144,7 +144,9 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
    YYYY-MM-DD`, then runs the suite, builds one binary per platform
    (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, runs the installer against it,
    and publishes the binary, its archive and the archive's `.sha256`. A version with a
-   pre-release label (`0.2.0rc1`) is published as a GitHub pre-release, which `--update` and the
-   installers never offer: a way to test a build in real use before the release.
+   pre-release label (`0.2.0rc1`) is published as a GitHub pre-release, which the installers and
+   a plain `--update` on a final build never offer; `--update --rc` does, and a pre-release build
+   follows later ones with a plain `--update`: a way to test a build in real use before the
+   release.
 4. These agree on the release asset names and change together: `release.yml` and
    `tests/pack.py`, `install.sh`/`install.ps1` (and `tests/install_check.sh`), and the updater.

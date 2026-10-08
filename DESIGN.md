@@ -1994,7 +1994,7 @@ Messages
 Other
   vcharon guide  [TOPIC] [--project P] [--role R]
   vcharon --version
-  vcharon --update [--yes] [--force] [--json]
+  vcharon --update [--yes] [--force] [--json] [--rc]
 ```
 
 Every verb also takes `-v` (log lines to stderr too).
@@ -2276,27 +2276,35 @@ unchanged build's, into `EXIT updated` and exit 14 within a round, with no trace
 
 ### Self-update
 
-`vcharon --update [--yes] [--force] [--json]` replaces a standalone binary with the latest GitHub
-release. It is the only network call VCharon makes besides ssh, and only when it is run: no
+`vcharon --update [--yes] [--force] [--json] [--rc]` replaces a standalone binary with the latest
+GitHub release. It is the only network call VCharon makes besides ssh, and only when it is run: no
 version check at start-up.
 
 - **A flag, not a verb**: the verbs are what agents run, and an agent never updates (the guide
   says to ask the user: it replaces the program every member on the machine runs). Refused, as a
-  usage error (3), with a verb or any flag but `--yes`, `--force` and `--json`; those three are
-  refused without it.
+  usage error (3), with a verb or any flag but `--yes`, `--force`, `--json` and `--rc`; those four
+  are refused without it.
 - **It asks first**: it reads `releases/latest` (GitHub leaves out drafts and pre-releases),
   prints the current and the latest version, and with nothing newer and no `--force` says so and
   exits 0. Else `Update now? [y/N]`. No terminal, `--json`, Ctrl-C or anything but `y`/`yes` is
   "no": it reports and installs nothing, exit 0, so `vcharon --update --json` is the scripted
   check. `--yes` is the one yes; `--force` installs the latest even when it is this version, or
   an older one (this build is ahead of the latest release).
+- **Pre-releases**: with `--rc`, or when this build is itself a pre-release, it reads the first 30
+  releases GitHub lists instead (`releases?per_page=30`), skips drafts and tags that don't parse,
+  and takes the highest version, pre-releases included; by version, not list order, since GitHub
+  doesn't document the order and a fix tagged after an rc can come first. Its `latest` line then
+  marks a pre-release `(pre-release, <url>)`, and a pre-release build says that is why it counted
+  them. Why the pre-release build: a user testing `0.5.0rc1` follows rc2 and then the final with a
+  plain `--update`, and once on the final reads full releases only again, with no state kept. A
+  build without `--rc` (0.4.1 and older) gets its first pre-release by hand, from the release page.
 - **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
   number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` < `0.1.0rc2` <
-  `0.1.0`, and a post-release (`post`) above it: `0.1.0.post1` is newer than `0.1.0`. `--update`
-  reads only full releases (`releases/latest` never returns a pre-release), so a pre-release is
-  installed by hand from its release page, never through `--update`. A tag that doesn't parse is
-  never newer. `--force` with an older release says it "can be installed"; with the same one, "can
-  be reinstalled".
+  `0.1.0`, and a post-release (`post`) above it: `0.1.0.post1` is newer than `0.1.0`. On a final
+  build a plain `--update` reads only full releases (`releases/latest` never returns a
+  pre-release); `--rc` counts pre-releases too, and `--force --rc` installs the highest it read
+  even when it is this version or older. A tag that doesn't parse is never newer. `--force`
+  with an older release says it "can be installed"; with the same one, "can be reinstalled".
 - **Checked before the question**: how VCharon was installed, that a binary is published for
   this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
   pipx command), that the binary's folder is writable (by making and removing a temp folder in
@@ -2354,7 +2362,10 @@ version check at start-up.
 - **Exit codes**: 0 done, nothing newer, or "no"; 1 every failure, with the `update` error
   code; 3 a usage error.
 - **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`;
-  once the release is read `latest`, `tag`, `update_available`, `url`, `changed`, `confirmed`;
+  once the release is read `latest`, `tag`, `prerelease` (whether that release is a GitHub
+  pre-release), `rc` (whether pre-releases were counted, and why: `"flag"` for `--rc`, which wins,
+  `"current"` for a pre-release build, else `false`), `update_available`, `url`, `changed`,
+  `confirmed`;
   `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
   `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `bad_token`,
   `checksum_mismatch`, `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …),
@@ -2495,8 +2506,8 @@ maintainer asks before tagging.
   section and the full CHANGELOG: the notes say what changed and what was checked, and the
   entry is already written and checked by the tag test above. A version with a
   pre-release label (`rc`, `a`, `b`, `dev`, by `--update`'s own `parse_version`) is published as
-  a GitHub pre-release: `releases/latest` leaves those out, so `--update` and the installers never
-  offer a release candidate.
+  a GitHub pre-release: `releases/latest` leaves those out, so the installers and a plain
+  `--update` on a final build never offer a release candidate; `--update --rc` does.
 - `*.sh` files are LF on every checkout (`.gitattributes`), so a script is the same bytes on
   every OS: a Windows checkout turns text to CRLF, and a shell other than Git Bash refuses a CR.
 

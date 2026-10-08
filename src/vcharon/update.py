@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import hashlib
 import http.client
 import json
@@ -60,6 +61,8 @@ API_ROOT = "https://api.github.com/"
 # read in this order; the first one set is sent
 TOKEN_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
 API_LATEST = "%srepos/%s/releases/latest" % (API_ROOT, REPO)
+# the first 30 releases GitHub lists, pre-releases and drafts among them: what --rc reads
+API_RELEASES = "%srepos/%s/releases?per_page=30" % (API_ROOT, REPO)
 RELEASES_URL = install.RELEASES_URL
 
 # Per socket operation, not per transfer: a stalled read is the guard, not a slow download.
@@ -125,8 +128,7 @@ def parse_version(text):
     (2, n), above it ("0.1.0.post1" -> ((0, 1, 0), (2, 1))). None when nothing numeric is
     there. Lenient, since a tag is typed by a person: a leading v, a +build tail and a short 0.4
     are taken. A release candidate is tagged before the final, so 0.1.0rc1 < 0.1.0rc2 < 0.1.0
-    must each sort as newer than the one before (--update itself never offers a pre-release:
-    releases/latest leaves them out)."""
+    must each sort as newer than the one before (--update --rc goes rc1, rc2, final)."""
     if not isinstance(text, str):
         return None
     m = _VERSION.match(text.strip().split("+")[0])
@@ -151,6 +153,13 @@ def compare(a, b):
     ka = (pa[0] + (0,) * (width - len(pa[0])), pa[1])
     kb = (pb[0] + (0,) * (width - len(pb[0])), pb[1])
     return (ka > kb) - (ka < kb)
+
+
+def is_prerelease(text):
+    """Whether the version text has a pre-release label (an unknown label counts: it sorts
+    below the final release too). False when it doesn't parse."""
+    parsed = parse_version(text)
+    return parsed is not None and parsed[1][0] == 0
 
 
 def is_newer(candidate, current):
@@ -196,12 +205,42 @@ class Release:
     published_at: str
     # asset name -> browser_download_url
     assets: dict = dataclasses.field(default_factory=dict)
+    # GitHub's "prerelease": published as a pre-release
+    prerelease: bool = False
 
 
-def latest_release(timeout=META_TIMEOUT):
-    """The repo's latest published release, or UpdateError. releases/latest, not the first of
-    releases: GitHub leaves out drafts and pre-releases."""
-    data = _get_json(API_LATEST, timeout)
+def latest_release(timeout=META_TIMEOUT, pre=False):
+    """The repo's latest published release, or UpdateError. Without pre, releases/latest,
+    not the first of releases: GitHub leaves out drafts and pre-releases there. With pre, the
+    highest version among the newest releases, pre-releases included (newest_release)."""
+    if pre:
+        return newest_release(timeout)
+    return _release(_get_json(API_LATEST, timeout))
+
+
+def newest_release(timeout=META_TIMEOUT):
+    """The highest version among the first 30 releases GitHub lists, pre-releases
+    included, or UpdateError. Drafts and tags that don't parse are skipped. By version, not
+    list order: GitHub doesn't document the order, and a 0.4.2 fix tagged after 0.5.0rc1 can
+    come first."""
+    data = _get_json(API_RELEASES, timeout, want=list)
+    tags = [one for one in data if isinstance(one, dict) and not one.get("draft")
+            and parse_version(_tag(one)) is not None]
+    if not tags:
+        raise UpdateError("no_release", "the GitHub API listed no published release with a "
+                          "version tag", "see %s" % RELEASES_URL)
+    return _release(max(tags, key=functools.cmp_to_key(
+        lambda a, b: compare(_tag(a), _tag(b)))))
+
+
+def _tag(data):
+    """A release's tag_name, stripped; "" when there is none."""
+    tag = data.get("tag_name")
+    return tag.strip() if isinstance(tag, str) else ""
+
+
+def _release(data):
+    """The Release of one release's JSON object, or UpdateError when it has no tag."""
     tag = data.get("tag_name")
     if not isinstance(tag, str) or not tag.strip():
         raise UpdateError("no_release", "the GitHub API returned a release with no tag",
@@ -216,7 +255,8 @@ def latest_release(timeout=META_TIMEOUT):
             assets[asset["name"]] = asset["browser_download_url"]
     return Release(tag=tag, version=version,
                    url=data.get("html_url") or "%s/tag/%s" % (RELEASES_URL, tag),
-                   published_at=data.get("published_at") or "", assets=assets)
+                   published_at=data.get("published_at") or "", assets=assets,
+                   prerelease=data.get("prerelease") is True)
 
 
 class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
@@ -336,7 +376,8 @@ def _request(url, token_var):
     return request
 
 
-def _get_json(url, timeout):
+def _get_json(url, timeout, want=dict):
+    """url's JSON, which must be a want (an object; a list for a listing), or UpdateError."""
     response = _open(url, timeout)
     try:
         raw = response.read()
@@ -349,8 +390,9 @@ def _get_json(url, timeout):
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as e:
         raise UpdateError("bad_response", "%s didn't return JSON: %s" % (url, e)) from e
-    if not isinstance(data, dict):
-        raise UpdateError("bad_response", "%s didn't return a JSON object" % url)
+    if not isinstance(data, want):
+        raise UpdateError("bad_response", "%s didn't return a JSON %s"
+                          % (url, "list" if want is list else "object"))
     return data
 
 

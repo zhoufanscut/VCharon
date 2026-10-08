@@ -227,8 +227,8 @@ jobs:
           PYEOF
           cat "$RUNNER_TEMP/notes.md"
 
-      # a pre-release (rc, a, b, dev) is never releases/latest, so --update and the installers
-      # don't offer it
+      # a pre-release (rc, a, b, dev) is never releases/latest, so the installers and a plain
+      # --update on a final build don't offer it; --update --rc does
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -328,7 +328,11 @@ It updates the standalone binary; any other install gets the command that update
 vcharon --update          # shows what's out, then asks before installing
 vcharon --update --yes    # no prompt
 vcharon --update --json   # report only, one JSON object; installs only with --yes
+vcharon --update --rc     # pre-releases (release candidates) count too
 ```
+
+A pre-release build (`0.5.0rc1`) counts pre-releases with a plain `--update` too, so it goes to
+rc2 and then to the final; once on the final, `--update` offers full releases only.
 
 It asks `Update now? [y/N]`, and counts no terminal as "no". A standalone binary is replaced in
 place, after the download's sha256 and the new binary's `--version` check out; any failure leaves

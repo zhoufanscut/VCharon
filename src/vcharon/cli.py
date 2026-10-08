@@ -110,14 +110,15 @@ def _parser():
     # updates (DESIGN, "Self-update"). Its options have their own dests, so a verb's --json
     # can't be taken for its.
     parser.add_argument("--update", action="store_true", help="update this binary from "
-                        "GitHub releases, asking first; alone or with the three below")
+                        "GitHub releases, asking first; alone or with the four below")
     parser.add_argument("--yes", dest="update_yes", action="store_true",
                         help="with --update: install without asking")
     parser.add_argument("--force", dest="update_force", action="store_true",
-                        help="with --update: install the latest even when it is this version "
-                        "or older")
+                        help="with --update: install the latest even if it isn't newer")
     parser.add_argument("--json", dest="update_json", action="store_true",
                         help="with --update: print one JSON object; installs only with --yes")
+    parser.add_argument("--rc", dest="update_rc", action="store_true",
+                        help="with --update: count pre-releases too")
     commands = parser.add_subparsers(dest="command", metavar="<command>")
 
     def verb(name, text, example):
@@ -340,7 +341,7 @@ def main(argv=None):
 
 
 # what may come with --update
-UPDATE_FLAGS = ("--update", "--yes", "--force", "--json")
+UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc")
 
 
 def _main(argv, run):
@@ -396,17 +397,17 @@ def _update_alone(words):
         return
     others = [w for w in words if w not in UPDATE_FLAGS]
     if others:
-        raise _usage("--update runs on its own, with only --yes, --force and --json: not with "
-                     "%s" % " ".join(others), "run vcharon --update by itself; then the rest")
+        raise _usage("--update runs on its own, with only --yes, --force, --json and --rc: not "
+                     "with %s" % " ".join(others), "run vcharon --update by itself; then the rest")
 
 
 def _update_flags(args):
-    """--yes, --force and --json before a verb are --update's: without it, refused rather
-    than ignored."""
+    """--yes, --force, --json and --rc before a verb are --update's: without it, refused
+    rather than ignored."""
     if args.update:
         return
     for flag, on in (("--yes", args.update_yes), ("--force", args.update_force),
-                     ("--json", args.update_json)):
+                     ("--json", args.update_json), ("--rc", args.update_rc)):
         if not on:
             continue
         if flag == "--json" and args.command is not None:
@@ -1262,17 +1263,20 @@ def _skill(args):
 
 
 def _update(args, run):
-    """vcharon --update [--yes] [--force] [--json] (DESIGN, "Self-update"): the latest
-    release from GitHub, and this binary replaced with it once the user says yes. A pipx,
+    """vcharon --update [--yes] [--force] [--json] [--rc] (DESIGN, "Self-update"): the
+    latest release from GitHub, and this binary replaced with it once the user says yes. With
+    --rc, or when this build is a pre-release, the newest pre-release counts too. A pipx,
     uv, pip or source install gets the command that updates it, and nothing changes. Exit 0
     when it's done, there is nothing newer, or the answer is no; 1 on every failure.
 
     --json prints one object on stdout, a failure's too: {"current", "install", "path"},
-    then, once the release is read, {"latest", "tag", "update_available", "url",
-    "changed", "confirmed"}; "ok"; a failure's {"error", "message", "fix"}; a refusal for
-    another install kind's "command"; an install's {"previous", "installed", "verified",
-    "skills"}, "skills" being {"paths", "ok", "fix"}: the skill copies the new binary was run
-    for, whether that worked, and the command to run when it didn't."""
+    then, once the release is read, {"latest", "tag", "prerelease", "rc", "update_available",
+    "url", "changed", "confirmed"}, "prerelease" being whether that release is one and "rc"
+    whether pre-releases were counted and why ("flag", "current" or false); "ok"; a failure's
+    {"error", "message", "fix"}; a refusal for another install kind's "command"; an install's
+    {"previous", "installed", "verified", "skills"}, "skills" being {"paths", "ok", "fix"}: the
+    skill copies the new binary was run for, whether that worked, and the command to run when it
+    didn't."""
     # Only here, not at the top: no other command needs the network modules, and this one is
     # short-lived; after its swap it imports nothing more.
     from . import update as update_mod
@@ -1300,22 +1304,30 @@ def _update(args, run):
             return fail("failed", "%s: %s" % (type(e).__name__, e),
                         "this is a bug in vcharon; see the log")
 
-    release = guarded(update_mod.latest_release)
+    # pre-releases count with --rc, and on a pre-release build: rc1 goes to rc2, then to the
+    # final, with a plain --update; a final build reads full releases only
+    rc = "flag" if args.update_rc else "current" if update_mod.is_prerelease(VERSION) else False
+    release = guarded(lambda: update_mod.latest_release(pre=bool(rc)))
     available = update_mod.is_newer(release.tag, VERSION)
-    doc.update(latest=release.version, tag=release.tag, update_available=available,
-               url=release.url, changed=False, confirmed=False)
+    doc.update(latest=release.version, tag=release.tag, prerelease=release.prerelease, rc=rc,
+               update_available=available, url=release.url, changed=False, confirmed=False)
     if not as_json:
         _say("vcharon: update")
         _say("  current  %s (%s%s)" % (VERSION, inst.kind,
                                        ", %s" % inst.path if inst.path else ""))
-        _say("  latest   %s (%s)" % (release.version, release.url))
+        if rc == "current":
+            _say("  note: this build is a pre-release, so pre-releases count too")
+        _say("  latest   %s (%s%s)" % (release.version,
+                                       "pre-release, " if release.prerelease else "",
+                                       release.url))
     if not available and not args.update_force:
         same = update_mod.compare(VERSION, release.version) == 0
         if as_json:
             return _print_json(dict(doc, ok=True))
         # "ahead" when they differ: a build newer than the release isn't "the latest"
-        _say("  %s is the latest release" % VERSION if same
-             else "  %s is ahead of the latest release" % VERSION)
+        what = "release or pre-release" if rc else "release"
+        _say("  %s is the latest %s" % (VERSION, what) if same
+             else "  %s is ahead of the latest %s" % (VERSION, what))
         _say("OK")
         return 0
     if not inst.self_updatable:
@@ -1326,7 +1338,7 @@ def _update(args, run):
     guarded(lambda: update_mod.preflight(inst, release))
     older = update_mod.compare(release.version, VERSION) == -1
     if not _confirm_update(release, args.update_yes, as_json, args.update_force, available,
-                           older):
+                           older, args.update_rc):
         if as_json:
             return _print_json(dict(doc, ok=True))
         return 0
@@ -1361,20 +1373,22 @@ def _update(args, run):
     return 0
 
 
-def _confirm_update(release, yes, as_json, force=False, available=True, older=False):
+def _confirm_update(release, yes, as_json, force=False, available=True, older=False,
+                    rc=False):
     """Whether to install: --yes is the one yes. --json and no terminal count as no (the
     release is reported, nothing installed), so an agent can't install by accident; so do
     Ctrl-C and Ctrl-D at the question. The only question vcharon asks besides vcharon key.
-    force, available, older: the line that says how keeps a --force given, and a release that
-    isn't newer (only --force gets here with one) is one to reinstall, or, older than this
-    build, one that can be installed."""
+    force, available, older, rc: the line that says how keeps a --force and an --rc given, and
+    a release that isn't newer (only --force gets here with one) is one to reinstall, or, older
+    than this build, one that can be installed."""
     if yes:
         return True
     if as_json or not _stdin_is_terminal():
         if not as_json:
             # a binary's spelling: only a binary gets here
-            command = "%s --update%s --yes" % (platform.self_command(),
-                                               " --force" if force else "")
+            command = "%s --update%s%s --yes" % (platform.self_command(),
+                                                 " --rc" if rc else "",
+                                                 " --force" if force else "")
             if available:
                 _say("  %s is available; to install it: %s" % (release.version, command))
             elif older:
