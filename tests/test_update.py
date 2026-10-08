@@ -1685,7 +1685,7 @@ class ExitWithParentTest(unittest.TestCase):
         with mock.patch.object(platform, "is_frozen", return_value=False):
             run.watch_code(said.append)
         run.parent_gone(parent)
-        self.assertEqual(said, ["EXIT orphaned"])
+        self.assertEqual(said, ["EXIT orphaned (exit 15)"])
 
     def test_a_bootloader_gone_before_main_stores_it(self):
         fake = FakeWaitWinapi()

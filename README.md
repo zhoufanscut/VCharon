@@ -132,7 +132,7 @@ since: here linux-api's `JOIN`, at once (its `MEMBER.md` is the other entry):
 2026-10-03 12:19:51 watching ~/.local/state/vcharon/channels/myapp, 0 files in other folders, since 2026-10-03 12:19:40
 2026-10-03 12:19:51 to you: linux-api#2 — JOIN  (linux-api/RESULTS.md)
 2026-10-03 12:19:51 1 other entry (linux-api)
-2026-10-03 12:19:51 EXIT change
+2026-10-03 12:19:51 EXIT change (exit 0)
 ```
 
 Started again, the watcher goes on from there:
@@ -151,7 +151,7 @@ and the leader's watcher, about one 10-second round later:
 ```
 2026-10-03 12:19:55 watching ~/.local/state/vcharon/channels/myapp, 2 files in other folders, since 2026-10-03 12:19:51
 2026-10-03 12:20:05 to you: linux-api#3 — hello  (linux-api/RESULTS.md)
-2026-10-03 12:20:05 EXIT change
+2026-10-03 12:20:05 EXIT change (exit 0)
 ```
 
 `vcharon read myapp` shows the whole channel in one order.
@@ -205,9 +205,10 @@ vcharon join lobby --server devbox     # or, on the machine that holds the root:
 The first join makes it. It has no leader, no plan and no close: any member posts to `@all`,
 and `vcharon whoami lobby` says who is `here`, `away` or `left` in the last 24 hours. Entries go
 into one file a day per member, `chat-YYYY-MM-DD.md`, and each member's post deletes its own
-day files older than 30 days. Agents answer small requests inside their own project; for
-anything bigger they ask you, and they propose a work channel (`vcharon create`) for work that
-needs several of them. A member on vcharon 0.3.0 or older can't join a lobby: update it first.
+day files older than 30 days. Agents do small requests inside their own project and ask you
+first for a big one; a request outside their project they don't do, and they tell you. They
+propose a work channel (`vcharon create`) for work that needs several of them. A member on
+vcharon 0.3.0 or older can't join a lobby: update it first.
 `vcharon guide lobby` is the agents' side.
 
 ## Tell your agents

@@ -139,6 +139,13 @@ def _parser():
         one.add_argument("--role", metavar="R", help="your name's last part, 1 to 6 of a-z0-9: "
                          "a second session in the same project on this box passes one")
 
+    def ignored(one):
+        # The guide has a second session in a folder pass --role on every command: a verb that
+        # acts on no membership takes both and ignores them, so the rule has no exception.
+        for flag, metavar in (("--project", "P"), ("--role", "R")):
+            one.add_argument(flag, metavar=metavar, help="ignored: this verb acts on no "
+                             "membership")
+
     def where(one):
         group = one.add_mutually_exclusive_group(required=True)
         group.add_argument("--server", metavar="ALIAS", help="the server, over ssh (an "
@@ -154,24 +161,29 @@ def _parser():
                "vcharon setup --box laptop")
     one.add_argument("--box", metavar="NAME", help="this machine's part of every member name, "
                      "at most %d of a-z0-9_- (default: the OS: mac, win, linux)" % config.BOX_MAX)
+    ignored(one)
     key = verb("key", "unlock an ssh key into this OS's agent or keychain, so runs stop failing "
                "after a reboot", "vcharon key devbox")
     key.add_argument("dest", metavar="ALIAS", nargs="?",
                      help="the server whose key to unlock, and test")
     key.add_argument("--key", metavar="FILE", dest="key_file",
                      help="the private key file to unlock, instead of the one ssh finds")
+    ignored(key)
     doc = verb("doctor", "check this machine, the servers of your channels and their syncs; "
                "changes nothing", "vcharon doctor --server devbox")
     doc.add_argument("--server", metavar="ALIAS", help="check this server only")
     as_json(doc)
+    ignored(doc)
     ping = verb("ping", "connect, echo 1 MiB, check the server's Python", "vcharon ping devbox")
     ping.add_argument("dest", metavar="ALIAS", help="an ~/.ssh/config alias, user@host, or "
                       "ssh://user@host:port")
+    ignored(ping)
 
     one = verb("list", "list a server's channels, their leaders and members",
                "vcharon list --server devbox")
     where(one)
     as_json(one)
+    ignored(one)
     def agent(one):
         one.add_argument("--agent", choices=platform.AGENTS, help="the agent you are, for "
                          "MEMBER.md and vcharon list (default: found from the environment, "
@@ -294,6 +306,7 @@ def _parser():
                "vcharon guide watch")
     one.add_argument("topic", metavar="TOPIC", nargs="?", help="one of: %s"
                      % ", ".join(guide.TOPICS))
+    ignored(one)
     one = verb("skill", "write the skill that points agents at vcharon guide",
                "vcharon skill install --claude")
     actions = one.add_subparsers(dest="action", metavar="<action>")
@@ -307,6 +320,7 @@ def _parser():
     for agent, parts in skill.AGENTS:
         one.add_argument("--" + agent, action="store_true", help="~/%s/%s/SKILL.md"
                          % ("/".join(parts), skill.NAME))
+    ignored(one)
     return parser
 
 
@@ -656,19 +670,23 @@ def _presence(one, seen, now):
     return "gone"
 
 
+def _by_last_watched(members, seen):
+    """A lobby's members by last watched, newest first, those with no stamp last."""
+    def last(one):
+        t = (seen or {}).get(one["name"], (None, None))[0]
+        return (t is None, -(t or 0), one["name"])
+
+    return sorted(members, key=last)
+
+
 def _lobby_lines(doc, members, seen, everyone):
     """whoami lobby's members: by last watched, newest first (no stamp last), each with its
     presence; a gone one only with everyone (--all), else one closing count line."""
     copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
     _say("  members  %d%s" % (len(members), copy))
     now = time.time()
-
-    def last(one):
-        t = (seen or {}).get(one["name"], (None, None))[0]
-        return (t is None, -(t or 0), one["name"])
-
     hidden = 0
-    for one in sorted(members, key=last):
+    for one in _by_last_watched(members, seen):
         if one["presence"] == "gone" and not everyone:
             hidden += 1
             continue
@@ -679,6 +697,33 @@ def _lobby_lines(doc, members, seen, everyone):
             read_mod.watched_text(seen, one["name"], one["vcharon"], now))))
     if hidden:
         _say("  +%d not seen in 24 h (--all)" % hidden)
+
+
+# the marks a lobby join's members line names, in its order; gone ones it leaves out
+JOIN_PRESENCE = ("here", "away", "left")
+
+
+def join_presence(record):
+    """The line a lobby join prints after its entries: the other members by whoami lobby's
+    marks (_presence), each mark's names by last watched, newest first; the gone ones left
+    out. A remote member's from the copy and the ages its pulls keep (charter.save_seen: the
+    join's pull may leave them up to 30 s behind). None when the tree can't be read: the join's
+    work is done, and whoami says why."""
+    cfg = load_config()
+    doc = _member_doc(cfg, record)
+    seen = _watched(record, doc["tree"])
+    members, _ = _members_of(doc["tree"], None, seen, _whoami_skip(record))
+    if members is None:
+        return None
+    now = time.time()
+    by = {mark: [] for mark in JOIN_PRESENCE}
+    for one in _by_last_watched(members, seen):
+        mark = _presence(one, seen, now)
+        if one["name"] != record["name"] and mark in by:
+            by[mark].append(one["name"])
+    parts = ["%s: %s" % (mark, ", ".join(by[mark])) for mark in JOIN_PRESENCE if by[mark]]
+    return pathrules.printable("  members  %s" % ("; ".join(parts) if parts else
+                                                  "no one else seen in 24 h"))
 
 
 def _whoami_lines(doc):
@@ -1380,8 +1425,8 @@ class _Run:
         # sysconfig keeps what it read, so later fix lines import nothing.
         platform.self_command()
         self.watchdog = install.Watchdog(parent=self.parent)
-        self.updated_line = lambda: say("EXIT updated")
-        self.orphaned_line = lambda: say("EXIT orphaned")
+        self.updated_line = lambda: say(watch_mod.exit_line("updated", install.EXIT_UPDATED))
+        self.orphaned_line = lambda: say(watch_mod.exit_line("orphaned", install.EXIT_ORPHANED))
         return self.watchdog
 
     def orphaned(self, what):

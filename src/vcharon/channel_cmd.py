@@ -80,8 +80,8 @@ ASK_USER = ("  note: if your user only asked you to join, ask them whether to wo
             "the leader assigns you")
 # its place in a lobby's first join: there is no leader and no plan, and a request comes from
 # any member (vcharon guide lobby)
-LOBBY_NOTE = ("  note: the lobby: a request inside your project you may do; for anything outside "
-              "it, or a big change, ask your user first (vcharon guide lobby)")
+LOBBY_NOTE = ("  note: the lobby: a request inside your project you may do (a big one: ask your "
+              "user first); outside it, don't: tell your user (vcharon guide lobby)")
 # join's note for a lobby made by an older vcharon: a work channel, with its leader and close
 OLD_LOBBY_NOTE = "  note: lobby here is a work channel, not a lobby"
 # the claim line's words for a lobby's join that took back this machine's folder after a leave
@@ -1314,6 +1314,9 @@ def _join_held(args, cfg, name, log, say, take):
                         keep=rejoin and record is not None)
     tree = os.path.dirname(own)
     _print_entries(tree, name, leader, channel, say, marks=marks, kind_=kind_)
+    if code == 0 and kind_ is kinds.LOBBY:
+        # whoami lobby's marks in one line: agents ran whoami right after a join to see them
+        _say_members(channel, name, say, log)
     if code == 0:
         _say_next(channel, name, say,
                   first=not rejoin and args.fields["agent"] != CHECK_SKIPPED)
@@ -1322,6 +1325,20 @@ def _join_held(args, cfg, name, log, say, take):
             say(platform.runnable(LOBBY_NOTE) if kind_ is kinds.LOBBY else ASK_USER)
         say("OK  in %s as %s; your folder is %s" % (channel, name, own))
     return code
+
+
+def _say_members(channel, name, say, log):
+    """A lobby join's members line (cli.join_presence); one that can't be made is logged,
+    never an error: the join's work is done."""
+    # here, not at the top: cli imports this module
+    from . import cli
+    try:
+        line = cli.join_presence(read_record(channel, name))
+    except (OSError, VCharonError) as e:
+        log.warn("couldn't list the members of %s: %s" % (channel, e))
+        return
+    if line is not None:
+        say(line)
 
 
 def _leader(server, channel, found):

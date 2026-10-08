@@ -1356,7 +1356,7 @@ class RepeatTest(FakeSshCase):
         swap = self.code_file()
         code, lines, err, waits = self.repeat("a", "b", between=[lambda: None, swap])
         self.assertEqual((code, err), (install.EXIT_UPDATED, ""))
-        self.assertEqual(lines, ["ROUND 0", "ROUND 0", "EXIT updated"])
+        self.assertEqual(lines, ["ROUND 0", "ROUND 0", "EXIT updated (exit 14)"])
         self.assertEqual(len(waits.waits), 2)
         self.assertIn("repeat: vcharon changed under it; exiting with 14", self.job_log("a"))
         self.assertIn("ssh exited with code 0", self.job_log("a"))
@@ -1384,7 +1384,7 @@ class RepeatTest(FakeSshCase):
                 mock.patch.object(install, "Parent", Parent):
             code, lines, err, _ = self.repeat("a", "b", between=[kill_parent])
         self.assertEqual((code, err), (install.EXIT_ORPHANED, ""))
-        self.assertEqual(lines, ["ROUND 0", "EXIT orphaned"])
+        self.assertEqual(lines, ["ROUND 0", "EXIT orphaned (exit 15)"])
         self.assertIn("repeat: the process that started this one (pid 4242) is gone; exiting "
                       "with 15", self.job_log("a"))
         self.assert_locks_free("a", "b")
@@ -1411,7 +1411,7 @@ class RepeatTest(FakeSshCase):
             code, lines, err, _ = self.repeat("a", "b", between=[lambda: None] * 3)
         self.assertEqual((code, err), (install.EXIT_UPDATED, ""))
         # not a round's ERROR line: the watcher would take it for one
-        self.assertEqual(lines, ["ROUND 0", "EXIT updated"])
+        self.assertEqual(lines, ["ROUND 0", "EXIT updated (exit 14)"])
         self.assertIn("vcharon changed under this process (ValueError: bad marshal data (unknown "
                       "type code)); exiting with 14", self.job_log("a"))
         self.assert_locks_free("a", "b")
@@ -1425,7 +1425,7 @@ class RepeatTest(FakeSshCase):
         self.assertEqual(lines[0], "ROUND 0")
         self.assertEqual(lines[1], "ERROR a: internal: ValueError: bad marshal data (unknown "
                                    "type code)")
-        self.assertNotIn("EXIT updated", lines)
+        self.assertFalse(any(l.startswith("EXIT updated") for l in lines), lines)
 
     def test_new_files_in_a_later_round(self):
         def more():
@@ -1654,7 +1654,7 @@ class RepeatTest(FakeSshCase):
         self.assertEqual((child.returncode, err), (14, b""))
         lines = [line.rstrip(b"\r\n") for line in lines] + out.replace(b"\r", b"").splitlines()
         self.assertEqual(lines[:2], [b"ROUND 0"] * 2)
-        self.assertEqual(lines[-1], b"EXIT updated")
+        self.assertEqual(lines[-1], b"EXIT updated (exit 14)")
         with open(imported, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
         self.assertIn("repeat: vcharon changed under it; exiting with 14",

@@ -414,6 +414,38 @@ class RemoteTest(LobbyCase):
         self.assertEqual(self.server_tree()["lobby/mac-web/CHANNEL.md"], before)
 
 
+class JoinMembersTest(LobbyCase):
+    def test_alone(self):
+        out = self.ok("join", "lobby", "--local")
+        self.assertIn("\n  members  no one else seen in 24 h\n", out)
+
+    def test_a_remote_join_has_the_ages_its_pull_brought(self):
+        self.ok("join", "lobby", "--local")
+        self.join("linux")
+        channels.stamp_seen(self.root, "lobby", "linux-web", "local 10")
+        out = self.join("win", "--server", "fake-dest")
+        self.assertIn("\n  members  here: linux-web; away: mac-web\n", out)
+
+    def test_newest_first_within_a_mark(self):
+        self.ok("join", "lobby", "--local")
+        for box in ("linux", "win"):
+            self.join(box)
+        now = time.time()
+        stamps = os.path.join(channels.seen_root(self.root), "lobby")
+        # both here; the order follows the stamps, not the names, so swapped stamps swap it.
+        # Set by utime: a stamp isn't rewritten within 30 s of the last
+        for ages, want in (((3, 20), "linux-web, win-web"), ((20, 3), "win-web, linux-web")):
+            for name, age in zip(("linux-web", "win-web"), ages):
+                channels.stamp_seen(self.root, "lobby", name, "local 10", now=now - age)
+                os.utime(os.path.join(stamps, name), (now - age, now - age))
+            out = self.ok("join", "lobby", "--local")
+            self.assertIn("\n  members  here: %s\n" % want, out)
+
+    def test_not_in_a_work_channel(self):
+        self.lead(where=("--local",))
+        self.assertNotIn("  members  ", self.ok("join", "game", "--local"))
+
+
 class DownJobTest(unittest.TestCase):
     def test_a_lobbys_down_has_no_delete_limit(self):
         def jobs(extra):
@@ -841,6 +873,14 @@ class WhoamiTest(LobbyCase):
                 if c["name"] == "lobby"]
         self.assertEqual((ch["kind"], ch["leader"], ch["leaders"], ch["founder"]),
                          ("lobby", None, [], "mac-web"))
+
+    def test_join_prints_who_is_here(self):
+        # whoami's marks of the others, in one line before the next: line; the gone old-web
+        # and the joiner itself left out
+        lines = self.ok("join", "lobby", "--local").splitlines()
+        [line] = [l for l in lines if l.startswith("  members  ")]
+        self.assertEqual(line, "  members  here: linux-web; away: win-web; left: laptop-web")
+        self.assertTrue(lines[lines.index(line) + 1].startswith("  next: "), lines)
 
     def test_all_is_a_lobbys(self):
         self.assertEqual(self.refused("whoami", "--all", code=3),

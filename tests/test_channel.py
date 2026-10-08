@@ -1007,10 +1007,10 @@ class FirstLookTest(ChannelCase):
         self.lead(where=("--local",))
         self.join_local()
         code, lines = self.watch_local("linux", "linux-x", once=True)
-        self.assertEqual((code, lines[-1]), (watch.EXIT_NOTHING, "EXIT nothing new"))
+        self.assertEqual((code, lines[-1]), (watch.EXIT_NOTHING, "EXIT nothing new (exit 16)"))
         self.post("laptop", "ui", "@linux-x", "step 1")
         code, lines = self.watch_local("linux", "linux-x", once=True)
-        self.assertEqual((code, lines[-1]), (watch.EXIT_CHANGE, "EXIT change"))
+        self.assertEqual((code, lines[-1]), (watch.EXIT_CHANGE, "EXIT change (exit 0)"))
 
     def test_a_remote_member_after_a_sync_by_hand(self):
         self.lead()
@@ -4064,7 +4064,7 @@ class OnceProcessTest(ChannelCase):
     def test_quiet_then_refused_then_a_post_once(self):
         # join saved the watcher's snapshot: a check works at once
         code, lines, err, _took = self.once()
-        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new (exit 16)"), (lines, err))
         self.assertEqual([l for l in lines if l.startswith("to ")], [])
         # the check stamped at its own pace, --no-stream's default
         with open(self.stamp, "rb") as f:
@@ -4080,19 +4080,19 @@ class OnceProcessTest(ChannelCase):
         os.remove(self.stamp)
         self.baseline()
         code, lines, err, _took = self.once()
-        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new (exit 16)"), (lines, err))
         self.use_box("laptop")
         self.ok("post", "game", "--to", "@mac-web", "--title", "for web", "--body", "b",
                 "--project", "ui")
         self.use_box("mac")
         code, lines, err, _took = self.once()
-        self.assertEqual((code, lines[-1]), (0, "EXIT change"), (lines, err))
+        self.assertEqual((code, lines[-1]), (0, "EXIT change (exit 0)"), (lines, err))
         told = [l for l in lines if "for web" in l]
         self.assertEqual(len(told), 1, lines)
         self.assertTrue(told[0].startswith("to you: laptop-ui#"), told)
         # seen once: the next check is quiet
         code, lines, err, _took = self.once()
-        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new"), (lines, err))
+        self.assertEqual((code, lines[-1]), (16, "EXIT nothing new (exit 16)"), (lines, err))
         self.assertNotIn("for web", "\n".join(lines))
 
     def test_a_stalled_sync_is_cut_off_at_the_cap(self):
@@ -4102,9 +4102,9 @@ class OnceProcessTest(ChannelCase):
         code, lines, err, took = self.once(cap=3, FAKE_SSH_STALL="60")
         self.assertEqual(code, 11, (lines, err))
         self.assertEqual(lines[-2:], ["ERROR vcharon sync of game.mac-web didn't finish within "
-                                      "3 s", "EXIT error"])
+                                      "3 s", "EXIT error (exit 11)"])
         self.assertLess(took, 20)
         # the next check, with the ssh well again, reports the recovery, not a change
         code, lines, err, _took = self.once()
-        self.assertEqual((code, lines[-2:]), (16, ["ok again", "EXIT nothing new"]),
+        self.assertEqual((code, lines[-2:]), (16, ["ok again", "EXIT nothing new (exit 16)"]),
                          (lines, err))

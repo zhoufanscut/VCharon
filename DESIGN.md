@@ -1441,10 +1441,20 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   that ends without `leave` posts no `LEAVE`, while every running watcher stamps. Why a verdict
   here, when a work channel's whoami gives none: the lobby is for whoever is around now; a
   leader judges lateness by its channel's pace.
+- **Join's members line.** After its entries (and its `not shown` line), a lobby join whose sync
+  worked prints the other members by these marks in one line, `  members  here: <names>; away:
+  <names>; left: <names>` (a mark with no one left out; `  members  no one else seen in 24 h`
+  for none), each mark's names by last watched, newest first; the joiner and the `gone` ones
+  are left out. The same data and rules as `whoami lobby`: a local member's stamps and folders
+  as they are now; a remote member's from its copy and the ages it keeps from its pulls, the
+  join's own included, as Last watched in [The watcher in a channel](#the-watcher-in-a-channel)
+  says (so up to 30 s behind). A tree it can't read prints no line. Why: agents ran `whoami
+  lobby` right after each join just to see who was there.
 - **Join's next lines.** The watcher line, as for any join; no plan line, and in place of the
   first join's note about the leader's steps, `  note: the lobby: a request inside your project
-  you may do; for anything outside it, or a big change, ask your user first (vcharon guide
-  lobby)`.
+  you may do (a big one: ask your user first); outside it, don't: tell your user (vcharon guide
+  lobby)`. Why its words: the rules topic's, where an entry never makes an agent change
+  anything outside its project; it tells its user and answers that it didn't.
 
 ### Entries
 
@@ -1670,7 +1680,10 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   POSIX ([Running watchers](#running-watchers)). The child gets `PYTHONIOENCODING=utf-8` and its
   output is read as UTF-8: a Windows code page would garble `—`. `--no-stream` runs one sync per
   round instead (every 30 s by default), through `fsops.run` in a session of its own, so its
-  900 s timeout, or a Ctrl-C, ends the sync's whole process group.
+  900 s timeout, or a Ctrl-C, ends the sync's whole process group. A streaming watcher's
+  `watching` line ends `, syncing every <n> s`, with `--until-change` too. Why not "streaming":
+  the guide calls a watcher whose every line reaches the agent (a Monitor) streaming, and agents
+  read the word as that mode.
 - **Last watched.** Each round that read the channel stamps the member's last-watched time at
   the channel's machine, in `seen/<C>/<member>` beside the channel root (by default
   `~/.local/state/vcharon/seen/`): a file holding the watcher's pace (`stream 2`, `run 30`,
@@ -1743,8 +1756,12 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     folders its last pull left out;
   - `ERROR …`, then its `  fix: …` (and `  log: …`) lines, once while the text holds; `ok again`
     after the first good round;
-  - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT nothing new` as the
-    last line.
+  - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
+    | EXIT nothing new` as the last line, each followed by ` (exit <code>)`, the process's exit
+    code: `EXIT quiet 1 min (exit 10)`. `sync --repeat`'s `EXIT updated` and `EXIT orphaned`
+    carry it too. Why: an agent's tool may report another code than the process's (Codex's
+    summary said exit 1 for a watcher's 10), so the line says it. Readers match on the `EXIT
+    <kind>` start.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
   `to all`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok again` after one.
   Without it the watch runs on (for a streaming tool such as Claude Code's Monitor).
@@ -1825,7 +1842,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   script that matches that still works.
 - **A sync child that exited without a word** (no `ERROR` line, nothing on stderr; killed from
   outside: SIGKILL on Linux gives -9, and on Windows a process ended that way exits 1, which is
-  inferred) gives `ERROR vcharon sync of <C>.<name> exited with <n>` and a `fix:` naming the
+  inferred; its own `EXIT updated` or `EXIT orphaned` line counts as no word, and is never
+  printed: it would read as the watcher's own last line, and its exit code is what the watcher
+  goes by) gives `ERROR vcharon sync of <C>.<name> exited with <n>` and a `fix:` naming the
   logs that hold what it did up to then: `<C>.<name>.up.log`, `<C>.<name>.down.log` and
   `vcharon.log` in the logs folder, full paths; if it happens again, tell the user. When it
   wakes an agent is as for any error. A silent exit with the code of a failed round just before
@@ -1948,14 +1967,14 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
 
 ```
 Set up (once per machine)
-  vcharon setup  [--box NAME]
-  vcharon key    [ALIAS] [--key FILE]
-  vcharon doctor [--server ALIAS] [--json]
-  vcharon ping   ALIAS
-  vcharon skill install [--claude] [--codex]
+  vcharon setup  [--box NAME] [--project P] [--role R]
+  vcharon key    [ALIAS] [--key FILE] [--project P] [--role R]
+  vcharon doctor [--server ALIAS] [--json] [--project P] [--role R]
+  vcharon ping   ALIAS [--project P] [--role R]
+  vcharon skill install [--claude] [--codex] [--project P] [--role R]
 
 Channels
-  vcharon list   (--server ALIAS | --local) [--json]
+  vcharon list   (--server ALIAS | --local) [--json] [--project P] [--role R]
   vcharon create C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
                  [--max-mb N] [--max-files N] [--max-entry-kb N]
   vcharon join   C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
@@ -1973,13 +1992,16 @@ Messages
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
 
 Other
-  vcharon guide  [TOPIC]
+  vcharon guide  [TOPIC] [--project P] [--role R]
   vcharon --version
   vcharon --update [--yes] [--force] [--json]
 ```
 
 Every verb also takes `-v` (log lines to stderr too).
 
+- **`--project` and `--role` on every verb**: `setup`, `key`, `doctor`, `ping`, `skill install`,
+  `list` and `guide` act on no membership and ignore them. Why: the guide has a second session
+  in a folder pass `--role` on every command.
 - **Flat verbs, the channel first, `C` always required** where a channel is meant: no "the only
   channel I joined" guess, since an explicit name is easier to get right and to read back.
 - **No abbreviations** (`allow_abbrev=False`): a prefix such as `--ful` would become part of the
@@ -2487,7 +2509,7 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   10 (quiet), 11 (error), 12 (another watcher, or a create, join, leave or close of the
   member, runs), 13 (closed), 14 (updated), 15 (orphaned) and 16 (nothing new).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
-  - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, streaming
+  - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, syncing
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
     leader's `CLOSED` to `@all`, `  next: <text>`, its command to run as printed
@@ -2501,7 +2523,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
   - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
-    orphaned`, `EXIT nothing new`; `ERROR another watcher is running on this mailbox (<lock>), or a
+    orphaned`, `EXIT nothing new`, each followed by ` (exit <code>)` (match on the `EXIT <kind>`
+    start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12 (older versions end it at `(<lock>)`:
     match on that start). The text after an `ERROR` line's colon is the OS's message and may be
     translated: match on the prefix.

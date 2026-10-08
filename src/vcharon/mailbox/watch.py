@@ -37,7 +37,7 @@ Lines; * marks the ones that count for --until-change:
                                    at the start; <n> counts the files outside <me>/; `, since
                                    <time>` when it goes on from a saved snapshot (the last
                                    round that changed it), `, fresh
-                                   start` with --fresh; then `, streaming every <n> s` for a
+                                   start` with --fresh; then `, syncing every <n> s` for a
                                    streaming remote member
     note: ignoring the saved snapshot <path>: <why>
                                    at the start, for a snapshot it can't use
@@ -80,7 +80,8 @@ Lines; * marks the ones that count for --until-change:
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
     | EXIT nothing new             the last line, when it exits on its own (exit 0, 10, 11,
-                                   13, 14, 15, 16); EXIT nothing new: a --once check that
+                                   13, 14, 15, 16), each followed by ` (exit <code>)`, that
+                                   code (exit_line); EXIT nothing new: a --once check that
                                    found nothing; EXIT closed right after the ERROR and fix
                                    (and log) lines of a
                                    channel that's gone, in every mode and on every start while
@@ -1208,23 +1209,19 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
         if done or not at_once:
             sleep(every)
         if updated is not None and updated():
-            w.say("EXIT updated")
-            return EXIT_UPDATED
+            return _exit_as(w, "updated", EXIT_UPDATED)
         if orphaned is not None and orphaned():
-            w.say("EXIT orphaned")
-            return EXIT_ORPHANED
+            return _exit_as(w, "orphaned", EXIT_ORPHANED)
         changes, failed, saved = step()
         done += 1
         if w.updated:
             # the streaming child saw it first: its round brought nothing
-            w.say("EXIT updated")
-            return EXIT_UPDATED
+            return _exit_as(w, "updated", EXIT_UPDATED)
         if w.closed:
             # in every mode, before the rules below: a closed channel's rule is "don't
             # restart; leave", not a change's "restart, then read"; nor is it counted, so a
             # restart from the saved error ends the same way
-            w.say("EXIT closed")
-            return EXIT_CLOSED
+            return _exit_as(w, "closed", EXIT_CLOSED)
         now = timer()
         if failed:
             errors += 1
@@ -1236,20 +1233,33 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
         if until_change and not saved:
             # the change lines, if any, and the save's ERROR came before. Unsaved, every
             # restart would print the same changes again: a loop of EXIT change.
-            w.say("EXIT error")
-            return EXIT_ERROR
+            return _exit_as(w, "error", EXIT_ERROR)
         if until_change and changes:
-            w.say("EXIT change")
-            return EXIT_CHANGE
+            return _exit_as(w, "change", EXIT_CHANGE)
         if until_change and (errors >= max_errors if error_seconds is None
                              else failing >= error_seconds):
             # the error line came before: a failed round's, shown when it first came
-            w.say("EXIT error")
-            return EXIT_ERROR
+            return _exit_as(w, "error", EXIT_ERROR)
         if max_minutes is not None and timer() - start >= max_minutes * 60:
-            w.say("EXIT quiet %d min" % max_minutes)
-            return EXIT_QUIET
+            return _exit_as(w, "quiet %d min" % max_minutes, EXIT_QUIET)
     return 0
+
+
+# how every EXIT line starts (exit_line)
+EXIT_PREFIX = "EXIT "
+
+
+def exit_line(kind, code):
+    """The watcher's last line, `EXIT <kind> (exit <code>)`, and sync --repeat's EXIT updated
+    and orphaned: the code is the process's own, since an agent's tool may report another
+    (DESIGN, "The watcher in a channel"). Readers match on the `EXIT <kind>` start."""
+    return "%s%s (exit %d)" % (EXIT_PREFIX, kind, code)
+
+
+def _exit_as(w, kind, code):
+    """Prints the EXIT line of kind, then returns code, the watcher's exit code."""
+    w.say(exit_line(kind, code))
+    return code
 
 
 def _once(w, step, updated=None, orphaned=None):
@@ -1260,36 +1270,27 @@ def _once(w, step, updated=None, orphaned=None):
     can't wait out a network blip, so a check during an outage must not look quiet; else EXIT
     nothing new."""
     if updated is not None and updated():
-        w.say("EXIT updated")
-        return EXIT_UPDATED
+        return _exit_as(w, "updated", EXIT_UPDATED)
     if orphaned is not None and orphaned():
-        w.say("EXIT orphaned")
-        return EXIT_ORPHANED
+        return _exit_as(w, "orphaned", EXIT_ORPHANED)
     changes, _failed, saved = step()
     if w.updated:
-        w.say("EXIT updated")
-        return EXIT_UPDATED
+        return _exit_as(w, "updated", EXIT_UPDATED)
     if w.closed:
-        w.say("EXIT closed")
-        return EXIT_CLOSED
+        return _exit_as(w, "closed", EXIT_CLOSED)
     if not saved:
-        w.say("EXIT error")
-        return EXIT_ERROR
+        return _exit_as(w, "error", EXIT_ERROR)
     if changes:
-        w.say("EXIT change")
-        return EXIT_CHANGE
+        return _exit_as(w, "change", EXIT_CHANGE)
     if w.busy is not None:
         for line in w.busy:
             w.say(line)
-        w.say("EXIT error")
-        return EXIT_ERROR
+        return _exit_as(w, "error", EXIT_ERROR)
     if w.error is not None:
         # its ERROR line came before: the round printed it, as a restored error is printed
         # again by the first round
-        w.say("EXIT error")
-        return EXIT_ERROR
-    w.say("EXIT nothing new")
-    return EXIT_NOTHING
+        return _exit_as(w, "error", EXIT_ERROR)
+    return _exit_as(w, "nothing new", EXIT_NOTHING)
 
 
 def _not_restored(w, channel, flags):
@@ -1299,8 +1300,7 @@ def _not_restored(w, channel, flags):
     check would find that baseline. So ONCE_BAD_FIX's line, as _need_snapshot's refusal
     gives it."""
     w.say(FIX + platform.runnable(ONCE_BAD_FIX % (channel, flags, channel, flags)))
-    w.say("EXIT error")
-    return EXIT_ERROR
+    return _exit_as(w, "error", EXIT_ERROR)
 
 
 def _locked(w, state):
@@ -1337,8 +1337,7 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         # as a round that finds it gone: the OS's own (localized) text
         w = _Watch(root, me, out, clock, gone=gone)
         w.status(*w._error(e))
-        w.say("EXIT closed")
-        return EXIT_CLOSED
+        return _exit_as(w, "closed", EXIT_CLOSED)
     except OSError:
         # there, but not a folder or not readable: server_leader says what's wrong
         pass
@@ -1725,7 +1724,7 @@ class Stream:
         the round said why. Its own rule decides, not the error's text (DESIGN, "Repeated
         syncs"). An exit with EXIT_UPDATED is UPDATED: vcharon was replaced. Any other exit (a
         round cut off, an exit before its first round, a crash after a round) is one round,
-        with its error line from stdout or stderr."""
+        with its error line from stdout or stderr (never the child's own EXIT line)."""
         pending = []
         while True:
             if self.proc is None:
@@ -1778,7 +1777,11 @@ class Stream:
                 continue
             m = _ROUND.match(line)
             if m is None:
-                pending.append(line)
+                # the child's own EXIT updated or orphaned: its exit code tells this watch
+                # what happened, and the line relayed as a round's error would read as this
+                # watcher's last line
+                if not line.startswith(EXIT_PREFIX):
+                    pending.append(line)
                 continue
             code = int(m.group(1))
             self._prev_mark = self._err_mark if self._rounds else None
@@ -1982,7 +1985,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         _need_snapshot(state, local, me, sync_args[0], flags)
     w = _job_watch(job, local, me, leader, channel, out, clock, timer=timer,
                    hold=STREAM_HOLD if stream else None,
-                   suffix=", streaming every %d s" % every if stream else "", kind_=kind_)
+                   suffix=", syncing every %d s" % every if stream else "", kind_=kind_)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
