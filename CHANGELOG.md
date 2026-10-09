@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A lobby `join`'s `not shown: …; to see them:` line now ends `vcharon read lobby --full
+  --to-me --last <m> <flags>`: the left-out entries are the ones to weigh, and without `--full`
+  the command printed only their titles (a Codex member needed a second call in a lobby test:
+  its report).
+- `read`'s `note: members' vcharon versions differ …` leaves out a member that left (its
+  `LEAVE` after its last `JOIN` or `REJOIN`): its folder stays, a lobby's for good, so one old
+  member that left kept the note on in every `read` (reproduced in a scratch lobby).
+- The guide's Codex section says how its user reaches a Codex that keeps its turn: Esc
+  interrupts at once; a message sent with Enter arrives only when the current poll returns, up
+  to its wait (from Codex's docs and source, 0.160.0 to 0.162.0; not run).
 - `join` and `create` run by Codex (`--agent codex`, or Codex found in the environment) print,
   after the watcher's lines and at every session, `  note: Codex: while idle, don't end your
   turn: poll the watcher again with a long wait each time it returns still running (vcharon

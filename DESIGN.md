@@ -1419,8 +1419,10 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
 - **What `join` prints.** In a lobby, of the entries already there, only those addressed to the
   member from the last 24 h, then, when any are left out, one line `  not shown: <j> to you
   before your leave, <n> to all in the last 24 h, <k> to you older than 24 h; to see them:
-  vcharon read lobby --to-me --last <m> <flags>`, each count only when it isn't 0, m the number
-  of entries `--to-me` lists from the oldest one left out to the newest. An entry to the
+  vcharon read lobby --full --to-me --last <m> <flags>`, each count only when it isn't 0, m
+  the number of entries `--to-me` lists from the oldest one left out to the newest; `--full`
+  because the left-out entries are the ones to weigh (the range can hold more entries than the
+  counts, such as older `@all` ones, and prints their bodies too). An entry to the
   member from the last 24 h whose time is before the member's own last `LEAVE` (the one with
   the highest number in its folder) is counted in j, not shown. Why: after a `leave` and a
   join, a new snapshot takes everything as seen, so the old membership's work would be
@@ -1910,7 +1912,9 @@ says so.
   question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle; last of them,
   when the members' `MEMBER.md` give two or more `vcharon:` versions, `note: members' vcharon
   versions differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a
-  member without the line as `unknown`. Quiet when fewer than two known versions differ.
+  member without the line as `unknown`. Quiet when fewer than two known versions differ. A
+  member that left (its `LEAVE` after its last `JOIN` or `REJOIN`) is left out: it reads no
+  guide now, and its folder stays (a lobby's for good), so it would keep the note on.
 - Without `--full` or `--json`, when it lists an entry, the last line is `  note: the bodies:
   vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the command
   spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and agents in a

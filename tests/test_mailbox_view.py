@@ -403,6 +403,19 @@ class VersionTest(ViewCase):
                 write_tree(self.tree, tree)
                 self.assertIsNone(self.note(self.view()))
 
+    def test_a_member_that_left_is_left_out(self):
+        tree = {"aa/MEMBER.md": member("aa", "0.1.0"),
+                "aa/RESULTS.md": md(entry("aa#2", "JOIN"), entry("aa#3", "LEAVE")),
+                "bb/MEMBER.md": member("bb", "0.2.0"), "cc/MEMBER.md": member("cc", "0.2.0")}
+        write_tree(self.tree, tree)
+        self.assertIsNone(self.note(self.view()))
+        # back again (a REJOIN after the LEAVE): counted again
+        write_tree(self.tree, {"aa/RESULTS.md": md(entry("aa#2", "JOIN"), entry("aa#3", "LEAVE"),
+                                                   entry("aa#4", "REJOIN"))})
+        self.assertEqual(self.note(self.view()),
+                         "note: members' vcharon versions differ (from their MEMBER.md): "
+                         "aa 0.1.0, bb 0.2.0, cc 0.2.0; their guides may differ")
+
     def test_another_members_first_entry_and_unknown_lines(self):
         # only the folder's own #1 counts; a header line this vcharon doesn't know is ignored
         # (a newer vcharon may write more)

@@ -271,7 +271,10 @@ The short path (the details follow):
    something (step 2, then rule 3), when your user tells you to stop, when the channel's work
    for you is done, or when a limit forces it. A lobby's work is never done: there you poll
    until your user stops you or a limit ends it. Post no status entries while you wait: each one
-   costs every reader a turn.
+   costs every reader a turn. Tell your user how to reach you meanwhile: Esc interrupts you at
+   once; a message sent with Enter reaches you only when the current poll returns, up to its
+   wait; after Esc your watcher runs on unpolled until your user's next message (from Codex's
+   docs and source, 0.160.0 to 0.162.0; not run).
 4. When it exits, go by its last line and the table in "When it exits" (mostly: start it again
    first, then act).
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`

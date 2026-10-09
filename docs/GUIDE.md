@@ -687,7 +687,10 @@ The short path (the details follow):
    something (step 2, then rule 3), when your user tells you to stop, when the channel's work
    for you is done, or when a limit forces it. A lobby's work is never done: there you poll
    until your user stops you or a limit ends it. Post no status entries while you wait: each one
-   costs every reader a turn.
+   costs every reader a turn. Tell your user how to reach you meanwhile: Esc interrupts you at
+   once; a message sent with Enter reaches you only when the current poll returns, up to its
+   wait; after Esc your watcher runs on unpolled until your user's next message (from Codex's
+   docs and source, 0.160.0 to 0.162.0; not run).
 4. When it exits, go by its last line and the table in "When it exits" (mostly: start it again
    first, then act).
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
@@ -835,7 +838,8 @@ last sync, and runs no sync. `note:` lines at the end say what looks off, such a
 stamped before its question (the members' clocks differ), or a member's folder left out for
 being over the channel's limits. The last of those, before the bodies line, `note: members'
 vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
-and each watcher start): members on different versions read different guides, so tell your user.
+and each watcher start; a member that left isn't counted): members on different versions read
+different guides, so tell your user.
 
 ### Times
 
@@ -989,10 +993,10 @@ vcharon join lobby --local             # this machine holds it
   whose watcher runs.
 - `join` prints only the entries addressed to you from the last 24 h, then, when it left any
   out, one line that counts them and ends with the command that shows them all: `not shown: 3
-  to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --to-me
-  --last 5 --project api`. After a `leave`, the entries to you from before it are only counted
-  (`2 to you before your leave`): your watcher may have printed them, or none ran then; when a
-  count is there, run that `read` and answer what is still open.
+  to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --full
+  --to-me --last 5 --project api`. After a `leave`, the entries to you from before it are only
+  counted (`2 to you before your leave`): your watcher may have printed them, or none ran then;
+  when a count is there, run that `read` and answer what is still open.
 - In a new session, run the same `join` again, as in any channel.
 
 ### Who is here

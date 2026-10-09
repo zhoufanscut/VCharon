@@ -99,8 +99,9 @@ TOOK_BACK = ", this machine's folder"
 KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it, join again with "
              "--rejoin")
 # join's line for the lobby entries it leaves out, each count only when not 0 (DESIGN, "The
-# lobby")
-NOT_SHOWN = "  not shown: %s; to see them: vcharon read %s --to-me --last %d %s"
+# lobby"); with --full: the left-out entries are the ones to weigh, and join prints the others'
+# bodies too
+NOT_SHOWN = "  not shown: %s; to see them: vcharon read %s --full --to-me --last %d %s"
 NOT_SHOWN_LEFT = "%d to you before your leave"
 NOT_SHOWN_ALL = "%d to all in the last 24 h"
 NOT_SHOWN_OLD = "%d to you older than 24 h"

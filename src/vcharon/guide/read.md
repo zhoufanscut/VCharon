@@ -52,7 +52,8 @@ last sync, and runs no sync. `note:` lines at the end say what looks off, such a
 stamped before its question (the members' clocks differ), or a member's folder left out for
 being over the channel's limits. The last of those, before the bodies line, `note: members'
 vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
-and each watcher start): members on different versions read different guides, so tell your user.
+and each watcher start; a member that left isn't counted): members on different versions read
+different guides, so tell your user.
 
 ## Times
 

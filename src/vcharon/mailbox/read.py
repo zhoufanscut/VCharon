@@ -409,7 +409,9 @@ def watched_text(seen, name, version, now):
 def version_note(info):
     """The note when the members' MEMBER.md give two or more vcharon versions, each member
     with its version (unknown for one with none); None otherwise. Why: members on different
-    versions read different guides, and nothing else in a channel shows it."""
+    versions read different guides, and nothing else in a channel shows it. A member that
+    left is left out: it reads no guide now, and its folder stays (a lobby's for good)."""
+    info = [one for one in info if not one["left"]]
     if len({one["vcharon"] for one in info if one["vcharon"]}) < 2:
         return None
     return ("note: members' vcharon versions differ (from their MEMBER.md): %s; their guides "

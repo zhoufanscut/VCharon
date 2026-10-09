@@ -915,7 +915,7 @@ class JoinPrintTest(LobbyCase):
         # #10, #11 (an @all from before the 24 h, neither shown nor counted), #12, #13
         self.assertEqual(line, [channel_cmd.platform.runnable(
             "  not shown: 1 to all in the last 24 h, 1 to you older than 24 h; to see them: "
-            "vcharon read lobby --to-me --last 4 --project web")])
+            "vcharon read lobby --full --to-me --last 4 --project web")])
         listed = self.ok("read", "lobby", "--to-me")
         for n in ("#10", "#11", "#12", "#13"):
             self.assertIn("linux-web%s" % n, listed)
@@ -976,7 +976,7 @@ class JoinPrintTest(LobbyCase):
         line = [l for l in out.splitlines() if l.startswith("  not shown: ")]
         self.assertEqual(line, [channel_cmd.platform.runnable(
             "  not shown: 1 to you before your leave, 1 to all in the last 24 h, 1 to you older "
-            "than 24 h; to see them: vcharon read lobby --to-me --last 4 --project web")])
+            "than 24 h; to see them: vcharon read lobby --full --to-me --last 4 --project web")])
         self.assertIn("linux-web#9  @mac-web  missed",
                       self.ok("read", "lobby", "--to-me", "--last", "4"))
 
