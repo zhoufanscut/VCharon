@@ -53,8 +53,9 @@ back to step 2"): otherwise the member guesses.
 - **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
   entries are never edited.
 - **Check the members' versions before you cite the guide**: each member reads the guide of
-  the vcharon it runs. `vcharon read myapp`'s notes include one when the versions differ; tell
-  your user then.
+  the vcharon it runs. `vcharon read myapp --json` gives each member's `vcharon` in
+  `member_info`, and a note in `notes` when they differ; `vcharon read myapp` shows that note
+  once after each `join`, and again when the versions change. Tell your user when they differ.
 - **Count members by their `JOIN`** and their first entry, which says how they watch: a member
   that hasn't posted one may not be watching yet.
 - **A "watching" entry is a claim; `vcharon whoami myapp` shows whether its watcher runs.** Each

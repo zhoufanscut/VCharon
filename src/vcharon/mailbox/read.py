@@ -1,5 +1,6 @@
 """vcharon read C: a whole channel, every member's entries merged in one order (the guide's
-read topic). Read-only: it writes nothing and starts no sync.
+read topic). It only reads, apart from the version note it keeps in the state folder
+(charter.version_note_path, cli.py's read), and starts no sync.
 
 A local member reads the channel's folder in the channel root on this machine; a remote member
 reads this box's copy of the channel, as of its last sync (a watch, or vcharon sync C).
@@ -43,7 +44,8 @@ folder not its ID's, or a second copy of an ID; an entry with no time, or a bad 
 after this box's current minute; one stamped before the entry its re: names, even within one minute
 (clocks differ?); a re: naming an ID not in the tree (not synced yet, or a typo); re: lines that
 make a cycle within a minute, which then goes by number only; last, when the members'
-MEMBER.md give two or more vcharon versions, each member's (unknown for one with none).
+MEMBER.md give two or more vcharon versions, each member's (unknown for one with none): in
+cli.py's read, once per join until the versions change (view's versions).
 
 Every text line goes through pathrules.printable: entries are other members' text, and a
 control or format character in one is shown escaped, never sent to the terminal.
@@ -165,6 +167,15 @@ def read_tree(root, skip=None):
             continue
         items.extend(Item(e, folder, path) for e in found)
     return folders, items, notes
+
+
+def ids_numbered(root, number, skip=None):
+    """The IDs numbered number of the tree root, each once, sorted: only an entry in its
+    own member's folder, the one read would show. skip: read_tree's. OSError when the root
+    can't be read."""
+    _folders, items, _notes = read_tree(root, skip)
+    return sorted({item.e.id for item in items
+                   if item.e.number == number and item.e.name == item.folder})
 
 
 def _kahn(nodes, edges):
@@ -420,9 +431,9 @@ def version_note(info):
 
 
 def _collect(root, now, skip=None, notes=(), seen=None):
-    """(member folders, items in the view's order, notes, member_info) of the tree root;
-    OSError when the root can't be read. notes: more notes' texts, first; the version note,
-    if any, last. seen: member_info's."""
+    """(member folders, items in the view's order, notes, member_info, the version note or
+    None) of the tree root; OSError when the root can't be read. notes: more notes' texts,
+    first; the version note is the caller's to add, last. seen: member_info's."""
     folders, items, read_notes = read_tree(root, skip)
     read_notes = ["note: %s" % n for n in notes] + read_notes
     if now is None:
@@ -430,10 +441,7 @@ def _collect(root, now, skip=None, notes=(), seen=None):
     ordered, minute_notes = order(items, now)
     notes = read_notes + [n for item in ordered for n in item.notes] + minute_notes
     info = member_info(root, folders, seen, items)
-    versions = version_note(info)
-    if versions is not None:
-        notes.append(versions)
-    return folders, ordered, notes, info
+    return folders, ordered, notes, info, version_note(info)
 
 
 def to_me(item, me, leader, kind_=kinds.WORK):
@@ -466,14 +474,22 @@ def pick(ordered, last=None, ids=None, mine=None):
 
 
 def view(root, channel, synced=False, full=False, last=None, now=None, skip=None, notes=(),
-         bodies=None, ids=None, mine=None):
+         bodies=None, ids=None, mine=None, versions=None):
     """(the view's lines of the channel tree root, to print; the IDs of ids not found);
     OSError when the root can't be read (the caller names it with a code and a fix). Nothing
     is printed here, so an error writing stdout is never taken for one reading the tree.
     skip: read_tree's; notes: more notes (a remote member's: the members its last pull left
     out); bodies: the last line when the list, without full, shows at least one entry (the
-    caller's: how to see the bodies); ids, mine: pick's (ids imply full)."""
-    folders, ordered, notes, _info = _collect(root, now, skip, notes)
+    caller's: how to see the bodies); ids, mine: pick's (ids imply full); versions: given the
+    version note, or None when the versions agree, whether to print it (the caller's
+    once-rule); None prints it each time."""
+    folders, ordered, notes, _info, version = _collect(root, now, skip, notes)
+    if versions is not None:
+        # called with None too: the state it keeps learns that the versions agree now
+        if versions(version):
+            notes.append(version)
+    elif version is not None:
+        notes.append(version)
     out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
                                       _counted(len(folders), "member", "members"), root,
                                       ", as of this box's last sync" if synced else "")]
@@ -493,7 +509,9 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
     """The view as one JSON object (the module's docstring has its fields); OSError when the
     root can't be read. skip and notes: view's; ids and mine: pick's (ids imply full); seen:
     member_info's."""
-    folders, ordered, notes, info = _collect(root, now, skip, notes, seen)
+    folders, ordered, notes, info, version = _collect(root, now, skip, notes, seen)
+    if version is not None:
+        notes.append(version)
     shown, missing = pick(ordered, last, ids, mine)
     full = full or bool(ids)
     items = []

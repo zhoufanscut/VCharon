@@ -1146,8 +1146,9 @@ agent in a folder another agent shares saw nothing of the other one's.
   member's section. A failure before the record releases a new claim. (6) A remote member's
   rejoin first pulls its own folder from the server when this machine lost it (below). (7) A
   `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md` (a lobby's differ: [The
-  lobby](#the-lobby)), then the sync, which sends it with
-  `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the member's next sync.
+  lobby](#the-lobby)), then the sync (one line when it works: [Output](#output)), which
+  sends it with `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the
+  member's next sync.
   Then (unless the sync was stopped by Ctrl-C) the watcher's snapshot, under the lock the join
   holds: a first join, or a rejoin with no snapshot it can use, saves the one a watcher's start
   with none would save, from one look at the tree (the same scan, folder limits, entries taken
@@ -1237,7 +1238,8 @@ agent in a folder another agent shares saw nothing of the other one's.
   as in a lobby; a day file's `removed` lines follow it, as `post`'s do) and syncs; a failed
   sync stops before removing anything. Then it removes the local tree (only when it is
   exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
-  state, the kept last-watched ages, logs, locks not held, the watcher's snapshot, the post
+  state, the kept last-watched ages, `read`'s kept version note, logs, locks not held, the
+  watcher's snapshot, the post
   lock, the record, the section file, and last the watcher's lock file, after the record, so a
   watcher started then finds no membership; deleted and released in the order a failed join
   uses. One `removed <path>` line
@@ -1896,8 +1898,8 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 ### Reading a channel
 
 `vcharon read C [ID…] [--to-me] [--last N] [--full] [--json]` shows every member's entries in
-one order. It only reads: for a remote member it shows the local tree as of the last sync, and
-says so.
+one order. It only reads, apart from the version note it keeps (below): for a remote member it
+shows the local tree as of the last sync, and says so.
 
 - It reads each top-level folder with a valid member name, the own folder too, and every `.md`
   file below it but `MEMBER.md`, whose #1 only marks the folder.
@@ -1914,11 +1916,19 @@ says so.
   versions differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a
   member without the line as `unknown`. Quiet when fewer than two known versions differ. A
   member that left (its `LEAVE` after its last `JOIN` or `REJOIN`) is left out: it reads no
-  guide now, and its folder stays (a lobby's for good), so it would keep the note on.
-- Without `--full` or `--json`, when it lists an entry, the last line is `  note: the bodies:
-  vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the command
-  spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and agents in a
-  channel run didn't find how to see a body.
+  guide now, and its folder stays (a lobby's for good), so it would keep the note on. The
+  text form prints it once per join: the note last printed is kept in the state folder
+  (`<C>.<name>.version-note.json`, removed by each `join` and `create`, since a new session
+  starts with a `join`, and by `leave`), and a `read` whose note is the same text leaves it out;
+  a changed text (a member's version, or a member coming or going) prints again, and a `read`
+  that finds the versions agreeing removes the file, so a later difference prints too. A file
+  that can't be read or written prints the note each time. `--json` has it in `notes` every
+  time. Why: printed on every `read`, it repeated what the reader was told already; a script
+  reads `--json`, which keeps it.
+- Without `--full` or `--json`, when it lists an entry, the last line is `  note: to see the
+  bodies: vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the
+  command spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and
+  agents in a channel run didn't find how to see a body.
 - `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
   (null when missing).
 - **IDs** (`read C mac-web#3 …`, a leading `@` dropped, as `post --re` takes it): only the
@@ -1930,7 +1940,11 @@ says so.
   are printed (with `--json`, after the object, whose `missing` lists them): the fix is the whole
   list's `read`, and for a remote member a `sync` first. An argument that isn't `<name>#<n>`,
   or IDs with `--last` or `--to-me`, is a usage error (exit 3): `--last` and `--to-me` pick
-  from the whole list, and IDs already name what to show.
+  from the whole list, and IDs already name what to show. A number alone (`19`, `#19`) is
+  refused too, since every member numbers its own entries; its fix line lists the IDs with
+  that number that `read` would show, `give each ID as <name>#<n>; with that number:
+  <name>#19, …`, sorted, or, with none (or a tree it can't read), the usual `give each ID as
+  <name>#<n>, as the watcher's line prints it`.
 - **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:`
   ([The watcher in a channel](#the-watcher-in-a-channel)): a placed entry in another member's
   folder addressed to `@<me>`, or to `@all` from the leader (in a lobby, from any member). A
@@ -2102,6 +2116,15 @@ OK  2 jobs  (0.7 s)
   a commit that failed partway, `  fix: <text>` and `  log: <path>`. A job's name holds no `:`
   or space, so the name ends at the line's first `: `.
 - A Ctrl-C exits 130 with no summary; ssh is killed and the helper cleans up.
+- `join` and `create` run the same sync but print `  syncing with <server> …` before it (so a
+  sync that hangs or is killed isn't silent) and, when it succeeds, one line in place of its
+  blocks: `  synced: up <n> written; down <n> written  (<t> s)`, each side with `, <n>
+  deleted` when it deleted any, then the sync's own `  note    …` lines. A failure prints
+  everything `vcharon sync` would (the blocks held so far, then the rest as it comes, the
+  error block in its place), and `-v` prints the blocks always (and no `syncing` line: the
+  blocks show the progress). `leave`'s last sync prints
+  its blocks as `vcharon sync` does. Why: in a join the seven lines, two of them both ends'
+  full paths, say nothing to act on when the sync worked; on a failure they are what to read.
 
 ### Exit codes
 

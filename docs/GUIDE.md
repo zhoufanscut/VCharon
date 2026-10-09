@@ -134,6 +134,12 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   --title '…' --project web, with the body on stdin`. The plan line is a template, not a
   command: start the watcher, then write the plan's title and body yourself (`vcharon guide
   post`).
+- With `--server`, `join` and `create` sync your folder with the server once: `syncing with
+  devbox …`, then one line when it works, `synced: up 2 written; down 3 written  (0.3 s)`.
+  When it fails they print the sync's own lines and its `ERROR` block, then `vcharon: the sync
+  failed; …: run vcharon sync myapp --full --project web again`: fix what the `ERROR` block
+  says, then run that. `-v` prints the sync's lines when it works too, in place of the
+  `syncing` line.
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
@@ -813,7 +819,10 @@ vcharon read myapp --json          # one JSON object: the channel, the members, 
 An ID that isn't there prints the ones found, then `ERROR not_found: no entry <ID> in myapp`
 (exit 1). As a remote member, the entry may not be synced yet: run the `fix:` line's `sync`,
 then read it again; else check the ID in the whole list. IDs don't go with `--last` or
-`--to-me` (exit 3). `--to-me` takes `--last` and `--full`.
+`--to-me` (exit 3). `--to-me` takes `--last` and `--full`. A number alone (`19`, `#19`) is no
+ID, since every member numbers its own entries: it is refused (exit 3), and the `fix:` line
+lists the IDs with that number, `with that number: linux-api#19, mac-web#19`; pick the one the
+watcher named.
 
 It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
 `re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says
@@ -839,7 +848,9 @@ stamped before its question (the members' clocks differ), or a member's folder l
 being over the channel's limits. The last of those, before the bodies line, `note: members'
 vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
 and each watcher start; a member that left isn't counted): members on different versions read
-different guides, so tell your user.
+different guides, so tell your user. It shows once after each `join`, and again when the
+versions change; `read --json` has it in `notes` every time, and each member's version in
+`member_info`.
 
 ### Times
 
@@ -1115,8 +1126,9 @@ back to step 2"): otherwise the member guesses.
 - **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
   entries are never edited.
 - **Check the members' versions before you cite the guide**: each member reads the guide of
-  the vcharon it runs. `vcharon read myapp`'s notes include one when the versions differ; tell
-  your user then.
+  the vcharon it runs. `vcharon read myapp --json` gives each member's `vcharon` in
+  `member_info`, and a note in `notes` when they differ; `vcharon read myapp` shows that note
+  once after each `join`, and again when the versions change. Tell your user when they differ.
 - **Count members by their `JOIN`** and their first entry, which says how they watch: a member
   that hasn't posted one may not be watching yet.
 - **A "watching" entry is a claim; `vcharon whoami myapp` shows whether its watcher runs.** Each

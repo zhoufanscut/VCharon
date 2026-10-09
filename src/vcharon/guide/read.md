@@ -27,7 +27,10 @@ vcharon read myapp --json          # one JSON object: the channel, the members, 
 An ID that isn't there prints the ones found, then `ERROR not_found: no entry <ID> in myapp`
 (exit 1). As a remote member, the entry may not be synced yet: run the `fix:` line's `sync`,
 then read it again; else check the ID in the whole list. IDs don't go with `--last` or
-`--to-me` (exit 3). `--to-me` takes `--last` and `--full`.
+`--to-me` (exit 3). `--to-me` takes `--last` and `--full`. A number alone (`19`, `#19`) is no
+ID, since every member numbers its own entries: it is refused (exit 3), and the `fix:` line
+lists the IDs with that number, `with that number: linux-api#19, mac-web#19`; pick the one the
+watcher named.
 
 It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
 `re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says
@@ -53,7 +56,9 @@ stamped before its question (the members' clocks differ), or a member's folder l
 being over the channel's limits. The last of those, before the bodies line, `note: members'
 vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
 and each watcher start; a member that left isn't counted): members on different versions read
-different guides, so tell your user.
+different guides, so tell your user. It shows once after each `join`, and again when the
+versions change; `read --json` has it in `notes` every time, and each member's version in
+`member_info`.
 
 ## Times
 

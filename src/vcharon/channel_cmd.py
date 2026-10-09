@@ -467,6 +467,14 @@ def _made(folder):
     return folder
 
 
+def _forget_version_note(section):
+    """read's kept version note goes at each join and create: every new session starts with
+    one, so the session's first read shows the note again (DESIGN, "Reading a channel"). It
+    only adds a note, so a file that can't be removed changes nothing else."""
+    with contextlib.suppress(OSError):
+        os.remove(charter.version_note_path(section))
+
+
 def _remove(path):
     """Removes a file; True if it was there."""
     try:
@@ -1014,6 +1022,7 @@ def _create_held(args, cfg, name, log, say, take):
             except Exception as e:  # noqa: BLE001
                 log.warn("couldn't release %s/%s after the failure: %s" % (channel, name, e))
             raise
+    _forget_version_note(section)
     say("  claimed %s/%s; you lead it" % (channel, name))
     say(platform.runnable(TRUST))
     say("  format %d; limits per member folder %s, per entry file %s"
@@ -1022,7 +1031,7 @@ def _create_held(args, cfg, name, log, say, take):
            charter.size_text(info["limits"]["max_entry_kb"] * charter.KB)))
     code = 0
     if server.ssh is not None:
-        code = _run_section(args, section, full=True)
+        code = _run_section(args, section, full=True, brief=True)
     if code != 130:
         # the leader's first watcher start then prints every member's JOIN, one the sync's
         # down brought already too; a Ctrl-C skips the save: the user stopped the command
@@ -1290,6 +1299,7 @@ def _join_held(args, cfg, name, log, say, take):
                 _undo(made)
                 _release(server, channel, name, kind_, log)
             raise
+        _forget_version_note(section)
         if kind_ is kinds.LOBBY:
             say("  %s %s/%s%s; %s" % ("took back" if rejoin else "claimed", channel, name,
                                       TOOK_BACK if took_back else "",
@@ -1324,7 +1334,7 @@ def _join_held(args, cfg, name, log, say, take):
               "%s %s %s." % (name, "rejoined" if rejoin else "joined", channel), say)
     code = 0
     if server.ssh is not None:
-        code = _run_section(args, section, full=True)
+        code = _run_section(args, section, full=True, brief=True)
         if code == 130:
             # a Ctrl-C stops everything at once, as in vcharon sync
             return code
@@ -1795,11 +1805,11 @@ def _not_shown(tree, name, leader, kind_, where):
     return len(where)
 
 
-def _run_section(args, section, full):
+def _run_section(args, section, full, brief=False):
     """A sync of the section [--full], in this process, as vcharon sync would run it: its
-    lines, its exit code."""
+    lines (brief: one line unless it fails; cli.sync_section), its exit code."""
     from . import cli
-    return cli.sync_section(section, full=full, verbose=args.verbose)
+    return cli.sync_section(section, full=full, verbose=args.verbose, brief=brief)
 
 
 def _leave(args, cfg, record, log, say, close):
@@ -1954,9 +1964,10 @@ def _remove_membership(cfg, record, section, say, watcher):
     """leave's and close's removal on this box: a remote member's local tree (only when its
     mailbox.local is exactly the computed joined/ path), its jobs' state, log and lock files;
     the watcher snapshot (a server member's keyed by the channel folder, as the local member's
-    watch), the own folder's post lock, the record, a remote member's section file, and the
-    watcher's lock last. Locks only when no one holds them. A server member's folder stays on
-    the server (leave) or went with the channel (close). One `removed <path>` line each.
+    watch), read's kept version note (charter.version_note_path), the own folder's post lock,
+    the record, a remote member's section file, and the watcher's lock last. Locks only when
+    no one holds them. A server member's folder stays on the server (leave) or went with the
+    channel (close). One `removed <path>` line each.
     watcher: (the watcher's lock this process holds, the snapshot path), from _check_locks.
     The lock is released only once the record is gone, so a watcher starting then finds no
     membership, and its file is deleted as drop_held does it."""
@@ -1990,6 +2001,7 @@ def _remove_membership(cfg, record, section, say, watcher):
             drop(os.path.join(platform.state_dir(), job + ".lock"), lock=True)
         drop(charter.left_out_path(section))
         drop(charter.seen_path(section))
+    drop(charter.version_note_path(section))
     drop(snapshot)
     if post_lock is not None:
         drop(post_lock, lock=True)

@@ -117,6 +117,12 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   --title '…' --project web, with the body on stdin`. The plan line is a template, not a
   command: start the watcher, then write the plan's title and body yourself (`vcharon guide
   post`).
+- With `--server`, `join` and `create` sync your folder with the server once: `syncing with
+  devbox …`, then one line when it works, `synced: up 2 written; down 3 written  (0.3 s)`.
+  When it fails they print the sync's own lines and its `ERROR` block, then `vcharon: the sync
+  failed; …: run vcharon sync myapp --full --project web again`: fix what the `ERROR` block
+  says, then run that. `-v` prints the sync's lines when it works too, in place of the
+  `syncing` line.
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first

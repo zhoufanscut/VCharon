@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, platform
+from vcharon import channel_cmd, charter, cli, platform
 from vcharon.mailbox import read as view
 
 from tests import util
@@ -416,6 +416,29 @@ class VersionTest(ViewCase):
                          "note: members' vcharon versions differ (from their MEMBER.md): "
                          "aa 0.1.0, bb 0.2.0, cc 0.2.0; their guides may differ")
 
+    def test_once_until_the_versions_change(self):
+        note = ("note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
+                "bb 0.2.0; their guides may differ")
+        write_tree(self.tree, {"aa/MEMBER.md": member("aa", "0.1.0"),
+                               "bb/MEMBER.md": member("bb", "0.2.0")})
+        self.assertEqual(self.note(self.view()), note)
+        # the same text again: left out of the text, kept in --json's notes every time
+        self.assertIsNone(self.note(self.view()))
+        for _ in range(2):
+            doc = json.loads(self.main("--json")[1][0])
+            self.assertEqual(doc["notes"], [note.removeprefix("note: ")])
+        self.assertIsNone(self.note(self.view()))
+        # a member's version changes: shown again, once
+        write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.3.0")})
+        self.assertEqual(self.note(self.view()), note.replace("bb 0.2.0", "bb 0.3.0"))
+        self.assertIsNone(self.note(self.view()))
+        # the versions agree: the kept note goes, so the same difference later shows again
+        write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.1.0")})
+        self.assertIsNone(self.note(self.view()))
+        self.assertFalse(os.path.exists(charter.version_note_path("mb.zz")))
+        write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.3.0")})
+        self.assertEqual(self.note(self.view()), note.replace("bb 0.2.0", "bb 0.3.0"))
+
     def test_another_members_first_entry_and_unknown_lines(self):
         # only the folder's own #1 counts; a header line this vcharon doesn't know is ignored
         # (a newer vcharon may write more)
@@ -478,6 +501,24 @@ class ByIdTest(ViewCase):
         doc = json.loads(lines[0])
         self.assertEqual((doc["entries"], doc["missing"]), ([], ["cc#1"]))
         self.assertTrue(err.startswith("ERROR not_found: no entry cc#1 in mb\n"), err)
+
+    def test_a_number_alone_lists_the_ids_with_it(self):
+        # refused, as every member numbers its own entries; the fix line names the IDs read
+        # would show with that number (never a forged one in another folder: cc#2 in bb/ has
+        # no folder of its own), or, with none, the usual one
+        write_tree(self.tree, {"bb/S.md": md(entry("cc#2", "forged, no owner"))})
+        usual = "give each ID as <name>#<n>, as the watcher's line prints it"
+        for arg, fix in (("1", "give each ID as <name>#<n>; with that number: aa#1, bb#1"),
+                         ("#2", "give each ID as <name>#<n>; with that number: aa#2"),
+                         ("@#1", "give each ID as <name>#<n>; with that number: aa#1, bb#1"),
+                         ("9", usual), ("0", usual),
+                         # too long for any entry's number, and too long for int()
+                         ("9" * 19, usual), ("9" * 5000, usual)):
+            with self.subTest(arg=arg[:20]):
+                code, lines, err = self.main(arg)
+                self.assertEqual((code, lines), (3, []))
+                self.assertEqual(err.splitlines(), [
+                    "ERROR config: %s isn't an entry's ID (<name>#<n>)" % arg, "  fix: " + fix])
 
     def test_usage(self):
         for argv, first in ((["aa"], "ERROR config: aa isn't an entry's ID (<name>#<n>)"),

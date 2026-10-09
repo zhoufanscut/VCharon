@@ -9,6 +9,28 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join` and `create` with `--server` print their sync as `  syncing with <server> …` before it
+  starts and, when it works, one line after it, `  synced: up <n> written; down <n> written  (<t>
+  s)` (each side with `, <n> deleted` when it deleted any), then the sync's own `note` lines, in
+  place of the blocks `vcharon sync` prints (seven lines in a plain join). A failed sync prints
+  the blocks and the error block as before, after the `syncing` line, and `-v` prints the blocks
+  always, with no `syncing` line; `vcharon sync` and `leave` are unchanged. Measured on Linux with
+  the fake ssh: a join and a create print the two lines, and a rejoin whose up job failed (a
+  symlink in the own folder) printed the up header, its `ERROR` block, the down block and
+  `FAILED  1 of 2 jobs failed`, as before.
+- `read`'s `note: members' vcharon versions differ …` prints once per join (each `join`,
+  a new session's rejoin too, and `create` start it afresh), and again when its text changes (a
+  member's version, or a member coming or going); once the versions agree, a later difference
+  prints again. The note last printed is kept in the state folder,
+  `<C>.<name>.version-note.json`, which `join` and `create` reset and `leave` removes; `read`
+  writes nothing else in the state folder. `read --json` has it in `notes` every time, as
+  before. Measured on
+  Linux: in a scratch local channel the second `read` left the note out, a changed version
+  brought it back, a rejoin brought it back, and `--json` had it each time.
+- `read C 2` (or `#2`), a number with no name, is still refused, and its `fix:` line now lists
+  the IDs with that number that `read` would show: `give each ID as <name>#<n>; with that
+  number: laptop-api#2, mac-web#2` (with none, the fix line is as before). Measured on Linux in
+  a scratch local channel.
 - A lobby `join`'s `not shown: …; to see them:` line now ends `vcharon read lobby --full
   --to-me --last <m> <flags>`: the left-out entries are the ones to weigh, and without `--full`
   the command printed only their titles (a Codex member needed a second call in a lobby test:

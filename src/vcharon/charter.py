@@ -435,3 +435,50 @@ def load_seen(section):
 
     members = _load_seen_doc(seen_path(section)) or {}
     return {name: (t, channels.parse_pace(pace)[1]) for name, (t, pace) in members.items()}
+
+
+# --- the version note read showed last ---
+
+def version_note_path(section):
+    """Where read keeps the members' versions note it printed last for a membership (its
+    channel section): {"note": the text}. Gone while the versions agree."""
+    return os.path.join(platform.state_dir(), section + ".version-note.json")
+
+
+def version_note_new(section, note):
+    """Whether read prints the version note: once per text, so it shows the first time and
+    again when a member's version changes, not on every read. note None (the versions agree)
+    removes the kept one, so a later difference shows again. A file that can't be read is no
+    text kept, and one that can't be written keeps the note printing each time: it only adds
+    a note, so nothing is refused for it."""
+    path = version_note_path(section)
+    if note is None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return False
+    try:
+        with open(path, "rb") as f:
+            doc = json.loads(f.read(1 << 20).decode("utf-8"))
+    except (OSError, ValueError):
+        doc = None
+    if isinstance(doc, dict) and doc.get("note") == note:
+        return False
+    data = json.dumps({"note": note}, ensure_ascii=False).encode("utf-8")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".", suffix=".tmp")
+        try:
+            with open(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+    except OSError:
+        pass
+    return True

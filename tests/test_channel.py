@@ -709,13 +709,13 @@ class CreateJoinTest(ChannelCase):
             self.addCleanup(job_locks[-1].release)
             return 0, None, None
 
-        def sync(args, section, full):
+        def sync(args, section, full, brief=False):
             lines = []
             started.append(watch.watch_job(section, ["game", "--project", "web"], 2,
                                            out=lines.append, sleep=lambda s: None,
                                            run=watcher_sync, rounds=1))
             started.append([line[len("2026-10-01 09:05:46 "):] for line in lines])
-            return real(args, section, full)
+            return real(args, section, full, brief)
 
         with mock.patch.object(channel_cmd, "_run_section", sync):
             code, out, err = self.channel("join", "game", "--server", "fake-dest")
@@ -750,14 +750,14 @@ class CreateJoinTest(ChannelCase):
         real = channel_cmd._run_section
         started = []
 
-        def sync(args, section, full):
+        def sync(args, section, full, brief=False):
             lines = []
             started.append(watch.watch_job(section, ["game", "--project", "ui"], 2,
                                            out=lines.append, sleep=lambda s: None,
                                            run=lambda job, sync_args: (0, None, None),
                                            rounds=1))
             started.append([line[len("2026-10-01 09:05:46 "):] for line in lines])
-            return real(args, section, full)
+            return real(args, section, full, brief)
 
         with mock.patch.object(channel_cmd, "_run_section", sync):
             out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
@@ -930,6 +930,143 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(fix, "check the owner and permissions of %s" % records)
         self.assertFalse(os.path.exists(os.path.join(self.root, "game")))
 
+
+class VersionNoteJoinTest(ChannelCase):
+    """read's version note shows once per join: a new session starts with a join, and its
+    first read shows the note again."""
+
+    def test_a_rejoin_shows_it_again(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        member = os.path.join(self.root, "game", "laptop-ui", entries.MEMBER_FILE)
+        entries.set_header(member, os.path.dirname(member), "laptop-ui", 1, "vcharon", "0.0.1")
+        note = "note: members' vcharon versions differ"
+        self.assertIn(note, self.ok("read", "game"))
+        self.assertNotIn(note, self.ok("read", "game"))
+        self.assertIn("took back game/mac-web", self.ok("join", "game", "--local"))
+        self.assertIn(note, self.ok("read", "game"))
+        self.assertNotIn(note, self.ok("read", "game"))
+
+
+class SyncLineTest(ChannelCase):
+    """A remote join's and create's sync: one line when it works; when it fails, all that
+    vcharon sync prints; with -v, its blocks."""
+
+    # the sync's one line, the times left out
+    LINE = r"\A  synced: up 2 written; down %d written  \(\d+\.\d s\)\Z"
+    # printed before the sync starts
+    SYNCING = "  syncing with fake-dest …"
+    # what only the blocks print
+    BLOCKS = ("vcharon: game.mac-web.up  ", "  put     ", "OK  2 written", "OK  2 jobs")
+
+    def assert_one_line(self, out, down):
+        lines = out.splitlines()
+        self.assertEqual(len([l for l in lines if l.startswith("  synced: ")]), 1, out)
+        i = next(i for i, l in enumerate(lines) if l.startswith("  synced: "))
+        self.assertRegex(lines[i], self.LINE % down)
+        self.assertEqual(lines[i - 1], self.SYNCING)
+
+    def test_join_and_create_print_one_line(self):
+        self.use_box("laptop")
+        out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
+        self.assert_one_line(out, 0)
+        self.assertNotIn("vcharon: game.laptop-ui.up  ", out)
+        self.assertNotIn("OK  2 jobs", out)
+        self.use_box("mac")
+        out = self.ok("join", "game", "--server", "fake-dest")
+        # down brings the leader's two files and its folder
+        self.assert_one_line(out, 2)
+        for text in self.BLOCKS:
+            self.assertNotIn(text, out)
+        # the lines around it are as ever: after the claim, before the entries
+        lines = out.splitlines()
+        synced = next(i for i, l in enumerate(lines) if l.startswith("  synced: "))
+        self.assertLess(lines.index("  claimed game/mac-web; the leader is laptop-ui"), synced)
+        self.assertLess(synced, lines.index("entries for mac-web already in game:"))
+
+    def test_verbose_prints_the_blocks(self):
+        self.lead()
+        code, out, _err = self.channel("join", "game", "--server", "fake-dest", "-v")
+        self.assertEqual(code, 0, out)
+        for text in self.BLOCKS:
+            self.assertIn(text, out)
+        self.assertNotIn("  synced: ", out)
+
+    def test_a_failed_sync_prints_all_of_it(self):
+        # the up job works, the down job fails: the up block held back comes out first, then
+        # the down's header, its error block (stderr) and the summary, as vcharon sync shows
+        self.lead()
+        real = cli.engine.Engine.run
+        calls = []
+
+        def run(eng, *a, **kw):
+            calls.append(eng)
+            if len(calls) == 2:
+                raise VCharonError("io", "the disk broke", "fix the disk")
+            return real(eng, *a, **kw)
+
+        # stdout and stderr in one stream, as a terminal shows them
+        both = io.StringIO()
+        with mock.patch.object(cli.engine.Engine, "run", run), \
+                contextlib.redirect_stdout(both), contextlib.redirect_stderr(both):
+            code = cli.main(["join", "game", "--server", "fake-dest"])
+        out = both.getvalue()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("  synced: ", out)
+        lines = out.splitlines()
+        up = lines.index(next(l for l in lines if l.startswith("vcharon: game.mac-web.up  ")))
+        self.assertEqual(lines[up - 1], self.SYNCING)
+        starts = ["  put     2 files", "OK  2 written, 0 deleted  (",
+                  "vcharon: game.mac-web.down  ", "ERROR game.mac-web.down: io: the disk broke",
+                  "  fix: fix the disk", "  log: ", "FAILED  1 of 2 jobs failed  (",
+                  "vcharon: the sync failed; you are in game"]
+        for i, start in enumerate(starts, up + 1):
+            self.assertTrue(lines[i].startswith(start), (start, lines[i]))
+
+    def test_a_ctrl_c_prints_what_was_held(self):
+        # the down job is interrupted: the up block held back comes out before the
+        # interrupted line, as vcharon sync shows it, and the join stops with 130
+        self.lead()
+        real = cli.engine.Engine.run
+        calls = []
+
+        def run(eng, *a, **kw):
+            calls.append(eng)
+            if len(calls) == 2:
+                raise KeyboardInterrupt
+            return real(eng, *a, **kw)
+
+        both = io.StringIO()
+        with mock.patch.object(cli.engine.Engine, "run", run), \
+                contextlib.redirect_stdout(both), contextlib.redirect_stderr(both):
+            code = cli.main(["join", "game", "--server", "fake-dest"])
+        out = both.getvalue()
+        self.assertEqual(code, 130, out)
+        lines = out.splitlines()
+        up = lines.index(next(l for l in lines if l.startswith("vcharon: game.mac-web.up  ")))
+        self.assertEqual(lines[up - 1], self.SYNCING)
+        self.assertTrue(lines[up + 1].startswith("  put     2 files"), lines[up + 1])
+        self.assertTrue(lines[up + 2].startswith("OK  2 written, 0 deleted  ("), lines[up + 2])
+        self.assertTrue(lines[up + 3].startswith("vcharon: game.mac-web.down  "), lines[up + 3])
+        self.assertEqual(lines[up + 4], "vcharon: interrupted")
+        self.assertNotIn("  synced: ", out)
+
+    def test_the_line_with_deletes_and_notes(self):
+        held = cli._Held()
+        for line in ("vcharon: c.n.down  a -> b", "  put     1 file, 0 dirs (1 B)",
+                     "  note    left out x/: over the limit"):
+            held.say(line)
+        held.done = [("up", 2, 0), ("down", 3, 1)]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            held.summary(0.31)
+            # once summed up, a line goes straight out
+            held.say("after")
+        self.assertEqual(out.getvalue().splitlines(), [
+            "  synced: up 2 written; down 3 written, 1 deleted  (0.3 s)",
+            "  note    left out x/: over the limit", "after"])
+
+
 class FirstLookTest(ChannelCase):
     """join and create save the member's watcher snapshot (watch.first_look): its first start
     prints what came after the join or create, once, and nothing join listed (DESIGN, "Create,
@@ -1031,10 +1168,10 @@ class FirstLookTest(ChannelCase):
         real = channel_cmd._run_section
         calls = []
 
-        def sync(args, section, full):
+        def sync(args, section, full, brief=False):
             calls.append(section)
             if len(calls) > 1:
-                return real(args, section, full)
+                return real(args, section, full, brief)
             code = self.run_jobs(section + ".up", "--full")[0]
             self.use_box("mac")
             self.ok("join", "game", "--server", "fake-dest")
@@ -1741,6 +1878,11 @@ class LeaveCloseTest(ChannelCase):
         post_lock = entries.lock_path(os.path.join(self.joined("game.mac-web"),
                                                    "mac-web"))
         self.assertTrue(os.path.isfile(post_lock))
+        # a read that found the members' versions differing kept its note
+        copy = os.path.join(self.joined("game.mac-web"), "laptop-ui", entries.MEMBER_FILE)
+        entries.set_header(copy, os.path.dirname(copy), "laptop-ui", 1, "vcharon", "0.0.1")
+        self.assertIn("vcharon versions differ", self.ok("read", "game"))
+        self.assertTrue(os.path.isfile(charter.version_note_path("game.mac-web")))
         before = set(self.box_files())
         out = self.ok("leave", "game")
         self.assertIn("OK  left game", out)
@@ -1761,6 +1903,7 @@ class LeaveCloseTest(ChannelCase):
                      "state/game.mac-web.up.lock", "logs/game.mac-web.up.log",
                      "joined/game.mac-web/", "state/mailbox-watch-game.mac-web.json",
                      "state/mailbox-watch-game.mac-web.json.lock",
+                     "state/game.mac-web.version-note.json",
                      os.path.relpath(post_lock, self.homes["mac"]).replace(os.sep, "/")):
             self.assertIn(path, gone)
         # one line for each: the tree, and each file outside it

@@ -1031,6 +1031,11 @@ READ_MISSING_SYNC_HINT = ("if it was just posted, sync, then read it again: vcha
                           "; else check the ID in the whole list: vcharon read %s %s")
 
 
+# a number alone (19, #19): every member numbers its own entries, so it names no entry
+# (capped: a longer one is no entry's number, and gets the usual fix line)
+_BARE_NUMBER = re.compile(r"\A#?([1-9][0-9]{0,17})\Z")
+
+
 def _read_ids(args):
     """The IDs read was given, each once, in order, a leading @ dropped (post's --re takes it
     too, by habit); a usage error for one that isn't an ID, or with --last or --to-me."""
@@ -1038,8 +1043,14 @@ def _read_ids(args):
     for arg in args.ids:
         one = arg.removeprefix("@")
         if entries.parse_id(one) is None:
-            raise _usage("%s isn't an entry's ID (<name>#<n>)" % pathrules.show(arg),
-                         "give each ID as <name>#<n>, as the watcher's line prints it")
+            hint = "give each ID as <name>#<n>"
+            number = _BARE_NUMBER.match(one)
+            same = _same_number(args, int(number.group(1))) if number else []
+            if same:
+                hint += "; with that number: %s" % ", ".join(same)
+            else:
+                hint += ", as the watcher's line prints it"
+            raise _usage("%s isn't an entry's ID (<name>#<n>)" % pathrules.show(arg), hint)
         if one not in ids:
             ids.append(one)
     if ids and (args.last or args.to_me):
@@ -1047,6 +1058,20 @@ def _read_ids(args):
         raise _usage("%s goes with the whole list, not with IDs" % flag,
                      "leave out %s, or the IDs" % flag)
     return ids
+
+
+def _same_number(args, number):
+    """The IDs numbered number in the channel's tree on this box, as read would read it, for
+    the fix line of a number given alone; [] when the membership or the tree can't be read."""
+    try:
+        cfg = load_config()
+        record, _ = _membership(args)
+        tree, synced = _tree(cfg, record)
+        skip = (None if synced
+                else _over_limit(channel_cmd.channel_limits(record), record["name"]))
+        return read_mod.ids_numbered(tree, number, skip)
+    except (VCharonError, OSError):
+        return []
 
 
 def _read(args, run):
@@ -1075,9 +1100,13 @@ def _read(args, run):
             to_me = ["--to-me"] if args.to_me else []
             bodies = platform.runnable(READ_FULL_HINT % (args.channel,
                                                          " ".join(to_me + last + flags)))
-            shown, missing = read_mod.view(tree, args.channel, synced=synced, full=args.full,
-                                           last=args.last, skip=skip, notes=notes,
-                                           bodies=bodies, ids=ids, mine=mine)
+            # the versions note once per join, and again when it changes: on every read it
+            # would repeat what the reader was told. --json has it each time
+            section = _section(record)
+            shown, missing = read_mod.view(
+                tree, args.channel, synced=synced, full=args.full, last=args.last, skip=skip,
+                notes=notes, bodies=bodies, ids=ids, mine=mine,
+                versions=lambda note: charter.version_note_new(section, note))
     except OSError as e:
         raise fsops.error(e, tree)
     if args.json:
@@ -1247,19 +1276,78 @@ def _own_folder_intact(cfg, record):
             channel_cmd.rejoin_hint(record["channel"], record["ssh"], record["name"]))
 
 
-def run_jobs(names, full=False, dry_run=False, repeat=None, verbose=False, run=None):
+def run_jobs(names, full=False, dry_run=False, repeat=None, verbose=False, run=None,
+             held=None):
     """The jobs named, as vcharon sync runs a section's two (_run_job); its exit code. Errors
-    are raised, for the caller's _guarded."""
+    are raised, for the caller's _guarded. held: a _Held that takes the console lines."""
     args = argparse.Namespace(job=list(names), full=full, dry_run=dry_run, repeat=repeat,
-                              verbose=verbose)
+                              verbose=verbose, held=held)
     return _run_job(args, run if run is not None else _Run())
 
 
-def sync_section(section, full=False, verbose=False):
+class _Held:
+    """A join's or create's sync on the console: its lines held back, and on success one
+    line in their place. A failure releases them: what was held, then the rest as it comes,
+    so the error reads as vcharon sync shows it."""
+
+    def __init__(self):
+        # the lines held; None once released
+        self.lines = []
+        # each job that ended OK: (its side, up or down; files written; deleted)
+        self.done = []
+
+    def say(self, line):
+        if self.lines is None:
+            _say(line)
+        else:
+            self.lines.append(line)
+
+    def release(self):
+        lines, self.lines = self.lines or [], None
+        for line in lines:
+            _say(line)
+
+    def summary(self, seconds):
+        """The one line, then the sync's notes, which say what the counts don't (a member
+        left out for its size)."""
+        sides = ["%s %d written%s" % (side, written, ", %d deleted" % deleted if deleted else "")
+                 for side, written, deleted in self.done]
+        _say("  synced: %s  (%.1f s)" % ("; ".join(sides), seconds))
+        for line in self.lines or []:
+            if line.startswith("  note "):
+                _say(line)
+        self.lines = None
+
+
+def _console(args):
+    """How a sync's lines reach the console: as they come, or into join's or create's _Held."""
+    return _say if args.held is None else args.held.say
+
+
+def sync_section(section, full=False, verbose=False, brief=False):
     """A sync of the channel section, in this process, as vcharon sync would show it: join's
-    and create's first sync, leave's last one. Its exit code."""
+    and create's first sync, leave's last one. Its exit code. brief (join's and create's, but
+    not with -v): one line on success, all of it on a failure."""
     run = _Run()
-    return _guarded(lambda: run_jobs([section], full=full, verbose=verbose, run=run), run)
+    held = _Held() if brief and not verbose else None
+    started = time.monotonic()
+
+    def sync():
+        try:
+            return run_jobs([section], full=full, verbose=verbose, run=run, held=held)
+        except BaseException:
+            # before _guarded's error block, in the order vcharon sync prints them
+            if held is not None:
+                held.release()
+            raise
+
+    code = _guarded(sync, run)
+    if held is not None:
+        if code == 0:
+            held.summary(time.monotonic() - started)
+        else:
+            held.release()
+    return code
 
 
 def _doctor(args, run):
@@ -1952,6 +2040,10 @@ def _run_job(args, run):
         if len(jobs) > 1:
             errors.job_name = job.name
         todo.append(_JobRun(job, log, shown, errors, real_log=log))
+    if args.held is not None:
+        # join's and create's held lines show nothing until the sync ends: a sync that hangs
+        # or is killed must not look like a silent command
+        _say("  syncing with %s …" % jobs[0].ssh)
     if args.repeat is not None:
         return _repeat(args, run, todo)
     locks = []
@@ -1973,7 +2065,7 @@ def _run_job(args, run):
         with contextlib.ExitStack() as stack:
             for i, jr in enumerate(todo):
                 if conn.broke is not None:
-                    _skip(jr, conn)
+                    _skip(args, jr, conn)
                     continue
                 run.log = jr.log
                 jr.started = mark
@@ -1993,15 +2085,15 @@ def _run_job(args, run):
     else:
         line = ("FAILED  %d of %d jobs failed%s  (%.1f s)"
                 % (failed, len(todo), ", %d skipped" % skipped if skipped else "", total))
-    _say(line)
+    _console(args)(line)
     return code
 
 
-def _skip(jr, conn):
+def _skip(args, jr, conn):
     """A job whose connection broke under an earlier job: one line, and the exit code of the
     failure that broke it."""
     line = "vcharon: %s  skipped: the connection to %s broke" % (jr.name, jr.job.ssh)
-    _say(line)
+    _console(args)(line)
     jr.log.info(line)
     jr.status = "skipped"
     jr.code = conn.broke.exit_code if isinstance(conn.broke, VCharonError) else 1
@@ -2252,6 +2344,8 @@ def _one_job(args, jr, conn, stack, last):
         stack.close()
     if error is not None:
         jr.status = "failed"
+        if args.held is not None:
+            args.held.release()
         if isinstance(error, VCharonError):
             jr.errors.show_error(error)
             jr.code = error.exit_code
@@ -2262,8 +2356,10 @@ def _one_job(args, jr, conn, stack, last):
             jr.code = 1
         return
 
+    console = _console(args)
+
     def say(line):
-        _say(line)
+        console(line)
         jr.log.info(line)
 
     jr.status = "ok"
@@ -2273,9 +2369,11 @@ def _one_job(args, jr, conn, stack, last):
         say(jr.ok_line)
         return
     _commit_notes(say, eng, done)
-    jr.ok_line = ("OK  %d written, %d deleted  (%.1f s)"
-                  % (engine.written_files(eng.plan, done), done.deleted, total))
+    written = engine.written_files(eng.plan, done)
+    jr.ok_line = "OK  %d written, %d deleted  (%.1f s)" % (written, done.deleted, total)
     say(jr.ok_line)
+    if args.held is not None:
+        args.held.done.append((jr.name.rsplit(".", 1)[-1], written, done.deleted))
 
 
 def _session(conn, stack, jr):
@@ -2417,10 +2515,11 @@ def _run_one(args, jr, conn, stack):
 
     # --repeat prints only a round's errors and its ROUND line; the log keeps the rest
     quiet = args.repeat is not None
+    console = _console(args)
 
     def say(line):
         if not quiet:
-            _say(line)
+            console(line)
         log.info(line)
 
     mode = [word for word, on in (("full", args.full), ("dry run", args.dry_run)) if on]
