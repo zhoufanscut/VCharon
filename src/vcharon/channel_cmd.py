@@ -71,6 +71,13 @@ FIRST_CHECK = ("  note: first time, add --max-minutes 1 to that command and see 
                "(vcharon guide watch, \"The one-minute check\")")
 # the agent whose limits the guide gives, so it can skip the check
 CHECK_SKIPPED = "claude"
+# what join and create print after the watcher's lines, for Codex, at every session (a rejoin
+# too): Codex sees its watcher's exit only by polling, and it polls only while its turn runs, so
+# a turn ended while idle leaves entries unread until its user types again
+KEEP_TURN = ("  note: Codex: while idle, don't end your turn: poll the watcher again with a long "
+             "wait each time it returns still running (vcharon guide watch, \"Codex\")")
+# the agent KEEP_TURN is for
+KEEP_TURN_AGENT = "codex"
 # the fix of "a live session holds": the holder is the reader's own, or another agent's in the
 # same folder, and only the reader (or its user) can tell which
 LIVE_SESSION_FIX = ("your own earlier watcher or command: keep it or let it end; another agent's "
@@ -1023,15 +1030,16 @@ def _create_held(args, cfg, name, log, say, take):
         say(platform.runnable("vcharon: the sync failed; %s is created: run vcharon sync %s "
                               "--full %s again" % (channel, channel, name_flags(channel, name))))
         return code
-    _say_next(channel, name, say, plan=True, first=args.fields["agent"] != CHECK_SKIPPED)
+    _say_next(channel, name, say, plan=True, first=args.fields["agent"] != CHECK_SKIPPED,
+              agent=args.fields["agent"])
     say("OK  created %s; your folder is %s" % (channel, own))
     return 0
 
 
-def _say_next(channel, name, say, plan=False, first=False):
+def _say_next(channel, name, say, plan=False, first=False, agent=None):
     """The next steps, as this box runs vcharon, with the flags that find the membership from
     any folder; before them, the note for a skill copy of another version (skill.stale_note);
-    first: FIRST_CHECK right after the watcher's line.
+    first: FIRST_CHECK right after the watcher's line; KEEP_TURN after both, for Codex.
     On stdout with the rest: join and create print this machine's paths there already (the OK
     line's folder), and the agent reads stdout."""
     note = skill.stale_note()
@@ -1042,6 +1050,8 @@ def _say_next(channel, name, say, plan=False, first=False):
     say(platform.runnable(NEXT_WATCH % (channel, flags_)))
     if first:
         say(platform.runnable(FIRST_CHECK))
+    if agent == KEEP_TURN_AGENT:
+        say(platform.runnable(KEEP_TURN))
     if plan:
         say(platform.runnable(NEXT_PLAN % (channel, flags_)))
 
@@ -1333,7 +1343,8 @@ def _join_held(args, cfg, name, log, say, take):
         _say_members(channel, name, say, log)
     if code == 0:
         _say_next(channel, name, say,
-                  first=not rejoin and args.fields["agent"] != CHECK_SKIPPED)
+                  first=not rejoin and args.fields["agent"] != CHECK_SKIPPED,
+                  agent=args.fields["agent"])
         if not rejoin:
             # a first join only: a rejoin (a new session, the leader's too) had its answer
             say(platform.runnable(LOBBY_NOTE) if kind_ is kinds.LOBBY else ASK_USER)

@@ -99,22 +99,24 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
-  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. Before it come
-  your next step, the watcher command with your own flags: `next: start your watcher now
-  (vcharon guide watch): vcharon watch myapp --until-change --project api`, and `note: if your
-  user only asked you to join, ask them whether to work on the steps the leader assigns you`:
-  do so once your watcher runs (only a first join prints it; a rejoin doesn't). An agent other
-  than Claude Code also gets, right after the `next:` line, `note: first time, add --max-minutes
-  1 to that command and see how it ends (vcharon guide watch, "The one-minute check")`: do that
-  check (a first join and a create print it). Join's `next:` line has no `--server` on purpose:
-  `watch` takes the server from your join record.
+  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. Before it come your
+  next step, the watcher command with your own flags: `next: start your watcher now (vcharon
+  guide watch): vcharon watch myapp --until-change --project api`, and `note: if your user only
+  asked you to join, ask them whether to work on the steps the leader assigns you`: do so once
+  your watcher runs (only a first join prints it; a rejoin doesn't). An agent other than Claude
+  Code also gets, right after the `next:` line, `note: first time, add --max-minutes 1 to that
+  command and see how it ends (vcharon guide watch, "The one-minute check")`: do that check (a
+  first join and a create print it). Codex gets, after those, `note: Codex: while idle, don't
+  end your turn: …` at every join (`vcharon guide watch`, "Codex"). Join's `next:` line has no
+  `--server` on purpose: `watch` takes the server from your join record.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
-  agent other than Claude Code: then the first-time note), then `then post the plan (vcharon
-  guide post): vcharon post myapp --steps --to @all --title '…' --project web, with the body on
-  stdin`. The plan line is a template, not a command: start the watcher, then write the plan's
-  title and body yourself (`vcharon guide post`).
+  agent other than Claude Code: then the first-time note; Codex: then the note to keep its
+  turn), then `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all
+  --title '…' --project web, with the body on stdin`. The plan line is a template, not a
+  command: start the watcher, then write the plan's title and body yourself (`vcharon guide
+  post`).
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first

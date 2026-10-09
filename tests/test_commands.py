@@ -932,6 +932,9 @@ HINTS = {
         # the topic, not a command to run as printed
         ("  note: first time, add --max-minutes 1 to that command and see how it ends "
          "(vcharon guide watch, \"The one-minute check\")", None),
+        # Codex's, at every join and create
+        ("  note: Codex: while idle, don't end your turn: poll the watcher again with a long "
+         "wait each time it returns still running (vcharon guide watch, \"Codex\")", None),
         # the note of join and create whose watcher's snapshot couldn't be saved
         ("  note: your watcher's snapshot couldn't be saved (%s): its first start takes what "
          "is there then as seen; once it runs, read what came: vcharon read %s --to-me %s",

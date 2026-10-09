@@ -448,6 +448,12 @@ class NamedSectionTest(unittest.TestCase):
         self.assertIn(named, have)
         self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_BAD_FIX)
 
+    def test_the_codex_section(self):
+        have = headings(os.path.join(GUIDE_DIR, "watch.md"))
+        [named] = re.findall(r'"([^"]+)"', channel_cmd.KEEP_TURN)
+        self.assertEqual(named, "Codex")
+        self.assertIn(named, have)
+
     def test_references_in_the_guide(self):
         # `vcharon guide <topic>`, "<heading>": the heading must be in that topic
         found = []

@@ -1386,10 +1386,29 @@ class FirstCheckTest(ChannelCase):
     def test_a_create_of_another_agent(self):
         with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}):
             lines = self.lines("create", "game", "--local", "--project", "ui")
-        # between the watcher's line and the plan's: "that command" is the watcher's
-        self.assertEqual(lines[-3], platform.runnable(channel_cmd.FIRST_CHECK))
-        self.assertTrue(lines[-4].startswith(platform.runnable("  next: ")), lines)
+        # between the watcher's line and the plan's: "that command" is the watcher's; Codex's
+        # turn note after it
+        self.assertEqual(lines[-4], platform.runnable(channel_cmd.FIRST_CHECK))
+        self.assertTrue(lines[-5].startswith(platform.runnable("  next: ")), lines)
+        self.assertEqual(lines[-3], platform.runnable(channel_cmd.KEEP_TURN))
         self.assertTrue(lines[-2].startswith(platform.runnable("  then post the plan")), lines)
+
+    def test_codex_keeps_its_turn_at_every_join(self):
+        self.lead(where=("--local",))
+        note = platform.runnable(channel_cmd.KEEP_TURN)
+        lines = self.lines("join", "game", "--local", "--agent", "codex")
+        at = lines.index(note)
+        self.assertEqual(lines[at - 1], platform.runnable(channel_cmd.FIRST_CHECK))
+        # a rejoin is a new session, whose turn can end idle again
+        lines = self.lines("join", "game", "--local", "--agent", "codex")
+        self.assertIn(note, lines)
+        self.assertTrue(lines[lines.index(note) - 1].startswith(
+            platform.runnable("  next: start your watcher")), lines)
+
+    def test_only_codex_gets_the_turn_note(self):
+        self.lead(where=("--local",))
+        self.assertNotIn(platform.runnable(channel_cmd.KEEP_TURN),
+                         self.lines("join", "game", "--local", "--agent", "opencode"))
 
 
 class ProjectNoteTest(ChannelCase):

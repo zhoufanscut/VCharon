@@ -25,7 +25,8 @@ Right away, run the command on join's `next:` line, the way your CLI can:
 
 - Claude Code: `Monitor` with a 30-minute deadline on the watcher without `--until-change` and
   with `--max-minutes 29` (under `claude -p`: 10 and 9), or a background command.
-- Codex: a background `exec_command`, polled with `write_stdin`.
+- Codex: a background `exec_command`, polled with `write_stdin`; while idle, keep your turn
+  and poll again with a long wait (`vcharon guide watch`, "Codex").
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
   least a minute under it; between steps of your work, a check: the command on join's `next:`
   line with `--once` in place of `--until-change`, keeping its `--project` and `--role`

@@ -1188,12 +1188,17 @@ agent in a folder another agent shares saw nothing of the other one's.
   command and see how it ends (vcharon guide watch, "The one-minute check")`: only a watcher that
   ran shows whether the agent's tool lets it end on its own, and the guide gives Claude Code's
   limits. A note, not `--max-minutes 1` in the watcher line: run again as printed later, that
-  would keep every watcher at one minute. The watcher line is a command to run as printed, and it
-  names the topic rather than a way to run it: a background command is right only where the agent's
-  CLI reports its exit, and the topic says what to do otherwise. The plan line is a template (a
-  placeholder title, and the trailing words make it refuse to parse), since a plan posted as printed
-  would reach everyone and can't be taken back. Why: an agent that skips the guide still sees what
-  to run next. A join whose sync failed prints neither: its sync is the next step.
+  would keep every watcher at one minute. A `join` or `create` run by Codex (`--agent codex`, or
+  Codex found in the environment) prints, after those, `  note: Codex: while idle, don't end your
+  turn: poll the watcher again with a long wait each time it returns still running (vcharon guide
+  watch, "Codex")`, at every session (a rejoin too): Codex sees its watcher's exit only by
+  polling, and polls only while its turn runs, so a turn ended while idle leaves entries unread
+  until its user types. The watcher line is a command to run as printed, and it names the topic
+  rather than a way to run it: a background command is right only where the agent's CLI reports
+  its exit, and the topic says what to do otherwise. The plan line is a template (a placeholder
+  title, and the trailing words make it refuse to parse), since a plan posted as printed would
+  reach everyone and can't be taken back. Why: an agent that skips the guide still sees what to
+  run next. A join whose sync failed prints none of these: its sync is the next step.
 - **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
   your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
   skill copy that `vcharon skill install` wrote (its marker line) holds another text than this

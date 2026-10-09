@@ -7,6 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `join` and `create` run by Codex (`--agent codex`, or Codex found in the environment) print,
+  after the watcher's lines and at every session, `  note: Codex: while idle, don't end your
+  turn: poll the watcher again with a long wait each time it returns still running (vcharon
+  guide watch, "Codex")`. The guide's Codex section and its watching rule 3 say the same: Codex
+  sees a background watcher only by polling, and polls only while its turn runs. In a lobby test
+  of 0.5.0rc2, both Codex members (Linux and Windows) ended their turn after joining and read
+  nothing until their user typed (their own reports); told to keep the turn, one, polling with
+  45 s waits (its report), answered each of three pings within about 20 s over about 20 minutes
+  (measured).
+
 ## 0.5.0rc2 — 2026-10-08
 
 The second release candidate for 0.5.0, published as a GitHub pre-release: a plain
