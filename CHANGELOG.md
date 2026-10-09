@@ -7,7 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.5.0rc3 — 2026-10-09
+
+The third release candidate for 0.5.0, published as a GitHub pre-release: a plain
+`vcharon --update` on 0.5.0rc1 or 0.5.0rc2 offers it. Fixes from a lobby test of 0.5.0rc2
+(Claude Code and Codex on Linux, and both on Windows over ssh). Nothing DESIGN.md lists under
+"Stable" changes: `--json` output is as before.
+
+Checked: the unit suite on Linux (measured, 1579 tests); CI on Linux, macOS and Windows with
+Python 3.13 and 3.14 (measured, run 37872397638); join, create, sync and the watcher over the
+test suite's fake ssh on Linux, byte-compared with 0.5.0rc2's source where unchanged
+(measured). Not run: real ssh by hand, Windows and macOS by hand, and Codex's Esc and Enter
+behaviour (from its docs and source).
 
 - `join` and `create` with `--server` print their sync as `  syncing with <server> …` before it
   starts and, when it works, one line after it, `  synced: up <n> written; down <n> written  (<t>
