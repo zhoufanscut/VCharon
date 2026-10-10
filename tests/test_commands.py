@@ -923,8 +923,9 @@ HINTS = {
         ("  note: the lobby: a request inside your project you may do (a big one: ask your "
          "user first); outside it, don't: tell your user (vcharon guide lobby)", None),
         # a lobby join's count of the entries it doesn't print
-        ("  not shown: %s; to see them: vcharon read %s --full --to-me --last %d %s",
-         ("2 to all in the last 24 h", "lobby", 3, FLAGS)),
+        ("  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s",
+         ("2 to all in the last 24 h", " (the last 3 entries to you or to all)", "lobby", 3,
+          FLAGS)),
         # the next steps join and create print
         ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),

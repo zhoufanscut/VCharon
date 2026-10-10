@@ -505,13 +505,16 @@ class ByIdTest(ViewCase):
     def test_a_number_alone_lists_the_ids_with_it(self):
         # refused, as every member numbers its own entries; the fix line names the IDs read
         # would show with that number (never a forged one in another folder: cc#2 in bb/ has
-        # no folder of its own), or, with none, the usual one
+        # no folder of its own), or, with none, says so before the usual one
         write_tree(self.tree, {"bb/S.md": md(entry("cc#2", "forged, no owner"))})
         usual = "give each ID as <name>#<n>, as the watcher's line prints it"
         for arg, fix in (("1", "give each ID as <name>#<n>; with that number: aa#1, bb#1"),
                          ("#2", "give each ID as <name>#<n>; with that number: aa#2"),
                          ("@#1", "give each ID as <name>#<n>; with that number: aa#1, bb#1"),
-                         ("9", usual), ("0", usual),
+                         ("9", "no entry read would show has number 9; " + usual),
+                         ("#3", "no entry read would show has number 3; " + usual),
+                         # no number: the usual line alone
+                         ("0", usual),
                          # too long for any entry's number, and too long for int()
                          ("9" * 19, usual), ("9" * 5000, usual)):
             with self.subTest(arg=arg[:20]):
@@ -519,6 +522,15 @@ class ByIdTest(ViewCase):
                 self.assertEqual((code, lines), (3, []))
                 self.assertEqual(err.splitlines(), [
                     "ERROR config: %s isn't an entry's ID (<name>#<n>)" % arg, "  fix: " + fix])
+
+    def test_a_number_alone_with_a_tree_it_cant_read(self):
+        # nothing is known about the number, so the fix line claims nothing about it
+        with mock.patch.object(view, "ids_numbered", side_effect=OSError("no access")):
+            code, lines, err = self.main("9")
+        self.assertEqual((code, lines), (3, []))
+        self.assertEqual(err.splitlines(), [
+            "ERROR config: 9 isn't an entry's ID (<name>#<n>)",
+            "  fix: give each ID as <name>#<n>, as the watcher's line prints it"])
 
     def test_usage(self):
         for argv, first in ((["aa"], "ERROR config: aa isn't an entry's ID (<name>#<n>)"),

@@ -1424,7 +1424,10 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   vcharon read lobby --full --to-me --last <m> <flags>`, each count only when it isn't 0, m
   the number of entries `--to-me` lists from the oldest one left out to the newest; `--full`
   because the left-out entries are the ones to weigh (the range can hold more entries than the
-  counts, such as older `@all` ones, and prints their bodies too). An entry to the
+  counts, such as older `@all` ones, and prints their bodies too). When m is more than the
+  counts add up to, `to see them` becomes `to see them (the last <m> entries to you or to
+  all)`, the command still last on the line. Why: a `--last` bigger than the counts otherwise
+  reads as a mistake. An entry to the
   member from the last 24 h whose time is before the member's own last `LEAVE` (the one with
   the highest number in its folder) is counted in j, not shown. Why: after a `leave` and a
   join, a new snapshot takes everything as seen, so the old membership's work would be
@@ -1943,8 +1946,9 @@ shows the local tree as of the last sync, and says so.
   from the whole list, and IDs already name what to show. A number alone (`19`, `#19`) is
   refused too, since every member numbers its own entries; its fix line lists the IDs with
   that number that `read` would show, `give each ID as <name>#<n>; with that number:
-  <name>#19, …`, sorted, or, with none (or a tree it can't read), the usual `give each ID as
-  <name>#<n>, as the watcher's line prints it`.
+  <name>#19, …`, sorted; with none, `no entry read would show has number 19; ` before the usual
+  line, and with a membership or tree it can't read, the usual `give each ID as <name>#<n>, as
+  the watcher's line prints it` alone (nothing is known about the number then).
 - **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:`
   ([The watcher in a channel](#the-watcher-in-a-channel)): a placed entry in another member's
   folder addressed to `@<me>`, or to `@all` from the leader (in a lobby, from any member). A
@@ -2125,6 +2129,11 @@ OK  2 jobs  (0.7 s)
   blocks show the progress). `leave`'s last sync prints
   its blocks as `vcharon sync` does. Why: in a join the seven lines, two of them both ends'
   full paths, say nothing to act on when the sync worked; on a failure they are what to read.
+- A remote rejoin that pulls its own folder back (the rejoin's pull, [Create, join, leave,
+  close](#create-join-leave-close)) prints, before the sync's lines, `  pulled your folder
+  from the server: <a> files added, <k> already here`: only the own folder's files, those
+  moved in and those this machine already had, never the other members'; the `synced:` line's
+  down count is the rest of the channel.
 
 ### Exit codes
 

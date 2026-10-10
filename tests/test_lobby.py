@@ -913,9 +913,11 @@ class JoinPrintTest(LobbyCase):
         # left out: #12 to all, #10 to you; the founder's CHANNEL.md #2 is to itself, so
         # neither counted nor listed. read --to-me lists from #10, the oldest of them, on:
         # #10, #11 (an @all from before the 24 h, neither shown nor counted), #12, #13
+        # 4 is more than the 2 counted, so the line says what the 4 are
         self.assertEqual(line, [channel_cmd.platform.runnable(
-            "  not shown: 1 to all in the last 24 h, 1 to you older than 24 h; to see them: "
-            "vcharon read lobby --full --to-me --last 4 --project web")])
+            "  not shown: 1 to all in the last 24 h, 1 to you older than 24 h; to see them "
+            "(the last 4 entries to you or to all): vcharon read lobby --full --to-me --last 4 "
+            "--project web")])
         listed = self.ok("read", "lobby", "--to-me")
         for n in ("#10", "#11", "#12", "#13"):
             self.assertIn("linux-web%s" % n, listed)
@@ -938,9 +940,10 @@ class JoinPrintTest(LobbyCase):
             .encode("utf-8")})
         lines = self.ok("join", "lobby", "--local").splitlines()
         i = lines.index("no entries for mac-web in the last 24 h")
-        # a count of 0 isn't printed
-        self.assertTrue(lines[i + 1].startswith("  not shown: 1 to all in the last 24 h; to "
-                                                "see them: "), lines[i + 1])
+        # a count of 0 isn't printed; --last is the count, so nothing is said about it
+        self.assertEqual(lines[i + 1], channel_cmd.platform.runnable(
+            "  not shown: 1 to all in the last 24 h; to see them: vcharon read lobby --full "
+            "--to-me --last 1 --project web"))
 
     def test_a_join_after_a_leave_counts_what_came_before_it(self):
         self.join("linux")
@@ -976,7 +979,8 @@ class JoinPrintTest(LobbyCase):
         line = [l for l in out.splitlines() if l.startswith("  not shown: ")]
         self.assertEqual(line, [channel_cmd.platform.runnable(
             "  not shown: 1 to you before your leave, 1 to all in the last 24 h, 1 to you older "
-            "than 24 h; to see them: vcharon read lobby --full --to-me --last 4 --project web")])
+            "than 24 h; to see them (the last 4 entries to you or to all): vcharon read lobby "
+            "--full --to-me --last 4 --project web")])
         self.assertIn("linux-web#9  @mac-web  missed",
                       self.ok("read", "lobby", "--to-me", "--last", "4"))
 

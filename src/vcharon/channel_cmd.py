@@ -101,7 +101,11 @@ KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it
 # join's line for the lobby entries it leaves out, each count only when not 0 (DESIGN, "The
 # lobby"); with --full: the left-out entries are the ones to weigh, and join prints the others'
 # bodies too
-NOT_SHOWN = "  not shown: %s; to see them: vcharon read %s --full --to-me --last %d %s"
+NOT_SHOWN = "  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s"
+# put after "to see them" when --last is more than the counts add up to: the read lists every
+# entry to the member or to all from the oldest left-out one on, the shown ones too, and a
+# --last bigger than the counts reads as a mistake
+NOT_SHOWN_WIDER = " (the last %d entries to you or to all)"
 NOT_SHOWN_LEFT = "%d to you before your leave"
 NOT_SHOWN_ALL = "%d to all in the last 24 h"
 NOT_SHOWN_OLD = "%d to you older than 24 h"
@@ -1776,7 +1780,8 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                                            (NOT_SHOWN_ALL, left_out["all"]),
                                            (NOT_SHOWN_OLD, left_out["old"])) if n]
         last = _not_shown(tree, name, leader, kind_, left_out["where"])
-        raw(platform.runnable(NOT_SHOWN % (", ".join(counts), channel, last,
+        wider = NOT_SHOWN_WIDER % last if last > len(left_out["where"]) else ""
+        raw(platform.runnable(NOT_SHOWN % (", ".join(counts), wider, channel, last,
                                            name_flags(channel, name))))
     for line in warnings:
         say(line)

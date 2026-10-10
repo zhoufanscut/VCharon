@@ -1045,11 +1045,16 @@ def _read_ids(args):
         if entries.parse_id(one) is None:
             hint = "give each ID as <name>#<n>"
             number = _BARE_NUMBER.match(one)
-            same = _same_number(args, int(number.group(1))) if number else []
+            same = _same_number(args, int(number.group(1))) if number else None
             if same:
                 hint += "; with that number: %s" % ", ".join(same)
             else:
                 hint += ", as the watcher's line prints it"
+                if same is not None:
+                    # a number read found in no entry: without this the fix line reads as if
+                    # only the spelling were wrong
+                    hint = ("no entry read would show has number %d; " % int(number.group(1))
+                            + hint)
             raise _usage("%s isn't an entry's ID (<name>#<n>)" % pathrules.show(arg), hint)
         if one not in ids:
             ids.append(one)
@@ -1062,7 +1067,8 @@ def _read_ids(args):
 
 def _same_number(args, number):
     """The IDs numbered number in the channel's tree on this box, as read would read it, for
-    the fix line of a number given alone; [] when the membership or the tree can't be read."""
+    the fix line of a number given alone; None when the membership or the tree can't be read
+    (then nothing is known about that number)."""
     try:
         cfg = load_config()
         record, _ = _membership(args)
@@ -1071,7 +1077,7 @@ def _same_number(args, number):
                 else _over_limit(channel_cmd.channel_limits(record), record["name"]))
         return read_mod.ids_numbered(tree, number, skip)
     except (VCharonError, OSError):
-        return []
+        return None
 
 
 def _read(args, run):

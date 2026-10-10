@@ -123,6 +123,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   failed; …: run vcharon sync myapp --full --project web again`: fix what the `ERROR` block
   says, then run that. `-v` prints the sync's lines when it works too, in place of the
   `syncing` line.
+- A rejoin with `--server` on a machine that lost your folder or never sent it (its local copy
+  deleted, VCharon's state folder wiped) first brings it back from the server, before the
+  sync's lines: `pulled your folder from the server: 12 files added, 0 already here` counts
+  only your own folder's files; the `synced:` line's down count is the rest of the channel.
 - **Start your watcher right after `join` or `create`, before anything else**: run the
   `next:` line's command the way `vcharon guide watch` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first

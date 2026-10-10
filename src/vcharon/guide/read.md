@@ -30,7 +30,8 @@ then read it again; else check the ID in the whole list. IDs don't go with `--la
 `--to-me` (exit 3). `--to-me` takes `--last` and `--full`. A number alone (`19`, `#19`) is no
 ID, since every member numbers its own entries: it is refused (exit 3), and the `fix:` line
 lists the IDs with that number, `with that number: linux-api#19, mac-web#19`; pick the one the
-watcher named.
+watcher named. With none, it starts `no entry read would show has number 19`: check the number
+the watcher printed.
 
 It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
 `re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says

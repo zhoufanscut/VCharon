@@ -7,6 +7,28 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A lobby `join`'s `not shown:` line, when its `--last <m>` is more than the counts add up to
+  (the read also lists the shown entries and older ones to all), says so before the command:
+  `to see them (the last <m> entries to you or to all): vcharon read lobby --full --to-me
+  --last <m> <flags>`. With m equal to the counts the line is as before. Measured on Linux in
+  the unit suite.
+- `read C <n>` (or `#<n>`): when no entry `read` would show has that number, the `fix:` line
+  now says so: `no entry read would show has number <n>; give each ID as <name>#<n>, as the
+  watcher's line prints it`. When the membership or tree can't be read, the fix line is as
+  before. Measured on Linux in the unit suite and in a scratch lobby.
+- The guide's start topic says when a rejoin prints `pulled your folder from the server: <a>
+  files added, <k> already here` and that it counts only your own folder's files, not the
+  `synced:` line's down count (doc only; measured on Linux with the test suite's fake ssh: a
+  rejoin with the own folder deleted printed `4 files added, 0 already here`, a plain rejoin
+  no such line).
+- The guide's Codex section: while idle, poll with the longest wait your session allows,
+  300000 ms by default, or your session's own lower cap on waits (a Linux Codex member whose
+  session capped waits at 60 s used 45 s waits: its report). It now cites a Windows Codex
+  member's report in place of "the 300000 ms wait on a real watcher is not yet checked": with
+  300000 ms waits, a ping woke it 271 s into a wait. Doc only.
+
 ## 0.5.0rc3 — 2026-10-09
 
 The third release candidate for 0.5.0, published as a GitHub pre-release: a plain
