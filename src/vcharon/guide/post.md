@@ -42,8 +42,21 @@ when you quote them in an entry, mask it.
   nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). Put a `--body` in
   single quotes; a body that holds a single quote goes in the heredoc, never in double quotes,
   where the shell runs backticks and `$` too. A shell with no heredoc (PowerShell) passes
-  `--body`, or pipes a file in (a body with a single quote: the file). A body line that starts
-  like a Markdown heading gets `> ` in front, so a body can't pass for an entry.
+  `--body`, or pipes the body in: from a single-quoted here-string, which runs nothing inside
+  it (`'@` must start its line; one member's report, Windows, seen once), or from a file:
+
+  ```
+  @'
+  Step 3 is done; it's in RESULTS.md.
+  '@ | vcharon post myapp --to @mac-myapp --title 'step 3 done'
+  ```
+
+  In PowerShell, a multi-line body, or one with a single quote, goes in the here-string or a
+  file: a `--body '…'` broke on a typographic apostrophe (`’`) in one member's PowerShell (its
+  report). In Windows PowerShell 5.1, run `$OutputEncoding = [Text.UTF8Encoding]::new($false)`
+  first: else a character outside ASCII reaches vcharon as `?` (from Microsoft's docs; not run).
+  A body line that starts like a Markdown heading gets `> ` in front, so a body can't
+  pass for an entry.
 - `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
   the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder

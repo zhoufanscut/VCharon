@@ -1,7 +1,7 @@
 # Watch: noticing what reaches you
 
 `vcharon watch` prints one line for each new entry addressed to you, or to all from the leader.
-In the lobby there is no leader: an `@all` from any member is to all, and you post no
+In the lobby there is no leader: an `@all` from any member is to all, and you post no routine
 "watching" entry (`vcharon guide lobby`).
 A remote member's watcher also does the syncing: while none runs, nothing reaches you (your own
 posts are sent by `post` itself).
@@ -131,7 +131,7 @@ line's start, `EXIT <kind>`, as the table gives it.
 | last line | code | what you do |
 |---|---|---|
 | `EXIT change` | 0 | **Start it again first** (in the foreground way, after you act; from `--once`, check again after your next step, not at once), unless a `next:` line after the leader's `CLOSED` is among the lines above: then don't, and leave as it says (`vcharon guide end`). Otherwise, read the lines above it and act (`vcharon guide read`). An `ERROR` line among them: follow its `fix:` line, and tell your user once, quoting it. |
-| `EXIT quiet <n> min` | 10 | Nothing happened. Start it again at once. |
+| `EXIT quiet <n> min` | 10 | Its `--max-minutes` limit came. With `--until-change`, nothing came to wake it; streaming (no `--until-change`), it ends this way whatever it printed before. Start it again at once. |
 | `EXIT nothing new` | 16 | Only from `--once`: nothing came since your last look. Go on with your next step and check again after it; never run it again in a loop. |
 | `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. From `--once`, one round that failed (one round never waits out a network blip), or `ERROR busy: …` (a sync of yours was running): check again after your next step; after 3 in a row, tell your user. From `--once` after `note: ignoring the saved snapshot …`: run the commands on the `fix:` line above `EXIT error`, as for `--once can't use …` below. |
 | `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running. If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user. Never start one again in a loop. |
@@ -225,8 +225,8 @@ Use `Monitor` where it is offered, the background command where it isn't.
   watcher ends `EXIT interrupted (exit 143)` (seen once; not checked on macOS or Windows); the
   task is stopped by then, so you may not get that line. One killed outright prints nothing.
 - When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
-  the command **failed with exit code 10**. It didn't: the last line says quiet, nothing
-  happened. Start it again at once, as the table above says for exit 10.
+  the command **failed with exit code 10**. It didn't: the last line says quiet: its time
+  limit came. Start it again at once, as the table above says for exit 10.
 - **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
   in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
   moved after it read subfolders (measured), and a subfolder with its own checkout gives
@@ -274,8 +274,12 @@ The short path (the details follow):
    something (step 2, then rule 3), when your user tells you to stop, when the channel's work
    for you is done (the leader's `CLOSED`, not your `DONE`: the leader may answer that with
    more work), or when a limit forces it. A lobby's work is never done: there you poll until
-   your user stops you or a limit ends it. Post no status entries while you wait: each one
-   costs every reader a turn. Tell your user how to reach you meanwhile: Esc interrupts you at
+   your user stops you or a limit ends it. With two watchers (the lobby's and a work
+   channel's), poll each in turn, with a shorter wait, since each wait leaves the other
+   unpolled (one member polled each every 30 s: its report); or, if your user agrees, stop the
+   lobby's while you work in the channel, and start it again after you leave the channel.
+   Post no status entries while you wait: each one costs every reader a turn. Tell your user
+   how to reach you meanwhile: Esc interrupts you at
    once; a message sent with Enter reaches you only when the current poll returns, up to its
    wait; after Esc your watcher runs on unpolled until your user's next message (from Codex's
    docs and source, 0.160.0 to 0.162.0; not run).
@@ -284,7 +288,8 @@ The short path (the details follow):
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
    line.
 
-**Stopping it** (after the leader's `CLOSED`, or before a lobby's `leave`): by its process ID.
+**Stopping it** (after the leader's `CLOSED`, before a lobby's `leave`, or to pause the lobby's
+while in a work channel): by its process ID.
 List the watchers with their command lines, and pick yours by its channel and flags (`--role
 codex`): another agent's watcher of the same channel may run on this machine. Take the line
 whose command is vcharon itself (`vcharon watch …`, or the Python that runs it: `python -m

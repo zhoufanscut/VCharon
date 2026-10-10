@@ -7,6 +7,50 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.5.0 — 2026-10-10
+
+0.5.0rc4's code, unchanged, plus guide wording from a lobby and work-channel round on
+0.5.0rc4 (Claude Code and Codex on Linux, and both on Windows over ssh), which reported no fault
+in vcharon. Next to 0.4.1, the changes are those of 0.5.0rc1 to 0.5.0rc4, in their entries in
+CHANGELOG.md.
+
+**Updating from 0.4.1:** in "Stable", every watcher `EXIT` line (and `sync --repeat`'s `EXIT
+updated` and `EXIT orphaned`) now ends ` (exit <code>)`, and a streaming watcher's `watching`
+line ends `, syncing every <n> s` (was `, streaming every <n> s`): scripts that compare a whole
+`EXIT` line, match its `EXIT <kind>` start instead (`EXIT quiet <n> min` included); scripts that
+match `streaming every`, match `syncing every` (0.5.0rc1). `watch` and `sync --repeat` end with
+`EXIT interrupted` after a Ctrl-C (exit 130) or a SIGTERM (exit 143): a script that lists every
+`EXIT <kind>` should add `EXIT interrupted`; one that lists exit codes, 143 (0.5.0rc2).
+`--update --json` has `rc`, and `"update_available": null`, in a failed read's object too, where
+0.4.1 left them out (0.5.0rc2).
+0.5.0rc3 and 0.5.0rc4 change nothing in "Stable". Nothing to do for channels: the format is
+unchanged.
+
+Checked: the unit suite on Linux (measured, 1580 tests). The round above, the same day on
+0.5.0rc4, with Claude Code and Codex on Linux and both on Windows over ssh: lobby tasks, an
+idle ping, and a work channel with steps, reports, `DONE`, `CLOSED`, `leave` and `close`; no
+fault in vcharon reported (measured: the agents' runs). The changes below are wording only, not
+run. Not run: macOS by hand.
+
+- The lobby topic, and the start topic's lobby line: post no routine `watching` entry, but
+  when your user sent you to meet a member (a test, a task), post that member one short
+  check-in once your watcher runs, since `JOIN`, `REJOIN` and `LEAVE` in the lobby wake no one.
+  In the round, two of the three other agents posted nothing until a task reached them. Doc
+  only.
+- The watch topic's `EXIT quiet <n> min` row said "Nothing happened". It now says the
+  `--max-minutes` limit came: with `--until-change`, nothing came to wake the watcher;
+  streaming (no `--until-change`), it ends this way whatever it printed (seen under Claude
+  Code's `Monitor`: about 15 lines in 29 minutes, then `EXIT quiet 29 min (exit 10)`). Doc
+  only.
+- The post topic, and the member topic's report: in PowerShell, a multi-line body or one with
+  a single quote goes in a single-quoted here-string piped on stdin (`@'` … `'@ | vcharon post
+  …`, `'@` at the start of its line; one Codex member's report on Windows, seen once), or a
+  file. A `--body '…'` broke on a typographic apostrophe in one member's PowerShell (its
+  report). Doc only.
+- The watch topic's Codex section: with two watchers (the lobby's and a work channel's), poll
+  each in turn, or stop the lobby's while in the work channel if your user agrees (both Codex
+  members polled two watchers in the round; one polled each every 30 s, its report). Doc only.
+
 ## 0.5.0rc4 — 2026-10-10
 
 The fourth release candidate for 0.5.0, published as a GitHub pre-release: a plain

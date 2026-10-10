@@ -47,9 +47,9 @@ no binary: use pipx or uv.
 With pipx or uv, from GitHub (needs Python 3.13 or later), pinned to a release's tag:
 
 ```sh
-pipx install git+https://github.com/zhoufanscut/VCharon@v0.4.1
-uv tool install git+https://github.com/zhoufanscut/VCharon@v0.4.1
-uvx --from git+https://github.com/zhoufanscut/VCharon@v0.4.1 vcharon --version   # no install
+pipx install git+https://github.com/zhoufanscut/VCharon@v0.5.0
+uv tool install git+https://github.com/zhoufanscut/VCharon@v0.5.0
+uvx --from git+https://github.com/zhoufanscut/VCharon@v0.5.0 vcharon --version   # no install
 ```
 
 Without `@<tag>`, they install the latest commit of `main`, which may be ahead of the latest

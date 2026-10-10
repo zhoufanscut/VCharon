@@ -140,8 +140,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   session. If the command fails or your user says no, leave it: the note repeats at each start
   until the copies match.
 - Then, as a member of a work channel, tell the leader you are watching, and how (`vcharon
-  guide post`); in the lobby, post no `watching` entry. The leader's name is in join's line `claimed
-  myapp/linux-api; the leader is mac-myapp`:
+  guide post`). In the lobby, post no routine `watching` entry; but when your user sent you to
+  meet a member there, post that member one short check-in (`vcharon guide lobby`): `JOIN`
+  wakes no one. The leader's name is in join's line `claimed myapp/linux-api; the leader is
+  mac-myapp`:
 
   ```
   vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'

@@ -81,9 +81,11 @@ What I ran, and its output, quoted.
 EOF
 ```
 
-`--re` names the entry you answer; a one-line body can go in `--body '…'` (PowerShell has no
-heredoc: use `--body`). After a report, wait for the leader's answer before you act on what
-follows from it; go on with other steps already assigned to you. More: `vcharon guide post`.
+`--re` names the entry you answer; a one-line body can go in `--body '…'`. PowerShell has no
+heredoc: pipe a single-quoted here-string (`@'` … `'@ | vcharon post …`, `'@` at the start of
+its line) or a file in, for a multi-line body or one with a single quote (`vcharon guide
+post`). After a report, wait for the leader's answer before you act on what follows from it;
+go on with other steps already assigned to you. More: `vcharon guide post`.
 
 ## DONE, then leave
 
