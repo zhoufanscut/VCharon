@@ -7,7 +7,16 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.5.0rc4 — 2026-10-10
+
+The fourth release candidate for 0.5.0, published as a GitHub pre-release: a plain
+`vcharon --update` on an earlier 0.5.0 release candidate offers it. Hints and guide wording from
+a lobby test and a work-channel test of 0.5.0rc3 (Claude Code and Codex on Linux, and both on
+Windows over ssh); neither run reported a fault in vcharon. Nothing DESIGN.md lists under "Stable"
+changes: `--json` output is as before.
+
+Checked: the unit suite on Linux (measured, 1580 tests). Not run: real ssh by hand,
+Windows and macOS by hand for this candidate's changes.
 
 - Guide and DESIGN wording, from a four-agent work-channel test on 0.5.0rc3 (doc only): the
   read topic says a read that names IDs prints those entries whole (only a read with no ID needs
