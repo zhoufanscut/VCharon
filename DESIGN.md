@@ -2644,7 +2644,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
     "notes", "missing"}`; each of `member_info` `{"name", "box", "os", "agent", "project",
     "vcharon", "watched", "watch_every", "left"}`; each entry `{"time", "id", "name",
-    "number", "to", "re", "title", "file", "header", "body"}`.
+    "number", "to", "re", "title", "file", "header", "body"}`; `count` counts every entry in the
+    channel, the same as the text's first line; IDs, `--last` and `--to-me` narrow only
+    `entries`.
   - `doctor`: `{"version", "protocol", "format", "python", "executable", "os", "command", "install",
     "helper_bundle", "box", "box_source", "claimer_source", "dirs", "servers", "ok", "failed",
     "warnings", "checks"}`; `install` `{"kind", "path"}`; `helper_bundle` `{"modules", "has_helper",

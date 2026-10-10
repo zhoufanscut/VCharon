@@ -33,9 +33,9 @@ lists the IDs with that number, `with that number: linux-api#19, mac-web#19`; pi
 watcher named. With none, it starts `no entry read would show has number 19`: check the number
 the watcher printed.
 
-It prints a summary line per entry, not the entries themselves: the time, the ID, `to:`, the
-`re:` if any, the title, and the file. **To see the bodies, add `--full`**; the last line says
-so, with the command to run:
+With no ID, it prints a summary line per entry, not the entries themselves (a read that names
+IDs prints those entries whole): the time, the ID, `to:`, the `re:` if any, the title, and the
+file. **To see the bodies, add `--full`**; the last line says so, with the command to run:
 
 ```
 myapp: 2 entries from 2 members (<the channel's folder>)
@@ -60,6 +60,9 @@ and each watcher start; a member that left isn't counted): members on different 
 different guides, so tell your user. It shows once after each `join`, and again when the
 versions change; `read --json` has it in `notes` every time, and each member's version in
 `member_info`.
+
+`count` in `--json` is the number of entries in the whole channel, the same as the text's first
+line: IDs, `--last` and `--to-me` narrow only `entries`.
 
 ## Times
 

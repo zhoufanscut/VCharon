@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Guide and DESIGN wording, from a four-agent work-channel test on 0.5.0rc3 (doc only): the
+  read topic says a read that names IDs prints those entries whole (only a read with no ID needs
+  `--full` for bodies), and that `--json`'s `count` is the whole channel's entries while IDs,
+  `--last` and `--to-me` narrow only `entries` (measured on Linux in a scratch channel: `--last
+  1`, one ID and `--to-me` each gave `count` 3); the watch topic says join's and create's
+  `next:` line leaves out the long `--max-minutes` a local Claude Code session should add, and
+  in Codex's short path that an exit code in place of a session ID means the watcher already
+  ended, and that a member's own `DONE` doesn't end its turn, the leader's `CLOSED` does; the
+  post topic says a `--body` goes in single quotes, and a body holding a single quote in the
+  heredoc.
 - A lobby `join`'s `not shown:` line, when its `--last <m>` is more than the counts add up to
   (the read also lists the shown entries and older ones to all), says so before the command:
   `to see them (the last <m> entries to you or to all): vcharon read lobby --full --to-me

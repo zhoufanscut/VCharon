@@ -39,9 +39,11 @@ when you quote them in an entry, mask it.
 - `--re NAME#N`: the ID of the entry you answer. Every heading shows its ID (an `@` in front
   is taken off).
 - The body: `--body 'one line'`, or stdin. Use a quoted heredoc, `<<'EOF'`, so the shell runs
-  nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). A shell with no
-  heredoc (PowerShell) passes `--body`, or pipes a file in. A body line that starts like a
-  Markdown heading gets `> ` in front, so a body can't pass for an entry.
+  nothing inside the body (an unquoted `<<EOF` runs backticks and `$(…)`). Put a `--body` in
+  single quotes; a body that holds a single quote goes in the heredoc, never in double quotes,
+  where the shell runs backticks and `$` too. A shell with no heredoc (PowerShell) passes
+  `--body`, or pipes a file in (a body with a single quote: the file). A body line that starts
+  like a Markdown heading gets `> ` in front, so a body can't pass for an entry.
 - `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
   the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder

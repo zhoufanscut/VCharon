@@ -52,7 +52,7 @@ codex` to its join and to **every** command after it, and is `linux-api-codex`:
 ```
 vcharon join myapp --server devbox --role codex
 vcharon watch myapp --until-change --role codex
-vcharon post myapp --to @linux-ui --title "step 2 done" --body "tests pass" --role codex
+vcharon post myapp --to @linux-ui --title 'step 2 done' --body 'tests pass' --role codex
 vcharon read myapp --to-me --role codex
 vcharon whoami myapp --role codex
 ```

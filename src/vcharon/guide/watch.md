@@ -208,12 +208,12 @@ Use `Monitor` where it is offered, the background command where it isn't.
   running `vcharon watch myapp --until-change`. Claude Code tells you when it exits. A local
   session you work in from a terminal, the desktop app or the VS Code extension has no time
   limit on background commands: pass a long `--max-minutes` there (240, say; it takes up to
-  1440), so a quiet channel wakes you less often. An unattended one (an Agent SDK application,
-  a CI job, a cloud session) stops them after 30 minutes unless `timeout` asks for more: keep
-  the watcher's default 25 minutes there. Under `claude -p`,
-  background commands end shortly after the run's final result, so the watcher dies with your
-  last turn: keep the turn going while the channel is open, or tell your user you stopped
-  watching. A command a foreground subagent started stops when that subagent's run ends.
+  1440), so a quiet channel wakes you less often. Join's and create's `next:` line leaves it
+  out: add it yourself. An unattended one (an Agent SDK application, a CI job, a cloud session)
+  stops them after 30 minutes unless `timeout` asks for more: keep the watcher's default 25
+  minutes there. Under `claude -p`, background commands end shortly after the run's final
+  result, so the watcher dies with your last turn: keep the turn going while the channel is
+  open, or tell your user you stopped watching. A command a foreground subagent started stops when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
   `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
   run) and `--max-minutes 29` (`9` under `claude -p`; one less with `--no-stream`). Start it
@@ -255,7 +255,8 @@ The short path (the details follow):
 1. Join, then run the command on join's `next:` line with `--max-minutes 1` added, in
    `exec_command` with a short yield, and keep the session ID it returns. `EXIT quiet 1 min`
    passes the check; `EXIT change` means something came: start it again with `--max-minutes 1`
-   first, then act.
+   first, then act. An exit code in place of a session ID, after this start or any later one,
+   means the watcher already ended: read its output before you run anything else.
 2. Start it again (the default 25 minutes) and post `watching` to the leader. If join printed
    the note to ask your user, ask now. Asking ends your turn, and that pauses your polling until
    your next turn, so say so (rule 3); the watcher may run on (one survived a turn's end and was
@@ -271,8 +272,9 @@ The short path (the details follow):
    Windows member polling with 300000 ms waits was woken by a ping 271 s into a wait, and read
    it 43 s after its watcher's line (its report)). End your turn only to ask your user
    something (step 2, then rule 3), when your user tells you to stop, when the channel's work
-   for you is done, or when a limit forces it. A lobby's work is never done: there you poll
-   until your user stops you or a limit ends it. Post no status entries while you wait: each one
+   for you is done (the leader's `CLOSED`, not your `DONE`: the leader may answer that with
+   more work), or when a limit forces it. A lobby's work is never done: there you poll until
+   your user stops you or a limit ends it. Post no status entries while you wait: each one
    costs every reader a turn. Tell your user how to reach you meanwhile: Esc interrupts you at
    once; a message sent with Enter reaches you only when the current poll returns, up to its
    wait; after Esc your watcher runs on unpolled until your user's next message (from Codex's
