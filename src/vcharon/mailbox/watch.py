@@ -224,6 +224,9 @@ CLOSED_TITLE = "CLOSED"
 # (closed_next). Stop first: leave refuses while the watcher holds the member's lock.
 CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don't start it "
                "again, then run: vcharon leave %s %s")
+# The titles of the entries join, a rejoin and leave post (in a lobby, to their poster only),
+# which a --presence watcher prints: matched whole and exact, as join and leave write them.
+PRESENCE_TITLES = ("JOIN", "REJOIN", "LEAVE")
 # A --once check needs a saved snapshot: without one its round would be a baseline, which takes
 # what is there as seen and prints none of it, so an entry to the member would be lost for good.
 # Join and create save one (first_look), so a missing one means a join or create by an older
@@ -517,7 +520,7 @@ class Told:
 
 
 def read_entries(root, paths, marks, me, leader, baseline=False, present=None, closing=None,
-                 kind_=kinds.WORK):
+                 kind_=kinds.WORK, presence=False):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
     round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
     member's is ignored, since any member can write anything into its own folder; in a lobby
@@ -526,7 +529,8 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
     every file in the tree now (None: all those the marks name); an ID's head in a file gone
     from it, or in a file that no longer holds the ID, gives way to the next copy seen.
     closing: the line printed right after the leader's CLOSED to @all (CLOSED_NEXT), or None
-    for none."""
+    for none. presence: of the entries told to nobody, a JOIN, REJOIN or LEAVE (PRESENCE_TITLES)
+    outside MEMBER.md and CHANNEL.md is told as a presence line, which counts."""
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -599,7 +603,12 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
             after = ([closing] if closing is not None and folder == leader
                      and entries.ALL in e.to and e.title.strip() == CLOSED_TITLE else [])
             if kind_.silent(e, folder):
-                # every agent rejoins at each session: a wake is a turn for every member
+                # every agent rejoins at each session: a wake is a turn for every member, so
+                # only a watcher that asked for them (--presence) tells who came and went
+                if (presence and e.title in PRESENCE_TITLES
+                        and path not in ("%s/%s" % (folder, entries.MEMBER_FILE),
+                                         "%s/%s" % (folder, entries.CHANNEL_FILE))):
+                    told.entries.append((e.time or "", path, e.line, ["presence: " + where]))
                 continue
             if path == "%s/%s" % (folder, entries.MEMBER_FILE):
                 # a member's #1, addressed to the leader by design: its JOIN is what tells
@@ -865,12 +874,14 @@ class _Watch:
 
     def __init__(self, root, me, out, clock, fold=False, state=None, check=None, leader=None,
                  gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None,
-                 closing=None, kind_=kinds.WORK):
+                 closing=None, kind_=kinds.WORK, presence=False):
         self.root = root
         self.me = me
         # the channel's kind: whose @all is to all, what is told to nobody, and whether the
         # marks are kept short (_prune)
         self.kind = kind_
+        # --presence: other members' JOIN, REJOIN and LEAVE are told (read_entries)
+        self.presence = presence
         # a local member's: (max bytes, max files) of each other member's folder; one over
         # them is held as it was (hold_over), with a WARN line while it lasts
         self.folder_limits = folder_limits
@@ -1011,7 +1022,8 @@ class _Watch:
         # each folder's highest number seen before this round: the cap of _prune's floor
         prior = {f: max([s[0]] + list(s[1])) for f, s in self.marks.seen.items()}
         told = read_entries(self.root, [p for p in paths if is_entry_file(p)], self.marks,
-                            self.me, self.leader, baseline, files, self.closing, self.kind)
+                            self.me, self.leader, baseline, files, self.closing, self.kind,
+                            self.presence)
         for path in told.unread:
             files.pop(path, None)
         if self.kind.prune_heads:
@@ -1324,15 +1336,15 @@ def _locked(w, state):
 def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
               max_errors=10, folder_limits=None, updated=None, orphaned=None, once=False,
-              kind_=None):
+              kind_=None, presence=False):
     """Server mode: a server member's channel as it is on disk; root is the channel's
     folder, as main passes it. rounds: stop after that many (tests). folder_limits: (max
     bytes, max files) of each other member's folder; one over them is held as it was, with a
     WARN line. updated, orphaned: _loop's. once: a --once check (_once), refused (VCharonError)
     with no usable saved snapshot. kind_: the channel's, from the caller's record; None reads
-    it as the leader is read (server_kind). Returns the exit code. Refused (VCharonError) unless
-    root/me/ holds MEMBER.md; root gone (a closed channel) is the ERROR and fix lines and EXIT
-    closed, before any lock or snapshot."""
+    it as the leader is read (server_kind). presence: --presence's (read_entries). Returns the
+    exit code. Refused (VCharonError) unless root/me/ holds MEMBER.md; root gone (a closed
+    channel) is the ERROR and fix lines and EXIT closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
     try:
         os.scandir(root).close()
@@ -1352,7 +1364,8 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     flags = channel_cmd.name_flags(os.path.basename(root), me) if once else None
     if once:
         _need_snapshot(state, root, me, os.path.basename(root), flags)
-    w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone, kind_=kind_)
+    w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone, kind_=kind_,
+                   presence=presence)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
@@ -1382,18 +1395,20 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         lk.release()
 
 
-def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kinds.WORK):
+def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kinds.WORK,
+               presence=False):
     """A local member's _Watch, for its watcher and for first_look: one place for the choices
     the saved snapshot depends on (the check, the folder limits, the kind), so join saves the
     snapshot the watcher's start would. A difference there isn't caught when it loads: the
     first round would show a false WARN or held folder, and count it as a change."""
     return _Watch(root, me, out, clock, state=snapshot_path(root, me), check=warnings,
                   leader=leader, gone=gone, folder_limits=folder_limits,
-                  closing=closed_next(os.path.basename(root), me, leader, kind_), kind_=kind_)
+                  closing=closed_next(os.path.basename(root), me, leader, kind_), kind_=kind_,
+                  presence=presence)
 
 
 def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic, hold=None,
-               suffix="", kind_=kinds.WORK):
+               suffix="", kind_=kinds.WORK, presence=False):
     """A remote member's _Watch, for its watcher and for first_look (_dir_watch says why
     one place): the fold, and the check, which is the members its last pull left out for
     their size, as the sync saved them after its down (a WARN each while it lasts, in both
@@ -1401,7 +1416,8 @@ def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic
     return _Watch(local, me, out, clock, fold=FOLDS, state=snapshot_path(local, me, job),
                   leader=leader, timer=timer, hold=hold, suffix=suffix,
                   check=lambda root, me: charter.left_out_notes(job),
-                  closing=closed_next(channel, me, leader, kind_), kind_=kind_)
+                  closing=closed_next(channel, me, leader, kind_), kind_=kind_,
+                  presence=presence)
 
 
 def _discard(line):
@@ -1966,7 +1982,7 @@ def is_gone(fix):
 def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
-              updated=None, orphaned=None, once=False, kind_=kinds.WORK):
+              updated=None, orphaned=None, once=False, kind_=kinds.WORK, presence=False):
     """A remote member: sync the channel section job, then compare the local tree with the
     round before. Returns the exit code. sync_args: what follows `vcharon sync` for this
     membership. stream: the rounds are those of one long-lived `vcharon sync C --repeat
@@ -1975,7 +1991,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     updated: _loop's; a streaming child's exit with EXIT_UPDATED ends the watch the same
     way. orphaned: _loop's. once: a --once check (_once): one sync, never streamed, capped at
     ONCE_TIMEOUT; refused (VCharonError) with no usable saved snapshot. run: run_sync with the
-    watcher's pace, unless a test gives one. kind_: the channel's, from the caller's record."""
+    watcher's pace, unless a test gives one. kind_: the channel's, from the caller's record.
+    presence: --presence's (read_entries)."""
     stream = stream and not once
     if run is None:
         def run(job, sync_args):
@@ -1988,7 +2005,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         _need_snapshot(state, local, me, sync_args[0], flags)
     w = _job_watch(job, local, me, leader, channel, out, clock, timer=timer,
                    hold=STREAM_HOLD if stream else None,
-                   suffix=", syncing every %d s" % every if stream else "", kind_=kind_)
+                   suffix=", syncing every %d s" % every if stream else "", kind_=kind_,
+                   presence=presence)
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED

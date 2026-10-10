@@ -823,6 +823,139 @@ class LobbyStreamTest(watch_tests.WatchCase):
         self.assertEqual(code, 0)
         self.assertEqual(lines[1:], ["to all: mac#3 — hi  (mac/RESULTS.md)"])
 
+    def test_presence_from_the_synced_copy(self):
+        code, lines = self.watch([["out", "ROUND 0"], self.entry("mac", 2, "JOIN", to="@mac"),
+                                  ["out", "ROUND 0"]], rounds=2, kind_=kind.LOBBY,
+                                 presence=True, until_change=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines[1:], ["presence: mac#2 — JOIN  (mac/RESULTS.md)",
+                                     watch.exit_line("change", 0)])
+
+
+class PresenceWatchTest(LobbyWatchCase):
+    """watch --presence: the other members' JOIN, REJOIN and LEAVE, each a change."""
+
+    def watch(self, *steps, **kw):
+        lines = []
+        code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                               sleep=Rounds(*steps) if steps else never, rounds=len(steps),
+                               kind_=kind.LOBBY, **kw)
+        return code, self.said(lines)[1:]
+
+    def comings_and_goings(self):
+        # MEMBER.md #1 and a founder's CHANNEL.md #2 are to their poster too, but no
+        # presence, whatever their title
+        self.post("win", 1, "JOIN", to="@win", file="MEMBER.md")
+        self.post("win", 2, "JOIN", to="@win", file=TODAY, when="2026-10-01 09:01")
+        self.post("win", 3, "LEAVE", to="@win", file=TODAY, when="2026-10-01 09:02")
+        self.post("linux", 1, "LEAVE", to="@linux", file="CHANNEL.md")
+        self.post("linux", 2, "REJOIN", to="@linux", file=TODAY, when="2026-10-01 09:03")
+        # to its poster, but another title; and a JOIN to someone else is an other entry
+        self.post("linux", 3, "back soon", to="@linux", file=TODAY)
+        self.post("mac", 3, "JOIN", to="@win", file=TODAY)
+        # the watcher's own folder is never read
+        self.post("debian", 2, "JOIN", to="@debian", file=TODAY)
+
+    def test_the_others_joins_rejoins_and_leaves(self):
+        code, lines = self.watch(self.comings_and_goings, lambda: None, presence=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, [
+            "presence: win#2 — JOIN  (win/%s)" % TODAY,
+            "presence: win#3 — LEAVE  (win/%s)" % TODAY,
+            "presence: linux#2 — REJOIN  (linux/%s)" % TODAY,
+            "1 other entry (mac)"])
+        # without the flag: nothing of them (and the snapshot has them seen)
+        shutil.rmtree(self.tree)
+        os.remove(self.state())
+        self.setUp()
+        code, lines = self.watch(self.comings_and_goings, lambda: None)
+        self.assertEqual((code, lines), (0, ["1 other entry (mac)"]))
+
+    def test_until_change_and_once_end_on_one(self):
+        def joins():
+            self.post("win", 2, "JOIN", to="@win", file=TODAY)
+
+        code, lines = self.watch(joins, presence=True, until_change=True)
+        self.assertEqual((code, lines), (0, ["presence: win#2 — JOIN  (win/%s)" % TODAY,
+                                             watch.exit_line("change", 0)]))
+        # a check from the saved snapshot: what came since, once
+        self.post("win", 3, "LEAVE", to="@win", file=TODAY)
+        code, lines = self.watch(presence=True, once=True)
+        self.assertEqual((code, lines), (0, ["presence: win#3 — LEAVE  (win/%s)" % TODAY,
+                                             watch.exit_line("change", 0)]))
+        code, lines = self.watch(presence=True, once=True)
+        self.assertEqual((code, lines), (watch.EXIT_NOTHING,
+                                         [watch.exit_line("nothing new", watch.EXIT_NOTHING)]))
+        # without it, a JOIN wakes nobody
+        self.post("win", 4, "REJOIN", to="@win", file=TODAY)
+        code, lines = self.watch(once=True)
+        self.assertEqual(code, watch.EXIT_NOTHING)
+
+    def test_a_fresh_start_takes_them_as_seen(self):
+        self.post("win", 2, "JOIN", to="@win", file=TODAY)
+        self.post("win", 3, "for debian", to="@debian", file=TODAY)
+        code, lines = self.watch(lambda: None, presence=True, fresh=True)
+        self.assertEqual((code, lines), (0, []))
+
+
+class PresenceTest(LobbyCase):
+    """vcharon watch lobby --presence, through the command line: three members on this root."""
+
+    def check(self, *flags):
+        """mac-web's watch lobby --once: (exit code, its lines without their time)."""
+        code, out, err = self.channel("watch", "lobby", "--once", *flags)
+        self.assertEqual(err, "")
+        return code, [line[20:] for line in out.splitlines()]
+
+    def test_who_came_and_went(self):
+        # join and leave post at one day's clock (entries.post's default clock is bound at
+        # import, so patching time.time doesn't reach it): a run across midnight can't split
+        # the day files the lines name
+        post = entries.post
+        patcher = mock.patch.object(entries, "post",
+                                    lambda *a, **kw: post(*a, **dict(kw, clock=lambda: T0)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.join()
+        self.join("linux")
+        day = TODAY
+        code, lines = self.check("--presence")
+        self.assertEqual((code, lines[1:]), (0, [
+            "presence: linux-web#2 — JOIN  (linux-web/%s)" % day,
+            watch.exit_line("change", 0)]))
+        # printed once
+        self.assertEqual(self.check("--presence")[0], watch.EXIT_NOTHING)
+        # a watch without it takes win's JOIN as seen, so a later one with it doesn't print it
+        self.join("win")
+        code, lines = self.check()
+        self.assertEqual((code, lines[1:]), (watch.EXIT_NOTHING,
+                                             [watch.exit_line("nothing new", 16)]))
+        self.assertEqual(self.check("--presence")[0], watch.EXIT_NOTHING)
+        self.use_box("linux")
+        try:
+            self.ok("leave", "lobby")
+        finally:
+            self.use_box("mac")
+        self.join("linux")
+        code, lines = self.check("--presence")
+        self.assertEqual((code, lines[1:]), (0, [
+            "presence: linux-web#3 — LEAVE  (linux-web/%s)" % day,
+            "presence: linux-web#4 — REJOIN  (linux-web/%s)" % day,
+            watch.exit_line("change", 0)]))
+        # never the watcher's own: mac-web leaves and comes back
+        self.ok("leave", "lobby")
+        self.join()
+        code, lines = self.check("--presence")
+        self.assertEqual((code, lines[1:]), (watch.EXIT_NOTHING,
+                                             [watch.exit_line("nothing new", 16)]))
+
+    def test_a_work_channel_refuses_it(self):
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local")
+        self.assertEqual(self.refusal("watch", "game", "--presence", "--once", code=3), (
+            "ERROR config: --presence is for the lobby",
+            "a work channel's JOIN and LEAVE already reach its leader; leave out --presence"))
+
 
 class WhoamiTest(LobbyCase):
     def setUp(self):

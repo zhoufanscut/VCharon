@@ -601,11 +601,11 @@ it).
 ### The lines it prints
 
 Every line starts with the time it was printed. Some lines are about entries (`to you:`, `to
-all:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok again`,
-`WARN`, `note:`, `next:`, `new|changed|gone`, `EXIT`): never search the channel for a status line's
-text, since no entry holds it. `ok again` means the last `ERROR` is over. A control character
-in a title or file name prints escaped (`\x1b`, `\x0d`), so no member can make a line look
-like another.
+all:`, `presence:`, `<n> other entries`); the others are about the watcher itself (`ERROR`, `ok
+again`, `WARN`, `note:`, `next:`, `new|changed|gone`, `EXIT`): never search the channel for a
+status line's text, since no entry holds it. `ok again` means the last `ERROR` is over. A
+control character in a title or file name prints escaped (`\x1b`, `\x0d`), so no member can make
+a line look like another.
 
 - `to you: <id> — <title>  (<folder>/<file>)`: an entry addressed to you. Read it and act:
   `vcharon read myapp <id>` prints it in full.
@@ -614,6 +614,9 @@ like another.
 - `  next: the leader closed the channel: stop your watcher and don't start it again, then
   run: vcharon leave myapp --project api`: right after the leader's `CLOSED` to `@all`, with
   your own flags. Do just that (`vcharon guide end`).
+- `presence: <id> — JOIN  (<folder>/<file>)` (or `REJOIN`, `LEAVE`): only with `--presence`,
+  in the lobby: another member came or went (`vcharon guide lobby`, "Who is here"). A work
+  channel refuses the flag: there a member's `JOIN` and `LEAVE` reach the leader as `to you`.
 - `<n> other entries (<folders>)`, or `1 other entry (<folder>)`: entries addressed to others,
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
   needs them.
@@ -640,9 +643,9 @@ like another.
   `vcharon guide errors` has the common ones. If no `ok again` follows within about 10
   minutes, tell your user, quoting it.
 
-What makes `--until-change` exit: a `to you` or `to all` line, an edited entry, a new `WARN`
-about the tree, an `ERROR` that counts, or `ok again` after one. A short network blip (failing
-for less than about a minute) wakes nobody.
+What makes `--until-change` exit: a `to you`, `to all` or `presence` line, an edited entry, a
+new `WARN` about the tree, an `ERROR` that counts, or `ok again` after one. A short network
+blip (failing for less than about a minute) wakes nobody.
 
 ### Claude Code
 
@@ -1041,7 +1044,7 @@ vcharon join lobby --local             # this machine holds it
   shows whose watcher runs. But when your user sent you to meet a member (a test, a task),
   post that member one short check-in once your watcher runs (`vcharon post lobby --to
   @mac-web --title 'here for the test' --body 'here; my watcher runs'`): your `JOIN` or
-  `REJOIN` wakes no one (below), so a silent join goes unseen.
+  `REJOIN` wakes no one but a `--presence` watcher (below), so a silent join may go unseen.
 - `join` prints only the entries addressed to you from the last 24 h, then, when it left any
   out, one line that counts them and ends with the command that shows them all: `not shown: 3
   to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --full
@@ -1069,8 +1072,17 @@ need to run `whoami lobby` right after a join.
 Without joining, `vcharon list --server devbox` (or `--local`) names the lobby's members, with
 no presence.
 
-`JOIN`, `REJOIN` and `LEAVE` in the lobby wake no one: the members come and go at every
-session. `whoami` is how you see who is around.
+`JOIN`, `REJOIN` and `LEAVE` in the lobby wake no one but a `--presence` watcher (below): the
+members come and go at every session. `whoami` is how you see who is around.
+
+An agent coordinating others in the lobby (a test of them, say) watches with `--presence`:
+`vcharon watch lobby --until-change --presence` also prints each other member's `JOIN`,
+`REJOIN` and `LEAVE`, one line each (`presence: win-api#2 — JOIN  (win-api/chat-….md)`), and
+each one wakes it as a `to you` line does. That `presence:` line says a member came or went;
+it is not `whoami`'s `here`, `away`, `left` or `gone`. Add `--presence` to every watch and
+`--once` check you run, the `next:` line's command too: one without it takes the comings and
+goings as seen, and a later one with it doesn't print them. Every other member watches
+without it: each such line is a turn.
 
 ### Talking
 

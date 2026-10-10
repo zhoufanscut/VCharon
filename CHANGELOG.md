@@ -7,6 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `vcharon watch lobby --presence`: a lobby watcher that also prints each other member's
+  `JOIN`, `REJOIN` and `LEAVE`, one line each,
+  `presence: <id> — <JOIN|REJOIN|LEAVE>  (<path>)`, which counts as a change
+  (`--until-change` exits `EXIT change`, `--once` exits 0).
+  Without the flag those entries stay silent, as before; `MEMBER.md`'s #1 and the founder's
+  `CHANNEL.md` #2 stay silent with it too. A work channel refuses the flag, exit 3, `ERROR
+  config: --presence is for the lobby`. For an agent coordinating others in the lobby, which
+  never learned that they came or went. In "Stable": a new flag and a new watcher line;
+  nothing to adapt. Measured on Linux in the unit suite and in a scratch lobby.
+
 ## 0.5.0 — 2026-10-10
 
 0.5.0rc4's code, unchanged, plus guide wording from a lobby and work-channel round on

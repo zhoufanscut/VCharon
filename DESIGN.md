@@ -1346,6 +1346,20 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   new session, and a wake or a streamed line is a model turn for every member that watches;
   `whoami lobby` says who is here. The guide asks for `@name` over `@all` for the same reason:
   each `@all` is a turn for every member that watches.
+  - **`--presence`**, the one exception: a watcher started with it also prints each other
+    member's `JOIN`, `REJOIN` and `LEAVE` (an entry addressed only to its poster whose title
+    is exactly one of the three, outside `MEMBER.md` and `CHANNEL.md`) as `presence: <id> —
+    <title>  (<path>)`, in the entries' time order, and that line counts as a `to you` line
+    does ([The watcher in a channel](#the-watcher-in-a-channel)). `MEMBER.md`'s #1 and the
+    founder's `CHANNEL.md` #2 stay silent: they say nothing of coming or going. The snapshot
+    rules are the other lines': an entry seen once, by a watcher with or without the flag, is
+    not printed again, and a baseline takes them as seen. A work channel's watch refuses the
+    flag, exit 3, `ERROR config: --presence is for the lobby`, `fix: a work channel's JOIN
+    and LEAVE already reach its leader; leave out --presence`: a usage error, as `--steps` in
+    a lobby; the fix names no command, so the agent's other flags (`--once`) stay. Join's
+    `next:` line doesn't add it. Why opt in: an agent coordinating others in the lobby (a test
+    of them) never learned that they had come or gone, while for every other member each such
+    line would be a turn at every session.
 - **Limits.** `max mb: 50`, `max files: 1000`, `max entry kb: 10000` (10 MB a day file). Nothing
   sets them: `create lobby` is refused, and `join` has no limit flags. So 10 MB is room for one
   busy day; over 30 days a member can post at most about 1.7 MB a day on average (50 MB / 30).
@@ -1758,6 +1772,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     closed` fix line gives the command. Why the exact title: a looser match ("Closed", "CLOSED
     soon") could tell a member to leave a channel that goes on, while a miss only leaves the
     member to the guide's example;
+  - with `--presence`, in a lobby only, `presence: <id> — <title>  (<path>)` for another
+    member's `JOIN`, `REJOIN` or `LEAVE` ([The lobby](#the-lobby), "Silent entries"), among
+    the `to you` lines in the entries' time order;
   - at most one line a round each: `<n> other entries (<folders>)`, `1 other entry (<folder>)`
     for one (addressed elsewhere, no ID, an ID not its folder's, or a `MEMBER.md` #1; in a
     lobby, not an entry addressed only to its poster), `note: @all from <folders>, not the
@@ -1786,8 +1803,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     code than the process's (Codex's summary said exit 1 for a watcher's 10), so the line says
     it. Readers match on the `EXIT <kind>` start.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
-  `to all`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok again` after one.
-  Without it the watch runs on (for a streaming tool such as Claude Code's Monitor).
+  `to all`, `presence`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok
+  again` after one. Without it the watch runs on (for a streaming tool such as Claude Code's
+  Monitor).
   `--max-minutes M` (1 to 1440; 25 with `--until-change`) exits 10 with `EXIT quiet M min`;
   streaming, a round under way at the deadline is stopped.
 - **`--once`**: one round at once from the saved snapshot, then exit: a check between steps
@@ -2049,7 +2067,7 @@ Messages
                  [--file NAME.md | --steps] [--no-sync] [--project P] [--role R]
   vcharon read   C [ID…] [--to-me] [--last N] [--full] [--project P] [--role R] [--json]
   vcharon watch  C [--until-change] [--every S] [--max-minutes M] [--fresh] [--no-stream]
-                 [--max-errors N] [--once] [--project P] [--role R]
+                 [--max-errors N] [--once] [--presence] [--project P] [--role R]
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
 
 Other
@@ -2612,6 +2630,7 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
     leader's `CLOSED` to `@all`, `  next: <text>`, its command to run as printed
+  - with `--presence`, in a lobby: `presence: <id> — <JOIN|REJOIN|LEAVE>  (<path>)`
   - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
     <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
     `note: duplicate entry <id> in <path>: the one in <file> stands`, `note: your vcharon

@@ -290,6 +290,9 @@ def _parser():
                      "background commands)")
     one.add_argument("--no-stream", action="store_true", help="a remote member: a sync each "
                      "round, in place of one long-lived vcharon sync --repeat")
+    one.add_argument("--presence", action="store_true", help="the lobby: also print the other "
+                     "members' JOIN, REJOIN and LEAVE, each a change (for an agent "
+                     "coordinating others)")
     one.add_argument("--max-errors", type=_number(1, 1000, "rounds"), metavar="N",
                      help="with --until-change: exit after this many failed rounds in a row "
                      "(default 10); a streaming watch counts %d s of failing as one"
@@ -1178,6 +1181,11 @@ def _watch_member(args, run, say, out):
     # a config vcharon can't read refuses the watch, as it does every other command
     cfg = load_config()
     record, flags = _membership(args)
+    if args.presence and kinds.of(record) is kinds.WORK:
+        # a usage error, as --steps in a lobby: the flag has no use in this kind of channel
+        raise _usage("--presence is for the lobby",
+                     "a work channel's JOIN and LEAVE already reach its leader; leave out "
+                     "--presence")
     # every start, a restart after EXIT updated too: the own MEMBER.md's vcharon: line follows
     # an update made without a rejoin (a leader never rejoins). Before the watchdog's start, so
     # nothing it reads counts as an import after the start
@@ -1221,6 +1229,8 @@ def _watch_member(args, run, say, out):
     if kinds.of(record) is not kinds.WORK:
         # the record's kind; a work channel's watch gets none, and reads its record
         limits["kind_"] = kinds.of(record)
+    if args.presence:
+        limits["presence"] = True
     if record["ssh"] is None:
         if args.no_stream:
             raise _usage("--no-stream is for a remote member; you are a local member of %s"
