@@ -9,6 +9,17 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Guide (doc only): Codex stops its watcher with Ctrl-C through the watcher's exec session
+  (`write_stdin` with the Ctrl-C character alone, then one empty poll), not by its process ID,
+  which stays the fallback without a Codex sandbox (`danger-full-access`). In Codex's Linux
+  sandbox each command has its own process IDs, so `ps` doesn't list the watcher and `kill` can't
+  reach it; a `&` job also dies when its command returns, so the exec session is the only handle
+  on a watcher. Measured with Codex CLI 0.162.1 on Linux in its `workspace-write` sandbox
+  (2026-10-11): Ctrl-C ended the session with exit 130 (1 with `tty: true`) and no `EXIT` line,
+  the next poll answered `Unknown process id`, and `leave` then ran. Inferred, from source and a
+  Linux run without Codex: without that sandbox the watcher ends `EXIT interrupted (exit 130)`; on
+  Windows (source only), without `tty`, Codex ends the process with no `EXIT` line.
+
 - On Linux the holder of a watcher's lock writes its PID only from the initial PID namespace
   (`/proc/self/ns/pid` reads `pid:[4026531836]`; unreadable: no PID). A holder in another PID
   namespace writes none: its PID can name another process to a taker outside that namespace; this
