@@ -78,7 +78,8 @@ These are vcharon's stable interface: a release that changes one says so in its 
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
   held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C, 143 a SIGTERM
-  to the watcher; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
+  to `watch` or `sync --repeat`; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon
+  guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
   `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;
@@ -91,6 +92,3 @@ These are vcharon's stable interface: a release that changes one says so in its 
   `vcharon doctor --json` prints its report even when a check fails (exit 1); its `ok`,
   `failed` and `checks` say which. And `vcharon read C ID… --json` prints its object when an ID
   isn't there (exit 1); its `missing` lists them.
-- **Windows**: under mintty (Git Bash's own window) without winpty, stdin doesn't look like a
-  terminal, so `vcharon post` without `--body` waits for a body on stdin instead of refusing.
-  Pass `--body`, or a heredoc or file on stdin.

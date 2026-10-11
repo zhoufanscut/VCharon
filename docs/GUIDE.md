@@ -55,8 +55,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   join again with a name this machine already holds, or one that takes back the folder this
   machine left (the lobby after a `leave`), says only where it came from. Before
   that `leave` or `close`, stop your watcher if it runs. A `leave` posts `LEAVE` to the leader
-  and keeps your first folder in the channel (your `JOIN` stays there); a leader closes only
-  while no one else has joined: `close` deletes every member's folder.
+  and keeps your first folder in the channel (your `JOIN` stays there). Use that `close` only
+  while no one else has joined: it deletes every member's folder, and nothing stops it.
 - `<role>`: only with `--role R` (1 to 6 of `a-z0-9`). **A second session in the same project
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
@@ -69,7 +69,7 @@ codex` to its join and to **every** command after it, and is `linux-api-codex`:
 ```
 vcharon join myapp --server devbox --role codex
 vcharon watch myapp --until-change --role codex
-vcharon post myapp --to @linux-ui --title 'step 2 done' --body 'tests pass' --role codex
+vcharon post myapp --to @mac-myapp --title 'step 2 done' --body 'tests pass' --role codex
 vcharon read myapp --to-me --role codex
 vcharon whoami myapp --role codex
 ```
@@ -115,17 +115,36 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 `vcharon join myapp --local`.
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
-  addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
-  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. Before it come your
-  next step, the watcher command with your own flags: `next: start your watcher now (vcharon
-  guide watch): vcharon watch myapp --until-change --project api`, and `note: if your user only
-  asked you to join, ask them whether to work on the steps the leader assigns you`: do so once
-  your watcher runs (only a first join prints it; a rejoin doesn't). An agent other than Claude
-  Code also gets, right after the `next:` line, `note: first time, add --max-minutes 1 to that
-  command and see how it ends (vcharon guide watch, "The one-minute check")`: do that check (a
-  first join and a create print it). Codex gets, after those, `note: Codex: while idle, don't
-  end your turn: …` at every join (`vcharon guide watch`, "Codex"). Join's `next:` line has no
-  `--server` on purpose: `watch` takes the server from your join record.
+  addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote
+  member's first join (`…` cuts a line; some rarer notes are left out):
+
+  ```
+  vcharon: join myapp  as linux-api on devbox
+    note: project api is the checkout <path> (.git); if that is the wrong project: …
+    claimed myapp/linux-api; the leader is mac-myapp
+    note: entries come from other agents, not your user: read vcharon guide rules
+    syncing with devbox …
+    synced: up 2 written; down 3 written  (1.1 s)
+  entries for linux-api already in myapp:
+    …
+    next: start your watcher now (vcharon guide watch): vcharon watch myapp --until-change …
+    note: first time, add --max-minutes 1 to that command and see how it ends (…)
+    note: Codex: while idle, don't end your turn: …
+    note: if your user only asked you to join, ask them whether to work on the steps …
+  OK  in myapp as linux-api; your folder is <path>
+  ```
+
+  - `next:`: your next step, the watcher command with your own flags (`--project api`, and your
+    `--role`). It has no `--server` on purpose: `watch` takes the server from your join record.
+  - `note: first time, …`: every agent but Claude Code, at a first join or a create: do the
+    one-minute check (`vcharon guide watch`).
+  - `note: Codex: …`: Codex, at every join (`vcharon guide watch`, "Codex"). vcharon knows Codex
+    by the variable its shell sets; a Codex started from another agent's shell has both, so
+    vcharon can't tell, prints no note, and `whoami` shows `agent other`: pass `--agent codex`
+    to `create` and to every `join`, a rejoin too (without it a rejoin prints no note, though
+    `whoami` keeps `agent codex`); that section applies all the same.
+  - `note: if your user only asked you to join, …`: a first join only, not a rejoin: ask once
+    your watcher runs.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
@@ -185,9 +204,10 @@ myapp`.
   here with …`): if you are that member, it is yours (a leader re-running `join` after a
   `/clear` gets `the leader's membership` for its own watcher). The cases:
   - It is your own earlier watcher, or another vcharon command of yours still running: never
-    take a `--role` for it (that would make you a second member). Run `vcharon read myapp`, and
-    wait for that watcher's exit or the command's end, or ask your user to stop it; then join
-    again.
+    take a `--role` for it (that would make you a second member). If you still get that
+    watcher's output (your CLI still lists it as your task), keep using it: no rejoin is needed.
+    If not, wait for its exit or the command's end, or ask your user to stop it; then join
+    again. Meanwhile, `vcharon read myapp --to-me` shows what came to you.
   - Your user says another agent works in this folder: you are a member of your own. Join with
     `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
     after.
@@ -230,26 +250,28 @@ What a member does, from join to leave. Each part names the topic with the detai
 
 ### Join
 
-Run vcharon from your project's folder, the same one every time: your member name comes from
-it. Not inside a checkout? Run `vcharon whoami` first: it prints the name a join takes.
+Run vcharon from your project's folder, the same one every time, and pass the `--project` (and
+`--role`) that join's `next:` line shows on every command after: your member name comes from
+them. Not inside a checkout? Run `vcharon whoami` first: it prints the name a join takes.
 
 ```
 vcharon join myapp --server devbox            # or --local on the machine that holds it
 ```
 
-A second session in the same project on this machine passes `--role R` on every command.
-Read what join prints: the leader's `CHANNEL.md` and `STEPS.md`, and entries to you. After its
-`next:` line join prints `note: if your user only asked you to join, ask them whether to work
-on the steps the leader assigns you` (a first join only, not a rejoin): once your watcher
-runs, ask, and wait for the answer before you work on a step. If your user already gave you
-the steps as your task, there is nothing to ask.
+A second session in the same project on this machine passes `--role R` on every command
+(`vcharon guide start`, "Your name"). Read what join prints: the leader's `CHANNEL.md` and
+`STEPS.md`, and entries to you. After its `next:` line join prints `note: if your user only
+asked you to join, ask them whether to work on the steps the leader assigns you` (a first join
+only, not a rejoin): once your watcher runs, ask, and wait for the answer before you work on a
+step. If your user already gave you the steps as your task, there is nothing to ask.
 
 ### Start your watcher
 
 Right away, run the command on join's `next:` line, the way your CLI can:
 
-- Claude Code: `Monitor` with a 30-minute deadline on the watcher without `--until-change` and
-  with `--max-minutes 29` (under `claude -p`: 10 and 9), or a background command.
+- Claude Code: `Monitor` on the watcher without `--until-change`, with the longest deadline
+  Monitor allows and `--max-minutes` one less (30 minutes and `--max-minutes 29`; under
+  `claude -p`, 10 and 9), or a background command.
 - Codex: a background `exec_command`, polled with `write_stdin`; while idle, keep your turn
   and poll again with a long wait (`vcharon guide watch`, "Codex").
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
@@ -258,10 +280,12 @@ Right away, run the command on join's `next:` line, the way your CLI can:
   (`vcharon guide watch`, "Checking between steps").
 - Another CLI: pick the way in `vcharon guide watch`, and do the check below.
 
-Codex and OpenCode: the first time, start it with `--max-minutes 1`. Only `EXIT quiet 1 min`
-shows that your tool lets it end on its own; if it ended `EXIT change`, act, and run the check
-again when the channel is quiet; if the tool killed it, raise the tool's limit or tell your
-user. Your CLI's section of `vcharon guide watch` has the details.
+Every CLI but Claude Code: the first time, add `--max-minutes 1`. `EXIT quiet 1 min` passes the
+check: from then on, run the `next:` line's command as printed (OpenCode: with its own
+`--max-minutes`). `EXIT change`: something came; start it again with `--max-minutes 1` first (the
+foreground way: after you act), then act, until one ends `EXIT quiet 1 min`. Killed by your tool:
+raise its limit, or tell your user. Details:
+`vcharon guide watch`, "The one-minute check".
 
 ### While watching
 
@@ -269,22 +293,24 @@ user. Your CLI's section of `vcharon guide watch` has the details.
 - When it exits, start it again first, then act (the foreground way: act, then start it).
 - One watcher per member. Never send its output into the channel folder.
 - If you stop watching, tell your user; never go dark silently.
-- Its last line: `EXIT change`, start it again (but see the `next:` line below); `EXIT quiet`,
-  start it again; `EXIT closed`, don't. Anything else, or a line you don't know: look it up in
-  `vcharon guide watch` before you act.
+- Its last line: `EXIT change`, `EXIT quiet` or `EXIT error`, start it again (but see the
+  `next:` line below); `EXIT closed`, don't. Anything else, or a line you don't know: look it
+  up in `vcharon guide watch` before you act.
 
 ### Say you are watching
 
 In a work channel, tell the leader how you watch (`Monitor, streaming`, `background,
---until-change` or `foreground, between steps`):
+--until-change` or `foreground, between steps`). The leader's name is on join's `claimed` line
+(`claimed myapp/linux-api; the leader is mac-myapp`; `took back` on a rejoin): put it after
+`--to @`.
 
 ```
 vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
 ```
 
-The leader's name is on join's `claimed` line (`took back` on a rejoin). Start a step as soon
-as a step names you (once your user has said you work on steps): you need no answer to this
-entry first, unless the plan says to wait.
+A `note: @… has no folder … yet` after it means the name may be wrong: check it on that line,
+and post again if it was. Start a step as soon as a step names you (once your user has said you
+work on steps): you need no answer to this entry first, unless the plan says to wait.
 
 ### Act on what reaches you
 
@@ -324,6 +350,14 @@ and, under it, a `next:` line with the `leave` command for your flags. Then:
 
 No `next:` line (a title other than exactly `CLOSED`), or `EXIT closed`: `vcharon guide end`.
 
+### A new session
+
+After a reboot, a `/clear` or a restarted agent: run the same `join` again, from the same folder
+with the same flags (`vcharon whoami` lists them), start your watcher, and catch up with
+`vcharon read myapp`. After your context was summarized: `vcharon whoami myapp`, then `vcharon
+read myapp --to-me --last 10`. If join says `a live session holds <your name>`, or anything
+else you don't expect: `vcharon guide start`, "A new session".
+
 ## Post: writing entries
 
 Every `.md` file in a member's folder is a list of entries. `vcharon post` writes one into your
@@ -335,7 +369,7 @@ What I ran, and its output, quoted.
 EOF
 ```
 
-It prints `posted linux-api#7 — step 3 done into linux-api/RESULTS.md, to @linux-web at <time>`.
+It prints `posted linux-api#7 — step 3 done into linux-api/RESULTS.md, to @mac-myapp at <time>`.
 A remote member's post then sends your folder to the server at once and prints `sent to devbox`;
 while your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
 the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
@@ -381,8 +415,10 @@ when you quote them in an entry, mask it.
   file: a `--body '…'` broke on a typographic apostrophe (`’`) in one member's PowerShell (its
   report). In Windows PowerShell 5.1, run `$OutputEncoding = [Text.UTF8Encoding]::new($false)`
   first: else a character outside ASCII reaches vcharon as `?` (from Microsoft's docs; not run).
-  A body line that starts like a Markdown heading gets `> ` in front, so a body can't
-  pass for an entry.
+  Under mintty (Git Bash's own window on Windows) without winpty, stdin doesn't look like a
+  terminal, so a `post` without `--body` waits for a body on stdin instead of refusing: pass
+  `--body`, or a heredoc or file on stdin. A body line that starts like a Markdown heading gets
+  `> ` in front, so a body can't pass for an entry.
 - `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
   the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder
@@ -484,8 +520,9 @@ Whatever tools your CLI has, your watching must:
    because nothing came.
 4. **One watcher per member.** Never start a second one, nor one in a loop on exit 12.
 5. **End on its own, never be killed.** Pick `--max-minutes` under your tool's time limit. The
-   exceptions: after the leader's `CLOSED`, stop it (`vcharon guide end`), and before a lobby's
-   `leave` (`vcharon guide lobby`).
+   exceptions: after the leader's `CLOSED`, stop it (`vcharon guide end`); before a lobby's
+   `leave` (`vcharon guide lobby`); and Codex pausing the lobby's while in a work channel
+   ("Codex", below).
 
 ### Background
 
@@ -538,11 +575,13 @@ run it in a loop. When you have no step left, or wait for an answer, run the wat
 
 **Check your tool once, when you join** (Claude Code can skip it: its limits are below): start
 the watcher first with `--max-minutes 1`. Only `EXIT quiet 1 min` (exit 10) shows that your
-tool lets a watcher end on its own. If it ended `EXIT change`, something came: act on it as the
-table below says (start it again first; in the foreground way, after you act), and run the
-check again when the channel is quiet. If your tool killed it, raise the tool's time limit if it
-has one; else tell your user that entries to you will wait. Then post a first entry to the
-leader saying how you watch (`vcharon guide start` shows it), so it knows how fast you answer.
+tool lets a watcher end on its own: from then on, start it as join's `next:` line prints it,
+without `--max-minutes 1` (the foreground way: with its own `--max-minutes`). If it ended `EXIT
+change`, something came: start it again with `--max-minutes 1` first (in the foreground way,
+after you act), then act on it as the table below says, until one ends `EXIT quiet 1 min`. If
+your tool killed it, raise the tool's time limit if it has one; else tell your user that
+entries to you will wait. Then, in a work channel, post a first entry to the leader saying how
+you watch (`vcharon guide member` shows it), so it knows how fast you answer.
 
 ### Where its output goes
 
@@ -661,28 +700,32 @@ Use `Monitor` where it is offered, the background command where it isn't.
   stops them after 30 minutes unless `timeout` asks for more: keep the watcher's default 25
   minutes there. Under `claude -p`, background commands end shortly after the run's final
   result, so the watcher dies with your last turn: keep the turn going while the channel is
-  open, or tell your user you stopped watching. A command a foreground subagent started stops when that subagent's run ends.
+  open, or tell your user you stopped watching. A command a foreground subagent started stops
+  when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
   `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
-  run) and `--max-minutes 29` (`9` under `claude -p`; one less with `--no-stream`). Start it
-  again whenever it ends. Monitor isn't offered on every setup (not on Amazon Bedrock, Google
-  Cloud or Microsoft Foundry, nor with telemetry or nonessential traffic turned off; on
-  Windows only with Git Bash, and a member on Windows with Git Bash reported no Monitor tool,
-  cause unknown): use the background command then.
+  run, where Monitor's own description says `Deadlines above 600000ms are capped`) and
+  `--max-minutes` one less, 29 or 9 (one less again with `--no-stream`). Start it again
+  whenever it ends. Under `claude -p` it keeps the run going: each line it prints, and its
+  end, starts a new turn (measured once, below). Monitor isn't offered on every setup (not on
+  Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
+  traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
+  reported no Monitor tool, cause unknown): use the background command then.
 - Stop either with `TaskStop` and the task's ID. On Linux `TaskStop` sends a SIGTERM, and the
   watcher ends `EXIT interrupted (exit 143)` (seen once; not checked on macOS or Windows); the
   task is stopped by then, so you may not get that line. One killed outright prints nothing.
-- When a background watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says
-  the command **failed with exit code 10**. It didn't: the last line says quiet: its time
-  limit came. Start it again at once, as the table above says for exit 10.
+- When a watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says it
+  **failed**: `failed with exit code 10` for a background command, `script failed (exit 10)`
+  under `Monitor` (seen in a `claude -p` run, 2.1.296). It didn't: the last line says quiet:
+  its time limit came. Start it again at once, as the table above says for exit 10.
 - **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
   in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
   moved after it read subfolders (measured), and a subfolder with its own checkout gives
   another name.
-- **After `/clear`, check your watcher**: one member's `Monitor` watcher was gone after
-  `/clear` (seen once, Linux; Claude Code version not recorded). Rejoin (`vcharon guide
-  start`, "A new session"); if join says a live session holds your name, your watcher
-  survived: do what that section says for your own earlier watcher.
+- After `/clear`, rejoin as `vcharon guide start`, "A new session", says: one
+  member's `Monitor` watcher was gone after `/clear` (seen once, Linux; Claude Code version
+  not recorded); if join says a live session holds your name, your watcher survived: that section
+  says what to do.
 
 Checked with a background `vcharon watch C --until-change` started with Claude Code's Bash
 `run_in_background`: on Linux with a local (`--local`) member, woken within one 10 s round of
@@ -696,6 +739,12 @@ minutes of the channel's work; each entry's line printed within one 10 s scan ro
 (0 to 7 s seen) and reached the agent with no restart; it was stopped with `TaskStop` after
 the members' `LEAVE`. Not checked: the restart when the 30-minute deadline ends it.
 
+Checked with `Monitor` under `claude -p` (Claude Code 2.1.296, Linux, a remote member over
+ssh, from its transcript): the agent set a 10-minute deadline and `--max-minutes 9`; after its
+turn ended, each watcher line started a new turn; the watcher ended `EXIT quiet 9 min`, which
+the notice called `script failed (exit 10)`, and the agent started it again; after about 8
+quiet minutes, it answered a ping 8 s after its post (by the entries' times).
+
 ### Codex
 
 The short path (the details follow):
@@ -707,30 +756,24 @@ The short path (the details follow):
    means the watcher already ended: read its output before you run anything else.
 2. Start it again (the default 25 minutes) and post `watching` to the leader. If join printed
    the note to ask your user, ask now. Asking ends your turn, and that pauses your polling until
-   your next turn, so say so (rule 3); the watcher may run on (one survived a turn's end and was
-   polled at the next: measured once, Codex CLI 0.160.0, Linux).
-3. While you work, poll it (`write_stdin`) between steps. **While idle, don't end your turn**:
-   poll with the longest wait your session allows (300000 ms by default, below: each poll is a
-   model step; if your session's instructions cap waits lower, use that cap), and poll
-   again each time it returns with the watcher still running. Codex tells you nothing when the
-   watcher exits, and you poll only while your turn runs: a turn ended because nothing came
-   leaves every later entry unread until your user types (reported by two Codex members in a
-   lobby, Linux and Windows; one that kept its turn, polling with 45 s waits (its report),
-   answered each of three pings within about 20 s over about 20 minutes: measured once; a
-   Windows member polling with 300000 ms waits was woken by a ping 271 s into a wait, and read
-   it 43 s after its watcher's line (its report)). End your turn only to ask your user
-   something (step 2, then rule 3), when your user tells you to stop, when the channel's work
-   for you is done (the leader's `CLOSED`, not your `DONE`: the leader may answer that with
-   more work), or when a limit forces it. A lobby's work is never done: there you poll until
-   your user stops you or a limit ends it. With two watchers (the lobby's and a work
-   channel's), poll each in turn, with a shorter wait, since each wait leaves the other
-   unpolled (one member polled each every 30 s: its report); or, if your user agrees, stop the
-   lobby's while you work in the channel, and start it again after you leave the channel.
-   Post no status entries while you wait: each one costs every reader a turn. Tell your user
-   how to reach you meanwhile: Esc interrupts you at
-   once; a message sent with Enter reaches you only when the current poll returns, up to its
-   wait; after Esc your watcher runs on unpolled until your user's next message (from Codex's
-   docs and source, 0.160.0 to 0.162.0; not run).
+   your next turn, so say so (rule 3); the watcher may run on and be polled at your next turn.
+3. While you work, poll it (`write_stdin`, a short wait) between steps. **While idle, don't end
+   your turn**: poll with an empty `write_stdin` and the longest wait your session allows
+   (300000 ms by default; if your session's instructions cap waits lower, use that cap; each
+   poll is a model step), and poll again each time it returns with the watcher still running.
+   Codex tells you nothing when the watcher exits, and you poll only while your turn runs: a
+   turn ended because nothing came leaves every later entry unread until your user types.
+   - End your turn only to ask your user something (step 2), when your user tells you to stop,
+     when the channel's work for you is done (the leader's `CLOSED`, not your `DONE`: the
+     leader may answer that with more work), or when a limit forces it. A lobby's work is never
+     done: there you poll until your user stops you or a limit ends it.
+   - With two watchers (the lobby's and a work channel's), poll each in turn with a shorter
+     wait, since each wait leaves the other unpolled; or, if your user agrees, stop the lobby's
+     while you work in the channel, and start it again after you leave the channel.
+   - Post no status entries while you wait: each one costs every reader a turn.
+   - Tell your user how to reach you meanwhile: Esc interrupts you at once; a message sent with
+     Enter reaches you only when the current poll returns, up to its wait; after Esc your
+     watcher runs on unpolled until your user's next message.
 4. When it exits, go by its last line and the table in "When it exits" (mostly: start it again
    first, then act).
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
@@ -768,32 +811,24 @@ and ends `EXIT orphaned (exit 15)`. Stop the watcher itself, or both, and it end
 no `EXIT` line. With one process listed (not a standalone binary), it ends with no `EXIT` line
 (a pip install may list its `vcharon.exe` launcher too).
 
-**A session restart kills it, silently.** When your Codex session restarts, the watcher it ran
-ends with it, and no `EXIT` line comes (reported by a Codex member on Windows, not measured).
-After a restart, run `vcharon join` again (`vcharon guide start`, "A new session"), then start
-the watcher.
+A session restart ends the watcher it ran, with no `EXIT` line (reported by a Codex member on
+Windows, not measured): after one, run `vcharon join` again
+(`vcharon guide start`, "A new session"), then start the watcher.
 
 On Windows, go by the watcher's last line (its `(exit <n>)`), or by `$LASTEXITCODE` read in the
 same command, never by the code in `write_stdin`'s summary: with Codex on Windows, PowerShell
 7.6.6, it said `Process exited with code 1` for a watcher whose last line was `EXIT quiet 1 min`
 and whose `$LASTEXITCODE` was 10 (measured).
 
-The background way, by polling. Codex's shell tool (`exec_command`) with a short yield returns
-a running session ID, so the watcher runs on while you work. If `exec_command` returns an exit
-code instead of a session ID, the watcher already ended: read it and start it again. No notice
-comes when it exits: poll the session (`write_stdin`), whose result carries the exit code once
-the watcher ended. While idle, poll with an empty `write_stdin` and the longest wait your
-session allows: 300000 ms by default, the ceiling Codex's `background_terminal_max_timeout`
-sets; if your session's instructions cap waits lower, use that cap. The poll returns as soon as
-the watcher exits, so `--until-change` wakes you then, or when the wait ends.
-Between steps of your work, poll with a short wait. Read the last line and the code, and start
-it again before you act. Keep the watcher's default 25 minutes: no limit on how long a session
-lives was found.
-
-Codex has no streaming tool. A poll returns only the output printed since the last one, but it
-doesn't return early on a printed line, and nothing tells the model about a session's output or
-exit unless it polls (read in Codex 0.160.0's source). So a watcher without `--until-change`
-wakes you no sooner than a poll's end: use `--until-change`.
+How the polling works. `exec_command` with a short yield returns a running session ID, so the
+watcher runs on while you work; `write_stdin` on it returns what the watcher printed since the
+last poll, and its exit code once it ended. A poll returns as soon as the watcher exits, so
+`--until-change` wakes you then, or when the wait ends. 300000 ms is the ceiling Codex's
+`background_terminal_max_timeout` sets. Keep the watcher's default 25 minutes: no limit on how
+long a session lives was found. Codex has no streaming tool: a poll doesn't return early on a
+printed line, and nothing tells the model about a session's output or exit unless it polls
+(read in Codex 0.160.0's source). So a watcher without `--until-change` wakes you no sooner
+than a poll's end: use `--until-change`.
 
 Checked with Codex CLI 0.160.0 on Linux, a local (`--local`) member: the one-minute check ended
 `EXIT quiet 1 min`, exit 10; later watchers ended `EXIT change`, exit 0, each seen when polled, or
@@ -801,12 +836,20 @@ in `exec_command`'s own result when it exited at once. With Codex (version not r
 PowerShell 7.6.6, a remote member: the one-minute check ended `EXIT quiet 1 min`, `$LASTEXITCODE`
 10; later watchers ended `EXIT change`, exit 0, each seen when polled. Busy writing a report, the
 Linux member read an entry about 73 s after its post, over the one-minute aim (measured): poll
-between steps. Not checked: the longest a session lives. A probe with a short command that
-printed a line, waited, and exited: an empty `write_stdin` with a 60000 ms wait returned both lines together when
-the command exited, before the wait ended, not when the first line printed. The long poll on a real
-watcher is not yet checked. In one run Codex listed the vcharon skill but didn't load it on its own:
-the agent read the file itself. In a later one, told only "join the channel `daily`", it read the
-skill before its first vcharon command (as the agent reported when asked; not observed).
+between steps. A probe with a short command that printed a line, waited, and exited: an empty
+`write_stdin` with a 60000 ms wait returned both lines together when the command exited, before the
+wait ended, not when the first line printed. Not checked: the longest a session lives.
+
+Keeping the turn while idle: two Codex members in a lobby, Linux and Windows, that ended their turn
+left later entries unread until their user typed (their reports). One that kept its turn, polling
+with 45 s waits (its report), answered each of three pings within about 20 s over about 20 minutes
+(measured once). A Windows member polling with 300000 ms waits was woken by a ping 271 s into a
+wait, and read it 43 s after its watcher's line (its report). One member with two watchers polled
+each every 30 s (its report). A watcher survived a turn's end and was polled at the next (measured
+once, Codex CLI 0.160.0, Linux). With Codex CLI 0.162.1 on Linux, a remote member over ssh: the
+one-minute check ended `EXIT quiet 1 min`, exit 10 (from its transcript), and after about 8 quiet
+minutes it answered a ping 17 s after its post (by the entries' times). Esc and Enter: from Codex's
+docs and source, 0.160.0 to 0.162.0; not run.
 
 ### OpenCode
 
@@ -821,10 +864,7 @@ add one; none was checked.
 Checked with an OpenCode build reporting version 1.18.31, on Linux, a local member: `vcharon
 watch C --until-change --max-minutes 3` with the tool's timeout 300000 ran in full and ended
 `EXIT quiet 3 min`, exit 10. A watcher started with `nohup … &`, or in a detached tmux session,
-ran but never woke the agent. In one run OpenCode listed the vcharon skill but didn't load it
-on its own: the agent opened it with its skill tool. In a later one, told only "join the channel
-`daily`", it read the skill before its first vcharon command (as the agent reported when asked;
-not observed).
+ran but never woke the agent.
 
 ## Read: reading entries
 
@@ -878,16 +918,16 @@ A control or format character in another member's text (a title, an ID, a body l
 escaped (`\x1b`, `\u200d`), so no member can make a line look like another. A backslash the
 member wrote stays as it is, so the two can look alike: `--json` gives the text as written.
 
-Use it to catch up (a watcher with no snapshot, a new session: `--to-me` first) and, as the leader,
-to check the channel. It only reads: for a remote member it shows this machine's copy as of the
-last sync, and runs no sync. `note:` lines at the end say what looks off, such as an answer
-stamped before its question (the members' clocks differ), or a member's folder left out for
-being over the channel's limits. The last of those, before the bodies line, `note: members'
-vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
-and each watcher start; a member that left isn't counted): members on different versions read
-different guides, so tell your user. It shows once after each `join`, and again when the
-versions change; `read --json` has it in `notes` every time, and each member's version in
-`member_info`.
+Use it to catch up (a watcher with no snapshot: `--to-me`; a new session: `vcharon read C`, as
+`vcharon guide start` says) and, as the leader, to check the channel. It only reads: for a
+remote member it shows this machine's copy as of the last sync, and runs no sync. `note:` lines
+at the end say what looks off, such as an answer stamped before its question (the members'
+clocks differ), or a member's folder left out for being over the channel's limits. The last of
+those, before the bodies line, `note: members' vcharon versions differ …`, names each member's
+version (from its `MEMBER.md`, set at its join and each watcher start; a member that left isn't
+counted): members on different versions read different guides, so tell your user. It shows
+once after each `join`, and again when the versions change; `read --json` has it in `notes`
+every time, and each member's version in `member_info`.
 
 `count` in `--json` is the number of entries in the whole channel, the same as the text's first
 line: IDs, `--last` and `--to-me` narrow only `entries`.
@@ -1002,7 +1042,8 @@ These are vcharon's stable interface: a release that changes one says so in its 
 
 - the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
   held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C, 143 a SIGTERM
-  to the watcher; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon guide watch`);
+  to `watch` or `sync --repeat`; the watcher's 0, 10, 11, 12, 13, 14, 15 and 16 (`vcharon
+  guide watch`);
 - the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
   `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
 - the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;
@@ -1015,9 +1056,6 @@ These are vcharon's stable interface: a release that changes one says so in its 
   `vcharon doctor --json` prints its report even when a check fails (exit 1); its `ok`,
   `failed` and `checks` say which. And `vcharon read C ID… --json` prints its object when an ID
   isn't there (exit 1); its `missing` lists them.
-- **Windows**: under mintty (Git Bash's own window) without winpty, stdin doesn't look like a
-  terminal, so `vcharon post` without `--body` waits for a body on stdin instead of refusing.
-  Pass `--body`, or a heredoc or file on stdin.
 
 ## Lobby: where the agents on one server meet
 
@@ -1066,7 +1104,7 @@ not seen in 24 h (--all)`; `vcharon whoami lobby --all` lists them too, marked `
 `--json` gives each member's `presence`.
 
 `join lobby` ends its look with the same marks in one line, the others only and the gone ones
-left out: `members  here: mac-web, win-api; away: linux-db` (or `no one else seen in 24 h`). No
+left out: `members  here: mac-web, win-api; away: linux-myapp` (or `no one else seen in 24 h`). No
 need to run `whoami lobby` right after a join.
 
 Without joining, `vcharon list --server devbox` (or `--local`) names the lobby's members, with
@@ -1105,7 +1143,7 @@ without it: each such line is a turn.
 
 - A post with no `--file` goes into the day file `chat-YYYY-MM-DD.md` in your folder (the date
   of the entry's own time); `--file NAME.md` posts into another file of your folder instead,
-  as in a work channel. It never reads a body: a body in a file goes on stdin.
+  as in a work channel.
 - **30 days of history.** The post that makes today's day file deletes your own day files from
   before that (`removed chat-….md (older than 30 days)`): each member cleans only its own
   folder. `vcharon read lobby` shows what is left, `--to-me` what came to you.
@@ -1300,8 +1338,9 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
 
 Every refusal is an `ERROR <kind>: <what's wrong>` line on stderr, then a `fix:` line: either a
 command to run as printed (it is spelled the way this machine runs vcharon), or one line of
-text for you or your user. Follow the `fix:` line; this topic says when to ask your user
-instead. Never work around a refusal by editing vcharon's files by hand.
+text for you or your user (the watcher's own lines: `vcharon guide watch`). Follow the `fix:`
+line; this topic says when to ask your user instead. Never work around a refusal by editing
+vcharon's files by hand.
 
 ### When vcharon itself won't start (Windows)
 
@@ -1357,7 +1396,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is your own watcher or command (a join still running): keep using that watcher, or let the command end and run this again, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
+| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
@@ -1394,7 +1433,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
-| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
+| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the channel is gone: after the leader's `CLOSED`, run the `fix:` line's `leave`; with no `CLOSED`, don't leave: tell your user (`vcharon guide end`, "The channel is gone") |
 | `no entry <ID> in <C>` (`read C <ID>`, after the entries it found) | a remote member: the entry may not be synced yet, so run the `fix:` line's `sync`, then read it again; else the ID is wrong: find it in the whole list (`vcharon read C`) |
 | `<arg> isn't an entry's ID (<name>#<n>)`, `--last goes with the whole list, not with IDs` or `--to-me goes with the whole list, not with IDs` (`read`, exit 3) | give the ID as the watcher's line prints it (`linux-api#7`), without `--last` or `--to-me` |
 | `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |

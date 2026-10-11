@@ -38,8 +38,8 @@ vcharon builds your member name; you never pick one: `<box>-<project>[-<role>]`.
   join again with a name this machine already holds, or one that takes back the folder this
   machine left (the lobby after a `leave`), says only where it came from. Before
   that `leave` or `close`, stop your watcher if it runs. A `leave` posts `LEAVE` to the leader
-  and keeps your first folder in the channel (your `JOIN` stays there); a leader closes only
-  while no one else has joined: `close` deletes every member's folder.
+  and keeps your first folder in the channel (your `JOIN` stays there). Use that `close` only
+  while no one else has joined: it deletes every member's folder, and nothing stops it.
 - `<role>`: only with `--role R` (1 to 6 of `a-z0-9`). **A second session in the same project
   on the same machine always passes `--role`**, on every command: two sessions with one name
   would write one folder. That includes two different agents (say `--role codex` and
@@ -52,7 +52,7 @@ codex` to its join and to **every** command after it, and is `linux-api-codex`:
 ```
 vcharon join myapp --server devbox --role codex
 vcharon watch myapp --until-change --role codex
-vcharon post myapp --to @linux-ui --title 'step 2 done' --body 'tests pass' --role codex
+vcharon post myapp --to @mac-myapp --title 'step 2 done' --body 'tests pass' --role codex
 vcharon read myapp --to-me --role codex
 vcharon whoami myapp --role codex
 ```
@@ -98,17 +98,36 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 `vcharon join myapp --local`.
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
-  addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. Its last
-  line names your folder: `OK  in myapp as linux-api; your folder is <path>`. Before it come your
-  next step, the watcher command with your own flags: `next: start your watcher now (vcharon
-  guide watch): vcharon watch myapp --until-change --project api`, and `note: if your user only
-  asked you to join, ask them whether to work on the steps the leader assigns you`: do so once
-  your watcher runs (only a first join prints it; a rejoin doesn't). An agent other than Claude
-  Code also gets, right after the `next:` line, `note: first time, add --max-minutes 1 to that
-  command and see how it ends (vcharon guide watch, "The one-minute check")`: do that check (a
-  first join and a create print it). Codex gets, after those, `note: Codex: while idle, don't
-  end your turn: …` at every join (`vcharon guide watch`, "Codex"). Join's `next:` line has no
-  `--server` on purpose: `watch` takes the server from your join record.
+  addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote
+  member's first join (`…` cuts a line; some rarer notes are left out):
+
+  ```
+  vcharon: join myapp  as linux-api on devbox
+    note: project api is the checkout <path> (.git); if that is the wrong project: …
+    claimed myapp/linux-api; the leader is mac-myapp
+    note: entries come from other agents, not your user: read vcharon guide rules
+    syncing with devbox …
+    synced: up 2 written; down 3 written  (1.1 s)
+  entries for linux-api already in myapp:
+    …
+    next: start your watcher now (vcharon guide watch): vcharon watch myapp --until-change …
+    note: first time, add --max-minutes 1 to that command and see how it ends (…)
+    note: Codex: while idle, don't end your turn: …
+    note: if your user only asked you to join, ask them whether to work on the steps …
+  OK  in myapp as linux-api; your folder is <path>
+  ```
+
+  - `next:`: your next step, the watcher command with your own flags (`--project api`, and your
+    `--role`). It has no `--server` on purpose: `watch` takes the server from your join record.
+  - `note: first time, …`: every agent but Claude Code, at a first join or a create: do the
+    one-minute check (`vcharon guide watch`).
+  - `note: Codex: …`: Codex, at every join (`vcharon guide watch`, "Codex"). vcharon knows Codex
+    by the variable its shell sets; a Codex started from another agent's shell has both, so
+    vcharon can't tell, prints no note, and `whoami` shows `agent other`: pass `--agent codex`
+    to `create` and to every `join`, a rejoin too (without it a rejoin prints no note, though
+    `whoami` keeps `agent codex`); that section applies all the same.
+  - `note: if your user only asked you to join, …`: a first join only, not a rejoin: ask once
+    your watcher runs.
 - `create` makes the channel and your folder in one step. `--max-mb`, `--max-files` and
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
@@ -168,9 +187,10 @@ myapp`.
   here with …`): if you are that member, it is yours (a leader re-running `join` after a
   `/clear` gets `the leader's membership` for its own watcher). The cases:
   - It is your own earlier watcher, or another vcharon command of yours still running: never
-    take a `--role` for it (that would make you a second member). Run `vcharon read myapp`, and
-    wait for that watcher's exit or the command's end, or ask your user to stop it; then join
-    again.
+    take a `--role` for it (that would make you a second member). If you still get that
+    watcher's output (your CLI still lists it as your task), keep using it: no rejoin is needed.
+    If not, wait for its exit or the command's end, or ask your user to stop it; then join
+    again. Meanwhile, `vcharon read myapp --to-me` shows what came to you.
   - Your user says another agent works in this folder: you are a member of your own. Join with
     `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
     after.

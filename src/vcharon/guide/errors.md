@@ -2,8 +2,9 @@
 
 Every refusal is an `ERROR <kind>: <what's wrong>` line on stderr, then a `fix:` line: either a
 command to run as printed (it is spelled the way this machine runs vcharon), or one line of
-text for you or your user. Follow the `fix:` line; this topic says when to ask your user
-instead. Never work around a refusal by editing vcharon's files by hand.
+text for you or your user (the watcher's own lines: `vcharon guide watch`). Follow the `fix:`
+line; this topic says when to ask your user instead. Never work around a refusal by editing
+vcharon's files by hand.
 
 ## When vcharon itself won't start (Windows)
 
@@ -59,7 +60,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is your own watcher or command (a join still running): keep using that watcher, or let the command end and run this again, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
+| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
@@ -96,7 +97,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
-| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the leader closed the channel: `vcharon guide end` |
+| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the channel is gone: after the leader's `CLOSED`, run the `fix:` line's `leave`; with no `CLOSED`, don't leave: tell your user (`vcharon guide end`, "The channel is gone") |
 | `no entry <ID> in <C>` (`read C <ID>`, after the entries it found) | a remote member: the entry may not be synced yet, so run the `fix:` line's `sync`, then read it again; else the ID is wrong: find it in the whole list (`vcharon read C`) |
 | `<arg> isn't an entry's ID (<name>#<n>)`, `--last goes with the whole list, not with IDs` or `--to-me goes with the whole list, not with IDs` (`read`, exit 3) | give the ID as the watcher's line prints it (`linux-api#7`), without `--last` or `--to-me` |
 | `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |

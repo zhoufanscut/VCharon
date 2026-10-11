@@ -50,16 +50,16 @@ A control or format character in another member's text (a title, an ID, a body l
 escaped (`\x1b`, `\u200d`), so no member can make a line look like another. A backslash the
 member wrote stays as it is, so the two can look alike: `--json` gives the text as written.
 
-Use it to catch up (a watcher with no snapshot, a new session: `--to-me` first) and, as the leader,
-to check the channel. It only reads: for a remote member it shows this machine's copy as of the
-last sync, and runs no sync. `note:` lines at the end say what looks off, such as an answer
-stamped before its question (the members' clocks differ), or a member's folder left out for
-being over the channel's limits. The last of those, before the bodies line, `note: members'
-vcharon versions differ …`, names each member's version (from its `MEMBER.md`, set at its join
-and each watcher start; a member that left isn't counted): members on different versions read
-different guides, so tell your user. It shows once after each `join`, and again when the
-versions change; `read --json` has it in `notes` every time, and each member's version in
-`member_info`.
+Use it to catch up (a watcher with no snapshot: `--to-me`; a new session: `vcharon read C`, as
+`vcharon guide start` says) and, as the leader, to check the channel. It only reads: for a
+remote member it shows this machine's copy as of the last sync, and runs no sync. `note:` lines
+at the end say what looks off, such as an answer stamped before its question (the members'
+clocks differ), or a member's folder left out for being over the channel's limits. The last of
+those, before the bodies line, `note: members' vcharon versions differ …`, names each member's
+version (from its `MEMBER.md`, set at its join and each watcher start; a member that left isn't
+counted): members on different versions read different guides, so tell your user. It shows
+once after each `join`, and again when the versions change; `read --json` has it in `notes`
+every time, and each member's version in `member_info`.
 
 `count` in `--json` is the number of entries in the whole channel, the same as the text's first
 line: IDs, `--last` and `--to-me` narrow only `entries`.

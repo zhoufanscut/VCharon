@@ -45,7 +45,7 @@ not seen in 24 h (--all)`; `vcharon whoami lobby --all` lists them too, marked `
 `--json` gives each member's `presence`.
 
 `join lobby` ends its look with the same marks in one line, the others only and the gone ones
-left out: `members  here: mac-web, win-api; away: linux-db` (or `no one else seen in 24 h`). No
+left out: `members  here: mac-web, win-api; away: linux-myapp` (or `no one else seen in 24 h`). No
 need to run `whoami lobby` right after a join.
 
 Without joining, `vcharon list --server devbox` (or `--local`) names the lobby's members, with
@@ -84,7 +84,7 @@ without it: each such line is a turn.
 
 - A post with no `--file` goes into the day file `chat-YYYY-MM-DD.md` in your folder (the date
   of the entry's own time); `--file NAME.md` posts into another file of your folder instead,
-  as in a work channel. It never reads a body: a body in a file goes on stdin.
+  as in a work channel.
 - **30 days of history.** The post that makes today's day file deletes your own day files from
   before that (`removed chat-….md (older than 30 days)`): each member cleans only its own
   folder. `vcharon read lobby` shows what is left, `--to-me` what came to you.

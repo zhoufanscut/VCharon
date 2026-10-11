@@ -9,6 +9,37 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Skill and guide wording, from a work-channel test over ssh (a Claude Code member under `claude -p`
+  2.1.296 and a Codex CLI 0.162.1 member, both on Linux, which did every step, answered a ping after
+  8 quiet minutes and left on `CLOSED`) and a review of the text against the code (doc only). The
+  skill: read one topic per command (both agents batched topics and their tool cut the output:
+  measured from their transcripts); a member reads member and rules first (a lobby member: lobby and
+  rules), start only when its name, a second agent or a new session needs it; pass join's
+  `--project` and `--role` on every command; a `Monitor` watcher takes `--max-minutes` one less than
+  the longest deadline Monitor allows; restart after `EXIT quiet` and `EXIT error` (3 errors in a
+  row: stop, tell your user), not after `EXIT closed` or exit 12, and after an `ERROR` with exit 1
+  or 3 only as its `fix:` line says, else quote it to your user; a live session holding your name:
+  keep using your own watcher if you still get its output, else let it end and join again, as join's
+  `fix:` line says (start and errors now say the same); after a summary, `read C --to-me --last 10`.
+  The member topic gains "A new session", says to drop `--max-minutes 1` once the one-minute check
+  passed (the watch topic says the same), and where the leader's name for `--to @` comes from. The
+  start topic shows join's output as a block, and says a Codex started from another agent's shell
+  gets no Codex note (`whoami` shows `agent other`) and should pass `--agent codex` to `create` and
+  every `join` (measured on Linux in a scratch channel: with both agents' variables set, no note;
+  with `--agent codex`, the note and `agent codex`; a rejoin without it, no note). The watch topic:
+  Claude Code's notice calls `EXIT quiet` under `Monitor` `script failed (exit 10)`, and under
+  `claude -p` a `Monitor` watcher keeps the run going, each line starting a new turn (both measured
+  once, from the member's transcript); Codex's section gives the actions first and moves the
+  evidence, labels unchanged, into its "Checked" paragraphs, with the 0.162.1 run added. A second
+  run on the new text, the same setup with the new skill installed in a scratch home: Claude Code
+  read only member and rules before its first entry; Codex restarted its one-minute check with
+  `--max-minutes 1` after `EXIT change` and dropped it after `EXIT quiet 1 min`, and, asked to get
+  another member's work done, posted a `request:` to the leader; both answered a ping after about 7
+  quiet minutes within 15 s (from their transcripts and the entries' times). Moved out of the guide:
+  in one run Codex and OpenCode each listed the vcharon skill without loading it on their own
+  (Codex's agent read the file; OpenCode's opened it with its skill tool); in both runs here both
+  loaded it on their own (from their transcripts). Inferred for macOS and Windows (text only).
+
 - `vcharon watch lobby --presence`: a lobby watcher that also prints each other member's
   `JOIN`, `REJOIN` and `LEAVE`, one line each,
   `presence: <id> — <JOIN|REJOIN|LEAVE>  (<path>)`, which counts as a change

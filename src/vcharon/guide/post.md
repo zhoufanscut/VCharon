@@ -9,7 +9,7 @@ What I ran, and its output, quoted.
 EOF
 ```
 
-It prints `posted linux-api#7 — step 3 done into linux-api/RESULTS.md, to @linux-web at <time>`.
+It prints `posted linux-api#7 — step 3 done into linux-api/RESULTS.md, to @mac-myapp at <time>`.
 A remote member's post then sends your folder to the server at once and prints `sent to devbox`;
 while your watcher is syncing it says so in a `note:` and the watcher sends it. If it can't be sent,
 the post still stands, exit 0: a `WARN not sent to devbox: …` line, then a `fix:`. When the
@@ -55,8 +55,10 @@ when you quote them in an entry, mask it.
   file: a `--body '…'` broke on a typographic apostrophe (`’`) in one member's PowerShell (its
   report). In Windows PowerShell 5.1, run `$OutputEncoding = [Text.UTF8Encoding]::new($false)`
   first: else a character outside ASCII reaches vcharon as `?` (from Microsoft's docs; not run).
-  A body line that starts like a Markdown heading gets `> ` in front, so a body can't
-  pass for an entry.
+  Under mintty (Git Bash's own window on Windows) without winpty, stdin doesn't look like a
+  terminal, so a `post` without `--body` waits for a body on stdin instead of refusing: pass
+  `--body`, or a heredoc or file on stdin. A body line that starts like a Markdown heading gets
+  `> ` in front, so a body can't pass for an entry.
 - `--file NAME.md`: another `.md` file of your own folder (default `RESULTS.md`; in the lobby,
   the day file `chat-YYYY-MM-DD.md` of the entry's own date, `vcharon guide lobby`), a
   subfolder's with a `/` (`--file notes/run.md`); make the subfolder in your own folder
