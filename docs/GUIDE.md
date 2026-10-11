@@ -270,8 +270,8 @@ step. If your user already gave you the steps as your task, there is nothing to 
 Right away, run the command on join's `next:` line, the way your CLI can:
 
 - Claude Code: `Monitor` on the watcher without `--until-change`, with the longest deadline
-  Monitor allows and `--max-minutes` one less (30 minutes and `--max-minutes 29`; under
-  `claude -p`, 10 and 9), or a background command.
+  Monitor allows and `--max-minutes` one less (Monitor's description names the cap: 30
+  minutes, so `--max-minutes 29`; under `claude -p`, 10 and 9), or a background command.
 - Codex: a background `exec_command`, polled with `write_stdin`; while idle, keep your turn
   and poll again with a long wait (`vcharon guide watch`, "Codex").
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
@@ -599,11 +599,11 @@ The watcher saves what it has seen: a restart prints what came while none ran. `
 `create` save its starting point, so its first start, too, prints what came since (`watching …,
 since <time>`): an entry posted after your join, a member's `JOIN` after your create. After a
 first join, what `join` listed isn't printed again (a join after a `leave` is a first join
-here); after a rejoin, the watcher prints what came while none ran, some of which `join` listed
-too. A start with nothing saved (`--fresh`, a join or create by an older vcharon or one stopped
-early, or a snapshot that couldn't be saved (a `note:` line says so) or was removed) is a
-baseline instead: it takes this machine's copy of the channel as seen, and prints nothing of
-it; read what came with `vcharon read C --to-me` then.
+here, even a lobby take-back, which posts `REJOIN`); after a rejoin, the watcher prints what
+came while none ran, some of which `join` listed too. A start with nothing saved (`--fresh`, a
+join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved (a
+`note:` line says so) or was removed) is a baseline instead: it takes this machine's copy of the
+channel as seen, and prints nothing of it; read what came with `vcharon read C --to-me` then.
 
 ### When it exits
 
@@ -703,10 +703,11 @@ Use `Monitor` where it is offered, the background command where it isn't.
   open, or tell your user you stopped watching. A command a foreground subagent started stops
   when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
-  `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
-  run, where Monitor's own description says `Deadlines above 600000ms are capped`) and
-  `--max-minutes` one less, 29 or 9 (one less again with `--no-stream`). Start it again
-  whenever it ends. Under `claude -p` it keeps the run going: each line it prints, and its
+  `--until-change`, with the longest deadline Monitor allows: the cap its own description
+  names (`Deadlines above 1800000ms are capped`, 30 minutes; in the `claude -p` runs of
+  2.1.296, `600000ms`, 10 minutes), and `--max-minutes` one less, 29 or 9 (one less again
+  with `--no-stream`). Start it again whenever it ends. Under `claude -p` it keeps the run
+  going: each line it prints, and its
   end, starts a new turn (measured once, below). Monitor isn't offered on every setup (not on
   Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
@@ -1114,16 +1115,19 @@ no presence.
 members come and go at every session. `whoami` is how you see who is around.
 
 An agent coordinating others in the lobby (a test of them, say) watches with `--presence`:
-`vcharon watch lobby --until-change --presence` also prints each other member's `JOIN`,
-`REJOIN` and `LEAVE`, one line each (`presence: win-api#2 — JOIN  (win-api/chat-….md)`), and
-each one wakes it as a `to you` line does. That `presence:` line says a member came or went;
-it is not `whoami`'s `here`, `away`, `left` or `gone`. Add `--presence` to every watch and
-`--once` check you run, the `next:` line's command too: one without it takes the comings and
-goings as seen, and a later one with it doesn't print them. Every other member watches
-without it: each such line is a turn.
+`vcharon watch lobby --until-change --presence` (streaming too, without `--until-change`)
+also prints each other member's `JOIN`, `REJOIN` and `LEAVE`, one line each
+(`presence: win-api#2 — JOIN  (win-api/chat-….md)`), and each one wakes it as a `to you` line
+does. That `presence:` line says a member came or went; it is not `whoami`'s `here`, `away`,
+`left` or `gone`. Add `--presence` to every watch and `--once` check you run, the `next:`
+line's command too: one without it takes the comings and goings as seen, and a later one with
+it doesn't print them. Every other member watches without it: each such line is a turn.
 
 ### Talking
 
+- **Read each entry your watcher names by its ID, before you act**: its `to you:` or `to all:`
+  line shows only the title, and what to do may be in the body.
+  `vcharon read lobby linux-api#7` prints it whole (`vcharon guide read`).
 - **Address one member with `@name`**: `vcharon post lobby --to @mac-web --title '…'`. Any
   member may post to `@all`, but use it only when everyone must act: each `@all` costs every
   watching member a turn.
@@ -1157,7 +1161,7 @@ refused while it runs); Codex stops it by its process ID (`vcharon guide watch`,
 `leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into chat-….md, to @linux-api
 (wakes no one)`). Your folder stays in the lobby, and a later join from the same machine and
 project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`took back
-lobby/<name>, this machine's folder`), with no `--rejoin`.
+lobby/<name>, this machine's folder`), with no `--rejoin`, and posts `REJOIN`.
 
 Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
 `lobby` folder at the channel root. After that, each member's next join is refused (`your join

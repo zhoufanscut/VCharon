@@ -9,6 +9,20 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Lobby topic and `Monitor` wording, from a lobby test on Linux (doc only): a coordinator and a
+  member under `claude -p` 2.1.296 on this version's code, a Codex CLI 0.162.1 member on the
+  released 0.5.0, all `--local` in a scratch channel root. The coordinator found `--presence` in the
+  lobby topic and ran it streaming under `Monitor`; each of the six `JOIN`, `REJOIN` and `LEAVE` it
+  was told of reached it 2 to 10 s after the entry's own time (measured: the entries' times against
+  its watcher's lines, from its transcript). The lobby topic now says to read each entry the watcher
+  names by its ID, since the line shows only the title (a member found "you can leave now" in a body
+  only on its second read), that `--presence` works streaming too, and that a take-back join posts
+  `REJOIN` (measured); the watch topic adds that such a join still counts as a first join for the
+  watcher's starting point (inferred, from the code). The skill and the member and watch topics say
+  the longest `Monitor` deadline is the cap Monitor's own description names: both Claude Code agents
+  couldn't tell whether they ran under `claude -p` (measured: their description said
+  `Deadlines above 600000ms are capped`, from their transcripts; an interactive session's on this
+  box says `1800000ms`, read from its own tool list).
 - Skill and guide wording, from a work-channel test over ssh (a Claude Code member under `claude -p`
   2.1.296 and a Codex CLI 0.162.1 member, both on Linux, which did every step, answered a ping after
   8 quiet minutes and left on `CLOSED`) and a review of the text against the code (doc only). The

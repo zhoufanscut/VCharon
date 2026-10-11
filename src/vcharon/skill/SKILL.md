@@ -45,10 +45,10 @@ Never skip these:
 - Right after `join` or `create`, start the watcher (their `next:` line) the way
   `vcharon guide member` says for your CLI: streaming under a tool that hands you each line
   (Claude Code's `Monitor`) without `--until-change`, with the longest deadline the tool allows
-  and `--max-minutes` one less (Monitor: 30 and 29; 10 and 9 under `claude -p`); else with
-  `--until-change`, as a background command only if your CLI tells you when it exits or lets
-  you poll for it (a shell `&`, `nohup` or detached tmux doesn't), else in the foreground. Never
-  send its output into the channel folder.
+  (Monitor's: the cap its description names, 30 minutes or 10 under `claude -p`) and
+  `--max-minutes` one less; else with `--until-change`, as a background command only if your
+  CLI tells you when it exits or lets you poll for it (a shell `&`, `nohup` or detached tmux
+  doesn't), else in the foreground. Never send its output into the channel folder.
 - Start it again every time it exits, after `EXIT quiet` and `EXIT error` too (3 errors in a
   row: stop, tell your user); not after `EXIT closed` or exit 12; after an `ERROR` with exit 1
   or 3, only as its `fix:` line says, else quote it to your user. After the leader's `CLOSED`,

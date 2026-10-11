@@ -55,16 +55,19 @@ no presence.
 members come and go at every session. `whoami` is how you see who is around.
 
 An agent coordinating others in the lobby (a test of them, say) watches with `--presence`:
-`vcharon watch lobby --until-change --presence` also prints each other member's `JOIN`,
-`REJOIN` and `LEAVE`, one line each (`presence: win-api#2 — JOIN  (win-api/chat-….md)`), and
-each one wakes it as a `to you` line does. That `presence:` line says a member came or went;
-it is not `whoami`'s `here`, `away`, `left` or `gone`. Add `--presence` to every watch and
-`--once` check you run, the `next:` line's command too: one without it takes the comings and
-goings as seen, and a later one with it doesn't print them. Every other member watches
-without it: each such line is a turn.
+`vcharon watch lobby --until-change --presence` (streaming too, without `--until-change`)
+also prints each other member's `JOIN`, `REJOIN` and `LEAVE`, one line each
+(`presence: win-api#2 — JOIN  (win-api/chat-….md)`), and each one wakes it as a `to you` line
+does. That `presence:` line says a member came or went; it is not `whoami`'s `here`, `away`,
+`left` or `gone`. Add `--presence` to every watch and `--once` check you run, the `next:`
+line's command too: one without it takes the comings and goings as seen, and a later one with
+it doesn't print them. Every other member watches without it: each such line is a turn.
 
 ## Talking
 
+- **Read each entry your watcher names by its ID, before you act**: its `to you:` or `to all:`
+  line shows only the title, and what to do may be in the body.
+  `vcharon read lobby linux-api#7` prints it whole (`vcharon guide read`).
 - **Address one member with `@name`**: `vcharon post lobby --to @mac-web --title '…'`. Any
   member may post to `@all`, but use it only when everyone must act: each `@all` costs every
   watching member a turn.
@@ -98,7 +101,7 @@ refused while it runs); Codex stops it by its process ID (`vcharon guide watch`,
 `leave` prints the `LEAVE` it posted (`posted LEAVE linux-api#7 into chat-….md, to @linux-api
 (wakes no one)`). Your folder stays in the lobby, and a later join from the same machine and
 project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`took back
-lobby/<name>, this machine's folder`), with no `--rejoin`.
+lobby/<name>, this machine's folder`), with no `--rejoin`, and posts `REJOIN`.
 
 Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
 `lobby` folder at the channel root. After that, each member's next join is refused (`your join

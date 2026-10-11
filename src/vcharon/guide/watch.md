@@ -118,11 +118,11 @@ The watcher saves what it has seen: a restart prints what came while none ran. `
 `create` save its starting point, so its first start, too, prints what came since (`watching …,
 since <time>`): an entry posted after your join, a member's `JOIN` after your create. After a
 first join, what `join` listed isn't printed again (a join after a `leave` is a first join
-here); after a rejoin, the watcher prints what came while none ran, some of which `join` listed
-too. A start with nothing saved (`--fresh`, a join or create by an older vcharon or one stopped
-early, or a snapshot that couldn't be saved (a `note:` line says so) or was removed) is a
-baseline instead: it takes this machine's copy of the channel as seen, and prints nothing of
-it; read what came with `vcharon read C --to-me` then.
+here, even a lobby take-back, which posts `REJOIN`); after a rejoin, the watcher prints what
+came while none ran, some of which `join` listed too. A start with nothing saved (`--fresh`, a
+join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved (a
+`note:` line says so) or was removed) is a baseline instead: it takes this machine's copy of the
+channel as seen, and prints nothing of it; read what came with `vcharon read C --to-me` then.
 
 ## When it exits
 
@@ -222,10 +222,11 @@ Use `Monitor` where it is offered, the background command where it isn't.
   open, or tell your user you stopped watching. A command a foreground subagent started stops
   when that subagent's run ends.
 - **`Monitor`**, which streams each line to you as it is printed: run the watcher without
-  `--until-change`, with the longest deadline Monitor allows (30 minutes; 10 in a `claude -p`
-  run, where Monitor's own description says `Deadlines above 600000ms are capped`) and
-  `--max-minutes` one less, 29 or 9 (one less again with `--no-stream`). Start it again
-  whenever it ends. Under `claude -p` it keeps the run going: each line it prints, and its
+  `--until-change`, with the longest deadline Monitor allows: the cap its own description
+  names (`Deadlines above 1800000ms are capped`, 30 minutes; in the `claude -p` runs of
+  2.1.296, `600000ms`, 10 minutes), and `--max-minutes` one less, 29 or 9 (one less again
+  with `--no-stream`). Start it again whenever it ends. Under `claude -p` it keeps the run
+  going: each line it prints, and its
   end, starts a new turn (measured once, below). Monitor isn't offered on every setup (not on
   Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
