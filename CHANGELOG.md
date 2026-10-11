@@ -7,7 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.6.0rc2 — 2026-10-11
+
+The second release candidate for 0.6.0, published as a GitHub pre-release: a plain `vcharon
+--update` on 0.6.0rc1 offers it, and `vcharon --update --rc` on 0.5.0. From a lobby test of
+0.6.0rc1 with a Codex member in its Linux sandbox: the lock's PID is written only from the initial
+PID namespace, and the guide tells Codex to stop its watcher through its session. Nothing
+DESIGN.md lists under "Stable" changes: the exit-12 line may now end without its ` (PID <n>)`, as
+0.6.0rc1 already allowed.
+
+Checked: the unit suite on Linux (measured, Python 3.13); the PID change and the guide text with a
+Codex CLI 0.162.1 member in its `workspace-write` sandbox (measured, as each entry says). Not run:
+Windows, macOS and WSL2 by hand for this candidate's changes.
 
 - Guide (doc only): Codex stops its watcher with Ctrl-C through the watcher's exec session
   (`write_stdin` with the Ctrl-C character alone, then one empty poll), not by its process ID,
