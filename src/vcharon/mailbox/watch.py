@@ -803,7 +803,8 @@ def take_lock(path):
     the file the path names once it is taken: leave and close delete the file while they hold
     it (channel_cmd.drop_held), so one opened just before that would be a lock on a deleted
     file, while the next taker locks a new one. Such a lock is let go and the file opened
-    again; still not the path's file after LOCK_TRIES opens, None."""
+    again; still not the path's file after LOCK_TRIES opens, None. The lock taken, this
+    process's PID goes into the file (Lock.write_pid), for _locked's line to name."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     name = path + ".lock"
     for _ in range(LOCK_TRIES):
@@ -819,6 +820,7 @@ def take_lock(path):
         if not held:
             lk.release()
             return None
+        lk.write_pid()
         return lk
     return None
 
@@ -1327,9 +1329,11 @@ def _locked(w, state):
         raise fsops.error(e, state + ".lock")
     if lk is None:
         # create, join, leave and close hold this lock while they run (DESIGN, "Create, join,
-        # leave, close"). The older text stays the line's start: the exit-12 line is matched on it
+        # leave, close"). The older text stays the line's start: the exit-12 line is matched on
+        # it. The holder's PID, when it wrote one, so the user (or agent) can find that process
+        pid = Lock.holder_pid(state + ".lock")
         w.say("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
-              "leave or close of this member" % state)
+              "leave or close of this member%s" % (state, " (PID %d)" % pid if pid else ""))
     return lk
 
 

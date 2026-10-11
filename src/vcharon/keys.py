@@ -154,7 +154,7 @@ def _tool(settings, key_file, agent, say, log):
                    else "there's no ssh agent here: SSH_AUTH_SOCK is unset")
             raise VCharonError("config", why, hint=MAC_AGENT_HINT)
         if settings.ssh_path != APPLE_SSH:
-            say("  warn    only Apple's ssh (%s) reads the Keychain; ssh_path is %s"
+            say("  warn       only Apple's ssh (%s) reads the Keychain; ssh_path is %s"
                 % (APPLE_SSH, settings.ssh_path))
         argv = add + ["--apple-use-keychain", key_file]
     elif osn == "windows":
@@ -172,7 +172,7 @@ def _tool(settings, key_file, agent, say, log):
                                hint="a forwarded agent ends with its ssh login; log in again, or "
                                "start one: %s" % START_AGENT)
         argv = add + [key_file]
-    say("  run     %s" % show_argv(argv))
+    say("  run        %s" % show_argv(argv))
     log.info("running ssh-add on the terminal; vcharon never sees the passphrase")
     try:
         rc = fsops.run_terminal(argv)
@@ -186,11 +186,11 @@ def _tool(settings, key_file, agent, say, log):
 
 
 def _agent_only(key, say):
-    say("  key     %s: only the agent holds it; there's no key file here to unlock"
+    say("  key        %s: only the agent holds it; there's no key file here to unlock"
         % key_text(key))
-    say("  note    runs work while that agent holds the key")
+    say("  note       runs work while that agent holds the key")
     if platform.os_name() == "linux":
-        say("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
+        say("  note       an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
             "login that brought it is open; for cron, use a key without a passphrase on this "
             "machine (README.md, \"Keys\")")
 
@@ -207,11 +207,11 @@ def unlock(settings, dest, key_file, log, say):
     say("vcharon: key %s" % (dest or ssh.shown(key_file)))
     agent = agent_state(settings)
     state = agent[0]
-    say("  agent   %s" % agent_text(*agent))
+    say("  ssh-agent  %s" % agent_text(*agent))
     osn = platform.os_name()
     tool = None
     if key_file is not None:
-        say("  key     %s: given with --key" % ssh.shown(key_file))
+        say("  key        %s: given with --key" % ssh.shown(key_file))
         tool = key_file
     else:
         probe = ssh.verbose_probe(settings, dest, log)
@@ -224,11 +224,11 @@ def unlock(settings, dest, key_file, log, say):
         if key is None:
             if not ok:
                 raise no_key_error(dest, state)
-            say("  key     none: %s logs in without a key" % dest)
+            say("  key        none: %s logs in without a key" % dest)
         elif kind == "agent":
             _agent_only(key, say)
         elif kind == "file" and not ok:
-            say("  key     %s: the server accepts it, but it's locked" % key_text(key))
+            say("  key        %s: the server accepts it, but it's locked" % key_text(key))
             tool = key.ident
         elif not ok:
             raise VCharonError("connect", "ssh couldn't log in to %s with %s"
@@ -236,32 +236,32 @@ def unlock(settings, dest, key_file, log, say):
         elif kind == "file+agent":
             if osn == "darwin":
                 # into the Keychain, so it survives a reboot
-                say("  key     %s: in the agent; saving its passphrase in the Keychain"
+                say("  key        %s: in the agent; saving its passphrase in the Keychain"
                     % key_text(key))
                 tool = key.ident
             elif osn == "windows":
-                say("  key     %s: already in the ssh-agent service, which keeps it across "
+                say("  key        %s: already in the ssh-agent service, which keeps it across "
                     "reboots" % key_text(key))
             else:
-                say("  key     %s: already in the agent, for as long as that agent runs"
+                say("  key        %s: already in the agent, for as long as that agent runs"
                     % key_text(key))
         elif kind == "file":
-            say("  key     %s: it has no passphrase; nothing to unlock" % key_text(key))
+            say("  key        %s: it has no passphrase; nothing to unlock" % key_text(key))
         else:
-            say("  key     %s: ssh logs in with it; nothing to unlock" % key_text(key))
+            say("  key        %s: ssh logs in with it; nothing to unlock" % key_text(key))
     if tool is not None:
         _tool(settings, tool, agent, say, log)
         if osn == "darwin":
-            say("  config  add these lines at the top of ~/.ssh/config:")
+            say("  config     add these lines at the top of ~/.ssh/config:")
             for line in _config_lines(dest, tool):
-                say("            %s" % line)
+                say("               %s" % line)
     if dest:
         try:
             with ssh.Session(settings, dest, log, probe=True) as session:
                 session.open()
         except VCharonError:
-            say("  test    FAIL")
+            say("  test       FAIL")
             raise
-        say("  test    ok: vcharon logs in to %s with no prompt" % dest)
+        say("  test       ok: vcharon logs in to %s with no prompt" % dest)
     say("OK  (%.1f s)" % (time.monotonic() - started))
     return 0

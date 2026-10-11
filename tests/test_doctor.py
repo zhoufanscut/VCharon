@@ -157,8 +157,8 @@ class DoctorTest(DoctorCase):
         home = self.home
         self.assertEqual(lines[0], "vcharon: doctor")
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine", "claimer",
-                                                "fake-dest", "push", "pull"])
+                                                "box", "ssh", "ssh-agent", "dirs", "machine",
+                                                "claimer", "fake-dest", "push", "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
         self.assertEqual(lines.pop(1), "  ok    vcharon    %s, protocol 3, reads channel "
@@ -178,7 +178,7 @@ class DoctorTest(DoctorCase):
                          % platform.os_word())
         self.assertEqual(lines[3], "  ok    ssh        OpenSSH_fake 1.0, for vcharon's tests "
                                    "(%s)" % platform.default_ssh_path())
-        self.assertEqual(lines[4], "  ok    agent      holds 1 key")
+        self.assertEqual(lines[4], "  ok    ssh-agent  holds 1 key")
         self.assertEqual(lines[5], "  ok    dirs       state %s, logs %s, joined %s, "
                          "channels %s" % (os.path.join(self.vcharon_home, "state"),
                             os.path.join(self.vcharon_home, "logs"),
@@ -317,7 +317,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "bundle"), [
             ("FAIL", "the helper's bundle has 1 module and no vcharon.helper: no server can run "
                      "it")])
-        at = lines.index("  FAIL  bundle   the helper's bundle has 1 module and no "
+        at = lines.index("  FAIL  bundle     the helper's bundle has 1 module and no "
                          "vcharon.helper: no server can run it")
         self.assertEqual(lines[at + 1].strip(), "fix: " + doctor.BUNDLE_HINT)
         _, out, _ = self.run_cli("doctor", "--json")
@@ -334,10 +334,10 @@ class DoctorTest(DoctorCase):
         self.write_config("")
         os.environ["FAKE_SSH_ADD_L_RC"] = "2"
         lines = self.doctor(code=0)
-        at = lines.index("  warn  agent    none: %s" % keys.no_agent_why())
-        self.assertEqual(lines[at + 1], "                 fix: " + NO_AGENT_FIX)
-        self.assertEqual(lines[5], "  ok    config   %s: 0 jobs" % self.config)
-        self.assertEqual(lines[6], "                 note: no channels joined over ssh; to check "
+        at = lines.index("  warn  ssh-agent  none: %s" % keys.no_agent_why())
+        self.assertEqual(lines[at + 1], "                   fix: " + NO_AGENT_FIX)
+        self.assertEqual(lines[5], "  ok    config     %s: 0 jobs" % self.config)
+        self.assertEqual(lines[6], "                   note: no channels joined over ssh; to check "
                                    "a server: vcharon doctor --server ALIAS")
         self.assertRegex(lines[-1], r"\AOK  nothing failed, 1 warning  \(\d+\.\d s\)\Z")
 
@@ -346,30 +346,30 @@ class DoctorTest(DoctorCase):
     def test_agent(self):
         self.write_config("")
         os.environ["FAKE_SSH_ADD_LIST"] = "256 SHA256:x a (ED25519)\n3072 SHA256:y b (RSA)\n"
-        self.assertEqual(self.of(self.doctor(code=0), "agent"), [("ok", "holds 2 keys")])
+        self.assertEqual(self.of(self.doctor(code=0), "ssh-agent"), [("ok", "holds 2 keys")])
         os.environ["FAKE_SSH_ADD_L_RC"] = "1"
         lines = self.doctor("--server", "fake-dest", code=0)
-        self.assertEqual(self.of(lines, "agent"), [("warn", "holds no keys")])
+        self.assertEqual(self.of(lines, "ssh-agent"), [("warn", "holds no keys")])
         self.assertIn("fix: " + platform.runnable("a key with a passphrase works only once "
                                                   "it's in the agent: run vcharon key fake-dest"),
-                      lines[lines.index("  warn  agent      holds no keys") + 1])
+                      lines[lines.index("  warn  ssh-agent  holds no keys") + 1])
         os.environ["FAKE_SSH_ADD_L_RC"] = "2"
         lines = self.doctor(code=0)
-        self.assertEqual(self.of(lines, "agent"),
+        self.assertEqual(self.of(lines, "ssh-agent"),
                          [("warn", "none: %s" % keys.no_agent_why())])
         sock = os.path.join(self.tmp, "gone.sock")
         os.environ["SSH_AUTH_SOCK"] = sock
         lines = self.doctor(code=0)
         # on Windows the socket isn't what answers: the agent is a service (keys.no_agent_why)
-        self.assertEqual(self.of(lines, "agent"),
+        self.assertEqual(self.of(lines, "ssh-agent"),
                          [("warn", "none: %s" % keys.no_agent_why())])
         if platform.os_name() != "windows":
             self.assertIn("fix: a forwarded agent ends with its ssh login; log in again",
-                          lines[lines.index("  warn  agent    none: nothing answers at %s" % sock)
+                          lines[lines.index("  warn  ssh-agent  none: nothing answers at %s" % sock)
                                 + 1])
         self.os_name("windows")
         lines = self.doctor(code=0)
-        self.assertEqual(self.of(lines, "agent"),
+        self.assertEqual(self.of(lines, "ssh-agent"),
                          [("warn", "none: the ssh-agent service isn't running")])
         self.assertIn("Start-Service ssh-agent", "\n".join(lines))
 
@@ -380,9 +380,9 @@ class DoctorTest(DoctorCase):
         self.patch(ssh, "ssh_add_prefix", side_effect=lambda settings: [missing])
         lines = self.doctor(code=0)
         why = "couldn't start %s: %s" % (missing, start_failure_text(missing))
-        self.assertEqual(self.of(lines, "agent"), [("warn", why)])
-        self.assertEqual(lines[lines.index("  warn  agent    " + why) + 1],
-                         "                 fix: install the OpenSSH client, or set ssh_path in "
+        self.assertEqual(self.of(lines, "ssh-agent"), [("warn", why)])
+        self.assertEqual(lines[lines.index("  warn  ssh-agent  " + why) + 1],
+                         "                   fix: install the OpenSSH client, or set ssh_path in "
                          "vcharon.ini")
 
     def test_python_on_windows(self):
@@ -392,7 +392,7 @@ class DoctorTest(DoctorCase):
         lines = self.doctor(code=0)
         # the floor (3.13) covers every OS: no warning of its own on Windows
         self.assertEqual([level for level, text in self.of(lines, "python")], ["ok", "warn"])
-        self.assertIn("  warn  python   32-bit Python on 64-bit Windows", lines)
+        self.assertIn("  warn  python     32-bit Python on 64-bit Windows", lines)
 
     def test_python_of_a_binary(self):
         # the standalone binary's Python is its own: the line says so, not "(<python path>)"
@@ -414,7 +414,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(got, 1)
         dirs = [line for line in out.splitlines() if line.startswith("  FAIL  dirs")]
         self.assertEqual(len(dirs), 2, out)
-        self.assertTrue(dirs[0].startswith("  FAIL  dirs     can't write in %s: "
+        self.assertTrue(dirs[0].startswith("  FAIL  dirs       can't write in %s: "
                                            % os.path.join(blocker, "state")), dirs)
 
     def test_dirs_refused_by_a_sandbox(self):
@@ -647,8 +647,8 @@ class DoctorTest(DoctorCase):
     def test_one_destination(self):
         lines = self.doctor("--server", "fake-dest", code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine", "claimer",
-                                                "fake-dest"])
+                                                "box", "ssh", "ssh-agent", "dirs", "machine",
+                                                "claimer", "fake-dest"])
 
     def test_bad_destination(self):
         got, out, err = self.run_cli("doctor", "--server=-x")
@@ -660,7 +660,7 @@ class DoctorTest(DoctorCase):
         self.write_config("[vcharon]\n")
         lines = self.doctor(code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "box", "ssh", "agent", "dirs", "machine",
+                                                "box", "ssh", "ssh-agent", "dirs", "machine",
                                                 "claimer"])
 
     def test_broken_config(self):
@@ -669,7 +669,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "config"),
                          [("FAIL", "vcharon.ini [vcharon] compress: must be yes or no")])
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "ssh", "agent", "dirs", "machine", "claimer"])
+                                                "ssh", "ssh-agent", "dirs", "machine", "claimer"])
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
@@ -762,8 +762,8 @@ class PathTest(DoctorCase):
         # right after the install line
         lines = self.doctor(code=0)
         self.assertEqual(self.subjects(lines)[:3], ["vcharon", "install", "path"])
-        row = lines.index("  warn  path     " + text)
-        self.assertEqual(lines[row + 1], " " * 17 + "fix: " + doctor.LATER_HINT)
+        row = lines.index("  warn  path       " + text)
+        self.assertEqual(lines[row + 1], " " * 19 + "fix: " + doctor.LATER_HINT)
         # a fix an agent would follow asks its user first
         for hint in (doctor.LATER_HINT, doctor.FIRST_HINT, doctor.CHECKOUT_HINT):
             self.assertTrue(hint.startswith("ask your user "), hint)

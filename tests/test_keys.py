@@ -19,7 +19,7 @@ DENIED = "fake@host: Permission denied (publickey)."
 ADMIN = ("once, in an admin PowerShell: Get-Service ssh-agent | Set-Service -StartupType "
          "Automatic; Start-Service ssh-agent")
 EVAL = 'start one in this shell: eval "$(ssh-agent -s)", then run vcharon key again'
-LINUX_NOTE = ("  note    an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
+LINUX_NOTE = ("  note       an agent forwarded by ssh -A or ForwardAgent lasts only while the ssh "
               "login that brought it is open; for cron, use a key without a passphrase on this "
               "machine (README.md, \"Keys\")")
 
@@ -113,17 +113,17 @@ class KeyTest(KeyCase):
         self.locked()
         out, _err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
-        self.assertEqual(out[:4], ["vcharon: key fake-dest", "  agent   holds no keys",
-                                   "  key     %s (RSA): the server accepts it, but it's locked"
-                                   % self.key, "  run     %s" % self.key_add_shown(
+        self.assertEqual(out[:4], ["vcharon: key fake-dest", "  ssh-agent  holds no keys",
+                                   "  key        %s (RSA): the server accepts it, but it's locked"
+                                   % self.key, "  run        %s" % self.key_add_shown(
                                        "--apple-use-keychain", self.key)])
-        self.assertEqual(out[4:10], ["  config  add these lines at the top of ~/.ssh/config:",
-                                     "            IgnoreUnknown UseKeychain",
-                                     "            Host fake-dest",
-                                     "                IdentityFile %s" % self.key,
-                                     "                UseKeychain yes",
-                                     "                AddKeysToAgent yes"])
-        self.assertEqual(out[10], "  test    ok: vcharon logs in to fake-dest with no prompt")
+        self.assertEqual(out[4:10], ["  config     add these lines at the top of ~/.ssh/config:",
+                                     "               IgnoreUnknown UseKeychain",
+                                     "               Host fake-dest",
+                                     "                   IdentityFile %s" % self.key,
+                                     "                   UseKeychain yes",
+                                     "                   AddKeysToAgent yes"])
+        self.assertEqual(out[10], "  test       ok: vcharon logs in to fake-dest with no prompt")
         self.assertRegex(out[11], r"\AOK  \(\d+\.\d s\)\Z")
         self.assertEqual(len(out), 12)
         # the probe had -v and ControlMaster off; so did the test
@@ -135,8 +135,8 @@ class KeyTest(KeyCase):
             self.assertIn("ControlMaster=no", argv)
         with open(os.path.join(self.vcharon_home, "logs", "vcharon.log"), encoding="utf-8") as f:
             text = f.read()
-        self.assertIn("  agent   holds no keys", text)
-        self.assertIn("  test    ok", text)
+        self.assertIn("  ssh-agent  holds no keys", text)
+        self.assertIn("  test       ok", text)
 
     def key_add_shown(self, *rest):
         """The ssh-add command as the `run` line shows it: one shlex quoting of the whole
@@ -153,12 +153,12 @@ class KeyTest(KeyCase):
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: there's no ssh agent here: SSH_AUTH_SOCK is "
                                    "unset", fix])
-        self.assertIn("  agent   none: SSH_AUTH_SOCK is unset", out)
+        self.assertIn("  ssh-agent  none: SSH_AUTH_SOCK is unset", out)
         sock = os.path.join(self.tmp, "agent.sock")
         os.environ["SSH_AUTH_SOCK"] = sock
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: no agent answers at %s" % sock, fix])
-        self.assertIn("  agent   none: nothing answers at %s" % sock, out)
+        self.assertIn("  ssh-agent  none: nothing answers at %s" % sock, out)
         self.assertFalse(any(line.startswith("  run") for line in out))
         self.assertEqual(self.adds(), [])
 
@@ -170,8 +170,8 @@ class KeyTest(KeyCase):
             f.write("[vcharon]\nssh_path = %s\n" % other)
         self.locked()
         out, _err = self.key_cli("fake-dest")
-        self.assertIn("  warn    only Apple's ssh (/usr/bin/ssh) reads the Keychain; ssh_path is "
-                      + other, out)
+        self.assertIn("  warn       only Apple's ssh (/usr/bin/ssh) reads the Keychain; "
+                      "ssh_path is " + other, out)
 
     def test_locked_windows(self):
         self.os_name("windows")
@@ -180,12 +180,12 @@ class KeyTest(KeyCase):
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: the ssh-agent service isn't running",
                                    "  fix: " + ADMIN])
-        self.assertIn("  agent   none: the ssh-agent service isn't running", out)
+        self.assertIn("  ssh-agent  none: the ssh-agent service isn't running", out)
         self.assertEqual(self.adds(), [])
         self.agent(1)
         out, err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [[self.key]])
-        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
+        self.assertIn("  test       ok: vcharon logs in to fake-dest with no prompt", out)
         self.assertFalse(any(line.startswith("  config") for line in out))
 
     def test_locked_linux(self):
@@ -194,20 +194,20 @@ class KeyTest(KeyCase):
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: there's no ssh agent here: SSH_AUTH_SOCK is "
                                    "unset", "  fix: " + platform.runnable(EVAL)])
-        self.assertIn("  agent   none: SSH_AUTH_SOCK is unset", out)
+        self.assertIn("  ssh-agent  none: SSH_AUTH_SOCK is unset", out)
         sock = os.path.join(self.tmp, "agent.sock")
         os.environ["SSH_AUTH_SOCK"] = sock
         out, err = self.key_cli("fake-dest", code=3)
         self.assertEqual(err[:2], ["ERROR config: no agent answers at %s" % sock,
                                    '  fix: a forwarded agent ends with its ssh login; log in '
                                    'again, or start one: eval "$(ssh-agent -s)"'])
-        self.assertIn("  agent   none: nothing answers at %s" % sock, out)
+        self.assertIn("  ssh-agent  none: nothing answers at %s" % sock, out)
         self.assertEqual(self.adds(), [])
         self.agent(0, "3072 SHA256:x other key (RSA)\n")
         out, err = self.key_cli("fake-dest")
-        self.assertIn("  agent   holds 1 key", out)
+        self.assertIn("  ssh-agent  holds 1 key", out)
         self.assertEqual(self.adds(), [[self.key]])
-        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
+        self.assertIn("  test       ok: vcharon logs in to fake-dest with no prompt", out)
 
     def test_key_path_with_a_space(self):
         # one argument to ssh-add on each OS; on POSIX a list argv can't split it, so the
@@ -230,7 +230,7 @@ class KeyTest(KeyCase):
                 out, _err = self.key_cli("fake-dest")
                 if osn == "darwin":
                     self.assertEqual(self.adds(), [["--apple-use-keychain", key]])
-                    self.assertIn('                IdentityFile "%s"' % key, out)
+                    self.assertIn('                   IdentityFile "%s"' % key, out)
                 else:
                     self.assertEqual(self.adds(), [[key]])
 
@@ -251,7 +251,7 @@ class KeyTest(KeyCase):
         with mock.patch.object(keys.ssh, "ssh_add_prefix", lambda settings: [missing]):
             out, err = self.key_cli("fake-dest", code=3)
         why = "couldn't start %s: %s" % (missing, start_failure_text(missing))
-        self.assertIn("  agent   %s" % why, out)
+        self.assertIn("  ssh-agent  %s" % why, out)
         self.assertEqual(err[:2], ["ERROR config: " + why, "  fix: install the OpenSSH client, "
                                    "or set ssh_path in vcharon.ini"])
         self.assertFalse(any(line.startswith("  run") for line in out))
@@ -288,13 +288,13 @@ class KeyTest(KeyCase):
                 self.agent(0, "3072 SHA256:x c@h (RSA)\n")
                 self.logs_in(accepts('"c@h"', "agent"))
                 out, _err = self.key_cli("fake-dest")
-                lines = ['  key     "c@h" (RSA): only the agent holds it; there\'s no key file '
-                         'here to unlock', "  note    runs work while that agent holds the key"]
+                lines = ['  key        "c@h" (RSA): only the agent holds it; there\'s no key file '
+                         'here to unlock', "  note       runs work while that agent holds the key"]
                 if osn == "linux":
                     lines.append(LINUX_NOTE)
                 self.assertEqual(out[2:2 + len(lines)], lines)
                 self.assertEqual(out[2 + len(lines)],
-                                 "  test    ok: vcharon logs in to fake-dest with no prompt")
+                                 "  test       ok: vcharon logs in to fake-dest with no prompt")
                 self.assertFalse(any(line.startswith("  run") for line in out))
                 self.assertEqual(self.adds(), [])
 
@@ -302,22 +302,22 @@ class KeyTest(KeyCase):
         self.logs_in(accepts(self.key, "agent"))
         self.agent(0, "3072 SHA256:x me (RSA)\n")
         out, _err = self.key_cli("fake-dest")
-        self.assertIn("  key     %s (RSA): already in the agent, for as long as that agent runs"
+        self.assertIn("  key        %s (RSA): already in the agent, for as long as that agent runs"
                       % self.key, out)
         self.os_name("windows")
         out, _err = self.key_cli("fake-dest")
-        self.assertIn("  key     %s (RSA): already in the ssh-agent service, which keeps it "
+        self.assertIn("  key        %s (RSA): already in the ssh-agent service, which keeps it "
                       "across reboots" % self.key, out)
         self.assertEqual(self.adds(), [])
         self.os_name("darwin")
         out, _err = self.key_cli("fake-dest")
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
-        self.assertIn("  config  add these lines at the top of ~/.ssh/config:", out)
+        self.assertIn("  config     add these lines at the top of ~/.ssh/config:", out)
 
     def test_file_without_a_passphrase(self):
         self.logs_in(accepts(self.key))
         out, _err = self.key_cli("fake-dest")
-        self.assertIn("  key     %s (RSA): it has no passphrase; nothing to unlock" % self.key,
+        self.assertIn("  key        %s (RSA): it has no passphrase; nothing to unlock" % self.key,
                       out)
         self.assertEqual(self.adds(), [])
 
@@ -325,8 +325,9 @@ class KeyTest(KeyCase):
         # neither a file here nor the agent's (a token's key, say): nothing vcharon can unlock
         self.logs_in(accepts('"c@h"'))
         out, _err = self.key_cli("fake-dest")
-        self.assertEqual(out[2:4], ['  key     "c@h" (RSA): ssh logs in with it; nothing to unlock',
-                                    "  test    ok: vcharon logs in to fake-dest with no prompt"])
+        self.assertEqual(out[2:4], ['  key        "c@h" (RSA): ssh logs in with it; nothing to '
+                                    'unlock',
+                                    "  test       ok: vcharon logs in to fake-dest with no prompt"])
         self.assertEqual(self.adds(), [])
 
     def test_an_accepted_key_that_doesnt_log_in(self):
@@ -345,7 +346,7 @@ class KeyTest(KeyCase):
 
     def test_logs_in_without_a_key(self):
         out, _err = self.key_cli("fake-dest")
-        self.assertIn("  key     none: fake-dest logs in without a key", out)
+        self.assertIn("  key        none: fake-dest logs in without a key", out)
 
     def test_no_key_accepted(self):
         os.environ.update(FAKE_SSH_STDERR=DENIED, FAKE_SSH_EXIT="255")
@@ -378,7 +379,7 @@ class KeyTest(KeyCase):
         self.locked()
         del os.environ["FAKE_SSH_UNLOCK_FILE"]
         out, err = self.key_cli("fake-dest", code=4)
-        self.assertEqual(out[-1], "  test    FAIL")
+        self.assertEqual(out[-1], "  test       FAIL")
         self.assertEqual(err[0], "ERROR connect: ssh couldn't log in to fake-dest (Permission "
                                  "denied)")
         self.assertEqual(self.adds(), [[self.key]])
@@ -390,7 +391,7 @@ class KeyTest(KeyCase):
         os.environ["HOME"] = os.environ["USERPROFILE"] = self.tmp
         out, _err = self.key_cli("--key", "~/id_rsa", "fake-dest")
         self.assertEqual(self.adds(), [[self.key]])
-        self.assertIn("  key     %s: given with --key" % self.key, out)
+        self.assertIn("  key        %s: given with --key" % self.key, out)
         # a relative FILE is made absolute, from the current directory as the OS reports it:
         # on macOS the temp dir's /var or /tmp becomes /private/var or /private/tmp
         old = os.getcwd()
@@ -457,11 +458,11 @@ class UndecodableKeyNameTest(KeyCase):
         result = self.child("key", "fake-dest")
         out = result.stdout.decode("utf-8")
         self.assertEqual(result.returncode, 0, out + result.stderr.decode("utf-8", "replace"))
-        self.assertIn("  key     %s (RSA): the server accepts it, but it's locked" % self.shown,
+        self.assertIn("  key        %s (RSA): the server accepts it, but it's locked" % self.shown,
                       out)
-        [run] = [line for line in out.splitlines() if line.startswith("  run     ")]
+        [run] = [line for line in out.splitlines() if line.startswith("  run        ")]
         self.assertIn(self.shown, run)
-        self.assertIn("  test    ok: vcharon logs in to fake-dest with no prompt", out)
+        self.assertIn("  test       ok: vcharon logs in to fake-dest with no prompt", out)
         # ssh-add got the real name
         self.assertEqual(self.adds(), [[self.key]])
 
@@ -470,7 +471,7 @@ class UndecodableKeyNameTest(KeyCase):
         with mock.patch.object(platform, "os_name", return_value="darwin"):
             said = []
             keys.unlock(self.settings(), "fake-dest", None, self.log, said.append)
-        self.assertIn("                IdentityFile %s" % self.shown, said)
+        self.assertIn("                   IdentityFile %s" % self.shown, said)
         self.assertEqual(self.adds(), [["--apple-use-keychain", self.key]])
         for line in said:
             line.encode("utf-8")

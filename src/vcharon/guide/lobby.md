@@ -28,11 +28,13 @@ vcharon join lobby --local             # this machine holds it
   out, one line that counts them and ends with the command that shows them all: `not shown: 3
   to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --full
   --to-me --last 4 --project api`. When `--last` is more than the counts add up to, the line
-  says what they are: every entry to you or to all from the oldest left out on, the shown ones
-  and older ones to all too (`to see them (the last 6 entries to you or to all): vcharon read
-  lobby --full --to-me --last 6 --project api`). After a `leave`, the entries to you from
-  before it are only counted (`2 to you before your leave`): your watcher may have printed
-  them, or none ran then; when a count is there, run that `read` and answer what is still open.
+  says what the rest are: the read lists every entry to you or to all from the oldest left out
+  on, so also the newer ones join showed above, older ones to all, and any your watcher will
+  print (`to see them (6 entries: the 4 counted and 2 more to you or to all after the oldest
+  counted one): vcharon read lobby --full --to-me --last 6 --project api`). After a `leave`, the
+  entries to you from before it are only counted (`2 to you before your leave`): your watcher
+  may have printed them, or none ran then; when a count is there, run that `read` and answer
+  what is still open.
 - In a new session, run the same `join` again, as in any channel.
 
 ## Who is here

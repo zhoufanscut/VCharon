@@ -103,9 +103,11 @@ KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it
 # bodies too
 NOT_SHOWN = "  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s"
 # put after "to see them" when --last is more than the counts add up to: the read lists every
-# entry to the member or to all from the oldest left-out one on, the shown ones too, and a
-# --last bigger than the counts reads as a mistake
-NOT_SHOWN_WIDER = " (the last %d entries to you or to all)"
+# entry to the member or to all from the oldest left-out one on, so also the shown ones after it,
+# older @all ones and any the watcher is left to print; a --last bigger than the counts with no
+# word on the rest reads as a mistake
+NOT_SHOWN_WIDER = (" (%d entries: the %d counted and %d more to you or to all after the oldest "
+                   "counted one)")
 NOT_SHOWN_LEFT = "%d to you before your leave"
 NOT_SHOWN_ALL = "%d to all in the last 24 h"
 NOT_SHOWN_OLD = "%d to you older than 24 h"
@@ -628,11 +630,14 @@ def _check_locks(record, section, channel):
     else:
         snapshot = watcher_snapshot(record, section, record["name"])
 
-    # the watcher's lock names the watcher first: it is what an agent forgets to stop
+    # the watcher's lock names the watcher first: it is what an agent forgets to stop; and its
+    # holder's PID when it wrote one, as the watcher's exit-12 line does
     def watching():
+        pid = Lock.holder_pid(snapshot + ".lock")
         return channels.refused("your watcher of %s in %s is running, or a create, join, leave "
-                                "or close of it (%s.lock is held)"
-                                % (record["name"], channel, snapshot),
+                                "or close of it (%s.lock is held)%s"
+                                % (record["name"], channel, snapshot,
+                                   " (PID %d)" % pid if pid else ""),
                                 "stop the watcher first, or wait for that command to end")
 
     lk = hold_watcher(snapshot, watching)
@@ -1780,7 +1785,8 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                                            (NOT_SHOWN_ALL, left_out["all"]),
                                            (NOT_SHOWN_OLD, left_out["old"])) if n]
         last = _not_shown(tree, name, leader, kind_, left_out["where"])
-        wider = NOT_SHOWN_WIDER % last if last > len(left_out["where"]) else ""
+        counted = len(left_out["where"])
+        wider = NOT_SHOWN_WIDER % (last, counted, last - counted) if last > counted else ""
         raw(platform.runnable(NOT_SHOWN % (", ".join(counts), wider, channel, last,
                                            name_flags(channel, name))))
     for line in warnings:

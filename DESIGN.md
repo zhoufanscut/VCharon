@@ -796,6 +796,19 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
   `busy`, exit 2. The OS drops it when the process dies, so a crash never leaves it stuck.
 - `vcharon sync C --reset` takes the same lock.
 - The same lock kind guards the post lock, the watcher's snapshot, and stage dirs.
+- The watcher's snapshot lock names its holder: whoever takes it (a watcher; `create`, `join`,
+  `leave` and `close`) writes its PID into the file as `<pid>\n` from byte 1 on, and cuts the
+  file to its first byte before it lets go; a watcher refused it reads that and ends its exit-12
+  line with ` (PID <n>)`, only for a decimal PID and nothing else from the file; so does the
+  refusal of `leave` and `close` ([Create, join, leave, close](#create-join-leave-close)). Why:
+  the user (or agent) can find the process that holds the lock. From byte 1: `msvcrt` locks
+  byte 0, which no other process can read on Windows while it is held. The lock is on the file,
+  not its contents, so `take_lock`'s same-file check and `leave`'s and `close`'s delete of the held
+  file don't change. No PID (an older vcharon holds it, or the holder hasn't written it yet):
+  the line ends as before. The PID can be stale: a holder killed before it lets go leaves its
+  PID, which an older vcharon taking the lock next doesn't replace, and a new holder writes its
+  own only a moment after it takes the lock; the PID may also belong to another process by
+  then. So the guide says to check it is a `vcharon watch` before stopping it.
 
 ## Config
 
@@ -1266,8 +1279,9 @@ agent in a folder another agent shares saw nothing of the other one's.
   skipped as busy, and once the join's own sync lost the job lock (`ERROR busy`, exit 2). Held,
   a watcher started meanwhile exits 12 at once. The refusal of `leave` and `close` names
   the watcher first, since a running watcher is what an agent forgets to stop: `your watcher of
-  <name> in C is running, or a create, join, leave or close of it (<lock> is held)`; a job's
-  lock held is `a sync of <name> in C is running (<lock> is held)`.
+  <name> in C is running, or a create, join, leave or close of it (<lock> is held)`, followed
+  by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)); a job's lock held is `a sync of
+  <name> in C is running (<lock> is held)`.
 
 ### The lobby
 
@@ -1439,9 +1453,11 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   the number of entries `--to-me` lists from the oldest one left out to the newest; `--full`
   because the left-out entries are the ones to weigh (the range can hold more entries than the
   counts, such as older `@all` ones, and prints their bodies too). When m is more than the
-  counts add up to, `to see them` becomes `to see them (the last <m> entries to you or to
-  all)`, the command still last on the line. Why: a `--last` bigger than the counts otherwise
-  reads as a mistake. An entry to the
+  counts add up to (c), `to see them` becomes `to see them (<m> entries: the <c> counted and
+  <m - c> more to you or to all after the oldest counted one)`, the command still last on the
+  line; the others are entries the join showed above, older `@all` ones, and ones the
+  watcher's snapshot hasn't taken as seen (the watcher prints those). Why: a `--last` bigger
+  than the counts, with no word on the rest, reads as a mistake. An entry to the
   member from the last 24 h whose time is before the member's own last `LEAVE` (the one with
   the highest number in its folder) is counted in j, not shown. Why: after a `leave` and a
   join, a new snapshot takes everything as seen, so the old membership's work would be
@@ -1901,7 +1917,7 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>), or a create, join, leave or close of this member`:
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it
-  while they run.
+  while they run. When the holder wrote its PID ([Lock](#lock)) the line ends ` (PID <n>)`.
   The line keeps `ERROR another watcher is running on this mailbox (<lock>)` as its start, so a
   script that matches that still works.
 - **A sync child that exited without a word** (no `ERROR` line, nothing on stderr; killed from
@@ -2093,7 +2109,7 @@ Every verb also takes `-v` (log lines to stderr too).
   `--help` shows one example.
 - `setup` writes the config, or prints what this machine uses; `doctor` checks this machine
   (how VCharon was installed, other vcharon installs on PATH, Python, config, box, ssh client,
-  agent keys, folders, machine id), each server of the channels joined or the one named (login
+  ssh-agent keys, folders, machine id), each server of the channels joined or the one named (login
   through the `-v` probe, Python, distro, clock, an echo of 4 MiB), and each channel section's
   jobs; it only reads, apart from a temp file in the state and log dirs. `ping` connects,
   echoes all 256 byte values plus 1 MiB of random bytes, and prints the round trip.
@@ -2643,9 +2659,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
     orphaned`, `EXIT nothing new`, `EXIT interrupted`, each followed by ` (exit <code>)` (match
     on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
-    create, join, leave or close of this member` with exit 12 (older versions end it at `(<lock>)`:
-    match on that start). The text after an `ERROR` line's colon is the OS's message and may be
-    translated: match on the prefix.
+    create, join, leave or close of this member` with exit 12, followed by ` (PID <n>)` when the
+    holder wrote its PID (older versions end it at `(<lock>)`: match on that start). The text
+    after an `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
     "leaders", "founder", "members", "member_info", "newest", "strays", "format", "limits"}`,

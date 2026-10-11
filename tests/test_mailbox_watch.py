@@ -39,6 +39,7 @@ from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
 from tests import util
+from tests.test_lock import stop_child, take_in_child
 from tests.util import PACKAGE_DIR, write_tree
 
 # what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
@@ -50,6 +51,8 @@ STAMP = re.compile(r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
 # exit 12's line: a watcher, or a create, join, leave or close of the member, holds the lock
 LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
           "leave or close of this member")
+# its end when the holder wrote its PID: a watcher or take_lock in the test's own process
+HELD_HERE = " (PID %d)" % os.getpid()
 
 
 def silent_fix(job="mb.windows"):
@@ -750,10 +753,49 @@ class LockTest(WatchCase):
 
         watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=Rounds(second),
                         rounds=1)
-        self.assertEqual(seen, [12, [LOCKED % self.state()], 0, 0])
+        self.assertEqual(seen, [12, [LOCKED % self.state() + HELD_HERE], 0, 0])
         # the lock goes with the first watcher
         self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
                                          rounds=0), 0)
+
+    def test_the_line_names_the_holder_by_its_pid(self):
+        # the holder writes its PID after byte 0, the byte Windows locks: here a child that
+        # holds the lock as a watcher does, read from this process
+        state = self.state()
+        child, pid = take_in_child(state)
+        self.addCleanup(lambda: child.poll() is None and stop_child(child))
+        lines = []
+        self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                                         sleep=never, rounds=0), 12)
+        self.assertEqual(self.said(lines), [LOCKED % state + " (PID %d)" % pid])
+        # killed, it leaves its PID behind; the next taker locks the same file and writes
+        # over it
+        stop_child(child)
+        lk = watch.take_lock(state)
+        self.assertIsNotNone(lk)
+        self.addCleanup(lk.release)
+        self.assertEqual(watch.Lock.holder_pid(state + ".lock"), os.getpid())
+
+    def test_the_line_names_no_pid_but_a_decimal_one(self):
+        # an older vcharon's hold writes none; anything else in the file is never printed
+        state = self.state()
+        os.makedirs(os.path.dirname(state), exist_ok=True)
+        for data, end in ((b"", ""), (b"\0", ""), (b"\x0042\n", " (PID 42)"),
+                          (b"x42\n", " (PID 42)"), (b"\x00abc\n", ""), (b"\x000\n", ""),
+                          (b"\x00-5\n", ""), (b"\x00 42\n", ""), (b"\x0042", ""),
+                          (b"\x0042\n\n", ""), (b"\x00" + b"1" * 11 + b"\n", "")):
+            with self.subTest(data=data):
+                with open(state + ".lock", "wb") as f:
+                    f.write(data)
+                lk = watch.Lock.open(state + ".lock")
+                self.assertTrue(lk.try_acquire())
+                lines = []
+                try:
+                    code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                                           sleep=never, rounds=0)
+                finally:
+                    lk.release()
+                self.assertEqual((code, self.said(lines)), (12, [LOCKED % state + end]))
 
     def test_the_command_exits_12(self):
         write_tree(self.tree, {"mac/x": b"x"})
@@ -770,7 +812,7 @@ class LockTest(WatchCase):
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
         self.assertEqual(codes[0], 12)
         self.assertEqual(self.said(codes[1].splitlines()),
-                         [LOCKED % self.state()])
+                         [LOCKED % self.state() + HELD_HERE])
 
 
 class KeyTest(WatchCase):
@@ -790,7 +832,7 @@ class KeyTest(WatchCase):
             seen.append(self.said(lines))
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
-        self.assertEqual(seen, [12, [LOCKED % self.state()]])
+        self.assertEqual(seen, [12, [LOCKED % self.state() + HELD_HERE]])
 
     @unittest.skipUnless(os.name == "posix", "normcase folds case on Windows")
     def test_a_plain_path_keeps_its_name(self):
@@ -3325,7 +3367,8 @@ class OnceTest(WatchCase):
         self.baseline()
         lk = watch.take_lock(self.state())
         self.addCleanup(lk.release)
-        self.assertEqual(self.once(), (watch.EXIT_LOCKED, [LOCKED % self.state()]))
+        self.assertEqual(self.once(),
+                         (watch.EXIT_LOCKED, [LOCKED % self.state() + HELD_HERE]))
 
     def test_closed(self):
         self.baseline()

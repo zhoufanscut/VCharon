@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 
+import vcharon
 from vcharon.lock import Lock
 
 from tests.util import readline
@@ -45,6 +46,35 @@ def hold_in_child(path):
         child.communicate(timeout=60)
         raise AssertionError("the child didn't take the lock: %r" % line)
     return child
+
+
+# Takes the watcher's lock on the snapshot argv[1] as a watcher does (it writes its PID), says
+# that PID, then waits to be killed.
+TAKE_LOCK = """
+import os, sys, time
+from vcharon.mailbox import watch
+lk = watch.take_lock(sys.argv[1])
+print(os.getpid() if lk is not None else "not held", flush=True)
+time.sleep(60)
+"""
+
+
+def take_in_child(snapshot):
+    """(a child process holding the watcher's lock on snapshot, its PID) once it has said so.
+    Its own os.getpid(), not Popen.pid: on Windows a venv's python.exe runs the real one as a
+    child."""
+    package = os.path.dirname(os.path.abspath(vcharon.__file__))
+    child = subprocess.Popen([sys.executable, "-c", TAKE_LOCK, snapshot],
+                             stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                             env=dict(os.environ, PYTHONPATH=os.path.dirname(package)))
+    try:
+        line = readline(child.stdout)
+    except AssertionError:
+        line = b"(nothing)"
+    if not line.strip().isdigit():
+        stop_child(child)
+        raise AssertionError("the child didn't take the lock: %r" % line)
+    return child, int(line)
 
 
 def stop_child(child):
@@ -84,6 +114,23 @@ class LockTest(unittest.TestCase):
             stop_child(child)
         with Lock.open(self.path, create=False) as lk:
             self.assertTrue(lk.try_acquire())
+
+    def test_pid(self):
+        # a longer PID left by a holder killed before its release: the new one is all there is
+        with open(self.path, "wb") as f:
+            f.write(b"\x00" + b"9" * 10 + b"\n")
+        self.assertEqual(Lock.holder_pid(self.path), 9999999999)
+        with Lock.open(self.path) as lk:
+            # not held: nothing written
+            lk.write_pid()
+            self.assertEqual(os.path.getsize(self.path), 12)
+            self.assertTrue(lk.try_acquire())
+            lk.write_pid()
+            self.assertEqual(Lock.holder_pid(self.path), os.getpid())
+        # released: cut back to byte 0, so a free lock names no one
+        self.assertEqual(os.path.getsize(self.path), 1)
+        self.assertIsNone(Lock.holder_pid(self.path))
+        self.assertIsNone(Lock.holder_pid(os.path.join(self.tmp, "missing")))
 
     def test_open_flags(self):
         with self.assertRaises(FileNotFoundError):

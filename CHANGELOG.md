@@ -9,6 +9,29 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `doctor`'s check of the ssh agent has the subject `ssh-agent` (it was `agent`, which read as an
+  AI agent), in its text line and in `--json`'s `"subject"`; `vcharon key`'s row of it is
+  `ssh-agent` too. A script that picks that check by its subject: match `ssh-agent`. Doctor's
+  rows, which share one width, are now padded to at least 9 characters; `key`'s rows to 9.
+- A watcher's exit-12 line `ERROR another watcher is running on this mailbox (<lock>), or a
+  create, join, leave or close of this member` now ends ` (PID <n>)`, and so does `leave`'s and
+  `close`'s refusal `your watcher of <name> in <C> is running, or a create, join, leave or close
+  of it (<lock> is held)`: the process holding the lock, so the user (or agent) can find it.
+  Whoever takes that lock (a watcher, `create`, `join`, `leave`, `close`) writes its PID into the
+  lock file after byte 0 and clears it before letting go; with no PID there (an older vcharon
+  holds it) the lines end as before. The PID can be stale: a holder killed before it let go
+  leaves its PID, which an older vcharon taking the lock next doesn't replace, and a new holder
+  writes its own a moment after taking the lock; the process may also be another by then. A
+  matcher on either line's start still works. Measured on Linux (the suite: a child process
+  holding the lock, and a lock file holding something other than a PID); Windows, where the PID
+  is read around the locked byte 0, inferred.
+- A lobby `join`'s `not shown:` line, when its `--last <m>` is more than the counts add up to,
+  says where the rest come from: `to see them (<m> entries: the <c> counted and <m - c> more to
+  you or to all after the oldest counted one)` (it was `(the last <m> entries to you or to
+  all)`, which didn't say why `--last` was bigger than the counts). The rest are entries the join
+  showed, older `@all` ones and ones left for the watcher; each split measured on Linux (the
+  suite).
+
 - Lobby topic and `Monitor` wording, from a lobby test on Linux (doc only): a coordinator and a
   member under `claude -p` 2.1.296 on this version's code, a Codex CLI 0.162.1 member on the
   released 0.5.0, all `--local` in a scratch channel root. The coordinator found `--presence` in the

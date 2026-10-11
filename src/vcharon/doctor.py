@@ -59,7 +59,7 @@ ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("vcharon", "install", "path", "skill", "bundle", "python", "config", "box",
-                   "ssh", "agent", "dirs", "machine", "claimer")
+                   "ssh", "ssh-agent", "dirs", "machine", "claimer")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
 # reorder entries posted near a minute's end; from 30 s it will do so often.
@@ -321,15 +321,15 @@ def _agent(rep, agent, dests):
     state_, n = agent
     text = keys.agent_text(state_, n)
     if state_ == "keys":
-        rep.check("ok", "agent", text)
+        rep.check("ok", "ssh-agent", text)
         return
     if state_ == "error":
         # ssh-add itself is missing: no agent question can be answered
-        rep.check("warn", "agent", text, ssh.START_HINT)
+        rep.check("warn", "ssh-agent", text, ssh.START_HINT)
         return
     dest = dests[0].dest if len(dests) == 1 else "ALIAS"
     if state_ == "empty":
-        rep.check("warn", "agent", text, "a key with a passphrase works only once it's in the "
+        rep.check("warn", "ssh-agent", text, "a key with a passphrase works only once it's in the "
                   "agent: run vcharon key %s" % dest)
         return
     if platform.os_name() == "windows":
@@ -340,7 +340,7 @@ def _agent(rep, agent, dests):
     else:
         hint = "a forwarded agent ends with its ssh login; log in again"
     # at most a warn: a key without a passphrase needs no agent
-    rep.check("warn", "agent", text, hint)
+    rep.check("warn", "ssh-agent", text, hint)
 
 
 def folders():

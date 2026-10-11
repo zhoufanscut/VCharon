@@ -40,16 +40,17 @@ from vcharon.proto import VCharonError
 
 from tests import util
 from tests.test_cli import VCHARON_DIR
-from tests.test_lock import hold_in_child, stop_child
+from tests.test_lock import hold_in_child, stop_child, take_in_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
 # leave's fix for the leader, as written (before runnable)
 LEADER_LEAVE_FIX = ("a leader ends the channel with CLOSED to @all after every member's DONE, "
                     "then a close; how: vcharon guide end")
-# a watcher's exit-12 line: another watcher, or a create, join, leave or close, holds its lock
+# a watcher's exit-12 line: another watcher, or a create, join, leave or close, holds its lock;
+# here the holder is the test's own process, which wrote its PID
 WATCHER_LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, "
-                  "join, leave or close of this member")
+                  "join, leave or close of this member (PID %d)")
 
 
 def hold(case, path):
@@ -722,7 +723,7 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(code, 0, out + err)
         self.assertNotIn("busy", out + err)
         self.assertIn("OK  in game as mac-web", out)
-        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
         self.assertEqual(job_locks, [])
         # released when the join returned: the member's watcher starts now
         lk = watch.take_lock(snapshot)
@@ -762,7 +763,7 @@ class CreateJoinTest(ChannelCase):
         with mock.patch.object(channel_cmd, "_run_section", sync):
             out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
         self.assertIn("OK  created game", out)
-        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
         lk = watch.take_lock(snapshot)
         self.assertIsNotNone(lk)
         lk.release()
@@ -1964,6 +1965,13 @@ class LeaveCloseTest(ChannelCase):
                 child = hold(self, held + ".lock")
                 self.assertEqual(self.refused("leave", "game"), "ERROR channel: " + text % held)
                 release(child)
+        # a holder that wrote its PID, as a watcher does: the line ends with it
+        child, pid = take_in_child(locks[0])
+        self.addCleanup(release, child)
+        self.assertEqual(self.refused("leave", "game"), "ERROR channel: your watcher of mac-web "
+                         "in game is running, or a create, join, leave or close of it (%s.lock is "
+                         "held) (PID %d)" % (locks[0], pid))
+        release(child)
         # close's: not the leader; its fix is text too (a member leaves after CLOSED)
         self.assertEqual(self.refusal("close", "game"),
                          ("ERROR channel: only the leader closes game, and that is laptop-ui",
@@ -2012,7 +2020,7 @@ class LeaveCloseTest(ChannelCase):
 
         with mock.patch.object(channel_cmd, "_run_section", sync):
             out = self.ok("leave", "game")
-        self.assertEqual(started, [12, [WATCHER_LOCKED % snapshot]])
+        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
         self.assertEqual(out.splitlines()[-2:], ["  removed %s.lock" % snapshot, "OK  left game"])
         self.assertFalse(os.path.exists(snapshot + ".lock"))
 
