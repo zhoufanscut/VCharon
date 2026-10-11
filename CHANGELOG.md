@@ -7,7 +7,19 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.6.0rc1 — 2026-10-11
+
+The first release candidate for 0.6.0, published as a GitHub pre-release: `vcharon --update --rc`
+on 0.5.0 offers it, a plain `--update` doesn't. New: `vcharon watch lobby --presence`, `vcharon
+guide` with several topics, and the holder's PID on a refusal for a held watcher lock. Two
+changes touch what DESIGN.md lists under "Stable", each with how to adapt below: the watcher's
+exit-12 line gains a ` (PID <n>)` ending (a matcher on its start still works), and `doctor
+--json`'s check subject `agent` is now `ssh-agent`.
+
+Checked: the unit suite on Linux (measured, 1598 tests, Python 3.13; the lock, watch, doctor and
+guide tests also on 3.14). `--presence` and the guide and skill wording with real agents on
+Linux, as each entry says. Not run: Windows and macOS by hand for this candidate's changes; the
+PID read on Windows is inferred.
 
 - `vcharon guide` takes several topics: `vcharon guide member rules` prints both, in the order
   given, each exactly as it prints alone, one blank line between; a topic named twice prints
