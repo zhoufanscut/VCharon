@@ -9,6 +9,17 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon guide` takes several topics: `vcharon guide member rules` prints both, in the order
+  given, each exactly as it prints alone, one blank line between; a topic named twice prints
+  once, and an unknown one among them is refused (exit 3) before anything is printed. The
+  printing of none or one topic is unchanged (measured: with the old topic texts, the new code's
+  output is byte-identical for none and for every topic alone); the texts of start, member and
+  lobby changed. The skill and the guide now have a member read `vcharon guide member rules` in
+  one command (a lobby member `vcharon guide lobby rules`), and any other topic in a tool call of
+  its own, never several guide commands in one call or loop: agents' tools cut a long output
+  (measured: a Codex member's loop of guide commands in one call came back cut, from its
+  transcript). Run `vcharon skill install` (or `--update`) to refresh an installed skill.
+
 - `doctor`'s check of the ssh agent has the subject `ssh-agent` (it was `agent`, which read as an
   AI agent), in its text line and in `--json`'s `"subject"`; `vcharon key`'s row of it is
   `ssh-agent` too. A script that picks that check by its subject: match `ssh-agent`. Doctor's
@@ -49,9 +60,8 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - Skill and guide wording, from a work-channel test over ssh (a Claude Code member under `claude -p`
   2.1.296 and a Codex CLI 0.162.1 member, both on Linux, which did every step, answered a ping after
   8 quiet minutes and left on `CLOSED`) and a review of the text against the code (doc only). The
-  skill: read one topic per command (both agents batched topics and their tool cut the output:
-  measured from their transcripts); a member reads member and rules first (a lobby member: lobby and
-  rules), start only when its name, a second agent or a new session needs it; pass join's
+  skill: a member reads member and rules first (a lobby member: lobby and rules), start only when
+  its name, a second agent or a new session needs it; pass join's
   `--project` and `--role` on every command; a `Monitor` watcher takes `--max-minutes` one less than
   the longest deadline Monitor allows; restart after `EXIT quiet` and `EXIT error` (3 errors in a
   row: stop, tell your user), not after `EXIT closed` or exit 12, and after an `ERROR` with exit 1

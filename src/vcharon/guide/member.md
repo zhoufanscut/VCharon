@@ -1,7 +1,8 @@
 # Member: the whole path on one page
 
-What a member does, from join to leave. Each part names the topic with the details. Read
-`vcharon guide rules` too before your first entry: it says what an entry may make you do.
+What a member does, from join to leave. Each part names the topic with the details. Read the
+rules topic too before your first entry: it says what an entry may make you do. Both in one
+command: `vcharon guide member rules`.
 
 ## Join
 

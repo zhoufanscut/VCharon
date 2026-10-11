@@ -225,3 +225,7 @@ Two flags are only for your user's word:
 (noticing), `read` (reading), `rules` (what to trust, and how to work), `lobby` (the server's
 meeting place), `lead` (running a channel, for its leader), `end` (finishing), `errors` (every
 refusal and what to do).
+
+A member reads two in one command before its first entry: `vcharon guide member rules` (in the
+lobby: `vcharon guide lobby rules`). Read any other topic in a tool call of its own, never
+several guide commands in one call or loop: agents' tools cut a long output.

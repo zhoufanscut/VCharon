@@ -1,4 +1,4 @@
-"""vcharon guide [TOPIC]: the agent guide, one Markdown file per topic in this folder, so the
+"""vcharon guide [TOPIC ...]: the agent guide, one Markdown file per topic in this folder, so the
 guide an agent reads always matches the vcharon it runs. The files are read with
 importlib.resources, which finds them in a checkout, a wheel or a frozen binary alike.
 
@@ -43,13 +43,17 @@ def unknown(topic):
                         % (", ".join(TOPICS[:-1]), TOPICS[-1], DEFAULT))
 
 
-def page(topic=None):
-    """What vcharon guide prints: the index and the start topic, or one topic."""
-    if topic is None:
+def page(topics=()):
+    """What vcharon guide prints: the index and the start topic, or each topic named as it
+    prints alone, in the order given, one blank line between (every topic ends in one newline).
+    A topic named twice prints once, where it was first named. An unknown topic refuses them all
+    before any is printed: a part of the guide followed by an error would read as the whole."""
+    if not topics:
         return index() + "\n" + text(DEFAULT)
-    if topic not in TOPICS:
-        raise unknown(topic)
-    return text(topic)
+    for topic in topics:
+        if topic not in TOPICS:
+            raise unknown(topic)
+    return "\n".join(text(topic) for topic in dict.fromkeys(topics))
 
 
 def _shift(markdown):

@@ -5,6 +5,7 @@ the code's references to sections of DESIGN.md and README.md."""
 from __future__ import annotations
 
 import argparse
+import itertools
 import os
 import re
 import unittest
@@ -41,6 +42,38 @@ class GuideCommandTest(FakeSshCase):
         self.assertIn("the agent guide", lines[0])
         self.assertEqual([l.split()[0] for l in lines[2:]], list(guide.TOPICS))
         self.assertEqual("# " + start, guide.text("start"))
+
+    def test_several_topics(self):
+        # each as it prints alone, in the order given, one blank line between; one named twice
+        # prints once, where first named
+        code, out, err = self.run_cli("guide", "rules", "member", "rules")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, guide.text("rules") + "\n" + guide.text("member"))
+        self.assertTrue(guide.text("rules").endswith(".\n"))
+        self.assertIn(".\n\n# Member: ", out)
+        self.assertEqual(self.run_cli("guide", "member", "member"),
+                         (0, guide.text("member"), ""))
+
+    def test_every_topic_ends_in_one_newline(self):
+        # several topics are joined with "\n": one blank line between them only so
+        for topic in guide.TOPICS:
+            with self.subTest(topic=topic):
+                text = guide.text(topic)
+                self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"), text[-40:])
+
+    def test_an_unknown_topic_among_several_prints_none(self):
+        code, out, err = self.run_cli("guide", "member", "bogus", "rules")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err.splitlines()[0], "ERROR config: there is no guide topic 'bogus'")
+        self.assertEqual(err, self.run_cli("guide", "bogus")[2])
+
+    def test_the_pairs_the_skill_names_parse(self):
+        # a member's first read and a lobby member's: one command each
+        for pair in (["member", "rules"], ["lobby", "rules"]):
+            with self.subTest(pair=pair):
+                self.assertIn("`vcharon guide %s`" % " ".join(pair), skill.text())
+                code, out, _err = self.run_cli("guide", *pair)
+                self.assertEqual((code, out), (0, "\n".join(guide.text(t) for t in pair)))
 
     def test_the_identity_flags_are_ignored(self):
         # the guide has a second session in a folder pass --role on every command
@@ -116,14 +149,15 @@ def guide_commands(text):
 
 
 def check(case, argv, name_only):
-    """argv parses (or, for a command's name, its verb exists), and a guide topic it names
+    """argv parses (or, for a command's name, its verb exists), and every guide topic it names
     exists."""
     if name_only:
         case.assertIn(argv[0], platform.COMMANDS)
     else:
         parse(case, argv)
-    if argv[0] == "guide" and len(argv) > 1:
-        case.assertIn(argv[1], guide.TOPICS)
+    if argv[0] == "guide":
+        for topic in itertools.takewhile(lambda word: not word.startswith("-"), argv[1:]):
+            case.assertIn(topic, guide.TOPICS)
 
 
 class GuideCommandsParseTest(unittest.TestCase):

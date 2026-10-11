@@ -2087,7 +2087,7 @@ Messages
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
 
 Other
-  vcharon guide  [TOPIC] [--project P] [--role R]
+  vcharon guide  [TOPIC ...] [--project P] [--role R]
   vcharon --version
   vcharon --update [--yes] [--force] [--json] [--rc] [--check]
 ```
@@ -2118,7 +2118,12 @@ Every verb also takes `-v` (log lines to stderr too).
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
   would make it again, empty).
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
-  matches the program it runs. `skill install` writes a short skill that points at it, to
+  matches the program it runs. Several topics (`guide member rules`) print in the order given,
+  each as it prints alone, one blank line between; a topic named twice prints once; an unknown
+  one among them refuses them all before anything is printed (exit 3). Why: a member's first
+  read is two topics, one command for both; any other topic is read in a tool call of its own,
+  never several guide commands in one call or loop, since agents' tools cut a long output.
+  `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
   only a file holding its own marker line. The skill names the topics to read by role and the
   few rules an agent must never skip, and says the guide wins where they differ. Why: an agent

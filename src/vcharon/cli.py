@@ -314,10 +314,10 @@ def _parser():
                      "sync --full compares by content")
     ident(one)
 
-    one = verb("guide", "the agent guide for this vcharon, or one of its topics",
-               "vcharon guide watch")
-    one.add_argument("topic", metavar="TOPIC", nargs="?", help="one of: %s"
-                     % ", ".join(guide.TOPICS))
+    one = verb("guide", "the agent guide for this vcharon, or the topics named",
+               "vcharon guide member rules")
+    one.add_argument("topics", metavar="TOPIC", nargs="*", help="any of, printed in the order "
+                     "given: %s" % ", ".join(guide.TOPICS))
     ignored(one)
     one = verb("skill", "write the skill that points agents at vcharon guide",
                "vcharon skill install --claude")
@@ -1400,8 +1400,8 @@ COMMANDS = {
 
 
 def _guide(args):
-    """vcharon guide [TOPIC]: the text as it ships, on stdout."""
-    text = guide.page(args.topic)
+    """vcharon guide [TOPIC ...]: the text as it ships, on stdout."""
+    text = guide.page(args.topics)
     sys.stdout.write(text if text.endswith("\n") else text + "\n")
     return 0
 
