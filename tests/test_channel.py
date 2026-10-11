@@ -40,7 +40,7 @@ from vcharon.proto import VCharonError
 
 from tests import util
 from tests.test_cli import VCHARON_DIR
-from tests.test_lock import hold_in_child, stop_child, take_in_child
+from tests.test_lock import hold_in_child, show_pid, stop_child, take_in_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
@@ -697,6 +697,7 @@ class CreateJoinTest(ChannelCase):
             "membership on another server)", "pass --role R to join from here as another member"))
 
     def test_a_watcher_started_during_the_join_exits_12(self):
+        show_pid(self)
         # the join holds the watcher's lock to its end: a watcher started after the join's
         # check exits 12, so its sync can't take the job lock the join's own sync needs
         self.lead()
@@ -745,6 +746,7 @@ class CreateJoinTest(ChannelCase):
         lk.release()
 
     def test_a_watcher_started_during_the_create_exits_12(self):
+        show_pid(self)
         # create holds the watcher's lock from its claim to its end, through its sync
         self.use_box("laptop")
         snapshot = channel_cmd.watcher_snapshot(None, "game.laptop-ui", "laptop-ui")
@@ -2004,6 +2006,7 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(self.everything(), before)
 
     def test_a_watcher_started_during_the_leave_exits_12(self):
+        show_pid(self)
         # leave holds the watcher's lock to its end, through its sync; the lock file goes last
         snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
         real = channel_cmd._run_section

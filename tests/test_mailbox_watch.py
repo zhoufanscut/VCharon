@@ -39,7 +39,7 @@ from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.test_lock import stop_child, take_in_child
+from tests.test_lock import show_pid, stop_child, take_in_child
 from tests.util import PACKAGE_DIR, write_tree
 
 # what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
@@ -734,6 +734,7 @@ class LockTest(WatchCase):
         self.assertEqual(len(opened), watch.LOCK_TRIES)
 
     def test_a_second_watcher_exits(self):
+        show_pid(self)
         write_tree(self.tree, {"mac/x": b"x"})
         other_tree = os.path.join(self.tmp, "other")
         self.member(root=other_tree)
@@ -759,6 +760,7 @@ class LockTest(WatchCase):
                                          rounds=0), 0)
 
     def test_the_line_names_the_holder_by_its_pid(self):
+        show_pid(self)
         # the holder writes its PID after byte 0, the byte Windows locks: here a child that
         # holds the lock as a watcher does, read from this process
         state = self.state()
@@ -798,6 +800,7 @@ class LockTest(WatchCase):
                 self.assertEqual((code, self.said(lines)), (12, [LOCKED % state + end]))
 
     def test_the_command_exits_12(self):
+        show_pid(self)
         write_tree(self.tree, {"mac/x": b"x"})
         self.local_record()
         codes = []
@@ -818,6 +821,7 @@ class LockTest(WatchCase):
 class KeyTest(WatchCase):
     @unittest.skipUnless(util.CAN_SYMLINK, "no symlinks here")
     def test_two_spellings_of_one_dir_take_one_lock(self):
+        show_pid(self)
         # the snapshot and lock name come from normcase(realpath(--dir)), so a watcher
         # started through a link sees the one already running (exit 12)
         alias = os.path.join(self.tmp, "alias")
@@ -3364,11 +3368,21 @@ class OnceTest(WatchCase):
             "one-minute check)"), "EXIT error (exit 11)"])
 
     def test_another_watcher(self):
+        show_pid(self)
         self.baseline()
         lk = watch.take_lock(self.state())
         self.addCleanup(lk.release)
         self.assertEqual(self.once(),
                          (watch.EXIT_LOCKED, [LOCKED % self.state() + HELD_HERE]))
+
+    def test_another_watcher_in_its_own_pid_namespace(self):
+        # its PID would name another process here: it writes none, and the line ends as an
+        # older vcharon's
+        show_pid(self, False)
+        self.baseline()
+        lk = watch.take_lock(self.state())
+        self.addCleanup(lk.release)
+        self.assertEqual(self.once(), (watch.EXIT_LOCKED, [LOCKED % self.state()]))
 
     def test_closed(self):
         self.baseline()

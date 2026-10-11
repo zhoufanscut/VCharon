@@ -804,7 +804,8 @@ def take_lock(path):
     it (channel_cmd.drop_held), so one opened just before that would be a lock on a deleted
     file, while the next taker locks a new one. Such a lock is let go and the file opened
     again; still not the path's file after LOCK_TRIES opens, None. The lock taken, this
-    process's PID goes into the file (Lock.write_pid), for _locked's line to name."""
+    process's PID goes into the file when it may (Lock.write_pid), for _locked's line to
+    name."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     name = path + ".lock"
     for _ in range(LOCK_TRIES):

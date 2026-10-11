@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import re
+import sys
 
 if os.name == "nt":
     import msvcrt
@@ -16,6 +17,27 @@ else:
 PID_AT = 1
 # a decimal PID and its newline, as write_pid writes it; anything else in the file is no PID
 PID_RE = re.compile(rb"([1-9][0-9]{0,9})\n")
+# /proc/self/ns/pid in Linux's initial PID namespace (PROC_PID_INIT_INO): a PID from any other
+# can name another process outside it
+INIT_PID_NS = "pid:[4026531836]"
+# pid_shown's answer once worked out; None until then
+_pid_shown = None
+
+
+def pid_shown():
+    """True if this process's PID names it to every other process on the machine: on Linux only
+    in the initial PID namespace (DESIGN, "Lock"), so not in a sandbox, container or WSL2
+    distro with its own; always on macOS and Windows. Checked once per process."""
+    global _pid_shown
+    if _pid_shown is None:
+        if sys.platform.startswith("linux"):
+            try:
+                _pid_shown = os.readlink("/proc/self/ns/pid") == INIT_PID_NS
+            except OSError:
+                _pid_shown = False
+        else:
+            _pid_shown = True
+    return _pid_shown
 
 
 class Lock:
@@ -67,9 +89,19 @@ class Lock:
 
     def write_pid(self):
         """Writes this process's PID into the held lock file, from PID_AT on, for a taker it
-        refuses to name (holder_pid); release clears it. Best effort: the lock holds either
-        way."""
+        refuses to name (holder_pid); release clears it. None from outside Linux's initial PID
+        namespace (pid_shown): there a PID can name another process to a taker outside its own; this
+        includes WSL2 distros and containers, where it would have been right. Best effort: the
+        lock holds either way."""
         if not self.held:
+            return
+        if not pid_shown():
+            # a PID left by a holder killed before its release would name a dead process, or
+            # another one by now, for as long as this hold lasts
+            try:
+                os.ftruncate(self.fd, PID_AT)
+            except OSError:
+                pass
             return
         self.pid_written = True
         data = b"%d\n" % os.getpid()
@@ -83,7 +115,8 @@ class Lock:
     @staticmethod
     def holder_pid(path):
         """The PID a holder's write_pid left in the lock file path, or None: none written (an
-        older vcharon holds it, or the holder hasn't written it yet), the file gone or
+        older vcharon or a holder in its own PID namespace holds it, or the holder hasn't
+        written it yet), the file gone or
         unreadable, or anything but a decimal PID there. Reads from PID_AT on, never byte 0.
         It can be stale: a holder killed before its release leaves its PID, which an older
         vcharon's later hold doesn't replace and a new holder replaces only a moment after it

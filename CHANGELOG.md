@@ -7,6 +7,22 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- On Linux the holder of a watcher's lock writes its PID only from the initial PID namespace
+  (`/proc/self/ns/pid` reads `pid:[4026531836]`; unreadable: no PID). A holder in another PID
+  namespace writes none: its PID can name another process to a taker outside that namespace; this
+  includes WSL2 distros (each has its own PID namespace, per Microsoft's WSL docs; not run) and
+  containers, where a PID would have been right. Such a holder also clears a PID left by one killed
+  before its release, so the watcher's exit-12 line and `leave`'s and `close`'s refusal end with no
+  ` (PID <n>)` while it holds the lock (an older vcharon's hold leaves such a PID in place).
+  Measured: in a lobby test on 2026-10-11, a Codex CLI 0.162.1 member in its `workspace-write`
+  sandbox (bwrap, a PID namespace per command) started a watcher that wrote PID 3 (its host PID was
+  2085867), and `leave` printed `(PID 3)`, which on the host is a kernel thread. Checked on Linux
+  (measured): the suite, and by hand a watcher under `unshare --user --pid --fork` and a `watch
+  --once` outside it: no PID (this version), `(PID 1)` (0.6.0rc1). macOS and Windows unchanged
+  (inferred: the check is Linux only).
+
 ## 0.6.0rc1 — 2026-10-11
 
 The first release candidate for 0.6.0, published as a GitHub pre-release: `vcharon --update --rc`
