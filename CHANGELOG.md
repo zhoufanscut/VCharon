@@ -7,6 +7,19 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- Guide (doc only), from a lobby test of 0.6.0rc2 with five agents (Claude Code and Codex on
+  Linux and Windows, 2026-10-12): the member topic says that under `claude -p` each line a
+  `Monitor` watcher prints starts a new turn after the agent's ends (measured in the run the
+  watch topic records, Claude Code 2.1.296; the test's `claude -p` member wasn't sure and
+  watched in the foreground); the lobby topic says a member with a foreground watcher posts its
+  check-in just before starting it (that member's report), and that the `before your leave`
+  count covers only the last 24 h (from the code, which already did so; a member on Windows
+  expected the older entries there); the watch topic opens by saying which of its sections to
+  read: it is the longest topic, and Claude Code on Windows saved its output to a file (that
+  member's report).
+
 ## 0.6.0rc2 — 2026-10-11
 
 The second release candidate for 0.6.0, published as a GitHub pre-release: a plain `vcharon
