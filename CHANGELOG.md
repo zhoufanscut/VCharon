@@ -7,7 +7,29 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.6.0 — 2026-10-12
+
+0.6.0rc2's code, unchanged, plus guide wording from a lobby round on 0.6.0rc2 (Claude Code and
+Codex on Linux, and both on Windows over ssh), which reported no fault in vcharon. Next to
+0.5.0, the changes are those of 0.6.0rc1 and 0.6.0rc2, in their entries in CHANGELOG.md: `watch
+--presence`, `vcharon guide` with several topics, the lock holder's PID on exit-12 and on
+`leave`'s and `close`'s refusal (only from Linux's initial PID namespace), and the guide's way
+for Codex to stop its watcher.
+
+**Updating from 0.5.0:** in "Stable", `doctor --json`'s check subject `agent` is now
+`ssh-agent`: a script that picks that check by its subject, match `ssh-agent` (0.6.0rc1). The
+watcher's exit-12 line, and `leave`'s and `close`'s refusal of a held lock, may end ` (PID <n>)`:
+a matcher on the line's start still works (0.6.0rc1, 0.6.0rc2). Nothing to do for channels: the
+format is unchanged.
+
+Checked: the unit suite on Linux (measured, 1603 tests, Python 3.13). The round above, on
+2026-10-12, all five agents on 0.6.0rc2: check-ins, a member-to-member question, a ping after 10
+quiet minutes, and every member's `leave` (measured: the agents' entries and runs). The exit-12
+PID: absent for a Codex member in its Linux sandbox and its watcher's real PID for a Claude Code
+member on Linux (measured here), the watcher's `vcharon.exe` on Windows (that member's report).
+Codex's Ctrl-C stop through its session: exit 130, no `EXIT` line, then `leave` (measured on
+Linux from its transcript; on Windows from that member's report). The change below is wording
+only, not run. Not run: macOS by hand.
 
 - Guide (doc only), from a lobby test of 0.6.0rc2 with five agents (Claude Code and Codex on
   Linux and Windows, 2026-10-12): the member topic says that under `claude -p` each line a
