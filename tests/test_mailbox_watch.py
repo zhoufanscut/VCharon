@@ -2535,6 +2535,12 @@ class StopRemoteTest(WatchCase):
             "mb.windows", self.sync_args, 2, out=lines.append, stream=True, spawn=self.spawn,
             max_minutes=1))
         until_held(self, self.state("windows", "mb.windows") + ".lock")
+        # the lock is taken before the child starts: a request sent in between is seen at the
+        # round's top, with no child to stop
+        until = time.monotonic() + 30
+        while not self.procs:
+            self.assertLess(time.monotonic(), until, "the watcher never started its child")
+            time.sleep(0.02)
         # shorter than the next round: the request must be seen while the round is awaited
         with mock.patch.object(watch, "STOP_TIMEOUT", 5):
             code, out, err = self.cli("--stop", project="p")
