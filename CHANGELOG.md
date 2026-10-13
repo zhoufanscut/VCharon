@@ -7,7 +7,10 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.7.0rc1 — 2026-10-13
+
+The first release candidate for 0.7.0, published as a GitHub pre-release: `vcharon --update
+--rc` on 0.6.0 offers it; a plain `--update` on 0.6.0 doesn't.
 
 **Updating from 0.6.0:** a new watcher exit code, 17 (`EXIT stopped`), and a new flag,
 `watch --stop`: both are additions, so a script that knows the old codes and lines still works;
