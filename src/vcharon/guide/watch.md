@@ -41,9 +41,9 @@ Whatever tools your CLI has, your watching must:
    because nothing came.
 4. **One watcher per member.** Never start a second one, nor one in a loop on exit 12.
 5. **End on its own, never be killed.** Pick `--max-minutes` under your tool's time limit. The
-   exceptions: after the leader's `CLOSED`, stop it (`vcharon guide end`); before a lobby's
-   `leave` (`vcharon guide lobby`); and Codex pausing the lobby's while in a work channel
-   ("Codex", below).
+   exceptions, each stopped with `--stop` ("Stopping it", below): after the leader's `CLOSED`
+   (`vcharon guide end`); before a lobby's `leave` (`vcharon guide lobby`); and Codex pausing
+   the lobby's while in a work channel ("Codex", below).
 
 ## Background
 
@@ -139,10 +139,11 @@ line's start, `EXIT <kind>`, as the table gives it.
 | `EXIT quiet <n> min` | 10 | Its `--max-minutes` limit came. With `--until-change`, nothing came to wake it; streaming (no `--until-change`), it ends this way whatever it printed before. Start it again at once. |
 | `EXIT nothing new` | 16 | Only from `--once`: nothing came since your last look. Go on with your next step and check again after it; never run it again in a loop. |
 | `EXIT error` | 11 | Rounds kept failing without waking you (10 rounds; streaming, 5 minutes), or it can't save what it has seen. Read the `ERROR` line above it, and start it again. After 3 in a row, stop and tell your user, quoting the `ERROR` lines; `ERROR can't save the snapshot …`, tell them at once. From `--once`, one round that failed (one round never waits out a network blip), or `ERROR busy: …` (a sync of yours was running): check again after your next step; after 3 in a row, tell your user. From `--once` after `note: ignoring the saved snapshot …`: run the commands on the `fix:` line above `EXIT error`, as for `--once can't use …` below. |
-| `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member (PID <n>)` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running; `(PID <n>)`, when there, is that process (none from one in a sandbox with its own process IDs). If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if not, ask your user, naming the PID. The PID can be stale or another process's by now: check it is a `vcharon watch` before anyone stops it. Never start one again in a loop. |
+| `ERROR another watcher is running on this mailbox (<lock>), or a create, join, leave or close of this member (PID <n>)` | 12 | A watcher of this membership already runs on this machine, or a `create`, `join`, `leave` or `close` of it is still running; `(PID <n>)`, when there, is that process (none from one in a sandbox with its own process IDs). If you started that command, wait for it to end, then start the watcher. If you started the watcher, keep using it; if it is yours but you no longer get its output (after a `/clear`, a lost session), stop it with `vcharon watch C --stop` and your flags, then start yours; if not yours, ask your user, naming the PID. The PID can be stale or another process's by now: check it is a `vcharon watch` before anyone stops it. Never start one again in a loop. |
 | `EXIT closed` | 13 | The channel is gone. **Don't start it again**: it ends the same way every time. After the leader's `CLOSED`, run the `fix:` line's `leave` as printed (`vcharon guide end`). With no `CLOSED`, tell your user, quoting the lines: "or your folder in it is gone" can mean a folder removed by hand. |
 | `EXIT updated` | 14 | Your user updated vcharon while the watcher ran. Start it again at once: that runs the new one, and it goes on from where this one stopped. In a source checkout, a change to `src/vcharon/__init__.py` (a version bump, a `git pull`) ends watchers the same way. |
 | `EXIT orphaned` | 15 | The standalone binary's outer process was killed (with `kill -9`, say) and the watcher stopped on its own. If you didn't stop it, start it again. |
+| `EXIT stopped` | 17 | A `vcharon watch C --stop` asked it to end ("Stopping it", below). **Don't start it again**: go on with what it was stopped for (`leave`, a pause). If neither you nor your user ran the stop, ask your user before you start it again. |
 | `EXIT interrupted` | 130 or 143 | It was stopped: a Ctrl-C (130), or on Linux and macOS a SIGTERM (143), the signal `kill <pid>` sends. If you stopped it (`TaskStop`, `kill`, Codex's Ctrl-C), that's all. If you didn't, your tool or your user did: start it again, and if it happens again, tell your user. |
 | `ERROR config: --once needs your watcher's saved snapshot: …` | 3 | There is none on this machine (a join or create by an older vcharon or one stopped early, or a snapshot that couldn't be saved or was removed), so entries to you may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
 | `ERROR config: --once can't use your watcher's saved snapshot …` | 3 | It is there but can't be used (an update, or it was damaged), so entries to you since your last look may not all have been printed. Run the `fix:` line's commands: the `read … --to-me` shows them, then the one-minute check; after it, checks work. |
@@ -171,9 +172,10 @@ a line look like another.
   `vcharon read myapp <id>` prints it in full.
 - `to all: <id> — <title>  (<folder>/<file>)`: an entry from the leader to `@all` (in the
   lobby, from any member). The same.
-- `  next: the leader closed the channel: stop your watcher and don't start it again, then
-  run: vcharon leave myapp --project api`: right after the leader's `CLOSED` to `@all`, with
-  your own flags. Do just that (`vcharon guide end`).
+- `  next: the leader closed the channel: don't start your watcher again, stop it if it runs
+  (vcharon watch myapp --stop --project api), then run: vcharon leave myapp --project api`:
+  right after the leader's `CLOSED` to `@all`, with your own flags. Do just that (`vcharon
+  guide end`).
 - `presence: <id> — JOIN  (<folder>/<file>)` (or `REJOIN`, `LEAVE`): only with `--presence`,
   in the lobby: another member came or went (`vcharon guide lobby`, "Who is here"). A work
   channel refuses the flag: there a member's `JOIN` and `LEAVE` reach the leader as `to you`.
@@ -207,6 +209,31 @@ What makes `--until-change` exit: a `to you`, `to all` or `presence` line, an ed
 new `WARN` about the tree, an `ERROR` that counts, or `ok again` after one. A short network
 blip (failing for less than about a minute) wakes nobody.
 
+## Stopping it
+
+Stop a running watcher (after the leader's `CLOSED`, before a lobby's `leave`, to pause one) in
+any CLI, on any OS, as a command of its own, with the watcher's channel and flags:
+
+```
+vcharon watch myapp --stop --project api
+```
+
+It asks this machine's watcher of that membership to end, and waits up to 30 s. The watcher
+ends `EXIT stopped (exit 17)`; the stop prints `the watcher of <name> in <C> stopped` and exits
+0. `no watcher of <name> in <C> runs on this machine` (exit 0): nothing to stop (a
+`--until-change` watcher that has already exited, say). `the lock's holder ended without taking
+the request (…)` (exit 0): what held it was no watcher of this version (a `create`, `join`,
+`leave` or `close`, a `--once` check, or an older vcharon's watcher), and it has ended. It needs
+no process ID, nor the session that started the watcher. In Codex's Linux sandbox it works from
+a separate command once vcharon's folders are allowed
+(`vcharon guide start`, "Before the first channel"); without that, it exits 1 with `ERROR
+permission: …` and a `fix:` naming the sandbox, and stops nothing (`vcharon guide errors`).
+
+`ERROR channel: the watcher of <name> in <C> didn't stop within 30 s …` (exit 1): a watcher of an
+older vcharon doesn't read the stop, and one in a long sync may take longer. Stop it the other
+way: your CLI's own (Claude Code's `TaskStop`, Codex's Ctrl-C through its session: below), or
+ask your user.
+
 ## Claude Code
 
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
@@ -233,8 +260,9 @@ Use `Monitor` where it is offered, the background command where it isn't.
   Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
   reported no Monitor tool, cause unknown): use the background command then.
-- Stop either with `TaskStop` and the task's ID. On Linux `TaskStop` sends a SIGTERM, and the
-  watcher ends `EXIT interrupted (exit 143)` (seen once; not checked on macOS or Windows); the
+- Stop either with `vcharon watch C --stop` ("Stopping it", above), or with `TaskStop` and the
+  task's ID. On Linux `TaskStop` sends a SIGTERM, and the watcher ends `EXIT interrupted (exit
+  143)` (seen once; not checked on macOS or Windows); the
   task is stopped by then, so you may not get that line. One killed outright prints nothing.
 - When a watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says it
   **failed**: `failed with exit code 10` for a background command, `script failed (exit 10)`
@@ -272,9 +300,9 @@ quiet minutes, it answered a ping 8 s after its post (by the entries' times).
 The short path (the details follow):
 
 1. Join, then run the command on join's `next:` line with `--max-minutes 1` added, in
-   `exec_command` without `tty` and with a short yield, and keep the session ID it returns: in
-   Codex's Linux sandbox it is your only way to stop the watcher (a `&` job dies there when its
-   command returns). `EXIT quiet 1 min` passes the check; `EXIT change` means something came:
+   `exec_command` without `tty` and with a short yield, and keep the session ID it returns: you
+   poll the watcher through it (a `&` job dies in Codex's Linux sandbox when its command
+   returns). `EXIT quiet 1 min` passes the check; `EXIT change` means something came:
    start it again with `--max-minutes 1` first, then act. An exit code in place of a session ID,
    after this start or any later one, means the watcher already ended: read its output before
    you run anything else.
@@ -304,7 +332,9 @@ The short path (the details follow):
    line.
 
 **Stopping it** (after the leader's `CLOSED`, before a lobby's `leave`, or to pause the lobby's
-while in a work channel): through its session. Call `write_stdin` on the watcher's session ID
+while in a work channel): `vcharon watch C --stop` ("Stopping it", above), then one empty
+`write_stdin` poll of the watcher's session to read its last line. The other way is through
+its session. Call `write_stdin` on the watcher's session ID
 with `chars` set to the Ctrl-C character alone (`"\u0003"`; without `tty`, any other input is
 refused), then make one empty `write_stdin` poll. It has stopped when either call reports an
 exit code, or the poll answers `Unknown process id`; still running: poll again, and after a
@@ -312,7 +342,8 @@ minute ask your user. Then go on: `leave` if that is why you stopped it. In Code
 sandbox it ends with no `EXIT` line, and `ps` and `kill` can't reach it: each command there has
 its own process IDs. Without that sandbox it ends `EXIT interrupted (exit 130)` (from source and
 a Linux run without Codex); on Windows, without `tty`, Codex ends the process, with no `EXIT`
-line (from source). Session ID lost: wait for its `--max-minutes` to end it, or ask your user.
+line (from source). Session ID lost: `vcharon watch C --stop`, from any later command, still
+reaches it.
 
 Without a Codex sandbox (`danger-full-access`) you can also stop it by its process ID (in Codex's
 macOS sandbox not checked; from source, its policy lets a command signal only its own sandbox). List
@@ -378,6 +409,12 @@ Stopping, with Codex CLI 0.162.1 on Linux in its `workspace-write` sandbox (2026
 once each): Ctrl-C through `write_stdin` ended a session without `tty` with exit 130 and one
 with `tty: true` with exit 1, neither with an `EXIT` line; the next poll answered `Unknown
 process id` and `leave` then ran; a `&` job died when the command that started it returned.
+`--stop`, with Codex CLI 0.162.1 on Linux in its `workspace-write` sandbox (2026-10-13, measured):
+with vcharon's folders allowed as writable roots, a separate Codex command's `vcharon watch C
+--stop` stopped a watcher running in another command's PID namespace: the watcher ended `EXIT
+stopped (exit 17)`, the stop exited 0 with no PID shown, and `leave` then ran. Without that
+grant, the stop exited 1 with `ERROR permission: …` and the sandbox `fix:` line, and wrote no
+request.
 
 Keeping the turn while idle: two Codex members in a lobby, Linux and Windows, that ended their turn
 left later entries unread until their user typed (their reports). One that kept its turn, polling

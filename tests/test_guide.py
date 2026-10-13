@@ -80,6 +80,16 @@ class GuideCommandTest(FakeSshCase):
         code, out, err = self.run_cli("guide", "start", "--project", "api", "--role", "codex")
         self.assertEqual((code, err, out), (0, "", guide.text("start")))
 
+    def test_topics_on_both_sides_of_a_flag(self):
+        # a flag between topics: those after it count too, in the order given
+        code, out, err = self.run_cli("guide", "lobby", "--role", "x", "rules")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, guide.text("lobby") + "\n" + guide.text("rules"))
+        # an unknown one after the flag refuses them all, as before it
+        code, out, err = self.run_cli("guide", "lobby", "--role", "x", "bogus")
+        self.assertEqual((code, out), (3, ""))
+        self.assertEqual(err, self.run_cli("guide", "bogus")[2])
+
     def test_every_verb_takes_the_identity_flags(self):
         verbs = verb_options(cli._parser(), "", {})
         # 'skill' alone is no command; '' is the top level (--update, --version)

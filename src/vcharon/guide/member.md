@@ -101,9 +101,8 @@ When your steps are done, post `DONE` to the leader the same way, and keep watch
 work may come. The channel ends with the leader's `CLOSED` to `@all`; your watcher prints it
 and, under it, a `next:` line with the `leave` command for your flags. Then:
 
-1. Stop your watcher: don't start it again, and stop a running one with your CLI's way
-   (Claude Code: `TaskStop`; Codex: Ctrl-C through its session, `vcharon guide watch`,
-   "Codex").
+1. Stop your watcher: don't start it again, and stop a running one with the `next:` line's
+   `vcharon watch … --stop` as printed (`vcharon guide watch`, "Stopping it").
 2. Run the `next:` line's `leave` as printed.
 
 No `next:` line (a title other than exactly `CLOSED`), or `EXIT closed`: `vcharon guide end`.

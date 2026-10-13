@@ -1141,8 +1141,12 @@ agent in a folder another agent shares saw nothing of the other one's.
   it still running). When this machine has a record of the name, the line goes on to say whose
   membership it is, `(this machine's record: the leader's membership, created here with --project
   P, no --role)` or `(…: a member, joined here with --project P --role R)`, and the fix names the
-  cases without choosing: `your own earlier watcher or command: keep it or let it end; another
-  agent's (your user says so): join with --role R; unsure: ask your user`. The record can't
+  cases without choosing: `your own earlier watcher: keep using it, or if you no longer get its
+  output, stop it with vcharon watch C --stop <flags> (a command of yours: let it end); another
+  agent's (your user says so): join with --role R; unsure: ask your user`, the flags the
+  record's (with no record, so no membership for the stop to find: `your own earlier watcher or
+  command: keep it or let it end; …`). The line ends ` (PID <n>)` when the holder wrote its PID
+  ([Lock](#lock)), as the refusal of `leave` and `close` does. The record can't
   choose: a leader re-running `join` after a `/clear` gets `the leader's membership` for its own
   watcher. A record of the name on another server says `(this machine's record: a membership on
   another server)`, with `pass --role R to join from here as another member`. Why: an agent in the
@@ -1258,7 +1262,7 @@ agent in a folder another agent shares saw nothing of the other one's.
   sync stops before removing anything. Then it removes the local tree (only when it is
   exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
   state, the kept last-watched ages, `read`'s kept version note, logs, locks not held, the
-  watcher's snapshot, the post
+  watcher's snapshot and a stop request left by a stop that was killed (`--stop`), the post
   lock, the record, the section file, and last the watcher's lock file, after the record, so a
   watcher started then finds no membership; deleted and released in the order a failed join
   uses. One `removed <path>` line
@@ -1286,8 +1290,9 @@ agent in a folder another agent shares saw nothing of the other one's.
   a watcher started meanwhile exits 12 at once. The refusal of `leave` and `close` names
   the watcher first, since a running watcher is what an agent forgets to stop: `your watcher of
   <name> in C is running, or a create, join, leave or close of it (<lock> is held)`, followed
-  by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)); a job's lock held is `a sync of
-  <name> in C is running (<lock> is held)`.
+  by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)), its fix `stop the watcher with
+  vcharon watch C --stop <flags> (a create, join, leave or close: let it end), then run this
+  again`; a job's lock held is `a sync of <name> in C is running (<lock> is held)`.
 
 ### The lobby
 
@@ -1782,12 +1787,12 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   - `to you: <id> — <title>  (<path>)` for an entry whose `to:` holds `@<me>` (even with
     `@all`), and `to all: …` for `@all` from the leader (the record's leader, never "whoever holds
     `CHANNEL.md`"; in a lobby, from any member); in the entries' own time order;
-  - in a work channel only, `  next: the leader closed the channel: stop your watcher and don't
-    start it again, then run: vcharon leave C <flags>` right after the line of the leader's
-    entry to `@all` (a `to all`, or a `to you` when it names the member too) whose whole title
-    is `CLOSED` exactly,
-    letter case included, spaces around it aside. The flags are the member's record's (a placeholder
-    without one, as the gone fix's), the command as this box runs vcharon; never for the
+  - in a work channel only, `  next: the leader closed the channel: don't start your watcher
+    again, stop it if it runs (vcharon watch C --stop <flags>), then run: vcharon leave C
+    <flags>` right after the line of the leader's entry to `@all` (a `to all`, or a `to you`
+    when it names the member too) whose whole title is `CLOSED` exactly, letter case included,
+    spaces around it aside. The flags are the member's record's (a placeholder without one, as
+    the gone fix's), the commands as this box runs vcharon; never for the
     leader, who closes instead; it doesn't count on its own (its entry does), and comes again
     only with its entry's line. Why: the guide's end has each member leave after the leader's
     `CLOSED` and the leader close after the `LEAVE`s, so the channel is still there and no `EXIT
@@ -1819,7 +1824,8 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   - `ERROR …`, then its `  fix: …` (and `  log: …`) lines, once while the text holds; `ok again`
     after the first good round;
   - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
-    | EXIT nothing new | EXIT interrupted` as the last line, each followed by ` (exit <code>)`,
+    | EXIT nothing new | EXIT stopped | EXIT interrupted` as the last line, each followed by
+    ` (exit <code>)`,
     the process's exit code: `EXIT quiet 1 min (exit 10)`. `sync --repeat`'s `EXIT updated`,
     `EXIT orphaned` and `EXIT interrupted` carry it too. Why: an agent's tool may report another
     code than the process's (Codex's summary said exit 1 for a watcher's 10), so the line says
@@ -1896,6 +1902,45 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   `vcharon: interrupted`, as before. After a SIGTERM, SIG_IGN stays in place to the exit. When
   the run printed an `EXIT` line already (a Ctrl-C while the watch stops its child after `EXIT
   change`), no second one comes; the exit code is the interrupt's.
+- **`--stop`**: `vcharon watch C --stop` asks this machine's watcher of the membership (found
+  as a watch finds it) to end, and waits for it. Why: a watcher could be stopped only by its own
+  session (Ctrl-C, `TaskStop`) or by its PID, and a Codex in its Linux sandbox sees no PID (each
+  command has its own PID namespace), Windows prints no `EXIT` line on a terminate, and an agent
+  that lost its session after the leader's `CLOSED` had no clean way to stop the watcher that
+  makes `leave` refuse (exit 12). A file in the state dir crosses PID namespaces, and the
+  watcher ends through its normal way out, so every OS gets an `EXIT` line.
+  - No watcher holds the snapshot's lock (the stop can take it, and lets go at once): `no watcher
+    of <name> in C runs on this machine`, exit 0, nothing written.
+  - Held: it writes `<snapshot>.stop` beside the lock (the state dir, never a channel), prints
+    `asked the watcher of <name> in C to stop; waiting up to 30 s`, and polls the lock every
+    0.5 s. Free within 30 s, with the request taken (gone): `the watcher of <name> in C
+    stopped`, plus ` (PID <n>)` when the lock named one ([Lock](#lock)), exit 0. Free with the
+    request still there: `the lock's holder ended without taking the request (a create, join,
+    leave or close, a --once check, or an older vcharon's watcher)` (and the PID), exit 0: a
+    holder that isn't a watcher never takes it, and the stop can't tell holders apart before it
+    asks, so it tells by whether the request was taken. Still held: `ERROR channel: the watcher
+    of <name> in C didn't stop within 30 s (<lock> is still held)` (and the PID), exit 1, its
+    fix to stop it in its own session or by the PID, or to run the stop again. The request is
+    removed either way. Why 30 s: a streaming child gets 10 s to end after its
+    stdin closes, then 3 s after a SIGTERM; a `--no-stream` sync or a `--once` check under way
+    runs to its end first, which may take longer, and then the stop times out.
+  - The watcher removes a request it finds at its start, under the lock: a stop that timed out
+    must not end the next watcher. It looks for one at the top of each round, after each round,
+    and every 0.5 s while it waits: between rounds (a local member's 10 s, `--no-stream`'s 30
+    s), for its streaming child's next `ROUND` line, and in the backoff before a restart. A
+    `--no-stream` sync under way runs to its end. Seen, the request is removed and the watch
+    ends as on any way out (the streaming child stopped, the snapshot as saved after the last
+    round, the lock released), last line `EXIT stopped (exit 17)`. Its own code, not 130 or 143:
+    the guide's rule for it is "don't start it again", and an agent can tell it from a stop it
+    didn't ask for. A `--once` check only removes a stale request: its one round ends within its
+    60 s cap anyway, and ending it `stopped` would hide the check's result.
+  - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every`,
+    `--fresh`, `--once`, `--no-stream` or `--presence`: each is a watcher's, and a stop starts
+    none.
+  - Limits: a stop whose request lands just as a new watcher takes the lock, before that one
+    removes stale requests, loses it, and times out; a `held` check takes the lock for an
+    instant, so a watcher starting in that instant exits 12, and a `create` or `join` of that
+    member refuses with `a live session holds <name> in C`.
 - **`EXIT closed`** (13): as soon as a round sees the channel gone (a remote member's sync error
   whose `fix:` starts with the channel-gone text; a local member's channel folder missing), after
   the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays gone. Why
@@ -2089,7 +2134,7 @@ Messages
                  [--file NAME.md | --steps] [--no-sync] [--project P] [--role R]
   vcharon read   C [ID…] [--to-me] [--last N] [--full] [--project P] [--role R] [--json]
   vcharon watch  C [--until-change] [--every S] [--max-minutes M] [--fresh] [--no-stream]
-                 [--max-errors N] [--once] [--presence] [--project P] [--role R]
+                 [--max-errors N] [--once] [--presence] [--stop] [--project P] [--role R]
   vcharon sync   C [--repeat S] [--full] [--dry-run] [--reset up|down] [--project P] [--role R]
 
 Other
@@ -2126,7 +2171,9 @@ Every verb also takes `-v` (log lines to stderr too).
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
   matches the program it runs. Several topics (`guide member rules`) print in the order given,
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
-  one among them refuses them all before anything is printed (exit 3). Why: a member's first
+  one among them refuses them all before anything is printed (exit 3). Topics after a flag
+  count too (`guide lobby --role x rules`), in the order given, as `read`'s IDs do: an agent
+  adds its flags anywhere. Why: a member's first
   read is two topics, one command for both; any other topic is read in a tool call of its own,
   never several guide commands in one call or loop, since agents' tools cut a long output.
   `skill install` writes a short skill that points at it, to
@@ -2196,8 +2243,8 @@ The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher (or a 
 `join`, `leave` or `close` of the member) runs, 13 closed, 14 updated (VCharon was replaced
 while it ran; `sync --repeat` exits 14 too), and 15 orphaned (a binary's bootloader process is
 gone; `sync --repeat` too, and on Windows any command of a binary, though nothing is left to
-see it), and 16 nothing new (a `--once` check that found nothing). A usage error is 3, not
-argparse's 2, since 2 means busy.
+see it), 16 nothing new (a `--once` check that found nothing), and 17 stopped (`watch C
+--stop` asked it to end). A usage error is 3, not argparse's 2, since 2 means busy.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -2651,12 +2698,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 - **Verbs and flags**: the command line above, with each flag's meaning.
 - **Exit codes**: 0, 1, 2, 3, 4, 130 and 143 ([Exit codes](#exit-codes)); the watcher's 0 (change),
   10 (quiet), 11 (error), 12 (another watcher, or a create, join, leave or close of the
-  member, runs), 13 (closed), 14 (updated), 15 (orphaned) and 16 (nothing new).
+  member, runs), 13 (closed), 14 (updated), 15 (orphaned), 16 (nothing new) and 17
+  (stopped).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, syncing
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
-    leader's `CLOSED` to `@all`, `  next: <text>`, its command to run as printed
+    leader's `CLOSED` to `@all`, `  next: <text>`, its commands to run as printed
   - with `--presence`, in a lobby: `presence: <id> — <JOIN|REJOIN|LEAVE>  (<path>)`
   - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
     <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
@@ -2668,7 +2716,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
   - `EXIT change`, `EXIT quiet <n> min`, `EXIT error`, `EXIT closed`, `EXIT updated`, `EXIT
-    orphaned`, `EXIT nothing new`, `EXIT interrupted`, each followed by ` (exit <code>)` (match
+    orphaned`, `EXIT nothing new`, `EXIT stopped`, `EXIT interrupted`, each followed by
+    ` (exit <code>)` (match
     on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12, followed by ` (PID <n>)` when the
     holder wrote its PID (older versions end it at `(<lock>)`: match on that start). The text

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import types
 import unittest
@@ -217,7 +218,7 @@ class ExitLineTest(unittest.TestCase):
     def ending(self, run):
         lines = []
         w = types.SimpleNamespace(say=lines.append, updated=False, closed=False, busy=None,
-                                  error=None)
+                                  error=None, stopped=False)
         code = run(w)
         m = re.fullmatch(r"EXIT [a-z0-9 ]+ \(exit (\d+)\)", lines[-1])
         self.assertIsNotNone(m, lines)
@@ -250,6 +251,9 @@ class ExitLineTest(unittest.TestCase):
         self.assertEqual(self.ending(lambda w: watch._loop(
             w, 10, sleep, lambda: ([], False, True), clock, False, False, 1, 10, None)),
             "EXIT quiet 1 min (exit 10)")
+        self.assertEqual(self.ending(lambda w: watch._loop(
+            w, 10, sleep, lambda: ([], False, True), clock, False, False, 1, 10, None,
+            stopped=lambda: True)), "EXIT stopped (exit 17)")
 
 
 class ScanTest(WatchCase):
@@ -816,6 +820,130 @@ class LockTest(WatchCase):
         self.assertEqual(codes[0], 12)
         self.assertEqual(self.said(codes[1].splitlines()),
                          [LOCKED % self.state() + HELD_HERE])
+
+
+def in_thread(case, fn):
+    """fn() in a daemon thread: (the thread, the list its result goes into)."""
+    got = []
+    t = threading.Thread(target=lambda: got.append(fn()), daemon=True)
+    t.start()
+    case.addCleanup(t.join, 60)
+    return t, got
+
+
+def until_held(case, lock, wait=30):
+    """Waits until another holder (a watcher in a thread) has the lock file."""
+    until = time.monotonic() + wait
+    while not channel_cmd.held(lock):
+        case.assertLess(time.monotonic(), until, "the watcher never took its lock")
+        time.sleep(0.02)
+
+
+class StopTest(WatchCase):
+    """vcharon watch C --stop: a request file beside the snapshot's lock, which the watcher
+    takes and ends with EXIT stopped (17); the stop waits for the lock to come free."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.local_record()
+        # a waiting watcher, and the stop, look often: the tests' waits stay short
+        patcher = mock.patch.object(watch, "STOP_POLL", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def request(self):
+        return self.state() + watch.STOP_SUFFIX
+
+    def test_no_watcher(self):
+        self.assertEqual(self.cli("--stop"),
+                         (0, "no watcher of debian in mb runs on this machine\n", ""))
+        self.assertFalse(os.path.exists(self.request()))
+        # the stop let go of the lock at once
+        lk = watch.take_lock(self.state())
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_a_running_watcher_stops(self):
+        show_pid(self)
+        lines = []
+        # rounds 10 s apart and a shorter wait for the stop: the request must be seen during
+        # the wait between rounds; rounds: a watcher that never sees it ends on its own
+        t, got = in_thread(self, lambda: watch.watch_dir(self.tree, "debian", 10,
+                                                         out=lines.append, rounds=3))
+        until_held(self, self.state() + ".lock")
+        with mock.patch.object(watch, "STOP_TIMEOUT", 5):
+            code, out, err = self.cli("--stop")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines(), [
+            "asked the watcher of debian in mb to stop; waiting up to 5 s",
+            "the watcher of debian in mb stopped" + HELD_HERE])
+        t.join(30)
+        self.assertEqual(got, [watch.EXIT_STOPPED])
+        self.assertEqual(self.said(lines)[-1], "EXIT stopped (exit 17)")
+        self.assertFalse(os.path.exists(self.request()))
+        lk = watch.take_lock(self.state())
+        self.assertIsNotNone(lk)
+        lk.release()
+
+    def test_a_stale_request_is_cleared_at_the_start(self):
+        # a stop that timed out left its request: the next watcher runs on
+        os.makedirs(os.path.dirname(self.request()), exist_ok=True)
+        open(self.request(), "wb").close()
+        seen = []
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                               sleep=Rounds(lambda: seen.append(os.path.exists(self.request()))),
+                               rounds=1)
+        self.assertEqual((code, seen), (0, [False]))
+        self.assertNotIn("EXIT stopped (exit 17)", self.said())
+
+    def test_a_request_between_rounds(self):
+        # seen at the top of the next round, with a test's own sleep too; taken when seen
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                               sleep=Rounds(lambda: open(self.request(), "wb").close()),
+                               rounds=3)
+        self.assertEqual(code, watch.EXIT_STOPPED)
+        self.assertEqual(self.said()[-1], "EXIT stopped (exit 17)")
+        self.assertFalse(os.path.exists(self.request()))
+
+    def test_a_timed_out_stop(self):
+        show_pid(self)
+        # a holder that never reads the request (an older vcharon's watcher)
+        child, pid = take_in_child(self.state())
+        self.addCleanup(lambda: child.poll() is None and stop_child(child))
+        with mock.patch.object(watch, "STOP_TIMEOUT", 1):
+            code, out, err = self.cli("--stop")
+        self.assertEqual((code, out), (1, "asked the watcher of debian in mb to stop; waiting "
+                                          "up to 1 s\n"))
+        self.assertEqual(err.splitlines(), [
+            "ERROR channel: the watcher of debian in mb didn't stop within 1 s (%s.lock is "
+            "still held) (PID %d)" % (self.state(), pid),
+            "  fix: " + platform.runnable(watch.STOP_FIX % ("mb", "--project q"))])
+        # its request is gone: it must not stop the next watcher
+        self.assertFalse(os.path.exists(self.request()))
+
+    def test_a_holder_that_never_takes_the_request(self):
+        show_pid(self)
+        # a create, join, leave or close (here take_lock in this process) lets go of the lock
+        # on its own: the stop says so, not that a watcher stopped
+        lk = watch.take_lock(self.state())
+        timer = threading.Timer(0.3, lk.release)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        self.addCleanup(lk.release)
+        code, out, err = self.cli("--stop")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[-1], watch.STOP_NOT_TAKEN + HELD_HERE)
+        self.assertFalse(os.path.exists(self.request()))
+
+    def test_refused_with_a_watchers_flags(self):
+        for flags in (["--until-change"], ["--max-minutes", "5"], ["--max-errors", "3"],
+                      ["--every", "5"], ["--fresh"], ["--once"], ["--no-stream"],
+                      ["--presence"]):
+            with self.subTest(flags=flags):
+                code, out, err = self.cli("--stop", *flags)
+                self.assertEqual((code, out), (3, ""))
+                self.assertEqual(err.splitlines()[0],
+                                 "ERROR config: --stop doesn't go with %s" % flags[0])
 
 
 class KeyTest(WatchCase):
@@ -2038,8 +2166,9 @@ class StreamTest(WatchCase):
         self.assertEqual(lines, [
             watching(self.tree, 0, ", syncing every 2 s"),
             "to all: debian#2 — CLOSED  (debian/RESULTS.md)",
-            platform.runnable("  next: the leader closed the channel: stop your watcher and "
-                              "don't start it again, then run: vcharon leave mb --project p")])
+            platform.runnable("  next: the leader closed the channel: don't start your watcher "
+                              "again, stop it if it runs (vcharon watch mb --stop --project p), "
+                              "then run: vcharon leave mb --project p")])
         self.assert_all_stopped()
 
     def test_a_binarys_child(self):
@@ -2103,7 +2232,8 @@ class StreamTest(WatchCase):
         limit = watch.RUN_TIMEOUT + 2
         times = iter([0, limit - 0.1, limit])
         lines = mock.Mock(get=mock.Mock(side_effect=queue.Empty))
-        fake = types.SimpleNamespace(_lines=lines, timer=lambda: next(times), every=2)
+        fake = types.SimpleNamespace(_lines=lines, timer=lambda: next(times), every=2,
+                                     stopped=None)
         self.assertIs(watch.Stream._next_line(fake), watch._STUCK)
         self.assertEqual(list(times), [])
 
@@ -2381,6 +2511,92 @@ class StreamTest(WatchCase):
                  (1, "Traceback (most recent call last):", None))):
             with self.subTest(got=got):
                 self.assertEqual(watch.parse_failure(code, got, "mb.windows"), want)
+
+
+class StopRemoteTest(WatchCase):
+    """A remote member's watcher stops on request: streaming, its child is stopped too; with
+    --no-stream, after the sync under way."""
+
+    setUp = StreamTest.setUp
+    spawn = StreamTest.spawn
+    reap = staticmethod(StreamTest.reap)
+    assert_all_stopped = StreamTest.assert_all_stopped
+
+    def test_a_streaming_watcher_and_its_child(self):
+        show_pid(self)
+        patcher = mock.patch.object(watch, "STOP_POLL", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # one round, then the child waits for its stdin to close
+        self.children = [[["out", "ROUND 0"]]]
+        self.procs = []
+        lines = []
+        t, got = in_thread(self, lambda: watch.watch_job(
+            "mb.windows", self.sync_args, 2, out=lines.append, stream=True, spawn=self.spawn,
+            max_minutes=1))
+        until_held(self, self.state("windows", "mb.windows") + ".lock")
+        # shorter than the next round: the request must be seen while the round is awaited
+        with mock.patch.object(watch, "STOP_TIMEOUT", 5):
+            code, out, err = self.cli("--stop", project="p")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[-1], "the watcher of windows in mb stopped" + HELD_HERE)
+        t.join(30)
+        self.assertEqual(got, [watch.EXIT_STOPPED])
+        self.assertEqual(self.said(lines)[-1], "EXIT stopped (exit 17)")
+        self.assertEqual(len(self.procs), 1)
+        self.assert_all_stopped()
+
+    def test_a_stale_request_is_cleared_at_the_start(self):
+        request = self.state("windows", "mb.windows") + watch.STOP_SUFFIX
+        os.makedirs(os.path.dirname(request), exist_ok=True)
+        open(request, "wb").close()
+        seen = []
+
+        def run(job, sync_args):
+            seen.append(os.path.exists(request))
+            return 0, None, None
+
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
+                               sleep=never, run=run, rounds=1)
+        self.assertEqual((code, seen), (0, [False]))
+        self.assertNotIn("EXIT stopped (exit 17)", self.said())
+
+    def test_no_stream_with_the_default_sleep_through_the_command(self):
+        show_pid(self)
+        patcher = mock.patch.object(watch, "STOP_POLL", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        lines = []
+        # rounds 30 s apart: the request must be seen during the wait between them
+        t, got = in_thread(self, lambda: watch.watch_job(
+            "mb.windows", self.sync_args, 30, out=lines.append,
+            run=lambda job, sync_args: (0, None, None), rounds=3))
+        until_held(self, self.state("windows", "mb.windows") + ".lock")
+        with mock.patch.object(watch, "STOP_TIMEOUT", 5):
+            code, out, err = self.cli("--stop", project="p")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[-1], "the watcher of windows in mb stopped" + HELD_HERE)
+        t.join(30)
+        self.assertEqual(got, [watch.EXIT_STOPPED])
+        self.assertEqual(self.said(lines)[-1], "EXIT stopped (exit 17)")
+
+    def test_no_stream_after_the_sync_under_way(self):
+        request = self.state("windows", "mb.windows") + watch.STOP_SUFFIX
+        runs = []
+
+        def run(job, sync_args):
+            # the request comes while the round's sync runs
+            runs.append(job)
+            open(request, "wb").close()
+            return 0, None, None
+
+        sleep = Rounds(*[lambda: None] * 3)
+        code = watch.watch_job("mb.windows", self.sync_args, 30, out=self.lines.append,
+                               sleep=sleep, run=run, rounds=4)
+        # right after that round, before any wait
+        self.assertEqual((code, runs, sleep.seconds), (watch.EXIT_STOPPED, ["mb.windows"], []))
+        self.assertEqual(self.said()[-1], "EXIT stopped (exit 17)")
+        self.assertFalse(os.path.exists(request))
 
 
 class EntriesTest(WatchCase):
@@ -2766,8 +2982,9 @@ class ClosingTest(WatchCase):
 
     @staticmethod
     def next_line(flags):
-        return platform.runnable("  next: the leader closed the channel: stop your watcher and "
-                                 "don't start it again, then run: vcharon leave mb " + flags)
+        return platform.runnable("  next: the leader closed the channel: don't start your "
+                                 "watcher again, stop it if it runs (vcharon watch mb --stop "
+                                 "%s), then run: vcharon leave mb %s" % (flags, flags))
 
     def watch(self, me, posted, **kw):
         lines = []
@@ -3227,7 +3444,7 @@ class CommandTest(WatchCase):
         self.assertEqual(calls, [("mb.windows-b", ["mb", "--project", "p", "--role", "b"], 2)])
 
     def test_exit_codes(self):
-        for code in (0, 10, 11, 12, 13, 14, 16):
+        for code in (0, 10, 11, 12, 13, 14, 15, 16, 17):
             with self.subTest(code=code), \
                     mock.patch.object(watch, "watch_dir", return_value=code):
                 self.assertEqual(self.cli()[0], code)

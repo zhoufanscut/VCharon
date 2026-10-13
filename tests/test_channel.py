@@ -665,11 +665,14 @@ class CreateJoinTest(ChannelCase):
         self.assertNotIn(channel_cmd.ASK_USER, self.ok("join", "game", "--local").splitlines())
         hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web",
                                                 os.path.join(self.root, "game")) + ".lock")
-        fix = ("your own earlier watcher or command: keep it or let it end; another agent's "
-               "(your user says so): join with --role R; unsure: ask your user")
+        # with this server's record, the fix can offer the stop, which finds that membership
+        fix = ("your own earlier watcher: keep using it, or if you no longer get its output, "
+               "stop it with vcharon watch game --stop %s (a command of yours: let it end); "
+               "another agent's (your user says so): join with --role R; unsure: ask your user")
         self.assertEqual(self.refusal("join", "game", "--local"), (
             "ERROR channel: a live session holds mac-web in game (this machine's record: the "
-            "leader's membership, created here with --project web, no --role)", fix))
+            "leader's membership, created here with --project web, no --role)",
+            platform.runnable(fix % "--project web")))
         # with --role R the agent is a member of its own, and the note names the leader's
         # membership without calling it the reader's
         out = self.ok("join", "game", "--local", "--role", "cc")
@@ -681,7 +684,18 @@ class CreateJoinTest(ChannelCase):
                                                 os.path.join(self.root, "game")) + ".lock")
         self.assertEqual(self.refusal("join", "game", "--local", "--role", "cc"), (
             "ERROR channel: a live session holds mac-web-cc in game (this machine's record: a "
-            "member, joined here with --project web --role cc)", fix))
+            "member, joined here with --project web --role cc)",
+            platform.runnable(fix % "--project web --role cc")))
+
+    def test_the_refusal_names_the_holders_pid(self):
+        # a holder that wrote its PID, as a watcher does: the line ends with it, as leave's
+        self.lead(where=("--local",), box="mac", project="web")
+        child, pid = take_in_child(channel_cmd.watcher_snapshot(
+            None, "game.mac-web", "mac-web", os.path.join(self.root, "game")))
+        self.addCleanup(release, child)
+        self.assertEqual(self.refusal("join", "game", "--local")[0], (
+            "ERROR channel: a live session holds mac-web in game (this machine's record: the "
+            "leader's membership, created here with --project web, no --role) (PID %d)" % pid))
 
     def test_the_refusal_for_a_name_held_on_another_server(self):
         # the record is of a membership on another server: never this join's to take, so the
@@ -1873,10 +1887,13 @@ class LeaveCloseTest(ChannelCase):
         return self.box_files("mac"), self.box_files("laptop"), self.server_tree()
 
     def test_leave(self):
-        # a watcher ran: its snapshot and lock; the posts made the own folder's post lock
+        # a watcher ran: its snapshot and lock, and a stop's request left by a stop that was
+        # killed; the posts made the own folder's post lock
         snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
         write_tree(self.homes["mac"], {os.path.relpath(snapshot, self.homes["mac"]): b"{}",
                                        os.path.relpath(snapshot, self.homes["mac"]) + ".lock":
+                                       b"",
+                                       os.path.relpath(snapshot, self.homes["mac"]) + ".stop":
                                        b""})
         post_lock = entries.lock_path(os.path.join(self.joined("game.mac-web"),
                                                    "mac-web"))
@@ -1906,6 +1923,7 @@ class LeaveCloseTest(ChannelCase):
                      "state/game.mac-web.up.lock", "logs/game.mac-web.up.log",
                      "joined/game.mac-web/", "state/mailbox-watch-game.mac-web.json",
                      "state/mailbox-watch-game.mac-web.json.lock",
+                     "state/mailbox-watch-game.mac-web.json.stop",
                      "state/game.mac-web.version-note.json",
                      os.path.relpath(post_lock, self.homes["mac"]).replace(os.sep, "/")):
             self.assertIn(path, gone)
@@ -1983,7 +2001,9 @@ class LeaveCloseTest(ChannelCase):
         # the watcher lock held: refused before anything on the server changes
         child = hold(self, lock)
         self.assertEqual(self.refusal("close", "game", "--project", "ui")[1],
-                         "stop the watcher first, or wait for that command to end")
+                         platform.runnable("stop the watcher with vcharon watch game --stop "
+                                           "--project ui (a create, join, leave or close: let "
+                                           "it end), then run this again"))
         release(child)
         # another server than the record's
         os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE

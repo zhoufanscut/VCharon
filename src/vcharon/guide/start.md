@@ -189,8 +189,9 @@ myapp`.
   - It is your own earlier watcher, or another vcharon command of yours still running: never
     take a `--role` for it (that would make you a second member). If you still get that
     watcher's output (your CLI still lists it as your task), keep using it: no rejoin is needed.
-    If not, wait for its exit or the command's end, or ask your user to stop it; then join
-    again. Meanwhile, `vcharon read myapp --to-me` shows what came to you.
+    If not, stop that watcher with the `fix:` line's `vcharon watch … --stop` (a command of
+    yours: let it end); then join again. Meanwhile, `vcharon read myapp --to-me` shows what
+    came to you.
   - Your user says another agent works in this folder: you are a member of your own. Join with
     `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
     after.

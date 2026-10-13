@@ -82,6 +82,15 @@ KEEP_TURN_AGENT = "codex"
 # same folder, and only the reader (or its user) can tell which
 LIVE_SESSION_FIX = ("your own earlier watcher or command: keep it or let it end; another agent's "
                     "(your user says so): join with --role R; unsure: ask your user")
+# its form when this machine has a record of the name on this server: the stop command can find
+# that membership, for an own earlier watcher whose output the agent no longer gets (a /clear)
+LIVE_SESSION_STOP_FIX = ("your own earlier watcher: keep using it, or if you no longer get its "
+                         "output, stop it with vcharon watch %s --stop %s (a command of yours: "
+                         "let it end); another agent's (your user says so): join with --role R; "
+                         "unsure: ask your user")
+# the fix of leave's and close's refusal while the watcher's lock is held
+WATCHING_FIX = ("stop the watcher with vcharon watch %s --stop %s (a create, join, leave or "
+                "close: let it end), then run this again")
 # what join prints after its next: line, for a member: a bare "join" is no task, and the
 # steps the leader assigns are work only the user can ask for (vcharon guide rules)
 ASK_USER = ("  note: if your user only asked you to join, ask them whether to work on the steps "
@@ -542,6 +551,15 @@ def watcher_snapshot(record_or_none, section, name, channel_dir=None):
     return watch.snapshot_path(os.path.abspath(os.path.expanduser(channel_dir)), name)
 
 
+def record_snapshot(record):
+    """The watcher's snapshot path of record's membership (watcher_snapshot), as its watcher and
+    leave's lock check find it."""
+    section = "%s.%s" % (record["channel"], record["name"])
+    if record["ssh"] is None:
+        return watcher_snapshot(record, section, record["name"], record["remote"])
+    return watcher_snapshot(record, section, record["name"])
+
+
 def held(path):
     """True if another process holds the lock file path; a missing file is no lock."""
     try:
@@ -625,10 +643,7 @@ def _check_locks(record, section, channel):
     one of its jobs, holds its lock. Returns (the watcher's lock, now held by this process,
     the snapshot path it guards): released only at the end of the command. The job locks are
     only checked: the command's own sync takes them."""
-    if record["ssh"] is None:
-        snapshot = watcher_snapshot(record, section, record["name"], record["remote"])
-    else:
-        snapshot = watcher_snapshot(record, section, record["name"])
+    snapshot = record_snapshot(record)
 
     # the watcher's lock names the watcher first: it is what an agent forgets to stop; and its
     # holder's PID when it wrote one, as the watcher's exit-12 line does
@@ -638,7 +653,8 @@ def _check_locks(record, section, channel):
                                 "or close of it (%s.lock is held)%s"
                                 % (record["name"], channel, snapshot,
                                    " (PID %d)" % pid if pid else ""),
-                                "stop the watcher first, or wait for that command to end")
+                                WATCHING_FIX % (channel, name_flags(channel, record["name"],
+                                                                    record)))
 
     lk = hold_watcher(snapshot, watching)
     try:
@@ -1015,11 +1031,11 @@ def _create_held(args, cfg, name, log, say, take):
         made = []
         try:
             if server.ssh is None:
-                take(watcher_snapshot(None, section, name, os.path.join(server.root, channel)),
-                     lambda: _live_session(name, channel, record, server))
+                snapshot = watcher_snapshot(None, section, name,
+                                            os.path.join(server.root, channel))
             else:
-                take(watcher_snapshot(None, section, name),
-                     lambda: _live_session(name, channel, record, server))
+                snapshot = watcher_snapshot(None, section, name)
+            take(snapshot, lambda: _live_session(name, channel, record, server, snapshot))
             own, _remote_text, _ = _write_member(cfg, server, channel, name, name, section,
                                                 made, got, args.ident, args.fields, info,
                                                 create=True)
@@ -1239,7 +1255,7 @@ def _join_held(args, cfg, name, log, say, take):
                                         os.path.join(server.root, channel))
         else:
             snapshot = watcher_snapshot(None, section, name)
-        take(snapshot, lambda: _live_session(name, channel, record, server))
+        take(snapshot, lambda: _live_session(name, channel, record, server, snapshot))
         _another_server(record, server, channel)
         got = None
         if making:
@@ -1464,26 +1480,34 @@ def _first_look(channel, name, section, say, log, created=False, keep=False):
         return None
 
 
-def _live_session(name, channel, record, server):
+def _live_session(name, channel, record, server, snapshot):
     """The refusal of a create or join while the member's watcher lock is held: its watcher, or
     another create, join, leave or close of it, runs on this machine. record: this machine's
     record of name, or None. An agent in the leader's folder builds the leader's name, so the
     holder may not be the reader's: the line says whose membership the name is by the record,
     and the fix tells the cases apart (a leader re-running join after a /clear gets "the
-    leader's membership" for its own watcher, so the record alone never says "another")."""
+    leader's membership" for its own watcher, so the record alone never says "another").
+    snapshot: the watcher's, whose lock names its holder's PID when it wrote one: the line ends
+    with it, as leave's refusal does. With this server's record the fix offers the stop, which
+    finds the membership by that record."""
+    pid = Lock.holder_pid(snapshot + ".lock")
+    held_by = " (PID %d)" % pid if pid else ""
     text = "a live session holds %s in %s" % (name, channel)
     if record is not None and (record["machine"] != server.machine
                                or record["ssh"] != server.ssh):
         # a membership of this name on another server: never one this join can take
         return channels.refused(text + " (this machine's record: a membership on another "
-                                "server)", "pass --role R to join from here as another member")
+                                "server)" + held_by, "pass --role R to join from here as another "
+                                "member")
     if record is not None:
         # a lobby's founder leads nothing: a member, joined here
         leads = record["leader"] == name and kinds.of(record).can_close
         text += " (this machine's record: %s, %s here with %s)" % (
             "the leader's membership" if leads else "a member",
             "created" if leads else "joined", record_flags(record))
-    return channels.refused(text, LIVE_SESSION_FIX)
+        return channels.refused(text + held_by, LIVE_SESSION_STOP_FIX
+                                % (channel, name_flags(channel, name, record)))
+    return channels.refused(text + held_by, LIVE_SESSION_FIX)
 
 
 def _own_path(server, got, channel, name, section):
@@ -2014,6 +2038,8 @@ def _remove_membership(cfg, record, section, say, watcher):
         drop(charter.seen_path(section))
     drop(charter.version_note_path(section))
     drop(snapshot)
+    # a stop's request left by a stop that was killed (watch.StopRequest)
+    drop(snapshot + ".stop")
     if post_lock is not None:
         drop(post_lock, lock=True)
     drop(record_path(record["channel"], name))

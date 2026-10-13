@@ -68,7 +68,7 @@ EXIT_CODES = """exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is held), 
   4 couldn't connect or start the helper, 130 Ctrl-C, 143 SIGTERM (watch, sync --repeat).
   watch: 0 a change, 10 quiet (--max-minutes), 11 error, 12 another watcher (or a create,
   join, leave or close of the member) runs, 13 closed, 14 vcharon was updated (start it again),
-  15 a binary's bootloader process was killed, 16 nothing new (--once).
+  15 a binary's bootloader process was killed, 16 nothing new (--once), 17 stopped (--stop).
 Every refusal ends with a fix: line, a command to run or one line of text."""
 
 DESCRIPTION = """File-based channels for AI agents, on one machine or across machines over plain
@@ -297,6 +297,9 @@ def _parser():
                      help="with --until-change: exit after this many failed rounds in a row "
                      "(default 10); a streaming watch counts %d s of failing as one"
                      % watch_mod.STREAM_ERROR_ROUND)
+    one.add_argument("--stop", action="store_true", help="ask this membership's watcher on "
+                     "this machine to end (EXIT stopped, 17), and wait up to %d s for it"
+                     % watch_mod.STOP_TIMEOUT)
     ident(one)
     one = verb("sync", "a remote member: push your folder, pull the others'",
                "vcharon sync myapp --full")
@@ -353,6 +356,8 @@ def main(argv=None):
 
 # what may come with --update
 UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc", "--check")
+# the verbs whose list of positionals may go on after a flag, and the list's dest
+LISTS_AROUND_FLAGS = {"read": "ids", "guide": "topics"}
 
 
 def _main(argv, run):
@@ -365,10 +370,11 @@ def _main(argv, run):
         except SystemExit as e:
             # --help, --version
             return e.code if isinstance(e.code, int) else 0
-        if extra and args.command == "read":
-            # IDs on both sides of a flag (read C a#1 --full b#2): argparse takes only the
-            # first run of them into the list
-            args.ids += [w for w in extra if not w.startswith("-")]
+        if extra and args.command in LISTS_AROUND_FLAGS:
+            # IDs or topics on both sides of a flag (read C a#1 --full b#2, guide lobby --role
+            # x rules): argparse takes only the first run of them into the list
+            dest = LISTS_AROUND_FLAGS[args.command]
+            setattr(args, dest, getattr(args, dest) + [w for w in extra if not w.startswith("-")])
             extra = [w for w in extra if w.startswith("-")]
         if extra:
             # parse_args would say the same, but from the top parser, whose fix is the top
@@ -1151,7 +1157,9 @@ def _over_limit(limits, me):
 
 def _watch(args, run):
     """vcharon watch C: a local member's watch of the channel folder, or a remote member's of
-    its synced copy; the watcher's own exit codes."""
+    its synced copy; the watcher's own exit codes. --stop: _stop_watcher."""
+    if args.stop:
+        return _stop_watcher(args)
     # every line the watch prints goes through out, so a later Ctrl-C knows whether an EXIT
     # line came already
     out = run.noting_exit(watch_mod.say, len(watch_mod.stamp(time.time())) + 1)
@@ -1161,6 +1169,47 @@ def _watch(args, run):
 
     with run.stoppable(say):
         return _watch_member(args, run, say, out)
+
+
+def _stop_watcher(args):
+    """vcharon watch C --stop: asks the membership's watcher on this machine to end, through a
+    request file beside its lock (watch.ask_stop), and waits for its lock to come free. 0 when
+    none runs or it stopped; refused (exit 1) when the lock is still held after
+    watch.STOP_TIMEOUT, with the request removed. Not a watcher: no EXIT line of its own."""
+    # each is a watcher's own: a stop starts no watcher
+    for flag, on in (("--until-change", args.until_change),
+                     ("--max-minutes", args.max_minutes is not None),
+                     ("--max-errors", args.max_errors is not None),
+                     ("--every", args.every is not None), ("--fresh", args.fresh),
+                     ("--once", args.once), ("--no-stream", args.no_stream),
+                     ("--presence", args.presence)):
+        if on:
+            raise _usage("--stop doesn't go with %s" % flag, "leave out %s" % flag)
+    record, flags = _membership(args)
+    name, channel = record["name"], args.channel
+    snapshot = channel_cmd.record_snapshot(record)
+
+    def asked(pid):
+        # before the wait, so a stop that takes seconds isn't silent
+        print("asked the watcher of %s in %s to stop; waiting up to %d s"
+              % (name, channel, watch_mod.STOP_TIMEOUT), flush=True)
+
+    got = watch_mod.ask_stop(snapshot, asked=asked)
+    if got is None:
+        print("no watcher of %s in %s runs on this machine" % (name, channel))
+        return 0
+    pid, stopped, taken = got
+    # the PID its lock named, when it wrote one (DESIGN, "Lock")
+    held_by = " (PID %d)" % pid if pid else ""
+    if stopped:
+        # its lock is free either way; only a watcher that took the request was stopped by it
+        print("the watcher of %s in %s stopped%s" % (name, channel, held_by) if taken
+              else watch_mod.STOP_NOT_TAKEN + held_by)
+        return 0
+    raise channel_cmd.channels.refused(
+        "the watcher of %s in %s didn't stop within %d s (%s.lock is still held)%s"
+        % (name, channel, watch_mod.STOP_TIMEOUT, snapshot, held_by),
+        watch_mod.STOP_FIX % (channel, " ".join(flags)))
 
 
 def _watch_member(args, run, say, out):

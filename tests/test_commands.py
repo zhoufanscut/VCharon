@@ -926,6 +926,13 @@ HINTS = {
         ("  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s",
          ("2 to all in the last 24 h", " (3 entries: the 2 counted and 1 more to you or to all "
           "after the oldest counted one)", "lobby", 3, FLAGS)),
+        # a live session holds the name, and this machine's record of it is on this server
+        ("your own earlier watcher: keep using it, or if you no longer get its output, stop it "
+         "with vcharon watch %s --stop %s (a command of yours: let it end); another agent's "
+         "(your user says so): join with --role R; unsure: ask your user", ("game", FLAGS)),
+        # leave's and close's while the watcher's lock is held
+        ("stop the watcher with vcharon watch %s --stop %s (a create, join, leave or close: let "
+         "it end), then run this again", ("game", FLAGS)),
         # the next steps join and create print
         ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
@@ -1018,8 +1025,14 @@ HINTS = {
          "then vcharon watch %s --until-change --max-minutes 1 %s (the one-minute check)",
          ("game", FLAGS, "game", FLAGS)),
         # the line after the leader's CLOSED to @all
-        ("  next: the leader closed the channel: stop your watcher and don't start it again, "
-         "then run: vcharon leave %s %s", ("game", FLAGS))],
+        ("  next: the leader closed the channel: don't start your watcher again, stop it if it "
+         "runs (vcharon watch %s --stop %s), then run: vcharon leave %s %s",
+         ("game", FLAGS, "game", FLAGS)),
+        # watch --stop's, when the lock is still held at the end of its wait
+        ("a watcher of an older version doesn't read the request, and one may still be in a "
+         "sync: stop it in its own session (Ctrl-C, or your CLI's way to stop a background "
+         "command), or by the PID if one is shown once you checked it is vcharon's watcher; or "
+         "run vcharon watch %s --stop %s again", ("game", FLAGS))],
 }
 
 

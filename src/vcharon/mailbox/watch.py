@@ -44,8 +44,8 @@ Lines; * marks the ones that count for --until-change:
   * to you: <id> — <title>  (<path>)
   * to all: <id> — <title>  (<path>)
                                    a new entry, in the entries' own time order
-      next: the leader closed the channel: stop your watcher and don't start it again, then
-          run: vcharon leave C <flags>
+      next: the leader closed the channel: don't start your watcher again, stop it if it
+          runs (vcharon watch C --stop <flags>), then run: vcharon leave C <flags>
                                    right after the leader's entry to @all titled CLOSED, for a
                                    member (never the leader); with the flags from its record
   * WARN entry <id> was edited     a heading seen before with another text, in the same file;
@@ -79,8 +79,9 @@ Lines; * marks the ones that count for --until-change:
                                    in it is as this box runs vcharon
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
-    | EXIT nothing new             the last line, when it exits on its own (exit 0, 10, 11,
-                                   13, 14, 15, 16), each followed by ` (exit <code>)`, that
+    | EXIT nothing new | EXIT stopped
+                                   the last line, when it exits on its own (exit 0, 10, 11,
+                                   13, 14, 15, 16, 17), each followed by ` (exit <code>)`, that
                                    code (exit_line); EXIT nothing new: a --once check that
                                    found nothing; EXIT closed right after the ERROR and fix
                                    (and log) lines of a
@@ -91,7 +92,9 @@ Lines; * marks the ones that count for --until-change:
                                    child's exit 14, or after an unexpected error in a binary
                                    (cli.py): start it again, which runs the new one;
                                    EXIT orphaned when a binary's bootloader process is gone
-                                   (killed with SIGKILL): no one is left to read the watcher
+                                   (killed with SIGKILL): no one is left to read the watcher;
+                                   EXIT stopped when vcharon watch C --stop asked it to end
+                                   (StopRequest): don't start it again
     EXIT interrupted               the last line after a Ctrl-C (exit 130) or, on POSIX, a
                                    SIGTERM (exit 143), once the sync child is stopped
                                    (cli.py); a SIGKILL prints nothing
@@ -120,6 +123,13 @@ machine (channels.stamp_seen, beside the channel root, never in the channel): a 
 round after its scan worked; a remote member's sync child, marked by WATCH_ENV, through its
 down plan. At most one metadata write every 30 s, best effort, and never a line here: whoami C
 shows the ages.
+
+vcharon watch C --stop (ask_stop) writes a request file beside the snapshot's lock and waits
+for the lock to come free. The watcher clears a stale one at its start, under the lock, and
+looks for one at the top of each round, after each round and every STOP_POLL s while it waits
+(between rounds; for its streaming child's next round or restart); it then removes it and ends
+through its normal way out with EXIT stopped (exit 17). A --once check only clears it: its one
+round ends soon anyway.
 """
 
 from __future__ import annotations
@@ -202,6 +212,9 @@ EXIT_CHANGE, EXIT_QUIET, EXIT_ERROR, EXIT_LOCKED, EXIT_CLOSED = 0, 10, 11, 12, 1
 # a --once check that found nothing new: not 10, whose rule is "start it again at once", which
 # would make a check between steps a loop
 EXIT_NOTHING = 16
+# vcharon watch C --stop asked it to end: not 130 or 143, so an agent can tell it from a stop
+# it didn't ask for, and its rule is "don't start it again"
+EXIT_STOPPED = 17
 EXIT_UPDATED = install.EXIT_UPDATED
 EXIT_ORPHANED = install.EXIT_ORPHANED
 # the saved snapshot's format: 2 since channels, whose entries it keeps
@@ -220,10 +233,11 @@ _MORE = re.compile(r" \(and \d+ more; see the log\)")
 # and exact but for spaces around it: a looser match ("Closed", "CLOSED soon") could tell a
 # member to leave a channel that goes on, while a miss only leaves it to the guide's example.
 CLOSED_TITLE = "CLOSED"
-# The line after that entry's: the leave command for this membership, as this box runs vcharon
-# (closed_next). Stop first: leave refuses while the watcher holds the member's lock.
-CLOSED_NEXT = ("  next: the leader closed the channel: stop your watcher and don't start it "
-               "again, then run: vcharon leave %s %s")
+# The line after that entry's: the stop and leave commands for this membership, as this box runs
+# vcharon (closed_next). Stop first: leave refuses while the watcher holds the member's lock,
+# and a streaming watcher (a Monitor's) doesn't end on its own.
+CLOSED_NEXT = ("  next: the leader closed the channel: don't start your watcher again, stop it if "
+               "it runs (vcharon watch %s --stop %s), then run: vcharon leave %s %s")
 # The titles of the entries join, a rejoin and leave post (in a lobby, to their poster only),
 # which a --presence watcher prints: matched whole and exact, as join and leave write them.
 PRESENCE_TITLES = ("JOIN", "REJOIN", "LEAVE")
@@ -839,6 +853,112 @@ def _same_file(fd, path):
     return (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino)
 
 
+# vcharon watch C --stop's request: a file beside the snapshot's lock, in the state dir, never
+# in a channel (StopRequest)
+STOP_SUFFIX = ".stop"
+# how often a waiting watcher looks for a request, and the stop for the lock coming free: a
+# watcher between rounds sees one within this
+STOP_POLL = 0.5
+# how long the stop waits for the lock to come free: a streaming child gets STOP_WAIT after its
+# stdin closes, then TERM_WAIT after a SIGTERM; a --no-stream round's sync under way, or a
+# --once check's, runs to its end first, which may take longer
+STOP_TIMEOUT = 30
+# the stop's line when the lock came free with the request still there: its holder ended on
+# its own, never having read it
+STOP_NOT_TAKEN = ("the lock's holder ended without taking the request (a create, join, leave or "
+                  "close, a --once check, or an older vcharon's watcher)")
+# the stop's fix when the lock is still held after STOP_TIMEOUT
+STOP_FIX = ("a watcher of an older version doesn't read the request, and one may still be in a "
+            "sync: stop it in its own session (Ctrl-C, or your CLI's way to stop a background "
+            "command), or by the PID if one is shown once you checked it is vcharon's watcher; or "
+            "run vcharon watch %s --stop %s again")
+
+
+class StopRequest:
+    """A stop asked by vcharon watch C --stop: a file at <snapshot>.stop. A file, not a signal:
+    it reaches a watcher in another PID namespace (Codex's Linux sandbox runs each command in
+    its own), and gives every OS the watcher's EXIT line (DESIGN, "The watcher in a channel").
+    The watcher drops a stale one under its lock at its start (clear), looks for one at the top
+    of each round and while it waits (asked, sleep), and removes it when it sees it."""
+
+    def __init__(self, state):
+        self.path = state + STOP_SUFFIX
+        self.seen = False
+
+    def clear(self):
+        """Removes a request left from before this start (a stop that timed out, or was
+        killed): it must not end this watcher."""
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+    def asked(self):
+        """True once a request was seen; the file is removed then. A request that can't be
+        removed (another error than its absence) is looked for again next time."""
+        if not self.seen:
+            try:
+                os.unlink(self.path)
+            except OSError:
+                return False
+            self.seen = True
+        return True
+
+    def sleep(self, seconds):
+        """time.sleep(seconds), cut short by a request: looked for every STOP_POLL s. The
+        default sleep of the watch and of its streaming child's backoff; a test's own sleep
+        leaves only the checks between rounds."""
+        end = time.monotonic() + seconds
+        while not self.asked():
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(left, STOP_POLL))
+
+
+def ask_stop(state, timer=time.monotonic, sleep=time.sleep, asked=None):
+    """vcharon watch C --stop on the snapshot path state: None when no watcher holds its lock
+    (nothing written: the check takes the lock and lets go of it at once); else (pid, stopped,
+    taken): the PID the holder wrote into its lock (Lock.holder_pid), or None; whether the lock
+    came free within STOP_TIMEOUT; and whether the holder took the request (a watcher removes it
+    when it sees it), so a lock let go by a holder that ended on its own isn't told as a stop.
+    asked(pid): called once the request is written. The request is
+    removed on every way out, a timed-out one too: a holder that isn't a watcher (a create,
+    join, leave or close, a --once check, an older vcharon's watcher) never takes it, and the
+    next start would only clear it."""
+    lock = state + ".lock"
+    if not channel_cmd.held(lock):
+        return None
+    pid = Lock.holder_pid(lock)
+    request = state + STOP_SUFFIX
+    try:
+        try:
+            os.close(os.open(request, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                             0o600))
+        except OSError as e:
+            raise fsops.error(e, request) from None
+        if asked is not None:
+            asked(pid)
+        end = timer() + STOP_TIMEOUT
+        while channel_cmd.held(lock):
+            if timer() >= end:
+                return pid, False, False
+            sleep(STOP_POLL)
+        try:
+            os.unlink(request)
+        except FileNotFoundError:
+            # the watcher took it
+            return pid, True, True
+        except OSError:
+            pass
+        return pid, True, False
+    finally:
+        try:
+            os.unlink(request)
+        except OSError:
+            pass
+
+
 def output_in_tree(tree, streams=None):
     """The path, inside the channel tree and with "/", of the regular file one of streams
     (sys.stdout and sys.stderr by default: where the watcher's lines go) writes to, or None.
@@ -921,6 +1041,9 @@ class _Watch:
         self.closed = False
         # whether the streaming child exited because vcharon was updated: EXIT updated
         self.updated = False
+        # whether a stop request came while the streaming child's round was awaited: EXIT
+        # stopped
+        self.stopped = False
         # a --once check's round whose sync found the job busy: the lines it ends with
         self.busy = None
         # In the failing streak: the keys (error_key) that counted as a change, saved with the
@@ -1204,7 +1327,7 @@ class _Watch:
 
 
 def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_errors, rounds,
-          error_seconds=None, start=None, updated=None, orphaned=None):
+          error_seconds=None, start=None, updated=None, orphaned=None, stopped=None):
     """Runs rounds; returns the exit code. step() runs one round and returns (change lines,
     failed, saved): failed is None for a skipped (busy) round; saved is False if the snapshot
     couldn't be saved. The limits are checked between rounds, never during one. error_seconds
@@ -1214,7 +1337,8 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     too). updated(): whether vcharon's code changed since the start (install.Watchdog),
     asked at the top of each round, before any other work: EXIT updated (DESIGN, "Running
     watchers"); orphaned(): whether a binary's bootloader parent is gone, asked next: EXIT
-    orphaned."""
+    orphaned. stopped(): whether vcharon watch C --stop asked it to end (StopRequest.asked),
+    asked first at the top of each round and again after each round: EXIT stopped."""
     start = timer() if start is None else start
     errors = 0
     # error_seconds: the time of the failed rounds in a row, each from the end of the round
@@ -1226,12 +1350,19 @@ def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_
     while rounds is None or done < rounds:
         if done or not at_once:
             sleep(every)
+        # first: a watcher asked to stop is not to be started again, whatever else happened
+        if stopped is not None and stopped():
+            return _exit_as(w, "stopped", EXIT_STOPPED)
         if updated is not None and updated():
             return _exit_as(w, "updated", EXIT_UPDATED)
         if orphaned is not None and orphaned():
             return _exit_as(w, "orphaned", EXIT_ORPHANED)
         changes, failed, saved = step()
         done += 1
+        if w.stopped or (stopped is not None and stopped()):
+            # a request that came during the round (a --no-stream sync is a wait nothing cuts
+            # short): the round's lines are printed and saved by now; first, as at the top
+            return _exit_as(w, "stopped", EXIT_STOPPED)
         if w.updated:
             # the streaming child saw it first: its round brought nothing
             return _exit_as(w, "updated", EXIT_UPDATED)
@@ -1338,7 +1469,7 @@ def _locked(w, state):
     return lk
 
 
-def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=time.time,
+def watch_dir(root, me, every, out=say, sleep=None, rounds=None, clock=time.time,
               timer=time.monotonic, fresh=False, until_change=False, max_minutes=None,
               max_errors=10, folder_limits=None, updated=None, orphaned=None, once=False,
               kind_=None, presence=False):
@@ -1347,9 +1478,10 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
     bytes, max files) of each other member's folder; one over them is held as it was, with a
     WARN line. updated, orphaned: _loop's. once: a --once check (_once), refused (VCharonError)
     with no usable saved snapshot. kind_: the channel's, from the caller's record; None reads
-    it as the leader is read (server_kind). presence: --presence's (read_entries). Returns the
-    exit code. Refused (VCharonError) unless root/me/ holds MEMBER.md; root gone (a closed
-    channel) is the ERROR and fix lines and EXIT closed, before any lock or snapshot."""
+    it as the leader is read (server_kind). presence: --presence's (read_entries). sleep: the
+    wait between rounds, StopRequest.sleep unless a test gives one. Returns the exit code.
+    Refused (VCharonError) unless root/me/ holds MEMBER.md; root gone (a closed channel) is the
+    ERROR and fix lines and EXIT closed, before any lock or snapshot."""
     gone = gone_fix(root, me)
     try:
         os.scandir(root).close()
@@ -1371,10 +1503,15 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
         _need_snapshot(state, root, me, os.path.basename(root), flags)
     w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone, kind_=kind_,
                    presence=presence)
+    request = StopRequest(state)
+    if sleep is None:
+        sleep = request.sleep
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
     try:
+        # under the lock: a request from before this start is stale
+        request.clear()
         if once:
             # again under the lock, where no writer can change it: one spoilt since the check
             # above is refused before the start saves a baseline over it
@@ -1395,7 +1532,8 @@ def watch_dir(root, me, every, out=say, sleep=time.sleep, rounds=None, clock=tim
                 return _not_restored(w, os.path.basename(root), flags)
             return _once(w, step, updated, orphaned)
         return _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes,
-                     max_errors, rounds, updated=updated, orphaned=orphaned)
+                     max_errors, rounds, updated=updated, orphaned=orphaned,
+                     stopped=request.asked)
     finally:
         lk.release()
 
@@ -1672,8 +1810,10 @@ class Stream:
     BACKOFF's wait. spawn, sleep and timer are the tests' to replace."""
 
     def __init__(self, job, sync_args, every, spawn=_spawn, sleep=time.sleep,
-                 timer=time.monotonic, stop_wait=STOP_WAIT, pace=None):
+                 timer=time.monotonic, stop_wait=STOP_WAIT, pace=None, stopped=None):
         self.job = job
+        # StopRequest.asked of the watcher: looked for while a round is awaited (next_round)
+        self.stopped = stopped
         # the watcher's pace, for WATCH_ENV
         self.pace = pace
         self.argv = sync_argv(sync_args, repeat=every)
@@ -1746,9 +1886,11 @@ class Stream:
         one, saying nothing more on stdout or stderr, is started again without a round of its
         own: vcharon sync --repeat exits so after a round that left its session unusable, and
         the round said why. Its own rule decides, not the error's text (DESIGN, "Repeated
-        syncs"). An exit with EXIT_UPDATED is UPDATED: vcharon was replaced. Any other exit (a
-        round cut off, an exit before its first round, a crash after a round) is one round,
-        with its error line from stdout or stderr (never the child's own EXIT line)."""
+        syncs"). An exit with EXIT_UPDATED is UPDATED: vcharon was replaced. STOPPED: a stop
+        request came during the wait before a start, or before the ROUND line; the child is
+        left running for the watch's way out to stop. Any other exit (a round cut off, an exit
+        before its first round, a crash after a round) is one round, with its error line from
+        stdout or stderr (never the child's own EXIT line)."""
         pending = []
         while True:
             if self.proc is None:
@@ -1761,6 +1903,9 @@ class Stream:
                             self.sleep(left)
                         return None
                     self.sleep(wait)
+                    if self.stopped is not None and self.stopped():
+                        # asked during the wait: no child to start
+                        return STOPPED
                 try:
                     self._start()
                 except OSError as e:
@@ -1772,6 +1917,9 @@ class Stream:
                 # can take 45 s, a hung helper idle_timeout)
                 self.stop()
                 return None
+            if line is _STOPPED:
+                # the watch's way out stops the child (watch_job)
+                return STOPPED
             if line is _STUCK:
                 # no round for too long: the child is stuck; vcharon's own timeouts didn't end it
                 self.stop()
@@ -1818,14 +1966,17 @@ class Stream:
             return got
 
     def _next_line(self, deadline=None):
-        """The child's next stdout line; None at its end; _LATE once deadline passes, _STUCK
-        after RUN_TIMEOUT and a wait with no line (both by timer). Waits in short steps, so a
-        Ctrl-C gets through on Windows too."""
+        """The child's next stdout line; None at its end; _STOPPED once a stop request came
+        (stopped), _LATE once deadline passes, _STUCK after RUN_TIMEOUT and a wait with no line
+        (both by timer). Waits in short steps, so a Ctrl-C gets through on Windows too, and a
+        request is seen within STOP_POLL."""
         since = self.timer()
         while True:
             try:
-                return self._lines.get(timeout=0.5)
+                return self._lines.get(timeout=STOP_POLL)
             except queue.Empty:
+                if self.stopped is not None and self.stopped():
+                    return _STOPPED
                 now = self.timer()
                 if deadline is not None and now >= deadline:
                     return _LATE
@@ -1887,8 +2038,11 @@ class Stream:
 # Stream._next_line's answers besides a line and None
 _LATE = object()
 _STUCK = object()
+_STOPPED = object()
 # Stream.next_round's answer for a child that exited because vcharon was updated
 UPDATED = object()
+# and for a stop request that came while it waited (StopRequest)
+STOPPED = object()
 
 
 def mailbox_of(job):
@@ -1964,13 +2118,14 @@ def gone_fix(root, me):
 
 
 def closed_next(channel, me, leader, kind_=kinds.WORK):
-    """The line after the leader's CLOSED to @all: the leave command with the flags from me's
-    record (a placeholder without one, as gone_fix), as this box runs vcharon. None for the
-    leader, who closes instead (its own folder is never read anyway), and in a lobby, where a
-    CLOSED is chat."""
+    """The line after the leader's CLOSED to @all: the stop and leave commands with the flags
+    from me's record (a placeholder without one, as gone_fix), as this box runs vcharon. None for
+    the leader, who closes instead (its own folder is never read anyway), and in a lobby, where
+    a CLOSED is chat."""
     if me == leader or not kind_.closing_line:
         return None
-    return platform.runnable(CLOSED_NEXT % (channel, channel_cmd.name_flags(channel, me)))
+    flags = channel_cmd.name_flags(channel, me)
+    return platform.runnable(CLOSED_NEXT % (channel, flags, channel, flags))
 
 
 def is_gone(fix):
@@ -1984,7 +2139,7 @@ def is_gone(fix):
     return fix.startswith(channel_cmd.CHANNEL_GONE_PREFIX)
 
 
-def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds=None,
+def watch_job(job, sync_args, every, out=say, sleep=None, run=None, rounds=None,
               clock=time.time, timer=time.monotonic, fresh=False, until_change=False,
               max_minutes=None, max_errors=10, stream=False, spawn=_spawn, stop_wait=STOP_WAIT,
               updated=None, orphaned=None, once=False, kind_=kinds.WORK, presence=False):
@@ -1997,7 +2152,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
     way. orphaned: _loop's. once: a --once check (_once): one sync, never streamed, capped at
     ONCE_TIMEOUT; refused (VCharonError) with no usable saved snapshot. run: run_sync with the
     watcher's pace, unless a test gives one. kind_: the channel's, from the caller's record.
-    presence: --presence's (read_entries)."""
+    presence: --presence's (read_entries). sleep: the wait between --no-stream's rounds and
+    before a streaming child's restart, StopRequest.sleep unless a test gives one."""
     stream = stream and not once
     if run is None:
         def run(job, sync_args):
@@ -2012,11 +2168,16 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
                    hold=STREAM_HOLD if stream else None,
                    suffix=", syncing every %d s" % every if stream else "", kind_=kind_,
                    presence=presence)
+    request = StopRequest(state)
+    if sleep is None:
+        sleep = request.sleep
     lk = _locked(w, state)
     if lk is None:
         return EXIT_LOCKED
     child = None
     try:
+        # under the lock: a request from before this start is stale
+        request.clear()
         if once:
             # again under the lock, where no writer can change it: one spoilt since the check
             # above is refused before the start saves a baseline over it
@@ -2031,7 +2192,8 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         start = timer()
         if stream:
             child = Stream(job, sync_args, every, spawn=spawn, sleep=sleep, timer=timer,
-                           stop_wait=stop_wait, pace="stream %d" % every)
+                           stop_wait=stop_wait, pace="stream %d" % every,
+                           stopped=request.asked)
             deadline = None if max_minutes is None else start + max_minutes * 60
             error_seconds = max_errors * STREAM_ERROR_ROUND
 
@@ -2049,6 +2211,9 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
                 return 0, None, True
             if got is UPDATED:
                 w.updated = True
+                return [], None, True
+            if got is STOPPED:
+                w.stopped = True
                 return [], None, True
             code, line, fix = got
             if once and code == BUSY:
@@ -2078,7 +2243,7 @@ def watch_job(job, sync_args, every, out=say, sleep=time.sleep, run=None, rounds
         # the client's first round runs at once, as it always did
         return _loop(w, every, sleep, step, timer, True, until_change, max_minutes,
                      max_errors, rounds, error_seconds, start=start, updated=updated,
-                     orphaned=orphaned)
+                     orphaned=orphaned, stopped=request.asked)
     finally:
         # every way out: any EXIT, Ctrl-C, a crash; the lock even if the stop fails
         try:

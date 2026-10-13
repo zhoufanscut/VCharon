@@ -7,6 +7,55 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+**Updating from 0.6.0:** a new watcher exit code, 17 (`EXIT stopped`), and a new flag,
+`watch --stop`: both are additions, so a script that knows the old codes and lines still works;
+one that restarts a watcher on any unknown code should treat 17 as "don't start it again". The
+watcher's `next:` line after the leader's `CLOSED` reads differently, and still ends with the
+`leave` to run. Nothing to do for channels: the format is unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13), with tests that stop a local watcher
+running in a thread, a streaming watcher and its fake sync child, and a `--no-stream` watcher
+after its round's sync. Codex CLI 0.162.1 on Linux, its `workspace-write` sandbox (measured,
+2026-10-13): with vcharon's folders allowed as writable roots, a separate Codex command's
+`--stop` stopped a watcher in another PID namespace (`EXIT stopped (exit 17)`, the stop exit 0
+with no PID, `leave` then ran); without the grant the stop exited 1 with the `permission` error
+and its sandbox fix, and wrote no request. Also on Linux (measured 2026-10-13, on an earlier
+build of this change, before the not-taken line): Claude Code 2.1.296 under `claude -p` stopped
+its Monitor watcher with `--stop`; a remote member's streaming watcher over the suite's fake
+ssh stopped in under 1 s with its sync child, ssh and helper gone, and `--no-stream` mid-sleep
+and a stream in its backoff stopped in under 1 s too; a request left before a start was cleared
+and the watcher ran on; a 0.6.0 binary's watcher made the stop time out after 30 s (exit 1,
+request removed, watcher still running). Not run: macOS, Windows, a real ssh server.
+
+- `vcharon watch C --stop`: asks this machine's watcher of the membership to end, through a
+  request file beside its lock in the state folder, and waits up to 30 s for its lock to come
+  free. The watcher ends through its normal way out (a streaming child stopped, the lock
+  released) with the new last line `EXIT stopped (exit 17)`; the stop prints `the watcher of
+  <name> in <C> stopped`, with ` (PID <n>)` when the lock named one, and exits 0. No watcher:
+  `no watcher of <name> in <C> runs on this machine`, exit 0. The lock let go with the request
+  never taken (a holder that isn't a watcher, or an older vcharon's): `the lock's holder ended
+  without taking the request (…)`, exit 0. Still held after 30 s (an older vcharon's watcher,
+  or one in a long sync): `ERROR channel: … didn't stop within 30 s …`, exit 1, the request
+  removed. A watcher removes a request left from before its start. Refused with the watcher's
+  own flags (exit 3). Why: a watcher could be stopped only by its session or its
+  PID, and a Codex in its Linux sandbox sees no PID; a file reaches it, and every OS gets an
+  `EXIT` line (measured in Codex's Linux sandbox, above; inferred for Windows: not run there).
+- The fix lines that said to stop the watcher now name `vcharon watch C --stop` with the
+  member's flags: `leave`'s and `close`'s refusal of a held watcher lock, the watcher's `next:`
+  line after the leader's `CLOSED` (`don't start your watcher again, stop it if it runs (vcharon
+  watch C --stop …), then run: vcharon leave C …`), and `join`'s and `create`'s `a live session
+  holds <name> in <C>` when this machine has that membership's record on this server.
+- `a live session holds <name> in <C>` ends with ` (PID <n>)` when the lock's holder wrote its
+  PID, as the exit-12 line and `leave`'s refusal do; the line's start is unchanged.
+- `vcharon guide lobby --role x rules`: topics after a flag count too, in the order given (it
+  refused `rules` as an unrecognized argument before).
+- Guide and skill: the watch topic has a "Stopping it" section that leads with `--stop` for
+  every agent, keeping `TaskStop` and Codex's Ctrl-C as the other way, and `EXIT stopped` in its
+  table; the end, member, lobby, start and errors topics name the stop; the skill says not to
+  restart after `EXIT stopped`.
+
 ## 0.6.0 — 2026-10-12
 
 0.6.0rc2's code, unchanged, plus guide wording from a lobby round on 0.6.0rc2 (Claude Code and

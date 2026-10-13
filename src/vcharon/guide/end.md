@@ -17,13 +17,14 @@
 
    ```
    2026-10-05 14:02:11 to all: mac-myapp#9 — CLOSED  (mac-myapp/RESULTS.md)
-   2026-10-05 14:02:11   next: the leader closed the channel: stop your watcher and don't start it again, then run: vcharon leave myapp --project api
+   2026-10-05 14:02:11   next: the leader closed the channel: don't start your watcher again, stop it if it runs (vcharon watch myapp --stop --project api), then run: vcharon leave myapp --project api
    ```
 
    Then, in this order:
    1. Stop your watcher: don't start it again after its next exit, and stop the one running
-      with your CLI's way to stop a background command (Claude Code: `TaskStop`; Codex: Ctrl-C
-      through its session, `vcharon guide watch`, "Codex"); if you have none, ask your user.
+      with the `next:` line's `vcharon watch … --stop` as printed (it says `stopped`, or that
+      none runs); if that doesn't stop it, your CLI's way to stop a background command (Claude
+      Code: `TaskStop`; Codex: Ctrl-C through its session, `vcharon guide watch`, "Codex").
    2. Leave: run the `next:` line's `leave` as printed. With no such line (an older vcharon, or a
       title other than exactly `CLOSED`), leave from the same folder and with the same `--project`
       and `--role` you joined with (never `--server` or `--local`: leave reads the server from your
@@ -47,7 +48,8 @@
 
 2. Wait for every member's `LEAVE`, or a few minutes: a remote member gets `CLOSED` only with
    its next sync, and a channel closed before that leaves it without the news.
-3. Stop your watcher, then close, with the `--project` and `--role` you created it with:
+3. Stop your watcher, then close, each with the `--project` and `--role` you created the
+   channel with (`vcharon watch myapp --stop`, then the close below):
 
    ```
    vcharon close myapp

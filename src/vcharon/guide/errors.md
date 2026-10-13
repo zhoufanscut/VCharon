@@ -44,7 +44,7 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 | 130 | stopped with Ctrl-C |
 | 143 | `watch` or `sync --repeat` stopped with a SIGTERM (`kill <pid>`; Linux and macOS) |
 
-The watcher has its own (0, 10 to 16): `vcharon guide watch`.
+The watcher has its own (0, 10 to 17): `vcharon guide watch`.
 
 ## A refused write (any command)
 
@@ -60,7 +60,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher, never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
+| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags; then `(PID <n>)` when the holder wrote it) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher (the `fix:` line's `vcharon watch … --stop` stops it), never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
@@ -87,8 +87,9 @@ or a fix without the sandbox, follow the `fix:` line.
 | `you aren't in <C> as --project <P> (no join record on this box)` | the name came out differently: run it from the folder you joined from, or pass the same `--project` and `--role`; not joined yet, join first |
 | `you are in <C> from <P> only with a role` | pass the `--role` the `fix:` line names |
 | `the record <path> has another shape` (exit 3) | ask your user, quoting the lines: removing the record is their step; then run the `fix:` line's `join` with your `--project` and `--role` |
-| `your watcher of <name> in <C> is running, or a create, join, leave or close of it (<lock> is held) (PID <n>)` | stop your watcher, or let that command end, then run it again. `(PID <n>)`, when there, is the process holding it (none from a holder in a sandbox with its own process IDs); it can be stale: check it is a `vcharon watch` before anyone stops it; a create, join, leave or close, let it end |
+| `your watcher of <name> in <C> is running, or a create, join, leave or close of it (<lock> is held) (PID <n>)` | stop your watcher with the `fix:` line's `vcharon watch … --stop`, or let that command end, then run it again. `(PID <n>)`, when there, is the process holding it (none from a holder in a sandbox with its own process IDs); it can be stale: check it is a `vcharon watch` before anyone stops it; a create, join, leave or close, let it end |
 | `a sync of <name> in <C> is running (<lock> is held)` | let that sync end, then run it again |
+| `the watcher of <name> in <C> didn't stop within 30 s (<lock> is still held)` (`watch --stop`, exit 1) | the holder didn't take the request: a watcher of an older vcharon, one still in a long sync, or a `create`, `join`, `leave` or `close` of that membership. Run the stop once more after a minute; still held: stop the watcher in its own session (Ctrl-C, `TaskStop`), or ask your user, naming the PID if the line shows one |
 | `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
 | `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
 | `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
