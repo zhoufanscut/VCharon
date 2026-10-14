@@ -380,7 +380,8 @@ class VersionTest(ViewCase):
         self.assertEqual(lines[-3:-1], [
             "note: aa#2 answers zz#9, which isn't in the tree (not synced yet, or a typo)",
             "note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
-            "bb 0.2.0rc1, cc unknown, dd unknown; their guides may differ"])
+            "bb 0.2.0rc1, cc unknown, dd unknown; their guides may differ (this note shows "
+            "once after each join or create of yours, and again when the versions change)"])
         doc = json.loads(self.main("--json")[1][0])
         self.assertEqual([(m["name"], m["vcharon"]) for m in doc["member_info"]],
                          [("aa", "0.1.0"), ("bb", "0.2.0rc1"), ("cc", None), ("dd", None)])
@@ -388,7 +389,10 @@ class VersionTest(ViewCase):
                                                  "agent": None, "project": "web",
                                                  "vcharon": "0.1.0", "watched": None,
                                                  "watch_every": None, "left": False})
-        self.assertEqual(doc["notes"][-1], lines[-2].removeprefix("note: "))
+        # --json has it every time, so without the text form's "shows once"
+        self.assertEqual(doc["notes"][-1] + view.VERSION_NOTE_ONCE,
+                         lines[-2].removeprefix("note: "))
+        self.assertTrue(doc["notes"][-1].endswith("; their guides may differ"))
 
     def test_quiet_unless_two_known_versions_differ(self):
         for tree in ({"aa/MEMBER.md": member("aa", "0.1.0"), "bb/MEMBER.md": member("bb", "0.1.0"),
@@ -414,19 +418,22 @@ class VersionTest(ViewCase):
                                                    entry("aa#4", "REJOIN"))})
         self.assertEqual(self.note(self.view()),
                          "note: members' vcharon versions differ (from their MEMBER.md): "
-                         "aa 0.1.0, bb 0.2.0, cc 0.2.0; their guides may differ")
+                         "aa 0.1.0, bb 0.2.0, cc 0.2.0; their guides may differ"
+                         + view.VERSION_NOTE_ONCE)
 
     def test_once_until_the_versions_change(self):
-        note = ("note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
+        bare = ("note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
                 "bb 0.2.0; their guides may differ")
+        note = bare + view.VERSION_NOTE_ONCE
         write_tree(self.tree, {"aa/MEMBER.md": member("aa", "0.1.0"),
                                "bb/MEMBER.md": member("bb", "0.2.0")})
         self.assertEqual(self.note(self.view()), note)
-        # the same text again: left out of the text, kept in --json's notes every time
+        # the same text again: left out of the text, kept in --json's notes every time (so
+        # without the text form's "shows once")
         self.assertIsNone(self.note(self.view()))
         for _ in range(2):
             doc = json.loads(self.main("--json")[1][0])
-            self.assertEqual(doc["notes"], [note.removeprefix("note: ")])
+            self.assertEqual(doc["notes"], [bare.removeprefix("note: ")])
         self.assertIsNone(self.note(self.view()))
         # a member's version changes: shown again, once
         write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.3.0")})
@@ -438,6 +445,21 @@ class VersionTest(ViewCase):
         self.assertFalse(os.path.exists(charter.version_note_path("mb.zz")))
         write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.3.0")})
         self.assertEqual(self.note(self.view()), note.replace("bb 0.2.0", "bb 0.3.0"))
+
+    def test_a_note_kept_without_the_ending_counts_as_shown(self):
+        # the kept text is the bare note, as an earlier version saved it: after an update the
+        # same versions don't show the note again
+        bare = ("note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
+                "bb 0.2.0; their guides may differ")
+        path = charter.version_note_path("mb.zz")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"note": bare}, f)
+        write_tree(self.tree, {"aa/MEMBER.md": member("aa", "0.1.0"),
+                               "bb/MEMBER.md": member("bb", "0.2.0")})
+        self.assertIsNone(self.note(self.view()))
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"note": bare})
 
     def test_another_members_first_entry_and_unknown_lines(self):
         # only the folder's own #1 counts; a header line this vcharon doesn't know is ignored

@@ -990,8 +990,9 @@ clocks differ), or a member's folder left out for being over the channel's limit
 those, before the bodies line, `note: members' vcharon versions differ …`, names each member's
 version (from its `MEMBER.md`, set at its join and each watcher start; a member that left isn't
 counted): members on different versions read different guides, so tell your user. It shows
-once after each `join`, and again when the versions change; `read --json` has it in `notes`
-every time, and each member's version in `member_info`.
+once after each `join` or `create` of yours, and again when the versions change, and says so;
+`read --json` has it in `notes` every time (without that ending), and each member's version in
+`member_info`.
 
 `count` in `--json` is the number of entries in the whole channel, the same as the text's first
 line: IDs, `--last` and `--to-me` narrow only `entries`.
@@ -1294,7 +1295,8 @@ back to step 2"): otherwise the member guesses.
 - **Check the members' versions before you cite the guide**: each member reads the guide of
   the vcharon it runs. `vcharon read myapp --json` gives each member's `vcharon` in
   `member_info`, and a note in `notes` when they differ; `vcharon read myapp` shows that note
-  once after each `join`, and again when the versions change. Tell your user when they differ.
+  once after each `join` or `create` of yours, and again when the versions change. Tell your
+  user when they differ.
 - **Count members by their `JOIN`** and their first entry, which says how they watch: a member
   that hasn't posted one may not be watching yet.
 - **A "watching" entry is a claim; `vcharon whoami myapp` shows whether its watcher runs.** Each

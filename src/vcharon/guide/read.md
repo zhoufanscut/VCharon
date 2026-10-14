@@ -58,8 +58,9 @@ clocks differ), or a member's folder left out for being over the channel's limit
 those, before the bodies line, `note: members' vcharon versions differ …`, names each member's
 version (from its `MEMBER.md`, set at its join and each watcher start; a member that left isn't
 counted): members on different versions read different guides, so tell your user. It shows
-once after each `join`, and again when the versions change; `read --json` has it in `notes`
-every time, and each member's version in `member_info`.
+once after each `join` or `create` of yours, and again when the versions change, and says so;
+`read --json` has it in `notes` every time (without that ending), and each member's version in
+`member_info`.
 
 `count` in `--json` is the number of entries in the whole channel, the same as the text's first
 line: IDs, `--last` and `--to-me` narrow only `entries`.

@@ -3626,7 +3626,7 @@ class MemberFieldsTest(ChannelCase):
         self.assertEqual(self.member_header()["agent"], "claude")
         with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}):
             out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  agent: codex (was claude)", out)
+        self.assertIn("  agent: codex (your MEMBER.md said claude)", out)
         # sent by the rejoin's sync
         self.assertEqual(self.member_header()["agent"], "codex")
         out = self.ok("join", "game", "--server", "fake-dest", "--agent", "codex")
@@ -3640,7 +3640,7 @@ class MemberFieldsTest(ChannelCase):
         os.remove(os.path.join(os.environ["VCHARON_HOME"], "state", "game.mac-web.up.json"))
         out = self.ok("join", "game", "--server", "fake-dest", "--agent", "claude")
         self.assertIn("pulled your folder from the server", out)
-        self.assertIn("  agent: claude (was codex)", out)
+        self.assertIn("  agent: claude (your MEMBER.md said codex)", out)
         self.assertEqual(self.member_header()["agent"], "claude")
 
     def test_a_rejoin_from_a_plain_terminal_keeps_the_agent(self):
@@ -3659,7 +3659,7 @@ class MemberFieldsTest(ChannelCase):
         path = os.path.join(own, "MEMBER.md")
         entries.set_header(path, own, "mac-web", 1, "vcharon", "0.0.9")
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  vcharon: %s (was 0.0.9)" % vcharon.VERSION, out)
+        self.assertIn("  vcharon: %s (your MEMBER.md said 0.0.9)" % vcharon.VERSION, out)
         # sent by the rejoin's sync
         self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
         out = self.ok("join", "game", "--server", "fake-dest")
@@ -3671,7 +3671,7 @@ class MemberFieldsTest(ChannelCase):
         with open(path, "wb") as f:
             f.write(old)
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  vcharon: %s (was not set)" % vcharon.VERSION, out)
+        self.assertIn("  vcharon: %s (your MEMBER.md had none)" % vcharon.VERSION, out)
         with open(path, "rb") as f:
             self.assertEqual(f.read(), text)
 

@@ -1020,9 +1020,11 @@ rules](#launch-rules)) on purpose: the name says where the agent works.
   leaves it.
 - `vcharon:` is written at `join` and `create`, and set in place to the running version when
   it says another (or none: a `MEMBER.md` from before the line gets it added at its header's
-  end) by every rejoin, which prints `  vcharon: <new> (was <old>)`, and by every start of the
-  member's watcher (a restart after `EXIT updated` too), which prints nothing, its lines being
-  a contract. Why the watcher: an update needs no rejoin (a leader never rejoins), but every
+  end) by every rejoin, which prints `  vcharon: <new> (your MEMBER.md said <old>)`, or
+  `(your MEMBER.md had none)` (`agent:` the same way; it names the file because an agent that
+  ran no update can't tell what a bare "was" means), and by every start of the member's
+  watcher (a restart after `EXIT updated` too), which prints nothing, its lines being a
+  contract. Why the watcher: an update needs no rejoin (a leader never rejoins), but every
   agent restarts its watcher. The watcher's start does it before its first round and before
   the watchdog's start mark (nothing it reads is an import after the start), and tries the
   post lock once: a post holding it, or any failure, leaves the line and the watch starts at
@@ -2012,7 +2014,10 @@ shows the local tree as of the last sync, and says so.
   that finds the versions agreeing removes the file, so a later difference prints too. A file
   that can't be read or written prints the note each time. `--json` has it in `notes` every
   time. Why: printed on every `read`, it repeated what the reader was told already; a script
-  reads `--json`, which keeps it.
+  reads `--json`, which keeps it. The printed note ends with ` (this note shows once after each
+  join or create of yours, and again when the versions change)`, which the kept text and
+  `--json` leave out (`--json` has it every time). Why: agents who saw the note once took its
+  absence on the next `read` for a sign of something.
 - Without `--full` or `--json`, when it lists an entry, the last line is `  note: to see the
   bodies: vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the
   command spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and

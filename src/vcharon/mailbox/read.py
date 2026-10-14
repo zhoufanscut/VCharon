@@ -430,6 +430,13 @@ def version_note(info):
                                      for one in info))
 
 
+# appended to the version note where it is printed once (read's text form, the caller's
+# once-rule): agents who saw it once took its absence on the next read for a sign of
+# something. create too: a leader never rejoins
+VERSION_NOTE_ONCE = (" (this note shows once after each join or create of yours, and again when "
+                     "the versions change)")
+
+
 def _collect(root, now, skip=None, notes=(), seen=None):
     """(member folders, items in the view's order, notes, member_info, the version note or
     None) of the tree root; OSError when the root can't be read. notes: more notes' texts,
@@ -482,12 +489,12 @@ def view(root, channel, synced=False, full=False, last=None, now=None, skip=None
     out); bodies: the last line when the list, without full, shows at least one entry (the
     caller's: how to see the bodies); ids, mine: pick's (ids imply full); versions: given the
     version note, or None when the versions agree, whether to print it (the caller's
-    once-rule); None prints it each time."""
+    once-rule; the note then says it shows once); None prints it each time."""
     folders, ordered, notes, _info, version = _collect(root, now, skip, notes)
     if versions is not None:
         # called with None too: the state it keeps learns that the versions agree now
         if versions(version):
-            notes.append(version)
+            notes.append(version + VERSION_NOTE_ONCE)
     elif version is not None:
         notes.append(version)
     out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),

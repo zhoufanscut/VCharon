@@ -7,6 +7,16 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `read`'s versions note now ends with `(this note shows once after each join or create of
+  yours, and again when the versions change)`: in a mixed-version test (0.7.0rc1 and 0.6.0,
+  2026-10-14) agents who saw it once took its absence on the next `read` for a sign of
+  something. `read --json`'s `notes` keep the old text, since there it shows every time.
+- A rejoin's `  vcharon: <new> (was <old>)` line (and `  agent: …`) now reads `(your MEMBER.md
+  said <old>)`, or `(your MEMBER.md had none)` for `(was not set)`: in the same test an agent
+  that had run no update couldn't tell what "was" referred to.
+
 ## 0.7.0rc1 — 2026-10-13
 
 The first release candidate for 0.7.0, published as a GitHub pre-release: `vcharon --update

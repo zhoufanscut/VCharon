@@ -1555,7 +1555,12 @@ def _update_fields(own, name, fields, say, wait=entries.LOCK_WAIT):
         if was == value:
             continue
         entries.set_header(path, own, name, 1, key, value, wait=wait)
-        say("  %s: %s (was %s)" % (key, value, was or "not set"))
+        # name where the old value came from: an agent that ran no update can't tell what a
+        # bare "was" refers to
+        if was:
+            say("  %s: %s (your %s said %s)" % (key, value, entries.MEMBER_FILE, was))
+        else:
+            say("  %s: %s (your %s had none)" % (key, value, entries.MEMBER_FILE))
 
 
 def refresh_version(own, name):
