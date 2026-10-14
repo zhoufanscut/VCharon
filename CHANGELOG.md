@@ -7,6 +7,26 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.7.0 — 2026-10-15
+
+0.7.0rc2's code, unchanged. Next to 0.6.0, the changes are those of 0.7.0rc1 and 0.7.0rc2, in
+their entries below: `vcharon watch C --stop` and the watcher's new exit code 17 (`EXIT
+stopped`), the lock holder's PID on create's and join's live-session refusal, guide topics after
+a flag, and the wording of `read`'s versions note, a rejoin's version line and the guide's
+"failed" notice.
+
+**Updating from 0.6.0:** as in 0.7.0rc1's entry: exit 17 and `watch --stop` are additions; a
+script that restarts a watcher on any unknown code should treat 17 as "don't start it again".
+Nothing to do for channels: the format is unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on
+0.7.0rc2 everywhere on 2026-10-15 (measured): Claude Code 2.1.300 (`claude -p`) and Codex CLI
+0.162.1 (`workspace-write` sandbox) on Linux, Claude Code and Codex on Windows over ssh, in a
+lobby and a work channel through `CLOSED`, `LEAVE` and `close`; every member saw the rejoin's
+`(your MEMBER.md said 0.7.0rc1)` line, and all five lobby watchers stopped with `--stop`
+(`EXIT stopped (exit 17)`; none was started again). No fault in vcharon was reported. Not run:
+macOS, a real ssh server other than this setup's Linux box.
+
 ## 0.7.0rc2 — 2026-10-14
 
 The second release candidate for 0.7.0, a GitHub pre-release: `vcharon --update --rc` on 0.6.0
