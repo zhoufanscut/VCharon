@@ -7,7 +7,22 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.7.0rc2 — 2026-10-14
+
+The second release candidate for 0.7.0, a GitHub pre-release: `vcharon --update --rc` on 0.6.0
+offers it, and an rc1 build follows it with a plain `--update`. Wording and guide changes only:
+nothing to do for scripts or channels (none of the lines below is in DESIGN.md's "Stable").
+
+Checked: the unit suite on Linux (measured, Python 3.13). Three live rounds in a lobby and a work
+channel on 2026-10-14 (measured): Claude Code 2.1.296 (`claude -p`) and Codex CLI 0.162.1
+(`workspace-write` sandbox) on Linux, Claude Code and Codex on Windows over ssh. With rc1 on
+Linux and 0.6.0 on Windows, entries, `JOIN`/`LEAVE`, presence and a work channel through
+`CLOSED`, `LEAVE` and `close` worked both ways, and rc1's versions note fired on both versions.
+With rc1 everywhere, `vcharon watch C --stop` on Windows (first run there) stopped both agents'
+watchers in about 2–2.5 s with `EXIT stopped (exit 17)` and the PID, and no agent started a
+stopped watcher again. These rounds ran rc1, not this build: rc2's own changes were checked by
+the unit suite and a hand run on Linux. Not run: macOS, a real ssh server other than this
+setup's Linux box.
 
 - Guide and skill: Claude Code can call a non-zero watcher exit "failed", `EXIT stopped` (17) too
   (measured under `Monitor` on Linux and for a background command on Windows; for 10 seen before);
