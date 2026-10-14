@@ -45,7 +45,7 @@ Never skip these:
 - Right after `join` or `create`, start the watcher (their `next:` line) the way
   `vcharon guide member` says for your CLI: streaming under a tool that hands you each line
   (Claude Code's `Monitor`) without `--until-change`, with the longest deadline the tool allows
-  (Monitor's: the cap its description names, 30 minutes or 10 under `claude -p`) and
+  (Monitor's: the cap its own description names, 30 or 10 minutes; go by that) and
   `--max-minutes` one less; else with `--until-change`, as a background command only if your
   CLI tells you when it exits or lets you poll for it (a shell `&`, `nohup` or detached tmux
   doesn't), else in the foreground. Never send its output into the channel folder.

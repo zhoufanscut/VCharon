@@ -264,10 +264,12 @@ Use `Monitor` where it is offered, the background command where it isn't.
   task's ID. On Linux `TaskStop` sends a SIGTERM, and the watcher ends `EXIT interrupted (exit
   143)` (seen once; not checked on macOS or Windows); the
   task is stopped by then, so you may not get that line. One killed outright prints nothing.
-- When a watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says it
-  **failed**: `failed with exit code 10` for a background command, `script failed (exit 10)`
-  under `Monitor` (seen in a `claude -p` run, 2.1.296). It didn't: the last line says quiet:
-  its time limit came. Start it again at once, as the table above says for exit 10.
+- When a watcher ends with a code other than 0, Claude Code's notice may say it **failed**:
+  `failed with exit code 10` for a background command, `script failed (exit 10)` under
+  `Monitor` (seen in a `claude -p` run, 2.1.296), and the same for `EXIT stopped`, 17 (seen
+  under `Monitor` on Linux, 2.1.296, and for a background command on Windows, version not
+  recorded). Don't go by that word: go by the watcher's last line and the table above (start
+  it again after `EXIT quiet`, not after `EXIT stopped`).
 - **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
   in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
   moved after it read subfolders (measured), and a subfolder with its own checkout gives

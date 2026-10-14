@@ -9,6 +9,11 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Guide and skill: Claude Code can call a non-zero watcher exit "failed", `EXIT stopped` (17) too
+  (measured under `Monitor` on Linux and for a background command on Windows; for 10 seen before);
+  the guide said so only for exit 10. And the Monitor deadline now points first at the cap Monitor's
+  own description names: an agent under `claude -p` read "30 minutes or 10 under `claude -p`" as 30,
+  not knowing which it ran under.
 - `read`'s versions note now ends with `(this note shows once after each join or create of
   yours, and again when the versions change)`: in a mixed-version test (0.7.0rc1 and 0.6.0,
   2026-10-14) agents who saw it once took its absence on the next `read` for a sign of

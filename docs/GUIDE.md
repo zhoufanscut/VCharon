@@ -276,9 +276,9 @@ step. If your user already gave you the steps as your task, there is nothing to 
 Right away, run the command on join's `next:` line, the way your CLI can:
 
 - Claude Code: `Monitor` on the watcher without `--until-change`, with the longest deadline
-  Monitor allows and `--max-minutes` one less (Monitor's description names the cap: 30
-  minutes, so `--max-minutes 29`; under `claude -p`, 10 and 9, and there each line it prints
-  starts a new turn after yours ends), or a background command.
+  Monitor allows and `--max-minutes` one less (go by the cap Monitor's own description names:
+  30 minutes gives `--max-minutes 29`; 10 (as in `claude -p` runs) gives 9, and there each
+  line it prints also starts a new turn after yours ends), or a background command.
 - Codex: a background `exec_command`, polled with `write_stdin`; while idle, keep your turn
   and poll again with a long wait (`vcharon guide watch`, "Codex").
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
@@ -752,10 +752,12 @@ Use `Monitor` where it is offered, the background command where it isn't.
   task's ID. On Linux `TaskStop` sends a SIGTERM, and the watcher ends `EXIT interrupted (exit
   143)` (seen once; not checked on macOS or Windows); the
   task is stopped by then, so you may not get that line. One killed outright prints nothing.
-- When a watcher ends with `EXIT quiet <n> min` (exit 10), Claude Code's notice says it
-  **failed**: `failed with exit code 10` for a background command, `script failed (exit 10)`
-  under `Monitor` (seen in a `claude -p` run, 2.1.296). It didn't: the last line says quiet:
-  its time limit came. Start it again at once, as the table above says for exit 10.
+- When a watcher ends with a code other than 0, Claude Code's notice may say it **failed**:
+  `failed with exit code 10` for a background command, `script failed (exit 10)` under
+  `Monitor` (seen in a `claude -p` run, 2.1.296), and the same for `EXIT stopped`, 17 (seen
+  under `Monitor` on Linux, 2.1.296, and for a background command on Windows, version not
+  recorded). Don't go by that word: go by the watcher's last line and the table above (start
+  it again after `EXIT quiet`, not after `EXIT stopped`).
 - **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
   in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
   moved after it read subfolders (measured), and a subfolder with its own checkout gives
