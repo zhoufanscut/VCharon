@@ -359,7 +359,7 @@ class SkillInstallTest(FakeSshCase):
         # short: it points at the guide, and repeats only the topics to read and the rules
         # never to skip
         self.assertIn("vcharon guide", text)
-        self.assertLess(len(text.splitlines()), 70)
+        self.assertLess(len(text.splitlines()), 71)
 
 
 class TrustLineTest(ChannelCase):

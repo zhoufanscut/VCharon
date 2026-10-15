@@ -95,7 +95,8 @@ vcharon create myapp --server devbox          # make it; you lead it
 ```
 
 On the machine that holds the channel, use `--local` in place of `--server ALIAS`:
-`vcharon join myapp --local`.
+`vcharon join myapp --local`. When your user names no place, try that first; if it says
+`there is no channel myapp on this machine`, ask your user where. Never guess a server.
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote

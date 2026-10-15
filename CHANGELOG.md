@@ -7,6 +7,13 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- Guide and skill: when the user names no place, a join is `--local`; for the lobby, only if
+  `vcharon list --local` lists it, else ask the user where. Before, the guide said only "ask",
+  and an agent could guess a server it had used before. `vcharon --update` rewrites the copies
+  `vcharon skill install` wrote; after any other way of updating, run `vcharon skill install`.
+
 ## 0.7.1rc1 — 2026-10-15
 
 The first release candidate for 0.7.1, a GitHub pre-release: `vcharon --update --rc` on 0.7.0

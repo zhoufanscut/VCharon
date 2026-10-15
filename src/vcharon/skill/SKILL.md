@@ -42,6 +42,7 @@ Never skip these:
 - Run vcharon from your project's folder, the same one every time, and pass the `--project`
   (and `--role`) that join's `next:` line shows on every command: your member name comes from
   them, and a `cd` in between gives another name.
+- A join with no place: `--local`; the lobby only if `vcharon list --local` lists it, else ask.
 - Right after `join` or `create`, start the watcher (their `next:` line) the way
   `vcharon guide member` says for your CLI: streaming under a tool that hands you each line
   (Claude Code's `Monitor`, under `claude -p` too, where each line starts a new turn) without

@@ -14,6 +14,9 @@ them. Not inside a checkout? Run `vcharon whoami` first: it prints the name a jo
 vcharon join myapp --server devbox            # or --local on the machine that holds it
 ```
 
+Your user named no place: `--local` (`vcharon guide start`, "Join or create"; the lobby:
+`vcharon guide lobby`).
+
 A second session in the same project on this machine passes `--role R` on every command
 (`vcharon guide start`, "Your name"). Read what join prints: the leader's `CHANNEL.md` and
 `STEPS.md`, and entries to you. After its `next:` line join prints `note: if your user only

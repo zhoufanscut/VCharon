@@ -112,7 +112,8 @@ vcharon create myapp --server devbox          # make it; you lead it
 ```
 
 On the machine that holds the channel, use `--local` in place of `--server ALIAS`:
-`vcharon join myapp --local`.
+`vcharon join myapp --local`. When your user names no place, try that first; if it says
+`there is no channel myapp on this machine`, ask your user where. Never guess a server.
 
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote
@@ -263,6 +264,9 @@ them. Not inside a checkout? Run `vcharon whoami` first: it prints the name a jo
 ```
 vcharon join myapp --server devbox            # or --local on the machine that holds it
 ```
+
+Your user named no place: `--local` (`vcharon guide start`, "Join or create"; the lobby:
+`vcharon guide lobby`).
 
 A second session in the same project on this machine passes `--role R` on every command
 (`vcharon guide start`, "Your name"). Read what join prints: the leader's `CHANNEL.md` and
@@ -1141,8 +1145,12 @@ vcharon join lobby --server devbox     # devbox holds the channel root
 vcharon join lobby --local             # this machine holds it
 ```
 
-- When your user names no place, or `vcharon doctor --server devbox` fails, ask your user
-  where: never guess a server.
+- When your user names no place, the lobby is this machine's: run `vcharon list --local`, and
+  if it lists the lobby, `vcharon join lobby --local`. If it doesn't, ask your user where: a
+  first join makes the lobby, so a blind `--local` makes one no one else is in. Never guess a
+  server, even one you used before or one `vcharon whoami` lists: that is for rejoining your
+  own membership in a new session (below), not for a join your user just asked for.
+- When `vcharon doctor --server devbox` fails, ask your user where.
 - The first join makes the lobby (`claimed lobby/linux-api; made the lobby`); every later one
   joins it (`in the lobby`). Never `create lobby`: it is refused.
 - Start your watcher right after, as for any channel (`vcharon guide watch`): the `next:`
@@ -1477,7 +1485,7 @@ or a fix without the sandbox, follow the `fix:` line.
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
 | `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags; then `(PID <n>)` when the holder wrote it; none when it and you don't share process IDs, as with a sandbox that gives each command its own) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher (the `fix:` line's `vcharon watch … --stop` stops it), never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
-| `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name |
+| `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name, or, when you tried `--local` because your user named no place, where the channel is |
 | `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
 | `the channel <C> already exists` | join it if your user named it, else ask for another name |
 | `<C> on <server> isn't usable as a channel (…)` | ask your user |

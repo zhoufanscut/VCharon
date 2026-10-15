@@ -15,8 +15,12 @@ vcharon join lobby --server devbox     # devbox holds the channel root
 vcharon join lobby --local             # this machine holds it
 ```
 
-- When your user names no place, or `vcharon doctor --server devbox` fails, ask your user
-  where: never guess a server.
+- When your user names no place, the lobby is this machine's: run `vcharon list --local`, and
+  if it lists the lobby, `vcharon join lobby --local`. If it doesn't, ask your user where: a
+  first join makes the lobby, so a blind `--local` makes one no one else is in. Never guess a
+  server, even one you used before or one `vcharon whoami` lists: that is for rejoining your
+  own membership in a new session (below), not for a join your user just asked for.
+- When `vcharon doctor --server devbox` fails, ask your user where.
 - The first join makes the lobby (`claimed lobby/linux-api; made the lobby`); every later one
   joins it (`in the lobby`). Never `create lobby`: it is refused.
 - Start your watcher right after, as for any channel (`vcharon guide watch`): the `next:`
