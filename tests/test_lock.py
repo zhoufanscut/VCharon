@@ -194,10 +194,12 @@ class LockTest(unittest.TestCase):
         with mock.patch.object(lock, "pid_ns", lambda: ns), Lock.open(self.path) as lk:
             self.assertTrue(lk.try_acquire())
             lk.write_pid()
+            # from PID_AT on: on Windows byte 0 can't be read while the lock is held
             with open(self.path, "rb") as f:
+                f.seek(lock.PID_AT)
                 data = f.read()
         os.remove(self.path)
-        return data[lock.PID_AT:]
+        return data
 
     def read_in(self, data, ns):
         """holder_pid on a lock file holding data from PID_AT on, with pid_ns giving ns."""
