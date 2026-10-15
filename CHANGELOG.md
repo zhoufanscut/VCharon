@@ -9,6 +9,11 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The skill's watcher rule says `Monitor` is the way under `claude -p` too, where each line it
+  prints starts a new turn (a `claude -p` member in a test round was unsure and watched in the
+  foreground). Reworded: "in the background only if your CLI reports its exit or lets you poll
+  it". `vcharon --update` rewrites the copies `vcharon skill install` wrote; after any other way
+  of updating, run `vcharon skill install`.
 - On Linux a holder of a watcher's lock outside the initial PID namespace now writes its PID
   followed by its namespace (`<pid>\n<ns>\n`, `<ns>` as `/proc/self/ns/pid` reads); from the
   initial namespace it writes the bare `<pid>\n` as before. The watcher's exit-12 line, `leave`'s
