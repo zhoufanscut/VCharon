@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import datetime
 import glob
 import io
 import json
@@ -16,7 +17,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import VERSION, channel_cmd, channels, cli, config, keys, platform
+from vcharon import VERSION, channel_cmd, channels, charter, cli, config, entries, keys, platform
 from vcharon.mailbox import read
 from vcharon.proto import VCharonError
 
@@ -628,8 +629,9 @@ class ListJsonTest(ChannelCase):
         self.assertEqual(sorted(doc), ["channels", "others", "server"])
         self.assertEqual(doc["server"], "fake-dest")
         [ch] = doc["channels"]
-        self.assertEqual(sorted(ch), ["format", "founder", "kind", "leader", "leaders", "limits",
-                                      "member_info", "members", "name", "newest", "strays"])
+        self.assertEqual(sorted(ch), ["bytes", "created", "format", "founder", "kind", "leader",
+                                      "leaders", "limits", "member_info", "members", "name",
+                                      "newest", "strays"])
         self.assertEqual(ch["kind"], "work")
         self.assertEqual((ch["format"], ch["limits"]),
                          (1, {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}))
@@ -656,6 +658,60 @@ class ListJsonTest(ChannelCase):
         self.assertEqual(doc["server"], None)
         # one of --server and --local
         self.assertEqual(self.run_cli("list", "--json")[0], 3)
+
+    def test_age_and_size(self):
+        # old: created 12 days ago by its CHANNEL.md; bare: no leader, so its folder's mtime
+        self.lead()
+        made = time.time() - 12 * 86400 - 3600
+        text = ("# CHANNEL\n" + entries.build(
+            entries.stamp(made), "lead", 2, "channel old created", ["@all"],
+            header=[("leader", "lead"), ("created", entries.stamp(made)), ("format", "1")]))
+        charter_md = text.encode("utf-8")
+        write_tree(self.root, {"old/lead/CHANNEL.md": charter_md,
+                               "old/lead/notes.md": b"n" * 1500, "old/a/MEMBER.md": b"m" * 99,
+                               "old/a/.vcharon-stage-1/z": b"zzzz", "bare/x/": None})
+        if CAN_SYMLINK:
+            # a link is neither followed nor counted
+            os.symlink(os.path.join(self.root, "old", "lead"),
+                       os.path.join(self.root, "old", "a", "link"))
+            os.symlink(os.path.join(self.root, "old", "lead", "notes.md"),
+                       os.path.join(self.root, "old", "a", "file-link"))
+        bare = os.path.join(self.root, "bare")
+        os.utime(bare, (time.time() - 3 * 3600 - 60,) * 2)
+        # a stage dir's files count: they are on disk
+        size = len(charter_md) + 1500 + 99 + 4
+        for where in (("--server", "fake-dest"), ("--local",)):
+            with self.subTest(where=where):
+                lines = self.ok("list", *where).splitlines()
+                [old] = [l for l in lines if l.startswith("  old  ")]
+                self.assertTrue(old.endswith("  format 1  age 12 d  size %.1f kB"
+                                             % (size / 1000)), old)
+                [line] = [l for l in lines if l.startswith("  bare  ")]
+                self.assertTrue(line.endswith("  format -  age 3 h  size 0 B"), line)
+                [game] = [l for l in lines if l.startswith("  game  ")]
+                self.assertRegex(game, r"  format 1  age 0 min  size [\d.]+ k?B\Z")
+                doc = json.loads(self.ok("list", *where, "--json"))
+                got = {ch["name"]: (ch["created"], ch["bytes"]) for ch in doc["channels"]}
+                self.assertEqual(got["old"], (entries.stamp(made), size))
+                self.assertEqual(got["bare"], (entries.stamp(os.stat(bare).st_mtime), 0))
+                self.assertRegex(got["game"][0], r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\Z")
+
+    def test_age_text(self):
+        # headings carry local time with no zone
+        now = datetime.datetime(2026, 10, 15, 12, 0, 0)  # noqa: DTZ001
+        for created, want in (("2026-10-15 11:01:00", "59 min"), ("2026-10-15 11:00:00", "1 h"),
+                              ("2026-10-14 12:00:01", "23 h"), ("2026-10-14 12:00:00", "1 d"),
+                              ("2026-10-03 11:00:00", "12 d"), ("2026-10-15 12:30:00", "0 min"),
+                              (None, "-"), ("2026-10-15 11:00", "-")):
+            with self.subTest(created=created):
+                self.assertEqual(channel_cmd.age_text(created, now), want)
+        # only a created: time in a heading's shape: a minute one isn't
+        for value, want in (("2026-10-01 09:00:00", "2026-10-01 09:00:00"),
+                            ("2026-10-01 09:00", None)):
+            with self.subTest(value=value):
+                text = entries.build("2026-10-01 09:00:00", "lead", 2, "t", ["@all"],
+                                     header=[("created", value)])
+                self.assertEqual(charter.created(text, "lead"), want)
 
 
 class SyncTest(ChannelCase):

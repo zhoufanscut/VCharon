@@ -9,6 +9,15 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon list` (`--local` and `--server`) ends each channel's line with `age <n> d` (or `h`,
+  `min`) and `size <size>`, and `--json` gives each channel two new fields: `created`, its
+  `CHANNEL.md`'s `created:` time (`YYYY-mm-dd HH:MM:SS`, with no zone: a work channel's
+  creating client's clock, a lobby's server's; the channel folder's mtime when that is
+  missing), and `bytes`, the total size of the files in its folder. Why: only `close` deletes a
+  channel, so forgotten ones pile up unseen. The fields are additions; a matcher on the line's
+  old end (`format <n>` or `format -`) moves to `format <n>  age` (or `format -  age`).
+  Measured on Linux (the suite, and a hand run of two `--local` channels, one backdated).
+
 - A watcher that exits 12 prints a `  fix:` line after its `ERROR another watcher is running on
   this mailbox …` line, which is unchanged: the PID, when shown, holds the lock (this
   membership's watcher, or its create, join, leave or close); keep using your own watcher you

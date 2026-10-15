@@ -191,12 +191,15 @@ def _close_all(*handles):
 # --- channel.list ---
 
 def list_channels(root, tick=_no_tick):
-    """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "format",
-    "kind", "limits"}], "others": [{"name", "why"}]}, in name order. fields: for each member,
-    {"box", "os", "agent", "project"} from its MEMBER.md (None each when it's missing);
-    leaders: the members whose folder holds CHANNEL.md; newest: the newest file's mtime, or
-    None; format, kind (a lobby's only) and limits: from the one leader's CHANNEL.md
-    (charter.parse), unchecked. A missing root holds no channel."""
+    """{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "bytes",
+    "created", "made", "format", "kind", "limits"}], "others": [{"name", "why"}]}, in name
+    order. fields: for each member, {"box", "os", "agent", "project"} from its MEMBER.md (None
+    each when it's missing); leaders: the members whose folder holds CHANNEL.md; newest: the
+    newest file's mtime, or None; bytes: the size of every file below the channel's folder;
+    created: the one leader's CHANNEL.md created: time text (charter.created), or None; made:
+    the channel folder's mtime, which list shows when created is None; format, kind (a lobby's
+    only) and limits: from that CHANNEL.md (charter.parse), unchecked. A missing root holds no
+    channel."""
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
@@ -220,7 +223,7 @@ def list_channels(root, tick=_no_tick):
             others.append({"name": name, "why": "not a channel's folder"})
             continue
         try:
-            channels.append(_channel_info(os.path.join(root, name), name, tick))
+            channels.append(_channel_info(os.path.join(root, name), name, tick, st.st_mtime))
         except OSError as e:
             others.append({"name": name, "why": "can't be read: %s" % (e.strerror or e)})
     return {"channels": channels, "others": others}
@@ -230,7 +233,13 @@ def newest_file(path, tick=_no_tick, stages=False):
     """The newest mtime of a regular file below path, or None for none. os.walk never follows
     a symlinked folder. stages: also the files of vcharon's stage dirs, half-written files of
     a sync in progress (list counts them: they are activity in the channel)."""
-    newest = None
+    return _files_below(path, tick, stages)[0]
+
+
+def _files_below(path, tick, stages):
+    """(newest_file's mtime, the total size) of the regular files below path, in one walk; a
+    symlink is neither followed nor counted."""
+    newest, total = None, 0
     for dirpath, dirnames, filenames in os.walk(path):
         tick()
         if not stages:
@@ -241,12 +250,14 @@ def newest_file(path, tick=_no_tick, stages=False):
                 st = os.lstat(os.path.join(dirpath, f))
             except OSError:
                 continue
-            if stat.S_ISREG(st.st_mode) and (newest is None or st.st_mtime > newest):
-                newest = st.st_mtime
-    return newest
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+                if newest is None or st.st_mtime > newest:
+                    newest = st.st_mtime
+    return newest, total
 
 
-def _channel_info(path, name, tick):
+def _channel_info(path, name, tick, made):
     members, leaders, strays = [], [], []
     fields = {}
     for entry in sorted(os.scandir(path), key=lambda e: e.name):
@@ -262,10 +273,15 @@ def _channel_info(path, name, tick):
                 leaders.append(entry.name)
         else:
             strays.append(entry.name)
-    newest = newest_file(path, tick, stages=True)
+    newest, total = _files_below(path, tick, True)
     info = {"name": name, "members": members, "fields": fields, "leaders": leaders,
-            "strays": strays, "newest": newest}
-    info.update(_charter(path, leaders))
+            "strays": strays, "newest": newest, "bytes": total, "created": None, "made": made}
+    if len(leaders) == 1:
+        text = charter.read_text(os.path.join(path, leaders[0]))
+        info.update(charter.parse(text, leaders[0]))
+        info["created"] = charter.created(text, leaders[0])
+    else:
+        info.update(charter.parse("", ""))
     return info
 
 

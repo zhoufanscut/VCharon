@@ -2200,6 +2200,17 @@ Every verb also takes `-v` (log lines to stderr too).
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
   would make it again, empty).
+- `list` prints one line per channel: its leader (a lobby's founder), members, newest file,
+  format, `age` and `size`; then one line per member (box, os, agent, project) and the notes.
+  `age` counts from `CHANNEL.md`'s `created:`, else from the channel folder's mtime, which a
+  later join or leave moves on. `created:` has no zone, as a heading's ([Clocks](#clocks)): a
+  work channel's is the creating client's clock, a lobby's the server helper's, so the age is
+  off by any zone gap to this machine (the mtime fallback isn't). `size` is every regular file
+  below the channel's folder, stage dirs too, in the walk that finds `newest` (a link is
+  neither followed nor counted): disk use, not what the limits count (`charter.folder_total`,
+  per member folder, skips stage dirs and stage files), so it can pass `max mb` with no limit hit.
+  `--json` gives them as `created` (a heading's time) and `bytes`. Why: only `close` deletes
+  a channel, so a forgotten one stays until someone sees it.
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
   matches the program it runs. Several topics (`guide member rules`) print in the order given,
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
@@ -2757,9 +2768,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     after an `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
-    "leaders", "founder", "members", "member_info", "newest", "strays", "format", "limits"}`,
-    `member_info` each `{"name", "box", "os", "agent", "project"}`, `limits` `{"max_mb",
-    "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
+    "leaders", "founder", "members", "member_info", "newest", "created", "bytes", "strays",
+    "format", "limits"}`, `member_info` each `{"name", "box", "os", "agent", "project"}`,
+    `limits` `{"max_mb", "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "founder", "leads", "mode",
     "server", "folder", "tree", "box", "box_source", "members", "kind"}`, each member
     `{"name", "agent", "box", "os", "leader", "newest", "watched", "watch_every", "left"}`,
@@ -2918,8 +2929,6 @@ Later:
   took about 1.2 GB. That sshd's `MaxStartups 10:30:100` caused the resets is inferred (the
   server's log wasn't read). `MaxSessions 10` caps them only when `ssh_config` shares
   connections (ControlMaster, never on Windows); not measured.
-- Old channels pile up: only `close` deletes. `list` showing each channel's age and size would
-  make forgotten ones stand out.
 - Handing the leader role to another member: today the leader closes and the new one creates a
   new channel.
 - Closing a lobby, and removing the folders of members that never come back: today the user

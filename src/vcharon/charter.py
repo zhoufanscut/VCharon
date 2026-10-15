@@ -113,21 +113,34 @@ def parse(text, leader):
 def read(member_folder, leader):
     """parse() of member_folder/CHANNEL.md; a missing file, a link (never read through), or
     one that can't be read has no format."""
+    return parse(read_text(member_folder), leader)
+
+
+def read_text(member_folder):
+    """member_folder/CHANNEL.md's start (READ_MAX); "" for a missing file, a link (never read
+    through), or one that can't be read."""
     path = os.path.join(member_folder, entries.CHANNEL_FILE)
     try:
         if not stat.S_ISREG(os.lstat(path).st_mode):
-            return parse("", leader)
+            return ""
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
                      | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return parse("", leader)
+                return ""
             data = os.read(fd, READ_MAX)
         finally:
             os.close(fd)
     except OSError:
-        return parse("", leader)
-    return parse(data.decode("utf-8", "replace"), leader)
+        return ""
+    return data.decode("utf-8", "replace")
+
+
+def created(text, leader):
+    """The created: time of CHANNEL.md's #2 (text) as written, a heading's local time with no
+    zone; None when it has none in that shape."""
+    value = entries.header_of(text, leader, 2).get("created")
+    return value if entries.parse_time(value) is not None else None
 
 
 def limits_problem(limits):

@@ -865,6 +865,8 @@ def _list(args, cfg, log, say):
         print(json.dumps(list_json(server, listing), ensure_ascii=False))
         sys.stdout.flush()
         return 0
+    # the ages are of headings' times, which are local with no zone
+    now = datetime.datetime.now()  # noqa: DTZ005
     say("vcharon: list  (%s)" % server.where)
     if not listing["channels"] and not listing["others"]:
         say("  no channels")
@@ -872,13 +874,15 @@ def _list(args, cfg, log, say):
         leaders = ch["leaders"]
         newest = ch.get("newest")
         fmt = _format_of(ch)
+        size = _bytes_of(ch)
         # a lobby has no leader: the folder that holds CHANNEL.md is its founder
-        say("  %s  %s %s  members %s  newest %s  format %s"
+        say("  %s  %s %s  members %s  newest %s  format %s  age %s  size %s"
             % (ch["name"], "a lobby, founder" if _kind_of(ch) == kinds.LOBBY.name else "leader",
                leaders[0] if len(leaders) == 1 else "?",
                ", ".join(ch["members"]) or "none",
                entries.minute_stamp(newest) if isinstance(newest, (int, float)) else "-",
-               "-" if fmt is None else fmt))
+               "-" if fmt is None else fmt, age_text(_created(ch), now),
+               "-" if size is None else charter.size_text(size)))
         if not leaders:
             say("    note: no member's folder holds %s: ask the user" % entries.CHANNEL_FILE)
         elif len(leaders) > 1:
@@ -914,6 +918,38 @@ def _kind_of(ch):
     return kinds.of_name(ch.get("kind")).name
 
 
+def _bytes_of(ch):
+    n = ch.get("bytes")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
+
+
+def _created(ch):
+    """A listed channel's creation time as list --json gives it (entries.TIME_FORMAT): its
+    CHANNEL.md's created:, else the channel folder's mtime (a later time: a join or leave
+    changes it), else None."""
+    created = ch.get("created")
+    if isinstance(created, str) and entries.parse_time(created) is not None:
+        return created
+    made = ch.get("made")
+    if isinstance(made, (int, float)) and not isinstance(made, bool):
+        return entries.stamp(made)
+    return None
+
+
+def age_text(created, now):
+    """How long ago created (entries.TIME_FORMAT, local) was, to now, short: "5 min", "3 h",
+    "12 d"; "-" for None. A time ahead of now (another machine's clock or zone) is 0 min."""
+    when = entries.parse_time(created) if created is not None else None
+    if when is None:
+        return "-"
+    minutes = max(0, int((now - when).total_seconds() // 60))
+    if minutes < 60:
+        return "%d min" % minutes
+    if minutes < 24 * 60:
+        return "%d h" % (minutes // 60)
+    return "%d d" % (minutes // (24 * 60))
+
+
 def _limits_of(ch):
     """A listed channel's limits as list --json gives them: each an int or null."""
     limits = ch.get("limits") if isinstance(ch.get("limits"), dict) else {}
@@ -937,16 +973,17 @@ def member_info(ch):
 def list_json(server, listing):
     """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
     for --local; each channel is {"name", "kind", "leader", "leaders", "founder", "members",
-    "member_info", "newest", "strays", "format", "limits"}: "kind" is "work" or "lobby" (null
-    for a format or kind this vcharon can't use), "leader" is the one leader, or null when there
-    are none or several ("leaders" lists them); a lobby (its kind read from its one
-    CHANNEL.md) has none, "leader" null and "leaders" empty, and "founder" is the member whose
-    folder holds that CHANNEL.md (null in a work channel); "member_info" each member's
-    {"name", "box", "os", "agent", "project"} from its MEMBER.md (null for a field it lacks),
-    "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null, "format" the channel's
-    format from its leader's CHANNEL.md (null when it has none) and "limits" its {"max_mb",
-    "max_files", "max_entry_kb"} (null each when missing); each of "others" is {"name",
-    "why"}, a name at the root that isn't a usable channel."""
+    "member_info", "newest", "created", "bytes", "strays", "format", "limits"}: "kind" is
+    "work" or "lobby" (null for a format or kind this vcharon can't use), "leader" is the one
+    leader, or null when there are none or several ("leaders" lists them); a lobby (its kind
+    read from its one CHANNEL.md) has none, "leader" null and "leaders" empty, and "founder" is
+    the member whose folder holds that CHANNEL.md (null in a work channel); "member_info" each
+    member's {"name", "box", "os", "agent", "project"} from its MEMBER.md (null for a field it
+    lacks), "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null, "created" the
+    channel's creation time (_created) or null, "bytes" the total size of the files in its
+    folder, "format" the channel's format from its leader's CHANNEL.md (null when it has none)
+    and "limits" its {"max_mb", "max_files", "max_entry_kb"} (null each when missing); each of
+    "others" is {"name", "why"}, a name at the root that isn't a usable channel."""
     out = []
     for ch in listing["channels"]:
         holders = list(ch["leaders"])
@@ -960,6 +997,7 @@ def list_json(server, listing):
                     "member_info": member_info(ch),
                     "newest": entries.minute_stamp(newest) if isinstance(newest, (int, float))
                     else None,
+                    "created": _created(ch), "bytes": _bytes_of(ch),
                     "strays": list(ch.get("strays", [])), "format": _format_of(ch),
                     "limits": _limits_of(ch)})
     return {"server": server.ssh, "channels": out,

@@ -209,13 +209,13 @@ class FormatTest(ChannelCase):
         out = self.ok("list", "--server", "fake-dest")
         lines = out.splitlines()
         self.assertRegex(lines[1], r"\A  game  leader laptop-ui  members laptop-ui  newest "
-                                   r"\S+ \S+  format 1\Z")
+                                   r"\S+ \S+  format 1  age \d+ min  size \S+ \S+\Z")
         [new] = [l for l in lines if l.startswith("  new  ")]
-        self.assertTrue(new.endswith("  format 3"), new)
+        self.assertIn("  format 3  age ", new)
         self.assertIn("    note: new uses format 3; this vcharon reads up to 2; ask your user "
                       "to run: vcharon --update", lines)
         [old] = [l for l in lines if l.startswith("  old  ")]
-        self.assertTrue(old.endswith("  format -"), old)
+        self.assertIn("  format -  age ", old)
         self.assertIn("    note: old has no format: line in its CHANNEL.md, so it isn't a "
                       "channel this vcharon made; " + charter.NO_FORMAT_HINT, lines)
         # the channels this vcharon reads get no note

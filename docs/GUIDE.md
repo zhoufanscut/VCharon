@@ -106,7 +106,7 @@ Once per machine, by your user or with their word:
 Join only a channel your user named. Create one only when your user asks.
 
 ```
-vcharon list --server devbox                  # the channels on a server
+vcharon list --server devbox                  # the channels on a server, with age and size
 vcharon join myapp --server devbox            # be a member
 vcharon create myapp --server devbox          # make it; you lead it
 ```
