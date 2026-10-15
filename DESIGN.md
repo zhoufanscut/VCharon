@@ -1995,7 +1995,11 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it
   while they run. When the holder wrote its PID ([Lock](#lock)) the line ends ` (PID <n>)`.
   The line keeps `ERROR another watcher is running on this mailbox (<lock>)` as its start, so a
-  script that matches that still works.
+  script that matches that still works. A `  fix:` line follows it: the PID, when shown, holds
+  the lock; keep using your own watcher you still see, let a command of yours end, ask the user
+  if it isn't yours, and stop your own watcher you lost with `vcharon watch C --stop` and this
+  membership's flags, then start yours. The ERROR line alone named nothing to run and read as if
+  the PID could be any create's or join's.
 - **A sync child that exited without a word** (no `ERROR` line, nothing on stderr; killed from
   outside: SIGKILL on Linux gives -9, and on Windows a process ended that way exits 1, which is
   inferred; its own `EXIT updated` or `EXIT orphaned` line counts as no word, and is never
@@ -2748,7 +2752,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     ` (exit <code>)` (match
     on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12, followed by ` (PID <n>)` when the
-    holder wrote its PID (older versions end it at `(<lock>)`: match on that start). The text
+    holder wrote its PID (older versions end it at `(<lock>)`: match on that start). The `  fix:`
+    line after it is not stable (its text can change; older versions print none). The text
     after an `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",

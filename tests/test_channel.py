@@ -51,6 +51,18 @@ LEADER_LEAVE_FIX = ("a leader ends the channel with CLOSED to @all after every m
 # here the holder is the test's own process, which wrote its PID
 WATCHER_LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, "
                   "join, leave or close of this member (PID %d)")
+# the fix line after it, for the membership's flags in channel game
+WATCHER_LOCKED_FIX = ("  fix: the PID, if shown, holds the lock: this membership's watcher, or "
+                      "its create, join, leave or close. Your watcher you still see: keep using "
+                      "it. A command of yours: let it end. Not yours: ask your user. Your watcher "
+                      "you lost: stop it, then start yours: vcharon watch game --stop %s")
+
+
+def watcher_locked(snapshot, flags):
+    """A watcher's exit-12 lines, without their time, the test's own process holding the lock;
+    the fix line's command as this box runs vcharon."""
+    return [WATCHER_LOCKED % (snapshot, os.getpid()),
+            platform.runnable(WATCHER_LOCKED_FIX % flags)]
 
 
 def hold(case, path):
@@ -738,7 +750,7 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(code, 0, out + err)
         self.assertNotIn("busy", out + err)
         self.assertIn("OK  in game as mac-web", out)
-        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
+        self.assertEqual(started, [12, watcher_locked(snapshot, "--project web")])
         self.assertEqual(job_locks, [])
         # released when the join returned: the member's watcher starts now
         lk = watch.take_lock(snapshot)
@@ -779,7 +791,7 @@ class CreateJoinTest(ChannelCase):
         with mock.patch.object(channel_cmd, "_run_section", sync):
             out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
         self.assertIn("OK  created game", out)
-        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
+        self.assertEqual(started, [12, watcher_locked(snapshot, "--project ui")])
         lk = watch.take_lock(snapshot)
         self.assertIsNotNone(lk)
         lk.release()
@@ -2043,7 +2055,7 @@ class LeaveCloseTest(ChannelCase):
 
         with mock.patch.object(channel_cmd, "_run_section", sync):
             out = self.ok("leave", "game")
-        self.assertEqual(started, [12, [WATCHER_LOCKED % (snapshot, os.getpid())]])
+        self.assertEqual(started, [12, watcher_locked(snapshot, "--project web")])
         self.assertEqual(out.splitlines()[-2:], ["  removed %s.lock" % snapshot, "OK  left game"])
         self.assertFalse(os.path.exists(snapshot + ".lock"))
 

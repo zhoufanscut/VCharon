@@ -9,6 +9,15 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A watcher that exits 12 prints a `  fix:` line after its `ERROR another watcher is running on
+  this mailbox …` line, which is unchanged: the PID, when shown, holds the lock (this
+  membership's watcher, or its create, join, leave or close); keep using your own watcher you
+  still see, let a command of yours end, ask your user if it isn't yours, or stop your own
+  watcher you lost with `vcharon watch C --stop <flags>`, then start yours. Why: the line had no
+  fix line, and live testers read the PID as possibly some other command's. The fix line is not
+  Stable text; a matcher on the ERROR line is unaffected. Measured on Linux (the suite, and a hand
+  run of two watchers of one `--local` membership).
+
 - A lobby `join`'s `not shown:` line is two lines. The first counts only the entries left out
   from the last 24 h (`<j> to you before your leave, <n> to all in the last 24 h`), and its
   `--last` reaches only the oldest of those; the entries to you older than 24 h get a second

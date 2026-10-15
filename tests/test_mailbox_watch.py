@@ -54,6 +54,19 @@ LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a crea
           "leave or close of this member")
 # its end when the holder wrote its PID: a watcher or take_lock in the test's own process
 HELD_HERE = " (PID %d)" % os.getpid()
+# the fix line after it, with the stop command for the channel and the membership's flags
+LOCKED_FIX = ("  fix: the PID, if shown, holds the lock: this membership's watcher, or its "
+              "create, join, leave or close. Your watcher you still see: keep using it. A "
+              "command of yours: let it end. Not yours: ask your user. Your watcher you lost: "
+              "stop it, then start yours: vcharon watch %s --stop %s")
+# the flags name_flags gives debian with no join record
+NO_RECORD = "<the --project and --role that make debian>"
+
+
+def locked(state, end="", flags=NO_RECORD, channel="mb"):
+    """Exit 12's two lines, without their time: the ERROR line (end: its PID part) and the fix
+    line, its command as this box runs vcharon."""
+    return [LOCKED % state + end, platform.runnable(LOCKED_FIX % (channel, flags))]
 
 
 def silent_fix(job="mb.windows"):
@@ -758,7 +771,7 @@ class LockTest(WatchCase):
 
         watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=Rounds(second),
                         rounds=1)
-        self.assertEqual(seen, [12, [LOCKED % self.state() + HELD_HERE], 0, 0])
+        self.assertEqual(seen, [12, locked(self.state(), HELD_HERE), 0, 0])
         # the lock goes with the first watcher
         self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
                                          rounds=0), 0)
@@ -773,7 +786,7 @@ class LockTest(WatchCase):
         lines = []
         self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=lines.append,
                                          sleep=never, rounds=0), 12)
-        self.assertEqual(self.said(lines), [LOCKED % state + " (PID %d)" % pid])
+        self.assertEqual(self.said(lines), locked(state, " (PID %d)" % pid))
         # killed, it leaves its PID behind; the next taker locks the same file and writes
         # over it
         stop_child(child)
@@ -802,25 +815,26 @@ class LockTest(WatchCase):
                                            sleep=never, rounds=0)
                 finally:
                     lk.release()
-                self.assertEqual((code, self.said(lines)), (12, [LOCKED % state + end]))
+                self.assertEqual((code, self.said(lines)), (12, locked(state, end)))
 
     def test_the_command_exits_12(self):
         show_pid(self)
         write_tree(self.tree, {"mac/x": b"x"})
-        self.local_record()
+        # the fix line's flags are the record's, --role too
+        self.local_record(role="r")
         codes = []
 
         def second():
             # a lock that let it through fails here, not by watching for 25 minutes
             ran = AssertionError("the second watch started")
             with mock.patch.object(watch, "_loop", side_effect=ran):
-                code, out, _err = self.cli("--until-change")
+                code, out, _err = self.cli("--until-change", "--role", "r")
             codes.extend([code, out])
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
         self.assertEqual(codes[0], 12)
         self.assertEqual(self.said(codes[1].splitlines()),
-                         [LOCKED % self.state() + HELD_HERE])
+                         locked(self.state(), HELD_HERE, "--project q --role r"))
 
 
 def in_thread(case, fn):
@@ -965,7 +979,8 @@ class KeyTest(WatchCase):
             seen.append(self.said(lines))
 
         watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=Rounds(second), rounds=1)
-        self.assertEqual(seen, [12, [LOCKED % self.state() + HELD_HERE]])
+        # the channel's name in the fix is the folder's, as the watcher was given it
+        self.assertEqual(seen, [12, locked(self.state(), HELD_HERE, channel="alias")])
 
     @unittest.skipUnless(os.name == "posix", "normcase folds case on Windows")
     def test_a_plain_path_keeps_its_name(self):
@@ -1771,6 +1786,24 @@ class ClientModeTest(WatchCase):
     def setUp(self):
         WatchCase.setUp(self)
         self.sync_args = self.write_config(self)
+
+    def test_the_command_exits_12(self):
+        # a remote member's fix line names its stop with the record's flags, --role too
+        show_pid(self)
+        record = channel_cmd.read_record("mb", "windows")
+        channel_cmd.write_record(dict(record, role="r"))
+        lk = watch.take_lock(self.state("windows", "mb.windows"))
+        self.addCleanup(lk.release)
+        out, err = io.StringIO(), io.StringIO()
+        # a lock that let it through fails here, not by syncing
+        ran = AssertionError("the watch synced")
+        with mock.patch.object(watch, "run_sync", side_effect=ran), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            code = cli.main(["watch", "mb", "--project", "p", "--role", "r", "--no-stream"])
+        self.assertEqual((code, err.getvalue()), (12, ""))
+        self.assertEqual(self.said(out.getvalue().splitlines()),
+                         locked(self.state("windows", "mb.windows"), HELD_HERE,
+                                "--project p --role r"))
 
     def test_rounds(self):
         # a fake sync: each round's result, and what it brings
@@ -3559,10 +3592,10 @@ class OnceTest(WatchCase):
         self.local_record(project="web")
         taken = watch._locked
 
-        def spoil(w, state):
+        def spoil(w, state, *fix):
             with open(state, "w", encoding="utf-8") as f:
                 f.write("{")
-            return taken(w, state)
+            return taken(w, state, *fix)
 
         with mock.patch.object(watch, "_locked", spoil), \
                 self.assertRaises(VCharonError) as cm:
@@ -3597,7 +3630,7 @@ class OnceTest(WatchCase):
         lk = watch.take_lock(self.state())
         self.addCleanup(lk.release)
         self.assertEqual(self.once(),
-                         (watch.EXIT_LOCKED, [LOCKED % self.state() + HELD_HERE]))
+                         (watch.EXIT_LOCKED, locked(self.state(), HELD_HERE)))
 
     def test_another_watcher_in_its_own_pid_namespace(self):
         # its PID would name another process here: it writes none, and the line ends as an
@@ -3606,7 +3639,7 @@ class OnceTest(WatchCase):
         self.baseline()
         lk = watch.take_lock(self.state())
         self.addCleanup(lk.release)
-        self.assertEqual(self.once(), (watch.EXIT_LOCKED, [LOCKED % self.state()]))
+        self.assertEqual(self.once(), (watch.EXIT_LOCKED, locked(self.state())))
 
     def test_closed(self):
         self.baseline()
@@ -3703,10 +3736,10 @@ class OnceRemoteTest(WatchCase):
         state = self.state("windows", "mb.windows")
         taken = watch._locked
 
-        def spoil(w, state):
+        def spoil(w, state, *fix):
             with open(state, "w", encoding="utf-8") as f:
                 f.write("{")
-            return taken(w, state)
+            return taken(w, state, *fix)
 
         with mock.patch.object(watch, "_locked", spoil), \
                 self.assertRaises(VCharonError) as cm:

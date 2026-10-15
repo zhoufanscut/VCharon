@@ -260,6 +260,12 @@ ONCE_BUSY = ("ERROR busy: a sync of %s is running (a post's, or one a stopped wa
              "nothing was synced")
 ONCE_BUSY_FIX = ("run vcharon watch %s --once %s again after your next step; 3 times in a row, "
                  "tell your user")
+# The fix line after exit 12's ERROR line, which stays as it was (Stable): the line alone reads
+# as if its PID could be some other command's, and it named nothing to run
+LOCKED_FIX = ("the PID, if shown, holds the lock: this membership's watcher, or its create, join, "
+              "leave or close. Your watcher you still see: keep using it. A command of yours: let "
+              "it end. Not yours: ask your user. Your watcher you lost: stop it, then start "
+              "yours: vcharon watch %s --stop %s")
 
 
 def error_key(line):
@@ -1452,9 +1458,9 @@ def _not_restored(w, channel, flags):
     return _exit_as(w, "error", EXIT_ERROR)
 
 
-def _locked(w, state):
-    """The lock on the saved snapshot, or None after the ERROR line if another watcher has
-    it."""
+def _locked(w, state, channel, flags_of):
+    """The lock on the saved snapshot, or None after the ERROR and fix lines if another watcher
+    has it. flags_of: the membership's flags for the fix's stop command, called only then."""
     try:
         lk = take_lock(state)
     except OSError as e:
@@ -1466,6 +1472,7 @@ def _locked(w, state):
         pid = Lock.holder_pid(state + ".lock")
         w.say("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
               "leave or close of this member%s" % (state, " (PID %d)" % pid if pid else ""))
+        w.say(FIX + platform.runnable(LOCKED_FIX % (channel, flags_of())))
     return lk
 
 
@@ -1506,7 +1513,8 @@ def watch_dir(root, me, every, out=say, sleep=None, rounds=None, clock=time.time
     request = StopRequest(state)
     if sleep is None:
         sleep = request.sleep
-    lk = _locked(w, state)
+    lk = _locked(w, state, os.path.basename(root),
+                 lambda: flags or channel_cmd.name_flags(os.path.basename(root), me))
     if lk is None:
         return EXIT_LOCKED
     try:
@@ -2171,7 +2179,7 @@ def watch_job(job, sync_args, every, out=say, sleep=None, run=None, rounds=None,
     request = StopRequest(state)
     if sleep is None:
         sleep = request.sleep
-    lk = _locked(w, state)
+    lk = _locked(w, state, sync_args[0], lambda: flags)
     if lk is None:
         return EXIT_LOCKED
     child = None

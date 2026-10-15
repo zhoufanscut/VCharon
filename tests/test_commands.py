@@ -1036,7 +1036,12 @@ HINTS = {
         ("a watcher of an older version doesn't read the request, and one may still be in a "
          "sync: stop it in its own session (Ctrl-C, or your CLI's way to stop a background "
          "command), or by the PID if one is shown once you checked it is vcharon's watcher; or "
-         "run vcharon watch %s --stop %s again", ("game", FLAGS))],
+         "run vcharon watch %s --stop %s again", ("game", FLAGS)),
+        # exit 12's, after its ERROR line
+        ("the PID, if shown, holds the lock: this membership's watcher, or its create, join, "
+         "leave or close. Your watcher you still see: keep using it. A command of yours: let it "
+         "end. Not yours: ask your user. Your watcher you lost: stop it, then start yours: "
+         "vcharon watch %s --stop %s", ("game", FLAGS))],
 }
 
 
