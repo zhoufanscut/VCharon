@@ -62,19 +62,35 @@ cleanup() {
   if [ -n "${SERVER}" ]; then kill "${SERVER}" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
-"${PYTHON}" -u -m http.server 0 --bind 127.0.0.1 --directory "${RELEASE}" \
-  > "${WORK}/server.log" 2>&1 &
+# the server, on a port the OS picks, which it prints once it listens. Not `python -m
+# http.server`: on the macOS runners that one printed its line only about 35 s after it
+# started; suspected, not shown, is a name lookup at its start (getaddrinfo of --bind, getfqdn
+# in HTTPServer.server_bind). A plain TCPServer with the same handler makes neither. One line
+# of Python, for Git Bash to pass to a Windows python.
+SERVE="import functools, http.server, socketserver, sys; \
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=sys.argv[1]); \
+server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), handler); \
+sys.stdout.write('port %d' % server.server_address[1] + chr(10)); server.serve_forever()"
+"${PYTHON}" -u -c "${SERVE}" "${RELEASE}" > "${WORK}/server.log" 2>&1 &
 SERVER=$!
+started="$(date +%s)"
 tries=0
-until PORT="$(sed -n 's/.* port \([0-9][0-9]*\) .*/\1/p' "${WORK}/server.log")" \
+# a Windows python ends the line with CRLF
+until PORT="$(sed -n 's/^port \([0-9][0-9]*\).*/\1/p' "${WORK}/server.log")" \
     && [ -n "${PORT}" ]; do
-  tries=$((tries + 1))
-  if [ "${tries}" -gt 60 ] || ! kill -0 "${SERVER}" 2>/dev/null; then
+  if ! kill -0 "${SERVER}" 2>/dev/null; then
     cat "${WORK}/server.log"
-    fail "the fake release's server didn't start"
+    fail "the fake release's server exited before it printed its port"
+  fi
+  tries=$((tries + 1))
+  # two minutes or more, far past what a start takes, so a slow runner doesn't fail the check
+  if [ "${tries}" -gt 240 ]; then
+    cat "${WORK}/server.log"
+    fail "the fake release's server printed no port in $(($(date +%s) - started)) s"
   fi
   sleep 0.5
 done
+echo "the fake release's server is up after $(($(date +%s) - started)) s, on port ${PORT}"
 ROOT="http://127.0.0.1:${PORT}"
 export VCHARON_INSTALL_API_URL="${ROOT}/latest.json"
 export VCHARON_INSTALL_DOWNLOAD_URL="${ROOT}/download"
