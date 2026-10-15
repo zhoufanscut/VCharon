@@ -7,6 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- On Linux a holder of a watcher's lock outside the initial PID namespace now writes its PID
+  followed by its namespace (`<pid>\n<ns>\n`, `<ns>` as `/proc/self/ns/pid` reads); from the
+  initial namespace it writes the bare `<pid>\n` as before. The watcher's exit-12 line, `leave`'s
+  and `close`'s refusal, create's and join's live-session refusal and `watch --stop`'s lines show
+  the PID only to a reader in the same namespace, a bare PID counting as the initial one's. So a
+  holder in a WSL2 distro or a container now gets its ` (PID <n>)`; a holder in a sandbox with a
+  PID namespace per command (Codex on Linux) still shows none to another command, and a reader in
+  such a sandbox no longer shows a host PID. A 0.6.0rc2 to 0.7.0 reader still sees the PID of a
+  holder in the initial namespace, and none from another (its line ends as before). macOS and
+  Windows unchanged (inferred: the namespace is Linux only). Checked on Linux (measured): the
+  suite, with a holder under `unshare --user --pid --fork` whose PID a reader outside doesn't
+  show.
+
 ## 0.7.0 — 2026-10-15
 
 0.7.0rc2's code, unchanged. Next to 0.6.0, the changes are those of 0.7.0rc1 and 0.7.0rc2, in

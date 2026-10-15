@@ -784,6 +784,7 @@ class LockTest(WatchCase):
 
     def test_the_line_names_no_pid_but_a_decimal_one(self):
         # an older vcharon's hold writes none; anything else in the file is never printed
+        show_pid(self)
         state = self.state()
         os.makedirs(os.path.dirname(state), exist_ok=True)
         for data, end in ((b"", ""), (b"\0", ""), (b"\x0042\n", " (PID 42)"),

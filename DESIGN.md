@@ -797,24 +797,36 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 - `vcharon sync C --reset` takes the same lock.
 - The same lock kind guards the post lock, the watcher's snapshot, and stage dirs.
 - The watcher's snapshot lock names its holder: whoever takes it (a watcher; `create`, `join`,
-  `leave` and `close`) writes its PID into the file as `<pid>\n` from byte 1 on, and cuts the file
-  to its first byte before it lets go; a watcher refused it reads that and ends its exit-12 line
-  with ` (PID <n>)`, only for a decimal PID and nothing else from the file; so does the refusal of
-  `leave` and `close` ([Create, join, leave, close](#create-join-leave-close)). Why: the user (or
-  agent) can find the process that holds the lock. On Linux only from the initial PID namespace
-  (`/proc/self/ns/pid` reads `pid:[4026531836]`; unreadable: no PID), checked once per process: in a
-  sandbox with its own (Codex's Linux sandbox runs each command so), a PID can name another process
-  to a taker outside that namespace, so none is written there; this includes WSL2 distros (each has
-  its own PID namespace, per Microsoft's WSL docs; not run) and containers, where a PID would have
-  been right. Such a holder cuts the file to its first byte instead, so a PID left before it isn't
-  read as its own. From byte 1: `msvcrt` locks byte 0, which no other process can read on Windows
-  while it is held. The lock is on the file, not its contents, so `take_lock`'s same-file check and
-  `leave`'s and `close`'s delete of the held file don't change. No PID (an older vcharon or one in
-  its own PID namespace holds it, or the holder hasn't written it yet): the line ends as before. The
-  PID can be stale: a holder killed before it lets go leaves its PID, which an older vcharon taking
-  the lock next doesn't replace, and a new holder replaces with its own, or clears (in a PID
-  namespace of its own), only a moment after it takes the lock; the PID may also belong to another
-  process by then. So the guide says to check it is a `vcharon watch` before stopping it.
+  `leave` and `close`) writes its PID into the file from byte 1 on, and cuts the file to its first
+  byte before it lets go; a watcher refused it reads that and ends its exit-12 line with ` (PID
+  <n>)`; so does the refusal of `leave` and `close`
+  ([Create, join, leave, close](#create-join-leave-close)). Why: the user (or agent) can find the
+  process that holds the lock. On Linux outside the initial PID namespace the file holds
+  `<pid>\n<ns>\n`, `<ns>` being the holder's `/proc/self/ns/pid` text (e.g. `pid:[4026532561]`),
+  read once per process; from the initial namespace (`pid:[4026531836]`, `PROC_PID_INIT_INO`), and
+  on macOS and Windows, `<pid>\n`. A reader shows the PID only when the file holds one of these
+  forms and nothing more, and on Linux only when its own `/proc/self/ns/pid` reads the same `<ns>`,
+  a bare `<pid>\n` counting as the initial namespace's: a PID names the same process only inside
+  one PID namespace, and in a sandbox with its own (Codex's Linux sandbox runs each command so) it
+  can name another process to a reader outside. So WSL2 distros (each has its own PID namespace,
+  per Microsoft's WSL docs; not run) and containers get their PID; a sandboxed Codex command gets
+  none for another command's watcher, and a sandboxed reader gets none for a holder outside it.
+  The bare form from the initial namespace: vcharon from 0.6.0rc2 to 0.7.0 shows a PID only for
+  `<pid>\n` and wrote one only from there, so such a reader still sees the PID of a holder there,
+  and none from another namespace (its line ends as before). 0.6.0rc1 wrote a bare PID from any
+  namespace: a holder of that version in another one is read as in the initial one. A holder
+  whose link can't be read writes none, and cuts the file to its first byte instead, so a PID left
+  before it isn't read as its own; a reader whose link can't be read shows none. From byte 1:
+  `msvcrt` locks byte 0, which no other process can read on Windows while it is held. The lock is
+  on the file, not its contents, so `take_lock`'s same-file check and `leave`'s and `close`'s
+  delete of the held file don't change. No PID shown (an older vcharon in a PID namespace of its
+  own holds it, a holder in another namespace than the reader, or the holder hasn't written it
+  yet): the line ends as before. The PID can be stale: a holder killed before it lets go leaves
+  its PID, which an older vcharon taking the lock next doesn't replace, and a new holder replaces
+  with its own, or clears, only a moment after it takes the lock; the PID may also belong to
+  another process by then, and a namespace's number can be reused once that namespace is gone,
+  so a stale PID can match the reader's namespace. So the guide says to check it is a `vcharon
+  watch` before stopping it.
 
 ## Config
 
