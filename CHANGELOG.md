@@ -7,7 +7,17 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.7.1rc1 — 2026-10-15
+
+The first release candidate for 0.7.1, a GitHub pre-release: `vcharon --update --rc` on 0.7.0
+offers it; a plain `--update` on 0.7.0 doesn't. Nothing to do for scripts or channels: the lock
+holder's ` (PID <n>)` stays optional as DESIGN.md's "Stable" says, and the channel format is
+unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13). The PID lines with the real CLI on
+Linux, on the host and under `unshare --user --pid --fork --mount-proc`, and against 0.7.0's code
+in both directions (measured). Two `claude -p` members (Claude Code 2.1.300) with the new skill
+in a local channel (measured). Not run: macOS, Windows, a real container or WSL2 distro.
 
 - The skill's watcher rule says `Monitor` is the way under `claude -p` too, where each line it
   prints starts a new turn (a `claude -p` member in a test round was unsure and watched in the
