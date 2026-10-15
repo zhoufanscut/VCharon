@@ -7,7 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.7.1 — 2026-10-15
+
+0.7.1rc1's code plus one guide and skill change, the first item below. Next to 0.7.0, the
+changes are that item and those in 0.7.1rc1's entry: the lock holder's PID beside its PID
+namespace on Linux, and the skill's `Monitor` line under `claude -p`. Nothing to do for scripts
+or channels: the format is unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on 0.7.1rc1
+everywhere on 2026-10-15 (measured): Claude Code (`claude -p`) and Codex CLI 0.162.1
+(`workspace-write` sandbox) on Linux, Claude Code and Codex on Windows over ssh, in a lobby and
+a work channel through `CLOSED`, `LEAVE` and `close`. A second watcher's exit-12 line showed the
+running watcher's PID on Linux and on Windows (both agents), each confirmed as that member's own
+watcher, and none for the sandboxed Codex on Linux, as designed. No fault in vcharon was
+reported. Not in that round: the first item's guide and skill wording (written after rc1).
+Not run: macOS, a real container or WSL2 distro.
 
 - Guide and skill: when the user names no place, a join is `--local`; for the lobby, only if
   `vcharon list --local` lists it, else ask the user where. Before, the guide said only "ask",
