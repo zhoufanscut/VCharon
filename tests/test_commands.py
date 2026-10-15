@@ -926,6 +926,10 @@ HINTS = {
         ("  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s",
          ("2 to all in the last 24 h", " (3 entries: the 2 counted and 1 more to you or to all "
           "after the oldest counted one)", "lobby", 3, FLAGS)),
+        # its second line, for the ones older than 24 h
+        ("  older: %s; to see them too%s: vcharon read %s --full --to-me --last %d %s",
+         ("1 to you older than 24 h, from earlier work", " (5 entries: the 3 counted on both "
+          "lines and 2 more to you or to all after the oldest counted one)", "lobby", 5, FLAGS)),
         # a live session holds the name, and this machine's record of it is on this server
         ("your own earlier watcher: keep using it, or if you no longer get its output, stop it "
          "with vcharon watch %s --stop %s (a command of yours: let it end); another agent's "

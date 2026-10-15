@@ -1472,31 +1472,42 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   once, and its next `join lobby` makes the new lobby or joins it. Why: the record names the
   old founder, and a join that made a lobby over it would mix the two.
 - **What `join` prints.** In a lobby, of the entries already there, only those addressed to the
-  member from the last 24 h, then, when any are left out, one line `  not shown: <j> to you
-  before your leave, <n> to all in the last 24 h, <k> to you older than 24 h; to see them:
-  vcharon read lobby --full --to-me --last <m> <flags>`, each count only when it isn't 0, m
-  the number of entries `--to-me` lists from the oldest one left out to the newest; `--full`
-  because the left-out entries are the ones to weigh (the range can hold more entries than the
-  counts, such as older `@all` ones, and prints their bodies too). When m is more than the
-  counts add up to (c), `to see them` becomes `to see them (<m> entries: the <c> counted and
-  <m - c> more to you or to all after the oldest counted one)`, the command still last on the
-  line; the others are entries the join showed above, older `@all` ones, and ones the
-  watcher's snapshot hasn't taken as seen (the watcher prints those). Why: a `--last` bigger
-  than the counts, with no word on the rest, reads as a mistake. An entry to the
-  member from the last 24 h whose time is before the member's own last `LEAVE` (the one with
-  the highest number in its folder) is counted in j, not shown. Why: after a `leave` and a
-  join, a new snapshot takes everything as seen, so the old membership's work would be
-  printed again; but no watcher may have printed it (one stopped for the `leave`, gaps
-  between `--until-change` runs, none started), so it is counted and the `read` reaches it.
-  That compares two members' clocks, so an entry posted within the skew of the `LEAVE` may
-  land on the wrong side. With none shown and that line following, the line before it is `no
-  entries for <name> since your leave` when j isn't 0, else `no entries for <name> in the last
-  24 h` (with no line, `no entries for <name> in lobby yet`), so the two agree. Why: a first
-  join and every rejoin print them, and 30 days of everyone's `@all`, in day files of up
-  to 10 MB, would flood every new session; and an older entry to the member, taken as seen by
-  a new snapshot, would be printed by nothing else. The 24 h go by the heading's time, the
-  poster's local time with no zone, so a member in another time zone moves the window by its
-  offset (up to about 14 h); a window is all it is. The snapshot rules are a work channel's.
+  member from the last 24 h, then, when any are left out, up to two lines. When j or n isn't 0:
+  `  not shown: <j> to you before your leave, <n> to all in the last 24 h; to see them: vcharon
+  read lobby --full --to-me --last <m> <flags>`, each count only when it isn't 0, m the number
+  of entries `--to-me` lists from the oldest one those two count to the newest. When k isn't 0,
+  after it: `  older: <k> to you older than 24 h, from earlier work; to see them too: vcharon
+  read lobby --full --to-me --last <o> <flags>`, o from the oldest of all left out; with j and n
+  both 0, that line alone, as `  not shown: <k> to you older than 24 h, from earlier work; to
+  see them: …`. Why two: one `--last` reaching back to the oldest count would pull a week of old
+  rounds into the read of what matters now, and three counts on one line, with the `(<m>
+  entries: …)` part after them, are hard to read. An entry to the member with no time or a bad
+  one (by hand, or from 0.1.0rc1: `post` stamps seconds) counts in k, and read lists it first, so
+  the `older:` line's `--last` reaches it. Why not the first line: listed first, it would make
+  that line's `--last` reach back over everything again. `--full` because the left-out entries
+  are the ones to weigh (the range can hold more entries than the counts, such as older `@all`
+  ones, and prints their bodies too). When a line's m or o is more than what its read counts (c:
+  the first line's j + n; the older line's j + n + k, since its range covers both), `to see
+  them` becomes `to see them (<m> entries: the <c> counted and <m - c> more to you or to all
+  after the oldest counted one)`, on the `older:` line `to see them too (<o> entries: the <c>
+  counted on both lines and …)`, the command still last on the line; the others are entries the
+  join showed above, older `@all` ones, and ones the watcher's snapshot hasn't taken as seen
+  (the watcher prints those). Why: a `--last` bigger than the counts, with no word on the rest,
+  reads as a mistake. An entry to the member from the last 24 h whose time is before the
+  member's own last `LEAVE` (the one with the highest number in its folder) is counted in j, not
+  shown. Why: after a `leave` and a join, a new snapshot takes everything as seen, so the old
+  membership's work would be printed again; but no watcher may have printed it (one stopped for
+  the `leave`, gaps between `--until-change` runs, none started), so it is counted and the
+  `read` reaches it. That compares two members' clocks, so an entry posted within the skew of
+  the `LEAVE` may land on the wrong side. With none shown and those lines following, the line
+  before them is `no entries for <name> since your leave` when j isn't 0, else `no entries for
+  <name> in the last 24 h` (with no line, `no entries for <name> in lobby yet`), so the two
+  agree. Why: a first join and every rejoin print them, and 30 days of everyone's `@all`, in day
+  files of up to 10 MB, would flood every new session; and an older entry to the member, taken
+  as seen by a new snapshot, would be printed by nothing else. The 24 h go by the heading's
+  time, the poster's local time with no zone, so a member in another time zone moves the window
+  by its offset (up to about 14 h); a window is all it is. The snapshot rules are a work
+  channel's.
 - **Who is here.** `whoami lobby` lists the members by last watched, newest first (no stamp
   last), each line marked with the first of these that holds (a `left` that is unknown, as for
   a local member's folder over the limits, counts as not left):
@@ -1519,7 +1530,7 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   that ends without `leave` posts no `LEAVE`, while every running watcher stamps. Why a verdict
   here, when a work channel's whoami gives none: the lobby is for whoever is around now; a
   leader judges lateness by its channel's pace.
-- **Join's members line.** After its entries (and its `not shown` line), a lobby join whose sync
+- **Join's members line.** After its entries (and the count lines), a lobby join whose sync
   worked prints the other members by these marks in one line, `  members  here: <names>; away:
   <names>; left: <names>` (a mark with no one left out; `  members  no one else seen in 24 h`
   for none), each mark's names by last watched, newest first; the joiner and the `gone` ones

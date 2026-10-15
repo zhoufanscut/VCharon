@@ -107,19 +107,26 @@ TOOK_BACK = ", this machine's folder"
 # a lobby founder's failed join that had to keep its folder: other members joined meanwhile
 KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it, join again with "
              "--rejoin")
-# join's line for the lobby entries it leaves out, each count only when not 0 (DESIGN, "The
-# lobby"); with --full: the left-out entries are the ones to weigh, and join prints the others'
-# bodies too
+# join's line for the lobby entries it leaves out that matter now, each count only when not 0
+# (DESIGN, "The lobby"); with --full: the left-out entries are the ones to weigh, and join
+# prints the others' bodies too. Also the only line when all it left out is older than 24 h
 NOT_SHOWN = "  not shown: %s; to see them%s: vcharon read %s --full --to-me --last %d %s"
+# the second line, for the ones older than 24 h: each line has a --last of its own; the older
+# line's reaches the oldest of all, so that the first line's read doesn't reach back to a week
+# of old rounds
+NOT_SHOWN_OLDER = "  older: %s; to see them too%s: vcharon read %s --full --to-me --last %d %s"
 # put after "to see them" when --last is more than the counts add up to: the read lists every
-# entry to the member or to all from the oldest left-out one on, so also the shown ones after it,
+# entry to the member or to all from the oldest one the line counts on, so also the shown ones,
 # older @all ones and any the watcher is left to print; a --last bigger than the counts with no
 # word on the rest reads as a mistake
 NOT_SHOWN_WIDER = (" (%d entries: the %d counted and %d more to you or to all after the oldest "
                    "counted one)")
+# NOT_SHOWN_OLDER's after a NOT_SHOWN line: its read reaches both lines' entries
+NOT_SHOWN_WIDER_BOTH = (" (%d entries: the %d counted on both lines and %d more to you or to all "
+                        "after the oldest counted one)")
 NOT_SHOWN_LEFT = "%d to you before your leave"
 NOT_SHOWN_ALL = "%d to all in the last 24 h"
-NOT_SHOWN_OLD = "%d to you older than 24 h"
+NOT_SHOWN_OLD = "%d to you older than 24 h, from earlier work"
 # how long a join re-lists a lobby listed without CHANNEL.md: its claim writes it a moment after
 # the mkdirs
 LOBBY_WAIT = 10.0
@@ -1720,18 +1727,20 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
     snapshot's (watch.first_look), or None for all: an entry or WARN line only for what they
     take as seen; one that landed after that look is the watcher's to print, so it is printed
     once. In a lobby, only the entries to name from the last 24 h by the heading's time, and
-    no MEMBER.md #1; one NOT_SHOWN line counts the rest (_not_shown): 30 days of everyone's
-    @all would flood every new session. Of those, one from before name's last LEAVE is
-    counted, not shown: a rejoin after a leave would print again what that membership's
-    watcher printed, but a watcher may not have run, so the count and its read still reach
-    it."""
+    no MEMBER.md #1; a NOT_SHOWN line counts the rest (_not_shown): 30 days of everyone's
+    @all would flood every new session. Of the entries to name from the last 24 h, one from
+    before name's last LEAVE is counted, not shown: a rejoin after a leave would print again
+    what that membership's watcher printed, but a watcher may not have run, so the count and
+    its read still reach it. The ones older than 24 h get a second line (NOT_SHOWN_OLDER),
+    so that the first line's read doesn't reach back to them."""
     # here, not at the top: the watch module imports this one
     from .mailbox import watch
     lobby = kind_ is kinds.LOBBY
     since = _now() - datetime.timedelta(hours=24)
     left_at = (entries.parse_time(entries.last_leave(os.path.join(tree, name), name))
                if lobby else None)
-    left_out = {"left": 0, "all": 0, "old": 0, "where": []}
+    # where: the (path, line) of each left out; recent: of those not older than 24 h
+    left_out = {"left": 0, "all": 0, "old": 0, "where": [], "recent": []}
     raw = say
 
     def say(line):
@@ -1784,8 +1793,10 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                         # an @all from before the 24 h is neither shown nor counted
                         if recent or to_me:
                             left_out["left" if before else "all" if recent else "old"] += 1
-                            left_out["where"].append(
-                                (os.path.relpath(md, tree).replace(os.sep, "/"), e.line))
+                            at = (os.path.relpath(md, tree).replace(os.sep, "/"), e.line)
+                            left_out["where"].append(at)
+                            if recent:
+                                left_out["recent"].append(at)
                         continue
                 if not shown:
                     say("entries for %s already in %s:" % (name, channel))
@@ -1810,14 +1821,24 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
             else "no entries for %s in the last 24 h" % name if left_out["where"]
             else "no entries for %s in %s yet" % (name, channel))
     if left_out["where"]:
-        counts = [text % n for text, n in ((NOT_SHOWN_LEFT, left_out["left"]),
-                                           (NOT_SHOWN_ALL, left_out["all"]),
-                                           (NOT_SHOWN_OLD, left_out["old"])) if n]
-        last = _not_shown(tree, name, leader, kind_, left_out["where"])
-        counted = len(left_out["where"])
-        wider = NOT_SHOWN_WIDER % (last, counted, last - counted) if last > counted else ""
-        raw(platform.runnable(NOT_SHOWN % (", ".join(counts), wider, channel, last,
-                                           name_flags(channel, name))))
+        flags = name_flags(channel, name)
+        recent, everyone = left_out["recent"], left_out["where"]
+        last_recent, last_all = _not_shown(tree, name, leader, kind_, [recent, everyone])
+        if recent:
+            counts = [text % n for text, n in ((NOT_SHOWN_LEFT, left_out["left"]),
+                                               (NOT_SHOWN_ALL, left_out["all"])) if n]
+            wider = (NOT_SHOWN_WIDER % (last_recent, len(recent), last_recent - len(recent))
+                     if last_recent > len(recent) else "")
+            raw(platform.runnable(NOT_SHOWN % (", ".join(counts), wider, channel, last_recent,
+                                               flags)))
+        if left_out["old"]:
+            # its read lists from the oldest of all counted on, so it counts both lines'
+            line, wide = ((NOT_SHOWN_OLDER, NOT_SHOWN_WIDER_BOTH) if recent
+                          else (NOT_SHOWN, NOT_SHOWN_WIDER))
+            wider = (wide % (last_all, len(everyone), last_all - len(everyone))
+                     if last_all > len(everyone) else "")
+            raw(platform.runnable(line % (NOT_SHOWN_OLD % left_out["old"], wider, channel,
+                                          last_all, flags)))
     for line in warnings:
         say(line)
 
@@ -1827,22 +1848,24 @@ def _now():
     return datetime.datetime.now()  # noqa: DTZ005
 
 
-def _not_shown(tree, name, leader, kind_, where):
-    """The --last of NOT_SHOWN's read: how many entries read --to-me lists from the oldest
-    one join left out (where: their (path, line)) to the newest, so that command shows every
-    one of them."""
+def _not_shown(tree, name, leader, kind_, wheres):
+    """The --last of each NOT_SHOWN line's read, one per list in wheres (of entries join
+    left out, their (path, line)): how many entries read --to-me lists from the oldest of
+    them to the newest, so that command shows every one of them."""
     from .mailbox import read
     try:
         _folders, items, _notes = read.read_tree(tree)
     except OSError:
-        return len(where)
+        return [len(where) for where in wheres]
     ordered, _ = read.order(items, read._now())
     listed = read.pick(ordered, mine=(name, leader, kind_))[0]
-    wanted = set(where)
-    for i, item in enumerate(listed):
-        if (item.path, item.e.line) in wanted:
-            return len(listed) - i
-    return len(where)
+    at = [(item.path, item.e.line) for item in listed]
+    lasts = []
+    for where in wheres:
+        wanted = set(where)
+        lasts.append(next((len(at) - i for i, place in enumerate(at) if place in wanted),
+                          len(where)))
+    return lasts
 
 
 def _run_section(args, section, full, brief=False):

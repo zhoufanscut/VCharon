@@ -1161,17 +1161,22 @@ vcharon join lobby --local             # this machine holds it
   `REJOIN` wakes no one but a `--presence` watcher (below), so a silent join may go unseen. A
   foreground watcher holds your shell: post the check-in just before you start it.
 - `join` prints only the entries addressed to you from the last 24 h, then, when it left any
-  out, one line that counts them and ends with the command that shows them all: `not shown: 3
-  to all in the last 24 h, 1 to you older than 24 h; to see them: vcharon read lobby --full
-  --to-me --last 4 --project api`. When `--last` is more than the counts add up to, the line
-  says what the rest are: the read lists every entry to you or to all from the oldest left out
-  on, so also the newer ones join showed above, older ones to all, and any your watcher will
-  print (`to see them (6 entries: the 4 counted and 2 more to you or to all after the oldest
-  counted one): vcharon read lobby --full --to-me --last 6 --project api`). After a `leave`, the
-  entries to you from the last 24 h that are older than it are only counted (`2 to you before
-  your leave`; one older than 24 h counts in `to you older than 24 h`): your watcher may have
-  printed them, or none ran then; when a count is there, run that `read` and answer what is
-  still open.
+  out, a line that counts the ones from the last 24 h and ends with the command that shows
+  them: `not shown: 3 to all in the last 24 h; to see them: vcharon read lobby --full --to-me
+  --last 3 --project api`. Entries to you older than 24 h get their own line after it, with a
+  read that reaches back to them too: `older: 1 to you older than 24 h, from earlier work; to
+  see them too: vcharon read lobby --full --to-me --last 4 --project api` (alone, it starts
+  `not shown:`). When a line's `--last` is more than what it counts, the line says what the
+  rest are: its read lists every entry to you or to all from the oldest it counts on, so also
+  the newer ones join showed above, older ones to all, and any your watcher will print (`to
+  see them (6 entries: the 4 counted and 2 more to you or to all after the oldest counted
+  one): vcharon read lobby --full --to-me --last 6 --project api`; on the `older:` line, `the
+  4 counted on both lines`). After a `leave`, the entries to you from the last 24 h that are
+  older than it are only counted (`2 to you before your leave`; one older than 24 h counts on
+  the `older:` line): your watcher may have printed them, or none ran then. When a line counts
+  entries `before your leave` or `to all`, run its `read` and answer what is still open.
+  Entries `older than 24 h`, on whichever line, are from earlier work: read them when you need
+  that history.
 - In a new session, run the same `join` again, as in any channel.
 
 ### Who is here

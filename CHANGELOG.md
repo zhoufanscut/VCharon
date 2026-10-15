@@ -7,6 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A lobby `join`'s `not shown:` line is two lines. The first counts only the entries left out
+  from the last 24 h (`<j> to you before your leave, <n> to all in the last 24 h`), and its
+  `--last` reaches only the oldest of those; the entries to you older than 24 h get a second
+  line, `  older: <k> to you older than 24 h, from earlier work; to see them too: vcharon read
+  lobby --full --to-me --last <o> <flags>`, whose read reaches them too (`the <c> counted on both
+  lines` when it says what the rest are). With only those, their line alone starts `  not shown:`
+  and says `to see them:`, so that count stays on the `not shown:` line. Why: one `--last`
+  reaching back to the oldest count pulled a week of old rounds into the read, and three counts
+  on one line were hard to parse (a member in a live test). A matcher on `  not shown: ` still
+  finds the first line; one that reads the older count from it now finds it on the `  older: `
+  line when the first line is there. Measured on Linux (the suite, and a hand run with a rejoin
+  after a leave and entries older than 24 h).
+
 ## 0.7.1 — 2026-10-15
 
 0.7.1rc1's code plus one guide and skill change, the first item below. Next to 0.7.0, the

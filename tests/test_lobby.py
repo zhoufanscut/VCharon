@@ -1042,14 +1042,18 @@ class JoinPrintTest(LobbyCase):
         self.assertIn("  ## %s — linux-web#13 — to you" % recent, out)
         for left in ("#10", "#11", "#12", "member"):
             self.assertNotIn("linux-web%s —" % left if left != "member" else "— member", out)
-        line = [l for l in out.splitlines() if l.startswith("  not shown: ")]
+        lines = [l for l in out.splitlines() if l.startswith(("  not shown: ", "  older: "))]
         # left out: #12 to all, #10 to you; the founder's CHANNEL.md #2 is to itself, so
-        # neither counted nor listed. read --to-me lists from #10, the oldest of them, on:
-        # #10, #11 (an @all from before the 24 h, neither shown nor counted), #12, #13
-        # 4 is more than the 2 counted, so the line says what the 4 are
-        self.assertEqual(line, [channel_cmd.platform.runnable(
-            "  not shown: 1 to all in the last 24 h, 1 to you older than 24 h; to see them "
-            "(4 entries: the 2 counted and 2 more to you or to all after the oldest counted "
+        # neither counted nor listed. The first line's read lists from #12 on: #12, #13; the
+        # second's from #10, the oldest of all counted, on: #10, #11 (an @all from before the
+        # 24 h, neither shown nor counted), #12, #13. Each --last is more than what it counts,
+        # so each line says what its entries are
+        self.assertEqual(lines, [channel_cmd.platform.runnable(l) for l in (
+            "  not shown: 1 to all in the last 24 h; to see them (2 entries: the 1 counted and "
+            "1 more to you or to all after the oldest counted one): vcharon read lobby --full "
+            "--to-me --last 2 --project web",
+            "  older: 1 to you older than 24 h, from earlier work; to see them too (4 entries: "
+            "the 2 counted on both lines and 2 more to you or to all after the oldest counted "
             "one): vcharon read lobby --full --to-me --last 4 --project web")])
         listed = self.ok("read", "lobby", "--to-me")
         for n in ("#10", "#11", "#12", "#13"):
@@ -1109,18 +1113,23 @@ class JoinPrintTest(LobbyCase):
         # counted as that, before the LEAVE or not
         self.assertNotIn("linux-web#9 ", out)
         self.assertNotIn("linux-web#10 ", out)
-        line = [l for l in out.splitlines() if l.startswith("  not shown: ")]
-        self.assertEqual(line, [channel_cmd.platform.runnable(
-            "  not shown: 1 to you before your leave, 1 to all in the last 24 h, 1 to you older "
-            "than 24 h; to see them (4 entries: the 3 counted and 1 more to you or to all after "
-            "the oldest counted one): vcharon read lobby --full --to-me --last 4 --project web")])
+        lines = [l for l in out.splitlines() if l.startswith(("  not shown: ", "  older: "))]
+        # the first line's read: #9, #10, #11; the second's: #8 on
+        self.assertEqual(lines, [channel_cmd.platform.runnable(l) for l in (
+            "  not shown: 1 to you before your leave, 1 to all in the last 24 h; to see them "
+            "(3 entries: the 2 counted and 1 more to you or to all after the oldest counted "
+            "one): vcharon read lobby --full --to-me --last 3 --project web",
+            "  older: 1 to you older than 24 h, from earlier work; to see them too (4 entries: "
+            "the 3 counted on both lines and 1 more to you or to all after the oldest counted "
+            "one): vcharon read lobby --full --to-me --last 4 --project web")])
         self.assertIn("linux-web#9  @mac-web  missed",
                       self.ok("read", "lobby", "--to-me", "--last", "4"))
 
     def not_shown(self, made, marked=None):
         """A join after linux-web's entries made [(seconds ago, to)], numbered from 10, in
-        notes.md: (its not shown: line, the IDs read --to-me lists, in order). marked: the IDs
-        the watcher's look took as seen, the rest left for the watcher to print (None: all)."""
+        notes.md: (its not shown: and older: lines, the IDs read --to-me lists, in order).
+        marked: the IDs the watcher's look took as seen, the rest left for the watcher to
+        print (None: all)."""
         self.join("linux")
         now = time.time()
         text = "# notes\n" + "".join(
@@ -1131,65 +1140,107 @@ class JoinPrintTest(LobbyCase):
         with mock.patch.object(watch, "marked", lambda marks, folder, e: (
                 real(marks, folder, e) and (marked is None or e.id in marked))):
             out = self.ok("join", "lobby", "--local")
-        [line] = [l for l in out.splitlines() if l.startswith("  not shown: ")]
+        lines = [l for l in out.splitlines() if l.startswith(("  not shown: ", "  older: "))]
         listed = [w for w in self.ok("read", "lobby", "--to-me").split()
                   if w.startswith("linux-web#")]
         self.shown = [n for n in range(10, 10 + len(made)) if "— linux-web#%d —" % n in out]
-        return line, listed
+        return lines, listed
 
-    def assert_not_shown(self, line, counts, last, counted=None):
-        """line is join's not shown: line of counts, --last last; counted: how many those
-        counts add up to, when last is more."""
-        wider = ""
-        if counted is not None:
-            wider = (" (%d entries: the %d counted and %d more to you or to all after the oldest "
-                     "counted one)" % (last, counted, last - counted))
-        self.assertEqual(line, channel_cmd.platform.runnable(
-            "  not shown: %s; to see them%s: vcharon read lobby --full --to-me --last %d "
-            "--project web" % (counts, wider, last)))
+    def assert_not_shown(self, lines, *expected):
+        """lines are join's not shown: and older: lines; expected, one per line: (counts,
+        --last, how many the line's read counts when --last is more, else None). A second
+        line is the older: one, whose read counts both lines' entries."""
+        want = []
+        for i, (counts, last, counted) in enumerate(expected):
+            head, too, both = (("not shown", "", "") if i == 0
+                               else ("older", " too", " on both lines"))
+            wider = ""
+            if counted is not None:
+                wider = (" (%d entries: the %d counted%s and %d more to you or to all after the "
+                         "oldest counted one)" % (last, counted, both, last - counted))
+            want.append(channel_cmd.platform.runnable(
+                "  %s: %s; to see them%s%s: vcharon read lobby --full --to-me --last %d "
+                "--project web" % (head, counts, too, wider, last)))
+        self.assertEqual(lines, want)
 
     # Each split of what read --to-me lists from the oldest entry join left out (the counted
     # ones) on: shown ones after it, older @all ones, ones left for the watcher
 
     def test_the_rest_are_shown_ones(self):
-        line, listed = self.not_shown([(2 * 3600, "@all"), (3600, "@mac-web")])
-        self.assert_not_shown(line, "1 to all in the last 24 h", 2, counted=1)
+        lines, listed = self.not_shown([(2 * 3600, "@all"), (3600, "@mac-web")])
+        self.assert_not_shown(lines, ("1 to all in the last 24 h", 2, 1))
         self.assertEqual(listed, ["linux-web#10", "linux-web#11"])
         self.assertEqual(self.shown, [11])
 
     def test_the_rest_is_an_older_all(self):
-        line, listed = self.not_shown([(3 * 86400, "@mac-web"), (2 * 86400, "@all")])
-        self.assert_not_shown(line, "1 to you older than 24 h", 2, counted=1)
+        # only older ones: their line alone, as the not shown: one
+        lines, listed = self.not_shown([(3 * 86400, "@mac-web"), (2 * 86400, "@all")])
+        self.assert_not_shown(lines, ("1 to you older than 24 h, from earlier work", 2, 1))
         self.assertEqual(listed, ["linux-web#10", "linux-web#11"])
         self.assertEqual(self.shown, [])
 
     def test_the_rest_is_left_for_the_watcher(self):
         # #11 landed after the watcher's look: neither shown nor counted, but read lists it
-        line, listed = self.not_shown([(2 * 3600, "@all"), (3600, "@mac-web")],
+        lines, listed = self.not_shown([(2 * 3600, "@all"), (3600, "@mac-web")],
                                       marked={"linux-web#10"})
-        self.assert_not_shown(line, "1 to all in the last 24 h", 2, counted=1)
+        self.assert_not_shown(lines, ("1 to all in the last 24 h", 2, 1))
         self.assertEqual(listed, ["linux-web#10", "linux-web#11"])
         self.assertEqual(self.shown, [])
 
     def test_a_shown_one_before_the_oldest_counted(self):
         # #10, shown, comes before #11, the counted one: the read starts at #11, so --last is
         # the count and nothing is said about it
-        line, listed = self.not_shown([(3 * 3600, "@mac-web"), (3600, "@all")])
-        self.assert_not_shown(line, "1 to all in the last 24 h", 1)
+        lines, listed = self.not_shown([(3 * 3600, "@mac-web"), (3600, "@all")])
+        self.assert_not_shown(lines, ("1 to all in the last 24 h", 1, None))
         self.assertEqual(listed, ["linux-web#10", "linux-web#11"])
         self.assertEqual(self.shown, [10])
 
     def test_all_kinds_of_rest_at_once(self):
         # counted: #10 (older than 24 h), #12 (to all); after #10: #11 an older @all, #13
         # shown, #14 left for the watcher
-        line, listed = self.not_shown(
+        lines, listed = self.not_shown(
             [(3 * 86400, "@mac-web"), (2 * 86400, "@all"), (3 * 3600, "@all"),
              (2 * 3600, "@mac-web"), (3600, "@mac-web")],
             marked={"linux-web#%d" % n for n in (10, 11, 12, 13)})
-        self.assert_not_shown(line, "1 to all in the last 24 h, 1 to you older than 24 h", 5,
-                              counted=2)
+        # the first line's read: #12, #13, #14; the second's: all five
+        self.assert_not_shown(lines, ("1 to all in the last 24 h", 3, 1),
+                              ("1 to you older than 24 h, from earlier work", 5, 2))
         self.assertEqual(listed, ["linux-web#%d" % n for n in (10, 11, 12, 13, 14)])
         self.assertEqual(self.shown, [13])
+
+    def test_only_older_ones_with_nothing_else(self):
+        # all older than 24 h, and nothing after them: one line, --last the count
+        lines, listed = self.not_shown([(3 * 86400, "@mac-web"), (2 * 86400, "@mac-web")])
+        self.assert_not_shown(lines, ("2 to you older than 24 h, from earlier work", 2, None))
+        self.assertEqual(listed, ["linux-web#10", "linux-web#11"])
+        self.assertEqual(self.shown, [])
+
+    def test_older_line_wider_than_both_counts(self):
+        # the first line's read is its count alone (#12); the second's starts at #10 and
+        # lists #11, an older @all, too
+        lines, listed = self.not_shown(
+            [(3 * 86400, "@mac-web"), (2 * 86400, "@all"), (3600, "@all")])
+        self.assert_not_shown(lines, ("1 to all in the last 24 h", 1, None),
+                              ("1 to you older than 24 h, from earlier work", 3, 2))
+        self.assertEqual(listed, ["linux-web#10", "linux-web#11", "linux-web#12"])
+
+    def test_no_older_line_without_older_ones(self):
+        # before the leave and to all, none older than 24 h: the not shown: line alone
+        self.join("linux")
+        self.ok("join", "lobby", "--local")
+        self.ok("leave", "lobby")
+        now = time.time()
+        write_tree(self.root, {"lobby/linux-web/notes.md": (
+            "# notes\n"
+            + entries.build(entries.stamp(now - 3600), "linux-web", 9, "missed", ["@mac-web"])
+            + entries.build(entries.stamp(now - 1800), "linux-web", 10, "to all", ["@all"]))
+            .encode("utf-8")})
+        lines = self.ok("join", "lobby", "--local").splitlines()
+        i = lines.index("no entries for mac-web since your leave")
+        self.assertEqual(lines[i + 1], channel_cmd.platform.runnable(
+            "  not shown: 1 to you before your leave, 1 to all in the last 24 h; to see them: "
+            "vcharon read lobby --full --to-me --last 2 --project web"))
+        self.assertFalse([l for l in lines if l.startswith("  older: ")], lines)
 
     def test_none_shown_since_the_leave(self):
         self.join("linux")
