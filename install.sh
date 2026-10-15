@@ -88,12 +88,22 @@ version_of() {
   "$1" --version > "${WORK_DIR}/version.out" 2>/dev/null &
   pid=$!
   (
-    # the binary done in time: the outer shell TERMs this watcher, which ends its sleep too
+    # the binary done in time: the outer shell TERMs this watcher, which ends its sleep too.
+    # A TERM before $! is read only marks the stop (the sleep may be forked already), and the
+    # check after $! ends the sleep. The sleep gets KILL, not TERM: a TERM that reaches the
+    # forked child before it has become sleep is lost, and the sleep would run on.
+    stop=""
     sleeper=""
-    trap 'if [ -n "${sleeper}" ]; then kill "${sleeper}" 2>/dev/null; fi; exit 0' TERM
+    trap 'stop=1; if [ -n "${sleeper}" ]; then kill -9 "${sleeper}" 2>/dev/null; exit 0; fi' TERM
     sleep "${VERSION_TIMEOUT}" &
     sleeper=$!
+    if [ -n "${stop}" ]; then kill -9 "${sleeper}" 2>/dev/null; exit 0; fi
     wait "${sleeper}"
+    # the time is up and that sleep is reaped, so its PID may be reused: from the new trap on a
+    # TERM only ends the watcher, and the check catches one that came before it
+    sleeper=""
+    trap 'exit 0' TERM
+    if [ -n "${stop}" ]; then exit 0; fi
     kill "${pid}" 2>/dev/null || exit 0
     sleep "${KILL_GRACE}"
     kill -9 "${pid}" 2>/dev/null

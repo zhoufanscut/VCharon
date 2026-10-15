@@ -9,6 +9,15 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `install.sh`, where `timeout(1)` is missing (as on macOS), no longer leaves a `sleep` of the
+  version check's timeout (60 s) running now and then after the binary answered in time: when the
+  binary finished just as its watcher started its `sleep`, the watcher's stop could miss that
+  `sleep`. The watcher now ends it with KILL, also when the stop came first. Nothing the
+  installer prints changes. Measured on Linux, under sh (bash) and dash with `timeout(1)` left
+  off the PATH, on two CPUs with six busy loops: a `sleep` left in a few of every 300 runs before
+  (rates varied between runs), in none of 600 each after; the installer's tests pass. macOS (bash
+  3.2 as sh): inferred, not run.
+
 - `vcharon list` (`--local` and `--server`) ends each channel's line with `age <n> d` (or `h`,
   `min`) and `size <size>`, and `--json` gives each channel two new fields: `created`, its
   `CHANNEL.md`'s `created:` time (`YYYY-mm-dd HH:MM:SS`, with no zone: a work channel's
