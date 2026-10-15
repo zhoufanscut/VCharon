@@ -7,7 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.0rc1 — 2026-10-15
+
+The first release candidate for 0.8.0, a GitHub pre-release: `vcharon --update --rc` on 0.7.1
+offers it; a plain `--update` on 0.7.1 doesn't. A minor version because `list --json` gains two
+fields (`created`, `bytes`), an addition DESIGN.md's "Stable" allows.
+
+**Updating from 0.7.1:** nothing to do for channels: the format is unchanged. A script that
+matches the end of `list`'s human line, or reads the older-than-24 h count from a lobby join's
+`not shown:` line, adapts as its item below says; the exit-12 `ERROR` line is unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). Each item: a review and a
+live test on Linux, as its line says (measured). Not run: macOS, Windows, real ssh beyond CI's.
 
 - `install.sh`, where `timeout(1)` is missing (as on macOS), no longer leaves a `sleep` of the
   version check's timeout (60 s) running now and then after the binary answered in time: when the
