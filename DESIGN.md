@@ -1848,10 +1848,10 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   - with `--presence`, in a lobby only, `presence: <id> — <title>  (<path>)` for another
     member's `JOIN`, `REJOIN` or `LEAVE` ([The lobby](#the-lobby), "Silent entries"), among
     the `to you` lines in the entries' time order;
-  - at most one line a round each: `<n> other entries (<folders>)`, `1 other entry (<folder>)`
-    for one (addressed elsewhere, no ID, an ID not its folder's, or a `MEMBER.md` #1; in a
-    lobby, not an entry addressed only to its poster), `note: @all from <folders>, not the
-    leader: ignored` (never in a lobby);
+  - `<n> other entries (<folders>)`, `1 other entry (<folder>)` for one (addressed elsewhere,
+    no ID, an ID not its folder's, or a `MEMBER.md` #1; in a lobby, not an entry addressed only
+    to its poster): at most one line a round, or held (below); `note: @all from <folders>, not
+    the leader: ignored` (never in a lobby), at most one line a round;
   - `WARN entry <id> was edited` (a heading seen before with another text in the same file,
     once), `WARN entry <id> in <folder>/: not its folder's`;
   - `note: duplicate entry <id> in <path>: the one in <file> stands`: of an ID in two files of its
@@ -1862,7 +1862,7 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     and its heading is compared with the one told: a retitled copy warns that it was edited, since
     it is what `read` now shows;
   - `new | changed | gone <path>` for files that aren't `.md` files in a member's folder: a
-    patch or log is announced by an entry, and only entries wake;
+    patch or log is announced by an entry, and only entries wake; held (below);
   - `WARN <text>` / `WARN cleared: <text>` for problems in the tree: a local member's watcher
     checks for names clients leave out at the top, case twins, names a Windows client can't
     hold, symlinks and special files, and over-limit folders; a remote member's shows the
@@ -1876,6 +1876,26 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     `EXIT orphaned` and `EXIT interrupted` carry it too. Why: an agent's tool may report another
     code than the process's (Codex's summary said exit 1 for a watcher's 10), so the line says
     it. Readers match on the `EXIT <kind>` start.
+- **Quiet lines held.** Without `--until-change` or `--once`, the other entries and file lines
+  print nothing alone: they are held, and printed just before the watcher's next line,
+  whatever it is (`to you`, `to all`, `presence`, a `WARN`, `ERROR`, `ok again`, a `note:`, an
+  `EXIT` line), merged: one other entries line for all of them (the entries summed, the
+  folders joined in name order), then a line for each file whose state differs from the last
+  file lines printed, in path order, as one round's comparison would give it (a file new and
+  gone again since then gives none, one new then changed is `new`). Each line keeps its shape
+  and has the time it is printed. A round's own join them, so a round with a `to you` prints
+  them before it. Why: under Claude Code's Monitor every line printed on its own is a turn,
+  and members counted 11 to 15 of these lines in about 5 minutes against 5 or 6 addressed to
+  them, lines the guide says to read only if the work needs them. Why the last state of each
+  file: it is what the agent can look at now, and a log written every round would give a line
+  per round. A Ctrl-C, a SIGTERM or a crash prints them as the watch ends, before `EXIT
+  interrupted` (after the sync child is stopped) or the crash's error. An end that stops the
+  process at once loses them, while the snapshot already has them seen: a SIGKILL or
+  `TerminateProcess`, and a Windows binary whose bootloader is gone, whose `EXIT orphaned`
+  comes from another thread just before the process exits (inferred from the source). A
+  SIGTERM whose reader is already gone (as a `TaskStop` can leave it) prints them to nobody.
+  `--until-change` and `--once` print each round's lines in that round, in its order: their
+  output is read when they exit, not line by line.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
   `to all`, `presence`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok
   again` after one. Without it the watch runs on (for a streaming tool such as Claude Code's
@@ -1998,7 +2018,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   heading hash for the edit check (`[<path>, <hash>]`; an older snapshot's bare hash is still read,
   its file taken from the next one seen), hashes of entries without an ID of their folder, the
   warnings shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's
-  lines are printed, so a crash may print a change twice but never loses one; written only when it
+  lines are printed, so a crash may print a change twice but never loses one (quiet lines still
+  held aside: an end that stops the process at once loses them, as "Quiet lines held" says);
+  written only when it
   changed, so a quiet watch doesn't touch the disk (but for the last-watched stamp, at most one
   small write every 30 s), and a restart's first round that changes nothing doesn't either. A
   restart goes on from it (`watching <dir>, <n> files in other folders, since <time>`, the
@@ -2786,6 +2808,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     skill at <path> is from another version: <fix>` (`skills at <path> and <path> are` for
     two; at start only)
   - `new <path>`, `changed <path>`, `gone <path>`
+  - without `--until-change` or `--once`, the other entries and file lines come just before the
+    next line, merged over the rounds they were held, with that line's time (older versions
+    printed them in their own round): their shapes are as above
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`

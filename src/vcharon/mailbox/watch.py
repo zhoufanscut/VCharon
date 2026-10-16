@@ -58,11 +58,12 @@ Lines; * marks the ones that count for --until-change:
                                    per file
     <n> other entries (<folders>)  new entries addressed to others, without an ID, in the
                                    wrong folder, or a member's MEMBER.md (its #1, addressed to
-                                   the leader, wakes nobody); one line a round; `1 other entry
-                                   (<folder>)` for one
+                                   the leader, wakes nobody); `1 other entry (<folder>)` for
+                                   one; one line a round, or held (below)
     note: @all from <folders>, not the leader: ignored
                                    one line a round; in a work channel only
-    new | changed | gone <path>    a file that isn't a .md file in a member's folder
+    new | changed | gone <path>    a file that isn't a .md file in a member's folder; held
+                                   (below)
   * WARN <text>                    server mode: another member's folder over the
                                    channel's limits, held as it was until it is back under;
                                    a name clients leave out; in a member's
@@ -98,6 +99,16 @@ Lines; * marks the ones that count for --until-change:
     EXIT interrupted               the last line after a Ctrl-C (exit 130) or, on POSIX, a
                                    SIGTERM (exit 143), once the sync child is stopped
                                    (cli.py); a SIGKILL prints nothing
+
+Without --until-change or --once, where every line is an agent's turn under a Monitor, the
+other entries and file lines print nothing alone: they are held (_Watch.flush) and printed,
+merged, just before the next line, whatever it is, the EXIT line too, with that time; one
+other entries line for all of them, then a line for each file whose state differs from the
+last file lines printed. A Ctrl-C, a SIGTERM or a crash prints them as the watch ends, before
+cli.py's line. An end that stops the process at once loses them, and the snapshot already has
+them seen: a SIGKILL or TerminateProcess, and a Windows binary whose bootloader is gone, whose
+EXIT orphaned comes from another thread (install.follow). --until-change and --once print each
+round's lines in it.
 
 The snapshot (version 2) is saved in vcharon's state dir at the start and after every round whose
 scan worked (a failed sync doesn't stop that), after the round's lines are printed, so a
@@ -510,6 +521,13 @@ class Marks:
                 "loose": sorted(self.loose)}
 
 
+def others_line(folders):
+    """The line for the entries addressed elsewhere, one folder each (with repeats)."""
+    n = len(folders)
+    return "%d other %s (%s)" % (n, "entry" if n == 1 else "entries",
+                                 ", ".join(sorted(set(folders))))
+
+
 class Told:
     """One round's entry lines: the ones that count, in the entries' time order, and the
     ones that don't."""
@@ -527,9 +545,7 @@ class Told:
         out = [line for e in sorted(self.entries, key=lambda e: e[:3]) for line in e[3]]
         out += self.edited + self.misplaced + self.duplicates
         if self.others:
-            n = len(self.others)
-            out.append("%d other %s (%s)" % (n, "entry" if n == 1 else "entries",
-                                             ", ".join(sorted(set(self.others)))))
+            out.append(others_line(self.others))
         if self.all_from:
             out.append("note: @all from %s, not the leader: ignored"
                        % ", ".join(sorted(set(self.all_from))))
@@ -1003,9 +1019,18 @@ class _Watch:
 
     def __init__(self, root, me, out, clock, fold=False, state=None, check=None, leader=None,
                  gone=None, timer=time.monotonic, hold=None, suffix="", folder_limits=None,
-                 closing=None, kind_=kinds.WORK, presence=False):
+                 closing=None, kind_=kinds.WORK, presence=False, hold_quiet=False):
         self.root = root
         self.me = me
+        # a watcher without --until-change or --once, whose every line is an agent's turn
+        # under a Monitor: the lines that wake nobody (the other entries, the files that
+        # aren't entries) are held, and printed merged just before the next line (flush).
+        # The folders of the other entries held, one each; and the files as of the last
+        # file lines printed (None: none held) and as of the last round
+        self.hold_quiet = hold_quiet
+        self.held_others = []
+        self.held_base = None
+        self.held_files = None
         # the channel's kind: whose @all is to all, what is told to nobody, and whether the
         # marks are kept short (_prune)
         self.kind = kind_
@@ -1066,9 +1091,27 @@ class _Watch:
         self._written = None
 
     def say(self, line):
+        self.flush()
+        self._print(line)
+
+    def _print(self, line):
         # every line, not only the fields from the tree: a name or title can reach a line by
         # many ways (an entry line, a file line, a WARN, a sync's error)
         self.out("%s %s" % (stamp(self.clock()), pathrules.printable(line)))
+
+    def flush(self):
+        """Prints the quiet lines held (hold_quiet), merged, in a round's order: one other
+        entries line for them all, then a file line for each file whose state differs from
+        the last file lines printed, as one round's diff would give it (a file new and gone
+        again since then gives none)."""
+        others, base, files = self.held_others, self.held_base, self.held_files
+        # cleared first: a line that fails to print is not printed again by the next
+        self.held_others, self.held_base, self.held_files = [], None, None
+        if others:
+            self._print(others_line(others))
+        if base is not None:
+            for line in diff(base, files):
+                self._print(line)
 
     def start(self, fresh=False):
         """The first snapshot: the saved one, or a scan. True if it came from the saved one,
@@ -1211,7 +1254,17 @@ class _Watch:
         added = ["WARN %s" % text for text in sorted(warns - self.warns)]
         # what isn't an entry, a non-.md file, is shown but wakes nobody: in a channel an
         # entry announces it
-        lines = told.lines() + (diff(self.snap, new) if not baseline else [])
+        files = diff(old, new) if not baseline else []
+        if self.hold_quiet and not baseline:
+            # held, for the next line to print (flush, which say calls)
+            self.held_others += told.others
+            told.others = []
+            if files and self.held_base is None:
+                self.held_base = old
+            if self.held_base is not None:
+                self.held_files = new
+            files = []
+        lines = told.lines() + files
         counted = told.counted()
         if not baseline:
             # a new warning is a change: --until-change wakes the agent for it
@@ -1513,7 +1566,7 @@ def watch_dir(root, me, every, out=say, sleep=None, rounds=None, clock=time.time
     if once:
         _need_snapshot(state, root, me, os.path.basename(root), flags)
     w = _dir_watch(root, me, out, clock, leader, folder_limits, gone=gone, kind_=kind_,
-                   presence=presence)
+                   presence=presence, hold_quiet=not (until_change or once))
     request = StopRequest(state)
     if sleep is None:
         sleep = request.sleep
@@ -1547,11 +1600,14 @@ def watch_dir(root, me, every, out=say, sleep=None, rounds=None, clock=time.time
                      max_errors, rounds, updated=updated, orphaned=orphaned,
                      stopped=request.asked)
     finally:
-        lk.release()
+        try:
+            _last_flush(w)
+        finally:
+            lk.release()
 
 
 def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kinds.WORK,
-               presence=False):
+               presence=False, hold_quiet=False):
     """A local member's _Watch, for its watcher and for first_look: one place for the choices
     the saved snapshot depends on (the check, the folder limits, the kind), so join saves the
     snapshot the watcher's start would. A difference there isn't caught when it loads: the
@@ -1559,11 +1615,11 @@ def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kin
     return _Watch(root, me, out, clock, state=snapshot_path(root, me), check=warnings,
                   leader=leader, gone=gone, folder_limits=folder_limits,
                   closing=closed_next(os.path.basename(root), me, leader, kind_), kind_=kind_,
-                  presence=presence)
+                  presence=presence, hold_quiet=hold_quiet)
 
 
 def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic, hold=None,
-               suffix="", kind_=kinds.WORK, presence=False):
+               suffix="", kind_=kinds.WORK, presence=False, hold_quiet=False):
     """A remote member's _Watch, for its watcher and for first_look (_dir_watch says why
     one place): the fold, and the check, which is the members its last pull left out for
     their size, as the sync saved them after its down (a WARN each while it lasts, in both
@@ -1572,7 +1628,18 @@ def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic
                   leader=leader, timer=timer, hold=hold, suffix=suffix,
                   check=lambda root, me: charter.left_out_notes(job),
                   closing=closed_next(channel, me, leader, kind_), kind_=kind_,
-                  presence=presence)
+                  presence=presence, hold_quiet=hold_quiet)
+
+
+def _last_flush(w):
+    """The quiet lines still held (_Watch.flush) when the watch ends with no EXIT line of its
+    own: a Ctrl-C or SIGTERM, whose EXIT interrupted cli.py prints after this, a crash, or a
+    test's last round. A stdout that is gone drops them, as it drops that line, and the error
+    that ends the watch stays the one cli.py sees."""
+    try:
+        w.flush()
+    except (OSError, ValueError):
+        pass
 
 
 def _discard(line):
@@ -2179,7 +2246,7 @@ def watch_job(job, sync_args, every, out=say, sleep=None, run=None, rounds=None,
     w = _job_watch(job, local, me, leader, channel, out, clock, timer=timer,
                    hold=STREAM_HOLD if stream else None,
                    suffix=", syncing every %d s" % every if stream else "", kind_=kind_,
-                   presence=presence)
+                   presence=presence, hold_quiet=not (until_change or once))
     request = StopRequest(state)
     if sleep is None:
         sleep = request.sleep
@@ -2262,7 +2329,11 @@ def watch_job(job, sync_args, every, out=say, sleep=None, run=None, rounds=None,
             if child is not None:
                 child.stop()
         finally:
-            lk.release()
+            try:
+                # after the child's stop, so they come just before EXIT interrupted
+                _last_flush(w)
+            finally:
+                lk.release()
 
 
 def utf8_output():

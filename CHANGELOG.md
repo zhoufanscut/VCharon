@@ -9,6 +9,25 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A watcher without `--until-change` or `--once` (the one a Monitor streams) no longer prints
+  `<n> other entries (<folders>)` / `1 other entry (<folder>)` or `new|changed|gone <path>`
+  lines on their own: it holds them and prints them just before its next line (a `to you`,
+  `to all`, `presence`, `WARN`, `ERROR`, `ok again`, `note:` or `EXIT` line), merged: one
+  other entries line counting every entry held, then one line per file whose state differs
+  from the last file lines printed (a file new and gone again in between gives none). Their
+  shapes are unchanged; their time is the time they are printed, and a round's own come before
+  its `to you` line. A Ctrl-C or SIGTERM prints them before `EXIT interrupted`; a SIGKILL
+  loses them. `--until-change` and `--once` print as before. Why: under Claude Code's Monitor
+  every line printed on its own is a turn, and members counted 11 to 15 of these lines in about
+  5 minutes against 5 or 6 addressed to them. Measured once since, by turn count, under
+  `claude -p`: Claude Code 2.1.301 on Linux, a member with 3 entries to it and 12 to others, 4
+  Monitor turns where the version before this one took 11 and 16 (Monitor hands lines printed
+  together to the agent in one turn). Stable lines' timing changed: a script that read these
+  lines as they came, counted rounds by them or took their time as the round's, should run the
+  watcher with `--until-change` (or read `vcharon read C`) instead. Checked: measured on Linux (the
+  suite, and a hand run of a local channel with three members); inferred for macOS and Windows
+  (the same code, no OS-specific path), and for the Windows binary's `EXIT orphaned`, which
+  comes without them (from the source).
 - `join` that takes back this machine's folder with no `--rejoin` (a found join record, or a
   lobby's folder after a `leave`), whose `MEMBER.md` said another `agent:` than this run's,
   prints after its `agent:` and `vcharon:` lines `  note: C/<name>'s MEMBER.md said agent:

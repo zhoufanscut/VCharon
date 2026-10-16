@@ -694,13 +694,18 @@ a line look like another.
   channel refuses the flag: there a member's `JOIN` and `LEAVE` reach the leader as `to you`.
 - `<n> other entries (<folders>)`, or `1 other entry (<folder>)`: entries addressed to others,
   or a new member's `MEMBER.md` (its `JOIN` is what tells you). Read them only if your work
-  needs them.
+  needs them. A watcher without `--until-change` or `--once` never prints this line alone: it
+  comes just before its next line of any other kind, `EXIT` included, counting every one since
+  the last time it printed.
 - `note: @all from <folders>, not the leader: ignored`: in a work channel only the leader posts
   to all.
 - `note: your vcharon skill at <path> is from another version: …`: at the start only, and it
   never wakes you. Do what `vcharon guide start` says for it.
 - `new <path>`, `changed <path>`, `gone <path>`: a file that isn't an entry (a patch, a log).
-  Act only if an entry tells you to.
+  Act only if an entry tells you to. Like the line above, without `--until-change` or `--once`
+  they come just before the watcher's next line of another kind, `EXIT` included, one for each
+  file that differs from the last time they printed (a file made and removed in between gives
+  none).
 - `WARN entry <id> was edited`: entries are never edited. Read it again and ask its poster
   what changed.
 - `note: duplicate entry <id> in <path>: the one in <file> stands`: one ID in two files of a
@@ -772,8 +777,13 @@ Use `Monitor` where it is offered, the background command where it isn't.
   2.1.296, `600000ms`, 10 minutes), and `--max-minutes` one less, 29 or 9 (one less again
   with `--no-stream`). Start it again whenever it ends. Under `claude -p` it keeps the run
   going: each line it prints, and its
-  end, starts a new turn (measured once, below). Monitor isn't offered on every setup (not on
-  Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
+  end, starts a new turn (measured once, below). This watcher holds its `<n> other entries`
+  and `new|changed|gone` lines and prints them merged just before its next other line, or its
+  `EXIT` line, and Monitor hands lines printed together to you in one turn (measured once, by
+  turn count, under `claude -p`: Claude Code 2.1.301 on Linux, a member with 3 entries to it
+  and 12 to others, 4 Monitor turns where the version before this one took 11 and 16). Monitor
+  isn't offered on every setup
+  (not on Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
   reported no Monitor tool, cause unknown): use the background command then.
 - Stop either with `vcharon watch C --stop` (`vcharon guide watch`, "Stopping it"), or with

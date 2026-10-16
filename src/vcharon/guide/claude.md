@@ -23,8 +23,13 @@ Use `Monitor` where it is offered, the background command where it isn't.
   2.1.296, `600000ms`, 10 minutes), and `--max-minutes` one less, 29 or 9 (one less again
   with `--no-stream`). Start it again whenever it ends. Under `claude -p` it keeps the run
   going: each line it prints, and its
-  end, starts a new turn (measured once, below). Monitor isn't offered on every setup (not on
-  Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
+  end, starts a new turn (measured once, below). This watcher holds its `<n> other entries`
+  and `new|changed|gone` lines and prints them merged just before its next other line, or its
+  `EXIT` line, and Monitor hands lines printed together to you in one turn (measured once, by
+  turn count, under `claude -p`: Claude Code 2.1.301 on Linux, a member with 3 entries to it
+  and 12 to others, 4 Monitor turns where the version before this one took 11 and 16). Monitor
+  isn't offered on every setup
+  (not on Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
   reported no Monitor tool, cause unknown): use the background command then.
 - Stop either with `vcharon watch C --stop` (`vcharon guide watch`, "Stopping it"), or with

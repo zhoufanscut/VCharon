@@ -615,19 +615,21 @@ class WatchTest(LobbyWatchCase):
         def gone():
             os.remove(os.path.join(self.tree, "win", TODAY))
 
+        # the other entry is held, then printed just before the round's to all lines
         self.assertEqual(self.run_dir(joins, says, gone), [
+            "1 other entry (mac)",
             "to all: win#3 — hello  (win/%s)" % TODAY,
-            "to all: mac#4 — CLOSED  (mac/%s)" % TODAY,
-            "1 other entry (mac)"])
+            "to all: mac#4 — CLOSED  (mac/%s)" % TODAY])
         # a work channel's watcher: the same entries are other entries, a member's @all is
         # ignored, and the leader's CLOSED has its next: line
         shutil.rmtree(self.tree)
         self.setUp()
+        # the first round's 3 other entries are held, and merged with the second round's 1
+        # just before its to all line
         self.assertEqual(self.run_dir(joins, says, kind_=kind.WORK), [
-            "3 other entries (mac, win)",
+            "4 other entries (mac, win)",
             "to all: mac#4 — CLOSED  (mac/%s)" % TODAY,
             watch.closed_next("mb", "debian", "mac"),
-            "1 other entry (mac)",
             "note: @all from win, not the leader: ignored"])
 
     def test_the_snapshot_drops_the_heads_of_gone_files(self):
@@ -860,10 +862,10 @@ class PresenceWatchTest(LobbyWatchCase):
         code, lines = self.watch(self.comings_and_goings, lambda: None, presence=True)
         self.assertEqual(code, 0)
         self.assertEqual(lines, [
+            "1 other entry (mac)",
             "presence: win#2 — JOIN  (win/%s)" % TODAY,
             "presence: win#3 — LEAVE  (win/%s)" % TODAY,
-            "presence: linux#2 — REJOIN  (linux/%s)" % TODAY,
-            "1 other entry (mac)"])
+            "presence: linux#2 — REJOIN  (linux/%s)" % TODAY])
         # without the flag: nothing of them (and the snapshot has them seen)
         shutil.rmtree(self.tree)
         os.remove(self.state())

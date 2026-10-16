@@ -527,10 +527,11 @@ class WatchLimitTest(unittest.TestCase):
         self.assertEqual([line[20:] for line in lines][1:], [
             # over: nothing new, nothing gone, one warning while it lasts
             "WARN " + warn,
-            # back under: what came while it was over, and the file deleted then
+            # back under: what came while it was over, and the file deleted then (held, so
+            # it comes just before the round's first line that isn't held)
+            "gone mac/run.log",
             "to you: mac#2 \u2014 first  (mac/RESULTS.md)",
             "to you: mac#3 \u2014 second  (mac/RESULTS.md)",
-            "gone mac/run.log",
             "WARN cleared: " + warn])
 
 
@@ -556,8 +557,8 @@ class WatchLimitTest(unittest.TestCase):
                 "again once it is back under")
         self.assertEqual([line[20:] for line in lines][1:], [
             "WARN " + warn,
-            "to you: mac#3 \u2014 while over  (mac/RESULTS.md)",
             "gone mac/big.bin",
+            "to you: mac#3 \u2014 while over  (mac/RESULTS.md)",
             "WARN cleared: " + warn])
 
 

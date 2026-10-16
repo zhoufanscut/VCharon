@@ -324,8 +324,9 @@ class ServerModeTest(WatchCase):
             shutil.rmtree(os.path.join(self.tree, "windows"))
 
         sleep = Rounds(lambda: None, change, own, remove)
+        # --until-change prints each round's lines as it goes; they never end it
         code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
-                               rounds=4)
+                               rounds=4, until_change=True)
         self.assertEqual(code, 0)
         self.assertEqual(self.said(), [watching(self.tree, 1),
                                        "new mac/x", "new windows/new.patch",
@@ -343,6 +344,237 @@ class ServerModeTest(WatchCase):
         said = self.said()
         self.assertEqual(said[0], watching(short, 0))
         self.assertTrue(said[1].startswith("ERROR can't read %s: " % short), said)
+
+
+class HoldTest(WatchCase):
+    """A watcher without --until-change or --once, whose every line is a turn under a Monitor,
+    holds the lines that wake nobody (other entries, files that aren't entries) and prints them
+    merged just before its next line, or its EXIT line (DESIGN, "The watcher in a channel")."""
+
+    # what the first two rounds below hold, merged: 2 + 1 other entries, mac/a.log new then
+    # changed, mac/old.log changed, mac/tmp new
+    HELD = ("3 other entries (mac, win)", "new mac/a.log", "changed mac/old.log", "new mac/tmp")
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        write_tree(self.tree, {"mac/old.log": b"o"})
+        # the lines printed before each step, from the third on
+        self.before = []
+
+    def first(self):
+        self.post("mac", 1, "one", to="@win")
+        self.post("mac", 2, "two", to="@win")
+        write_tree(self.tree, {"mac/a.log": b"a", "mac/old.log": b"oo"})
+
+    def second(self):
+        self.post("win", 1, "three", to="@mac")
+        write_tree(self.tree, {"mac/a.log": b"aa", "mac/tmp": b"t"})
+
+    def look(self):
+        self.before.append(self.said())
+
+    def watch(self, *steps, **kw):
+        """(exit code, lines without their time) of a local watcher whose rounds come after
+        first, second and each of steps, each step after a look at what was printed."""
+        def looking(step):
+            return lambda: (self.look(), step())
+
+        sleep = Rounds(self.first, self.second, *[looking(s) for s in steps],
+                       clock=kw.pop("clock", None))
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append, sleep=sleep,
+                               **kw)
+        return code, self.said()
+
+    def test_nothing_prints_alone(self):
+        code, lines = self.watch(lambda: None, lambda: None, rounds=4)
+        self.assertEqual(code, 0)
+        # two rounds of quiet lines printed nothing, nor a third that brought none
+        self.assertEqual(self.before, [[watching(self.tree, 1)]] * 2)
+        # a test's last round ends with no EXIT line: they come when the watch ends
+        self.assertEqual(lines, [watching(self.tree, 1), *self.HELD])
+
+    def test_merged_before_a_to_you_line(self):
+        def third():
+            os.remove(os.path.join(self.tree, "mac", "tmp"))
+            os.remove(os.path.join(self.tree, "mac", "old.log"))
+            self.post("win", 2, "four", to="@mac")
+            self.post("mac", 3, "for you", to="@debian")
+
+        code, lines = self.watch(third, rounds=3)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.before, [[watching(self.tree, 1)]])
+        # the third round's own quiet lines join them, before its to you line; a file new
+        # and gone again is left out, one changed then gone is gone, one new then changed new
+        self.assertEqual(lines, [watching(self.tree, 1), "4 other entries (mac, win)",
+                                 "new mac/a.log", "gone mac/old.log",
+                                 "to you: mac#3 — for you  (mac/RESULTS.md)"])
+
+    def test_held_again_after_a_flush(self):
+        def third():
+            self.post("mac", 3, "for you", to="@debian")
+
+        def fourth():
+            self.post("mac", 4, "five", to="@win")
+
+        _code, lines = self.watch(third, fourth, rounds=4)
+        self.assertEqual(self.before[-1], [watching(self.tree, 1), *self.HELD]
+                         + ["to you: mac#3 — for you  (mac/RESULTS.md)"])
+        self.assertEqual(lines[len(self.before[-1]):], ["1 other entry (mac)"])
+
+    def test_merged_before_to_all_and_next(self):
+        # mac leads: its CLOSED to @all is to all, with its next: line
+        self.member("debian", leader="mac")
+
+        def third():
+            self.post("mac", 3, "CLOSED", to="@all")
+
+        _code, lines = self.watch(third, rounds=3)
+        self.assertEqual(lines, [watching(self.tree, 1), *self.HELD] + [
+            "to all: mac#3 — CLOSED  (mac/RESULTS.md)",
+            watch.closed_next("mb", "debian", "mac")])
+
+    def test_merged_before_a_warn(self):
+        def third():
+            write_tree(self.tree, {"stray.txt": b"s"})
+
+        _code, lines = self.watch(third, rounds=3)
+        # the stray file's own line is the third round's, held too
+        self.assertEqual(lines[:-1], [watching(self.tree, 1), *self.HELD] + ["new stray.txt"])
+        self.assertTrue(lines[-1].startswith("WARN stray.txt at the top"), lines)
+
+    def test_merged_before_error_and_ok_again(self):
+        real = watch.scan
+        fail = [False]
+
+        def scan(root, me, fold=False):
+            if fail[0]:
+                raise PermissionError(13, "Permission denied")
+            return real(root, me, fold)
+
+        def broken():
+            fail[0] = True
+
+        def fixed():
+            fail[0] = False
+            os.remove(os.path.join(self.tree, "mac", "tmp"))
+
+        with mock.patch.object(watch, "scan", scan):
+            _code, lines = self.watch(broken, fixed, rounds=4)
+        error = "ERROR can't read %s: Permission denied" % self.tree
+        self.assertEqual(self.before[-1], [watching(self.tree, 1), *self.HELD] + [error])
+        # the round after: its file line, then ok again
+        self.assertEqual(lines[len(self.before[-1]):], ["gone mac/tmp", "ok again"])
+
+    def test_merged_before_exit_quiet(self):
+        clock = Clock()
+        code, lines = self.watch(*[lambda: None] * 4, clock=clock, timer=clock, max_minutes=1)
+        self.assertEqual(code, watch.EXIT_QUIET)
+        self.assertEqual(lines, [watching(self.tree, 1), *self.HELD]
+                         + ["EXIT quiet 1 min (exit 10)"])
+        # the held lines have the time they were printed: the EXIT line's
+        self.assertEqual({line[:20] for line in self.lines[1:]},
+                         {self.lines[-1][:20]})
+
+    def test_merged_before_exit_stopped(self):
+        def asked():
+            open(self.state() + watch.STOP_SUFFIX, "wb").close()
+
+        code, lines = self.watch(asked, rounds=3)
+        self.assertEqual(code, watch.EXIT_STOPPED)
+        self.assertEqual(lines, [watching(self.tree, 1), *self.HELD]
+                         + ["EXIT stopped (exit 17)"])
+
+    def test_merged_before_exit_closed(self):
+        code, lines = self.watch(lambda: shutil.rmtree(self.tree), rounds=3)
+        self.assertEqual(code, watch.EXIT_CLOSED)
+        self.assertEqual(lines[:len(self.HELD) + 1], [watching(self.tree, 1), *self.HELD])
+        self.assertTrue(lines[len(self.HELD) + 1].startswith("ERROR can't read "), lines)
+        self.assertEqual(lines[-1], "EXIT closed (exit 13)")
+
+    def test_merged_before_exit_interrupted(self):
+        # a Ctrl-C, or a SIGTERM, during the wait: the watch unwinds, then cli.py prints
+        # its EXIT line
+        self.local_record()
+        steps = [self.first, self.second]
+
+        def sleep(request, seconds):
+            if not steps:
+                raise KeyboardInterrupt
+            steps.pop(0)()
+
+        with mock.patch.object(watch.StopRequest, "sleep", sleep):
+            code, out, err = self.cli()
+        self.assertEqual((code, err), (130, "vcharon: interrupted\n"))
+        self.assertEqual(self.said(out.splitlines()), [watching(self.tree, 1), *self.HELD]
+                         + ["EXIT interrupted (exit 130)"])
+
+    def test_a_remote_member_holds_too(self):
+        # its watch ends here by a Ctrl-C in its second round: the held lines come first
+        sync_args = ClientModeTest.write_config(self)
+        runs = []
+
+        def run(job, sync_args):
+            runs.append(job)
+            if len(runs) == 2:
+                self.look()
+                raise KeyboardInterrupt
+            self.post("debian", 2, "x", to="@mac")
+            write_tree(self.tree, {"mac/x": b"x"})
+            return 0, None, None
+
+        with self.assertRaises(KeyboardInterrupt):
+            watch.watch_job("mb.windows", sync_args, 1, out=self.lines.append,
+                            sleep=lambda s: None, run=run)
+        self.assertEqual(self.before, [[watching(self.tree, 1)]])
+        self.assertEqual(self.said(), [watching(self.tree, 1), "1 other entry (debian)",
+                                       "new mac/x"])
+
+    def test_until_change_and_once_print_each_round(self):
+        # neither is read line by line: a round's lines come in its own order, at once
+        def both():
+            self.post("mac", 1, "for you", to="@debian")
+            self.post("mac", 2, "other", to="@win")
+            write_tree(self.tree, {"mac/x": b"x"})
+
+        mine = ["to you: mac#1 — for you  (mac/RESULTS.md)", "1 other entry (mac)",
+                "new mac/x"]
+        code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                               sleep=Rounds(both), until_change=True)
+        self.assertEqual((code, self.said()[1:]), (0, mine + ["EXIT change (exit 0)"]))
+        shutil.rmtree(self.tree)
+        os.remove(self.state())
+        self.member()
+        write_tree(self.tree, {"mac/old.log": b"o"})
+        self.assertEqual(watch.watch_dir(self.tree, "debian", 10, out=[].append, sleep=never,
+                                         rounds=0), 0)
+        both()
+        lines = []
+        code = watch.watch_dir(self.tree, "debian", 10, out=lines.append, sleep=never,
+                               once=True)
+        self.assertEqual((code, self.said(lines)[1:]), (0, mine + ["EXIT change (exit 0)"]))
+        # a remote member, windows: its first --until-change round, then a --once check
+        sync_args = ClientModeTest.write_config(self)
+
+        def bringing(n, name):
+            def run(job, sync_args):
+                self.post("mac", n, "for you", to="@windows")
+                self.post("mac", n + 1, "other", to="@debian")
+                write_tree(self.tree, {"mac/" + name: b"x"})
+                return 0, None, None
+            return run
+
+        def theirs(n, name):
+            return ["to you: mac#%d — for you  (mac/RESULTS.md)" % n, "1 other entry (mac)",
+                    "new mac/" + name, "EXIT change (exit 0)"]
+
+        lines = []
+        code = watch.watch_job("mb.windows", sync_args, 1, out=lines.append, sleep=never,
+                               run=bringing(3, "y"), until_change=True)
+        self.assertEqual((code, self.said(lines)[1:]), (0, theirs(3, "y")))
+        lines = []
+        code = watch.watch_job("mb.windows", sync_args, 1, out=lines.append, sleep=never,
+                               run=bringing(5, "z"), once=True)
+        self.assertEqual((code, self.said(lines)[1:]), (0, theirs(5, "z")))
 
 
 class LocalStampTest(WatchCase):
@@ -424,11 +656,12 @@ class TimeTest(WatchCase):
                                    sleep=Rounds(made, broken, fixed, *[lambda: None] * 3,
                                                 clock=clock),
                                    clock=clock, timer=clock, max_minutes=1)
-        # a minute after the start, between rounds
+        # a minute after the start, between rounds; the file line, held from 09:05:56, has
+        # the time it was printed, just before the ERROR line
         self.assertEqual(code, 10)
         self.assertEqual(self.lines, [
             "2026-10-01 09:05:46 " + watching(self.tree, 1),
-            "2026-10-01 09:05:56 new mac/y",
+            "2026-10-01 09:06:06 new mac/y",
             "2026-10-01 09:06:06 ERROR can't read %s: Permission denied" % self.tree,
             "2026-10-01 09:06:16 ok again",
             "2026-10-01 09:06:46 EXIT quiet 1 min (exit 10)"])
@@ -447,9 +680,9 @@ class RootTest(WatchCase):
 
         watch.watch_job("mb.windows", sync_args, 1, out=self.lines.append, sleep=never, run=run,
                         rounds=1)
-        self.assertEqual(self.said(), [watching(self.tree, 0),
-                                       "to you: debian#2 — first  (debian/RESULTS.md)",
-                                       "new mac/x"])
+        # the file line is held, then printed just before the round's to you line
+        self.assertEqual(self.said(), [watching(self.tree, 0), "new mac/x",
+                                       "to you: debian#2 — first  (debian/RESULTS.md)"])
 
 
 class SnapshotTest(WatchCase):
@@ -4406,7 +4639,9 @@ class UpdatedTest(WatchCase):
                 "sys.exit(code)\n" % (self.code, imported))
         child = subprocess.Popen([sys.executable, "-S", "-c", code, "watch", "mb", "--project",
                                   "q", "--every", "1"], stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, env=no_site_env())
+                                 stderr=subprocess.PIPE, env=no_site_env(), bufsize=0)
+        # unbuffered: a buffered readline reads ahead, and communicate() reads the pipe
+        # itself, so the lines read ahead would be lost
         try:
             lines = [util.readline(child.stdout).decode("utf-8")]
             self.post("mac", 1, "first", to="@debian")
@@ -4421,9 +4656,11 @@ class UpdatedTest(WatchCase):
         lines = [line.rstrip("\r\n") for line in lines] + out.decode("utf-8").splitlines()
         self.assertEqual(child.returncode, 14, err)
         said = self.said(lines)
-        self.assertEqual((said[0], said[1], said[-1]),
-                         (watching(self.tree, 0), "to you: mac#1 — first  (mac/RESULTS.md)",
-                          "EXIT updated (exit 14)"))
+        # the entry and the files may come in one round or two: a round between the post and
+        # the files prints the to you line alone, and the swap then ends the watch before a
+        # round sees the files, so their lines may not come
+        self.assertEqual((said[0], said[-1]), (watching(self.tree, 0), "EXIT updated (exit 14)"))
+        self.assertIn("to you: mac#1 — first  (mac/RESULTS.md)", said)
         with open(imported, encoding="utf-8") as f:
             self.assertEqual(json.load(f), [])
 
