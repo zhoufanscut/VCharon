@@ -159,7 +159,8 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "config")[0][1][:len(cfg)], cfg)
         dirs = self.of(lines, "dirs")[0][1]
         self.assertIn("state %s, " % os.path.join(home, "state"), dirs)
-        self.assertNotIn("~", dirs)
+        # no path shown from ~ (a Windows temp path may hold a short name like RUNNER~1)
+        self.assertNotRegex(dirs, r"(^| )~[\\/]")
         claimer = self.of(lines, "claimer")[0][1]
         self.assertIn(" ~%sstate%sclient-id " % (os.sep, os.sep), claimer)
         # no config file: its ok line names it whole too
