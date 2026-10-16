@@ -1467,11 +1467,14 @@ def _locked(w, state, channel, flags_of):
         raise fsops.error(e, state + ".lock")
     if lk is None:
         # create, join, leave and close hold this lock while they run (DESIGN, "Create, join,
-        # leave, close"). The older text stays the line's start: the exit-12 line is matched on
-        # it. The holder's PID, when it wrote one, so the user (or agent) can find that process
+        # leave, close"). The text up to `mailbox (` stays the line's start: the exit-12 line is
+        # matched on it. The holder's PID, when it wrote one, so the user (or agent) can find
+        # that process
         pid = Lock.holder_pid(state + ".lock")
-        w.say("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
-              "leave or close of this member%s" % (state, " (PID %d)" % pid if pid else ""))
+        # The lock's path with the home as ~: agents quote this line into channel entries.
+        w.say("ERROR another watcher is running on this mailbox (%s), or a create, join, "
+              "leave or close of this member%s"
+              % (platform.tilde(state + ".lock"), " (PID %d)" % pid if pid else ""))
         w.say(FIX + platform.runnable(LOCKED_FIX % (channel, flags_of())))
     return lk
 

@@ -2068,7 +2068,7 @@ def _remove_membership(cfg, record, section, say, watcher):
     watch), read's kept version note (charter.version_note_path), the own folder's post lock,
     the record, a remote member's section file, and the watcher's lock last. Locks only when
     no one holds them. A server member's folder stays on the server (leave) or went with the
-    channel (close). One `removed <path>` line each.
+    channel (close). One `removed <path>` line each, the home as ~ (platform.tilde).
     watcher: (the watcher's lock this process holds, the snapshot path), from _check_locks.
     The lock is released only once the record is gone, so a watcher starting then finds no
     membership, and its file is deleted as drop_held does it."""
@@ -2079,7 +2079,7 @@ def _remove_membership(cfg, record, section, say, watcher):
         if lock and held(path):
             return
         if _remove(path):
-            say("  removed %s" % path)
+            say("  removed %s" % platform.tilde(path))
 
     own = _own_of(cfg, record, section)
     # the post lock's key, from the own folder before it goes
@@ -2091,7 +2091,7 @@ def _remove_membership(cfg, record, section, say, watcher):
             local = plugin.Ctx("local").resolve(computed, "mailbox.local")
             if os.path.lexists(local):
                 _remove_tree(local)
-                say("  removed %s" % local)
+                say("  removed %s" % platform.tilde(local))
         elif jobs:
             say("  note    left %s in place: it isn't %s" % (jobs[0].mailbox.local, computed))
         for suffix in config.MAILBOX_JOBS:
@@ -2112,7 +2112,7 @@ def _remove_membership(cfg, record, section, say, watcher):
     if record["ssh"] is not None:
         drop(section_path(cfg, section))
     if drop_held(lk, snapshot + ".lock"):
-        say("  removed %s.lock" % snapshot)
+        say("  removed %s" % platform.tilde(snapshot + ".lock"))
 
 
 def _remove_tree(path):

@@ -69,6 +69,22 @@ def home():
     return os.path.expanduser("~")
 
 
+def tilde(path):
+    """path for a line an agent may quote into a channel: the home folder as ~ (~/... on POSIX,
+    ~\\... on Windows), so the entry doesn't name the user; a path outside home unchanged.
+    Display only: never for a path a command or a fix line uses."""
+    mod = _path()
+    seps = mod.sep + (mod.altsep or "")
+    root = home().rstrip(seps)
+    # a home that is a root or a drive would make every path "under" it
+    if not mod.splitdrive(root)[1] or mod.normcase(path[:len(root)]) != mod.normcase(root):
+        return path
+    rest = path[len(root):]
+    if not rest:
+        return "~"
+    return "~" + rest if rest[0] in seps else path
+
+
 def _vcharon_home():
     value = os.environ.get("VCHARON_HOME")
     if not value:

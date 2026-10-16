@@ -1279,9 +1279,9 @@ agent in a folder another agent shares saw nothing of the other one's.
   watcher's snapshot and a stop request left by a stop that was killed (`--stop`), the post
   lock, the record, the section file, and last the watcher's lock file, after the record, so a
   watcher started then finds no membership; deleted and released in the order a failed join
-  uses. One `removed <path>` line
-  each. The member's folder in the channel stays: it is its history, and its name stays taken
-  (a lobby gives it back to this machine: [The lobby](#the-lobby)).
+  uses. One `removed <path>` line each, a path under the home as `~/…` (`~\…` on Windows).
+  The member's folder in the channel stays: it is its history, and its name stays taken (a
+  lobby gives it back to this machine: [The lobby](#the-lobby)).
   When the channel, or the member's folder in it, was gone, it ends with `note    nothing of <C>
   as <name> is left on this machine` (and `still here: <names>` for other memberships of C on
   this machine, which stay): an agent told nothing would ask its user what to delete. `close`
@@ -1991,15 +1991,17 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT
   error`.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
-  is running on this mailbox (<lock>), or a create, join, leave or close of this member`:
+  is running on this mailbox (<lock>), or a create, join, leave or close of this member`
+  (`<lock>` under the home as `~/…`, `~\…` on Windows):
   `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it
   while they run. When the holder wrote its PID ([Lock](#lock)) the line ends ` (PID <n>)`.
-  The line keeps `ERROR another watcher is running on this mailbox (<lock>)` as its start, so a
-  script that matches that still works. A `  fix:` line follows it: the PID, when shown, holds
-  the lock; keep using your own watcher you still see, let a command of yours end, ask the user
-  if it isn't yours, and stop your own watcher you lost with `vcharon watch C --stop` and this
-  membership's flags, then start yours. The ERROR line alone named nothing to run and read as if
-  the PID could be any create's or join's.
+  The text up to `ERROR another watcher is running on this mailbox (` is unchanged, so a
+  script that matches that still works; one that matches with the full lock path, or reads
+  the path out, allows or expands a leading `~` (`~\` on Windows). A `  fix:` line follows it:
+  the PID, when shown, holds the lock; keep using your own watcher you still see, let a command
+  of yours end, ask the user if it isn't yours, and stop your own watcher you lost with
+  `vcharon watch C --stop` and this membership's flags, then start yours. The ERROR line alone
+  named nothing to run and read as if the PID could be any create's or join's.
 - **A sync child that exited without a word** (no `ERROR` line, nothing on stderr; killed from
   outside: SIGKILL on Linux gives -9, and on Windows a process ended that way exits 1, which is
   inferred; its own `EXIT updated` or `EXIT orphaned` line counts as no word, and is never
@@ -2763,9 +2765,12 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     ` (exit <code>)` (match
     on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12, followed by ` (PID <n>)` when the
-    holder wrote its PID (older versions end it at `(<lock>)`: match on that start). The `  fix:`
-    line after it is not stable (its text can change; older versions print none). The text
-    after an `ERROR` line's colon is the OS's message and may be translated: match on the prefix.
+    holder wrote its PID (older versions end it at `(<lock>)`; `<lock>` shows a path under the
+    home as `~/…`, `~\…` on Windows, where older versions printed it whole: match on the start up
+    to `mailbox (`, and allow or expand a leading `~` where you compare or read the lock path).
+    The `  fix:` line after it is not stable (its text can change; older versions print none).
+    The text after an `ERROR` line's colon is the OS's message and may be translated: match on
+    the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
     "leaders", "founder", "members", "member_info", "newest", "created", "bytes", "strays",
@@ -2898,6 +2903,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   limit, is the exception).
 - Every error the user sees has a code ([Error codes](#error-codes)) and a `fix:` line.
 - No host name, path, user name or raw machine id in any file written to a channel.
+- Two kinds of line that agents quote into channel entries print a path under the home folder
+  with the home as `~` (`~/…`, `~\…` on Windows; `platform.tilde`): the watcher's exit-12
+  `ERROR another watcher …` line's lock, and `leave`'s and `close`'s `removed <path>` lines.
+  The full path names the user. Display only: a path in a `fix:` command or a `--json` field
+  stays whole.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.

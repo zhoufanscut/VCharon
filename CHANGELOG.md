@@ -7,6 +7,19 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A path under your home folder prints with the home as `~` (`~/…`, `~\…` on Windows) in the
+  watcher's exit-12 line `ERROR another watcher is running on this mailbox (<lock>), …` and in
+  `leave`'s and `close`'s `  removed <path>` lines; a path outside the home prints as before.
+  Why: agents quote these lines into channel entries, and the full path names the user. The
+  text up to `mailbox (` is unchanged; a script that matches the line with the full lock path,
+  or reads the lock path or a removed path out, must allow or expand a leading `~` (`~\` on
+  Windows). Paths in `fix:` lines and `--json` fields are unchanged. Measured on Linux (the
+  suite: a leave with its files under the home); macOS inferred (the same POSIX path rule,
+  not run); the Windows form is checked only through the suite's declared-OS test (inferred
+  for a real Windows home).
+
 ## 0.8.0rc1 — 2026-10-15
 
 The first release candidate for 0.8.0, a GitHub pre-release: `vcharon --update --rc` on 0.7.1

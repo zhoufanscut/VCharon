@@ -2059,6 +2059,35 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(out.splitlines()[-2:], ["  removed %s.lock" % snapshot, "OK  left game"])
         self.assertFalse(os.path.exists(snapshot + ".lock"))
 
+    def test_paths_under_the_home_print_with_a_tilde(self):
+        # agents quote these lines into channel entries: the home folder shows as ~
+        show_pid(self)
+        home = self.homes["mac"]
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        real = channel_cmd._run_section
+        started = []
+
+        def sync(args, section, full):
+            lines = []
+            watch.watch_job(section, ["game", "--project", "web"], 2, out=lines.append,
+                            sleep=lambda s: None, run=lambda job, sync_args: (0, None, None),
+                            rounds=1)
+            started.extend(lines)
+            return real(args, section, full)
+
+        with mock.patch.object(channel_cmd, "_run_section", sync), \
+                mock.patch.object(platform, "home", return_value=home):
+            out = self.ok("leave", "game")
+        short = "~" + snapshot[len(home):] + ".lock"
+        self.assertIn("ERROR another watcher is running on this mailbox (%s), or a create, "
+                      "join, leave or close of this member (PID %d)" % (short, os.getpid()),
+                      [line[len("2026-10-01 09:05:46 "):] for line in started])
+        removed = [line for line in out.splitlines() if line.startswith("  removed ")]
+        self.assertIn("  removed %s" % short, removed)
+        self.assertIn("  removed ~%sjoined%sgame.mac-web" % (os.sep, os.sep), removed)
+        self.assertTrue(all(line.startswith("  removed ~" + os.sep) for line in removed),
+                        removed)
+
     def test_a_lock_file_that_wont_go_doesnt_fail_the_leave(self):
         # on Windows a watcher opening the lock file at that instant makes its delete fail
         snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")

@@ -107,6 +107,40 @@ class PathsTest(PatchedCase):
                                   platform.log_dir()), want)
 
 
+class TildeTest(PatchedCase):
+    def check(self, osn, home, cases):
+        with contextlib.ExitStack() as stack:
+            for patcher in on(osn, HOME=home):
+                stack.enter_context(patcher)
+            for path, want in cases:
+                with self.subTest(os=osn, home=home, path=path):
+                    self.assertEqual(platform.tilde(path), want)
+
+    def test_posix(self):
+        for home in ("/home/me", "/home/me/"):
+            self.check("linux", home, (
+                ("/home/me/.local/state/x.lock", "~/.local/state/x.lock"),
+                ("/home/me", "~"),
+                # outside the home, or a sibling whose name only starts with the home's
+                ("/tmp/vc/home/state/x.lock", "/tmp/vc/home/state/x.lock"),
+                ("/home/meg/x", "/home/meg/x"),
+                ("/home/Me/x", "/home/Me/x")))
+
+    def test_windows(self):
+        self.check("windows", "C:\\Users\\me", (
+            ("C:\\Users\\me\\AppData\\Local\\vcharon\\state\\x.lock",
+             "~\\AppData\\Local\\vcharon\\state\\x.lock"),
+            # case and either separator: one folder to Windows
+            ("c:\\users\\ME\\x", "~\\x"),
+            ("C:/Users/me/x", "~/x"),
+            ("D:\\vc\\x", "D:\\vc\\x"),
+            ("C:\\Users\\meg\\x", "C:\\Users\\meg\\x")))
+
+    def test_root_home_changes_nothing(self):
+        self.check("linux", "/", (("/srv/x", "/srv/x"),))
+        self.check("windows", "C:\\", (("C:\\vc\\x", "C:\\vc\\x"),))
+
+
 class SshPathTest(PatchedCase):
     def test_posix(self):
         for osn in ("linux", "darwin"):
