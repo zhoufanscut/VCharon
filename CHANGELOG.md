@@ -7,7 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.1rc2 — 2026-10-16
+
+The second release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.1rc1
+or 0.8.0rc1 offers it (a pre-release build follows later ones), and `--update --rc` on 0.7.1; a
+plain `--update` on 0.7.1 doesn't. As for 0.8.1rc1, from 0.7.1, the latest final, this is the
+minor step that may change a "Stable" line: the watcher's `watching <dir>` and error lines show
+a home path as `~`, and a streaming watcher prints its quiet lines merged, later (below).
+
+**Updating from 0.8.1rc1:** nothing to do for channels: the format is unchanged. A script that
+reads a path out of vcharon's human-readable lines, or counts a streaming watcher's rounds by its
+`<n> other entries` or `new|changed|gone` lines, adapts as its item below says.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). Each item: a review and a
+live test on Linux, as its line says (measured): the take-back note and the quiet lines with
+`claude -p` (Claude Code 2.1.301). Not run: macOS, Windows, real ssh beyond CI's.
 
 - A watcher without `--until-change` or `--once` (the one a Monitor streams) no longer prints
   `<n> other entries (<folders>)` / `1 other entry (<folder>)` or `new|changed|gone <path>`
