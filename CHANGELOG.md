@@ -7,7 +7,23 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.1rc1 — 2026-10-16
+
+The first release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.0rc1
+offers it (a pre-release build follows later ones), and `--update --rc` on 0.7.1; a plain
+`--update` on 0.7.1 doesn't. 0.8.0 had only its release candidate, so from 0.7.1, the latest
+final, this is still the minor step that may change a "Stable" line: the exit-12 `ERROR` line's
+lock path (below).
+
+**Updating from 0.8.0rc1 or 0.7.1:** nothing to do for channels: the format is unchanged. A
+script that matches the exit-12 line with the full lock path, or reads a path out of it or out of
+`leave`'s and `close`'s `removed` lines, adapts as its item below says. An agent that read
+`vcharon guide watch` for its CLI's part reads `vcharon guide claude`, `codex` or `opencode`.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). Each item: a review and a
+live test on Linux, as its line says (measured): the guide topics with `claude -p` (Claude Code
+2.1.301) and `codex exec` (Codex 0.162.1), two runs each. Not run: macOS, Windows, real ssh
+beyond CI's.
 
 - New guide topics `claude`, `codex` and `opencode`: each holds its CLI's part of the watch
   topic, moved out of it word for word apart from pointers back to watch, which keeps what
