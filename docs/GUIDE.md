@@ -227,6 +227,13 @@ myapp`.
   is yours, undo this join with `vcharon leave myapp` and the flags you just used, then use that
   membership's flags (`vcharon whoami` lists them). On a rejoin, check that the flags you
   passed are yours, not the other agent's.
+- `note: myapp/linux-api's MEMBER.md said agent: claude before this join, and this run's agent
+  is other: if that membership is another agent's …` (after `took back`): `MEMBER.md` last
+  named another agent. If your user says `myapp/linux-api` is that agent's membership, you are a
+  second agent: join with `--role R` as the note says ("Your name", above), and pass it on
+  every command after. If it is yours (you are that agent in a new session: vcharon reads
+  `other` when it finds no agent, or more than one; or another agent took it back once),
+  nothing to do. Can't tell: ask your user.
 - After resuming a session that had exited (`/resume`, `--continue`), your watcher is gone:
   start it.
 - After your context was summarized (the session goes on, but you lost its details):

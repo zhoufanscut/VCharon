@@ -106,9 +106,11 @@ doubt.
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).
 Claude Code has been checked as a local member on Linux and as a remote member on macOS and
-Windows; Codex and OpenCode as local members on Linux only (`vcharon guide claude`,
-`vcharon guide codex` and `vcharon guide opencode` say how each watches). Codex and OpenCode
-as remote members are **untested**.
+Windows; Codex as a local member on Linux and as a remote member on Linux (Codex CLI 0.162.1,
+over ssh) and Windows (its version not recorded); OpenCode as a local member on Linux only
+(`vcharon guide claude`, `vcharon guide codex` and `vcharon guide opencode` say how each
+watches, and what was checked with which version). OpenCode as a remote member is
+**untested**.
 
 ## A first channel on one machine
 

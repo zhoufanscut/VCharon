@@ -3754,7 +3754,9 @@ class MemberFieldsTest(ChannelCase):
         path = os.path.join(own, "MEMBER.md")
         entries.set_header(path, own, "mac-web", 1, "vcharon", "0.0.9")
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  vcharon: %s (your MEMBER.md said 0.0.9)" % vcharon.VERSION, out)
+        # what happened, and that nothing is left to do
+        self.assertIn("  vcharon: %s (your MEMBER.md said 0.0.9; join updated it: nothing to do)"
+                      % vcharon.VERSION, out)
         # sent by the rejoin's sync
         self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
         out = self.ok("join", "game", "--server", "fake-dest")
@@ -3766,7 +3768,8 @@ class MemberFieldsTest(ChannelCase):
         with open(path, "wb") as f:
             f.write(old)
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  vcharon: %s (your MEMBER.md had none)" % vcharon.VERSION, out)
+        self.assertIn("  vcharon: %s (your MEMBER.md had none; join added it: nothing to do)"
+                      % vcharon.VERSION, out)
         with open(path, "rb") as f:
             self.assertEqual(f.read(), text)
 
@@ -3899,6 +3902,113 @@ class MemberFieldsTest(ChannelCase):
         self.assertIn("took back game/mac-web", out)
         self.assertEqual(entries.header_of(entries.read_text(
             os.path.join(self.root, "game", "mac-web", "MEMBER.md")), "mac-web")["box"], "mac")
+
+
+class TakeBackAgentTest(ChannelCase):
+    """A join that takes back this machine's folder with no --rejoin, while its MEMBER.md names
+    another agent than this run's: a note asks whose membership it is, with the join of a
+    member of its own."""
+
+    def note(self, out):
+        return [l for l in out.splitlines() if "before this join" in l]
+
+    def member_agent(self, channel):
+        return entries.header_of(entries.read_text(
+            os.path.join(self.root, channel, "mac-web", "MEMBER.md")), "mac-web")["agent"]
+
+    def test_another_agent_in_a_work_channel(self):
+        # Claude Code joined; a second agent started in its folder, found by nothing
+        self.lead(where=("--local",))
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--local")
+        out = self.ok("join", "game", "--local")
+        [note] = self.note(out)
+        self.assertEqual(note, platform.runnable(channel_cmd.OTHER_AGENT_NOTE % (
+            "game", "mac-web", "claude", "other", "game", "--local", "web")))
+        self.assertIn("said agent: claude before this join, and this run's agent is other", note)
+        # after the take-back's line, before the entries
+        lines = out.splitlines()
+        self.assertLess(lines.index("  took back game/mac-web; the leader is laptop-ui"),
+                        lines.index(note))
+        # the join it names, as this box runs vcharon
+        from tests.test_commands import commands, parse
+        argv = commands(channel_cmd.OTHER_AGENT_NOTE % (
+            "game", "mac-web", "claude", "other", "game", "--local", "web"))[0]
+        self.assertEqual(argv[:7], ["join", "game", "--local", "--project", "web", "--role",
+                                    "R,"])
+        parse(self, argv[:6] + ["r"])
+        # MEMBER.md keeps its agent: none was found or given
+        self.assertEqual(self.member_agent("game"), "claude")
+
+    def test_the_same_agent_has_no_note(self):
+        # a new session of the same agent: the normal case
+        self.lead(where=("--local",))
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--local")
+            out = self.ok("join", "game", "--local")
+        self.assertIn("took back game/mac-web", out)
+        self.assertEqual(self.note(out), [])
+        # a plain terminal both times, and --agent naming the one MEMBER.md has
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.ok("join", "docs", "--local")
+        self.assertEqual(self.note(self.ok("join", "docs", "--local")), [])
+        self.assertEqual(self.note(self.ok("join", "docs", "--local", "--agent", "other")), [])
+
+    def test_another_agent_given_or_found(self):
+        # --agent, or another agent's variable: the note names the old one, and the rejoin
+        # updates agent: as it always does
+        self.lead(where=("--local",))
+        self.ok("join", "game", "--local", "--agent", "opencode")
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "t"}):
+            out = self.ok("join", "game", "--local")
+        self.assertIn("  agent: codex (your MEMBER.md said opencode)", out)
+        [note] = self.note(out)
+        self.assertIn("said agent: opencode before this join, and this run's agent is codex",
+                      note)
+        self.assertEqual(self.member_agent("game"), "codex")
+
+    def test_the_lobby_after_a_leave(self):
+        # the lobby takes this machine's folder back after a leave, with no record here
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "lobby", "--local")
+        self.ok("leave", "lobby")
+        out = self.ok("join", "lobby", "--local")
+        self.assertIn("  took back lobby/mac-web, this machine's folder; in the lobby", out)
+        [note] = self.note(out)
+        self.assertEqual(note, platform.runnable(channel_cmd.OTHER_AGENT_NOTE % (
+            "lobby", "mac-web", "claude", "other", "lobby", "--local", "web")))
+        self.assertEqual(self.member_agent("lobby"), "claude")
+
+    def test_a_member_md_with_no_agent_has_no_note(self):
+        # nothing to compare: not taken for another agent
+        self.lead(where=("--local",))
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--local")
+        path = os.path.join(self.root, "game", "mac-web", "MEMBER.md")
+        with open(path, "rb") as f:
+            text = f.read()
+        self.assertEqual(text.count(b"agent: claude\n"), 1)
+        with open(path, "wb") as f:
+            f.write(text.replace(b"agent: claude\n", b""))
+        out = self.ok("join", "game", "--local")
+        self.assertIn("took back game/mac-web", out)
+        self.assertEqual(self.note(out), [])
+
+    def test_a_remote_member_gets_its_server(self):
+        self.lead()
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--server", "fake-dest")
+        out = self.ok("join", "game", "--server", "fake-dest")
+        [note] = self.note(out)
+        self.assertEqual(note, platform.runnable(channel_cmd.OTHER_AGENT_NOTE % (
+            "game", "mac-web", "claude", "other", "game", "--server fake-dest", "web")))
+
+    def test_rejoin_has_no_note(self):
+        # --rejoin is the user's word that the folder is this agent's
+        self.lead(where=("--local",))
+        with mock.patch.dict(os.environ, {"CLAUDECODE": "1"}):
+            self.ok("join", "game", "--local")
+        self.assertEqual(self.note(self.ok("join", "game", "--local", "--rejoin")), [])
 
 
 class SeenTest(ChannelCase):

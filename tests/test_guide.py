@@ -499,6 +499,13 @@ class NamedSectionTest(unittest.TestCase):
         self.assertIn(named, have)
         self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_BAD_FIX)
 
+    def test_the_take_back_note(self):
+        [named] = re.findall(r'"([^"]+)"', channel_cmd.OTHER_AGENT_NOTE)
+        # the section with the bullet on this note, which points on to "Your name"
+        self.assertEqual(named, "A new session")
+        self.assertIn("(vcharon guide start, \"%s\")" % named, channel_cmd.OTHER_AGENT_NOTE)
+        self.assertIn(named, headings(os.path.join(GUIDE_DIR, "start.md")))
+
     def test_the_codex_topic(self):
         [argv] = commands(channel_cmd.KEEP_TURN)
         self.assertEqual(argv, ["guide", "codex"])
@@ -511,6 +518,14 @@ class NamedSectionTest(unittest.TestCase):
             with self.subTest(topic=topic):
                 self.assertIn(topic, guide.TOPICS)
                 self.assertIn("`vcharon guide %s`" % topic, text)
+
+    def test_start_names_every_other_topic(self):
+        # the start topic's list of the others: a new topic must be added to it
+        text = guide.text("start")
+        part = text.split("\n## The other topics\n\n", 1)[1]
+        paragraph = part.split("\n\n", 1)[0]
+        named = re.findall(r"`(?:vcharon guide )?([a-z]+)`", paragraph)
+        self.assertEqual(sorted(named), sorted(t for t in guide.TOPICS if t != "start"))
 
     def test_references_in_the_guide(self):
         # `vcharon guide <topic>`, "<heading>": the heading must be in that topic

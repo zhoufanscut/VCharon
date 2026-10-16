@@ -1032,19 +1032,21 @@ rules](#launch-rules)) on purpose: the name says where the agent works.
   leaves it.
 - `vcharon:` is written at `join` and `create`, and set in place to the running version when
   it says another (or none: a `MEMBER.md` from before the line gets it added at its header's
-  end) by every rejoin, which prints `  vcharon: <new> (your MEMBER.md said <old>)`, or
-  `(your MEMBER.md had none)` (`agent:` the same way; it names the file because an agent that
-  ran no update can't tell what a bare "was" means), and by every start of the member's
-  watcher (a restart after `EXIT updated` too), which prints nothing, its lines being a
-  contract. Why the watcher: an update needs no rejoin (a leader never rejoins), but every
-  agent restarts its watcher. The watcher's start does it before its first round and before
-  the watchdog's start mark (nothing it reads is an import after the start), and tries the
-  post lock once: a post holding it, or any failure, leaves the line and the watch starts at
-  once. No watcher wakes or warns: the member's own watcher skips the own folder; another
-  member's leaves `.md` files out of its `new`/`changed`/`gone` lines, and its edit check hashes
-  only an entry's heading, which stays (a check of header lines there would wake every member
-  at each such start). A remote member's up sends it. So the line can lag until the member's
-  next watcher start that gets the lock.
+  end) by every rejoin, which prints `  vcharon: <new> (your MEMBER.md said <old>; join updated
+  it: nothing to do)`, or `(your MEMBER.md had none; join added it: nothing to do)` (`agent:`
+  the same way, without the part after `;`; it names the file because an agent that ran no
+  update can't tell what a bare "was" means, and says it is done because a member asked what to
+  do about the line; a stale skill copy has a note of its own, the stale-skill note below), and
+  by every start of the member's watcher (a restart after `EXIT updated` too), which prints
+  nothing, its lines being a contract. Why the watcher: an update needs no rejoin (a leader never
+  rejoins), but every agent restarts its watcher. The watcher's start does it before its first
+  round and before the watchdog's start mark (nothing it reads is an import after the start), and
+  tries the post lock once: a post holding it, or any failure, leaves the line and the watch
+  starts at once. No watcher wakes or warns: the member's own watcher skips the own folder;
+  another member's leaves `.md` files out of its `new`/`changed`/`gone` lines, and its edit check
+  hashes only an entry's heading, which stays (a check of header lines there would wake every
+  member at each such start). A remote member's up sends it. So the line can lag until the
+  member's next watcher start that gets the lock.
 - A reader takes the fields it knows and leaves every other header line alone, so a newer
   vcharon may add one. 0.1.0's readers do the same: they look up `leader:`, `agent:`,
   `claimer:` and the four list fields by key, and skip the rest.
@@ -1122,6 +1124,25 @@ joins again with the other agent's flags is told nowhere else. It names the memb
 never calls it the reader's: two agents can work in one folder (a leader and a member, say),
 and the other membership may be the other agent's. Two records for one (C, project, role) are
 refused: ask the user.
+
+A join that takes back a folder with no `--rejoin` (step 1's record, or a lobby's folder after a
+`leave`, [The lobby](#the-lobby)) whose `MEMBER.md` said another `agent:` than this run's
+(`--agent`, else the environment, else `other`) prints, after its `agent:` and `vcharon:`
+lines, `  note: C/<name>'s MEMBER.md said agent: <old> before this join, and this run's agent is
+<new>: if that membership is another agent's (one that works in this checkout too), join as a
+member of your own: vcharon join C <--local or --server S> --project P --role R, and pass --role R
+on every command after (vcharon guide start, "A new session")`. None when the two agree (a new
+session of the same agent is the normal case), with `--rejoin` (the user's word that the folder is
+this one's), or for a `MEMBER.md` with no `agent:`; an old agent `other` still gets it. The note
+changes nothing: the rejoin updates `agent:` as [Member names](#member-names) says. So after a
+second agent's take-back with an agent found, `MEMBER.md` names the second agent until the first
+one rejoins with an agent found (a first agent found by nothing leaves it, and gets the note at
+every session). The first one's next session then gets the note too, so it asks whose membership it
+is, not whether another agent works here (yes for both). Why: a second agent started in another's
+folder with no `--role` builds the same name and takes the first one's membership with no word, and
+the agent is the only sign vcharon has; it can't be sure (an agent found by nothing, or more than
+one, reads `other`), so it is a note. The fix has no `leave`: that would leave the first agent's
+membership, its record and a `LEAVE` under its name.
 
 `whoami C`'s text names the same: after the membership's own lines, `  also     <name>  (--project
 P --role R): this project's other membership of C here` for each other membership of C this

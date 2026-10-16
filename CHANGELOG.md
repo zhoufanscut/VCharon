@@ -9,6 +9,23 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `join` that takes back this machine's folder with no `--rejoin` (a found join record, or a
+  lobby's folder after a `leave`), whose `MEMBER.md` said another `agent:` than this run's,
+  prints after its `agent:` and `vcharon:` lines `  note: C/<name>'s MEMBER.md said agent:
+  <old> before this join, and this run's agent is <new>: if that membership is another agent's
+  (one that works in this checkout too), join as a member of your own: vcharon join C … --role
+  R, and pass --role R on every command after (vcharon guide start, "A new session")`. No
+  note when the agents agree or with `--rejoin`. `MEMBER.md`'s `agent:` is updated as before,
+  so after a take-back by a second agent that was found (or passed `--agent`) it names that
+  agent, and the first one's next session gets the note too: it asks whose membership it is.
+  Why: a second agent started in another's folder with no `--role` took the first one's
+  membership with no word.
+- A rejoin's version line now says the join did the update: `  vcharon: <new> (your MEMBER.md
+  said <old>; join updated it: nothing to do)`, or `(your MEMBER.md had none; join added it:
+  nothing to do)`. The `agent:` line is unchanged. Why: a member asked what to do about it.
+- README: Codex as a remote member is no longer called untested; it says what `vcharon guide
+  codex` records (Linux with Codex CLI 0.162.1 over ssh, and Windows, its version not
+  recorded). OpenCode as a remote member is still untested.
 - Every human-readable line now prints a path under your home folder with the home as `~`
   (`~/…`, `~\…` on Windows), as the exit-12 line and the `removed` lines did already: the
   `ERROR` line's message and its `  | ` and `  log:` lines, the watcher's `watching <dir>`,

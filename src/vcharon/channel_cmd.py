@@ -104,6 +104,16 @@ OLD_LOBBY_NOTE = "  note: lobby here is a work channel, not a lobby"
 # the claim line's words for a lobby's join that took back this machine's folder after a leave
 # (DESIGN, "The lobby")
 TOOK_BACK = ", this machine's folder"
+# the end of a rejoin's vcharon: line, after the old value: the join wrote the new one
+VERSION_DONE = "; join %s it: nothing to do"
+# a take-back with no --rejoin whose MEMBER.md names another agent than this run's: a second
+# agent started in the folder takes the first one's membership with no word (DESIGN, "Which
+# membership"); a new session of the same agent is the normal case, so no note then
+OTHER_AGENT_NOTE = ("  note: %s/%s's MEMBER.md said agent: %s before this join, and this "
+                    "run's agent is %s: if that membership is another agent's (one that works "
+                    "in this checkout too), join as a member of your own: vcharon join %s %s "
+                    "--project %s --role R, and pass --role R on every command after (vcharon "
+                    "guide start, \"A new session\")")
 # a lobby founder's failed join that had to keep its folder: other members joined meanwhile
 KEPT_NOTE = ("  note: lobby/%s stays: it holds the lobby's CHANNEL.md; to use it, join again with "
              "--rejoin")
@@ -1398,7 +1408,11 @@ def _join_held(args, cfg, name, log, say, take):
         if rejoin:
             # the same checkout may run another agent now, or another vcharon: its name isn't
             # tied to either
-            _update_fields(own, name, args.fields, say)
+            was = (_update_fields(own, name, args.fields, say) or {}).get("agent")
+            if not args.rejoin and was and was != args.fields["agent"]:
+                say(platform.runnable(OTHER_AGENT_NOTE % (
+                    channel, name, was, args.fields["agent"], channel, _where_flag(server),
+                    args.ident["project"])))
     # before the sync, which then sends it with MEMBER.md: the leader sees the JOIN when the
     # folder appears, not at this member's next sync
     _announce(own, name, leader, kind_, "REJOIN" if rejoin else "JOIN",
@@ -1586,15 +1600,15 @@ def _update_fields(own, name, fields, say, wait=entries.LOCK_WAIT):
     place when it says another (or none): at a rejoin, and (vcharon: only) at a watcher's
     start. agent: only when one was found or --agent given: a rejoin from a plain terminal
     leaves it. A MEMBER.md without vcharon's entry #1 is left as it is: the caller goes on.
-    wait: the post lock's (set_header's)."""
+    wait: the post lock's (set_header's). Returns entry #1's header as it was, or None."""
     path = os.path.join(own, entries.MEMBER_FILE)
     try:
         found = entries.parse_file(path)
     except OSError:
-        return
+        return None
     first = [e for e in found if e.name == name and e.number == 1]
     if not first:
-        return
+        return None
     header = dict(first[0].header)
     wanted = [("agent", fields["agent"])] if fields["agent_given"] else []
     for key, value in wanted + [("vcharon", VERSION)]:
@@ -1603,11 +1617,14 @@ def _update_fields(own, name, fields, say, wait=entries.LOCK_WAIT):
             continue
         entries.set_header(path, own, name, 1, key, value, wait=wait)
         # name where the old value came from: an agent that ran no update can't tell what a
-        # bare "was" refers to
+        # bare "was" refers to; the version line also says it is done, or a member asks what
+        # to do about it (a stale skill has a note of its own, _say_next's)
+        done = VERSION_DONE % ("updated" if was else "added") if key == "vcharon" else ""
         if was:
-            say("  %s: %s (your %s said %s)" % (key, value, entries.MEMBER_FILE, was))
+            say("  %s: %s (your %s said %s%s)" % (key, value, entries.MEMBER_FILE, was, done))
         else:
-            say("  %s: %s (your %s had none)" % (key, value, entries.MEMBER_FILE))
+            say("  %s: %s (your %s had none%s)" % (key, value, entries.MEMBER_FILE, done))
+    return header
 
 
 def refresh_version(own, name):

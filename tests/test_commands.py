@@ -1000,6 +1000,13 @@ HINTS = {
         # the topic, not a command to run as printed
         ("  note: first time, add --max-minutes 1 to that command and see how it ends "
          "(vcharon guide watch, \"The one-minute check\")", None),
+        # a take-back's when MEMBER.md named another agent: a pointer to a topic's section
+        # ends it, so the join in it is parsed by its own test (test_channel's
+        # TakeBackAgentTest)
+        ("  note: %s/%s's MEMBER.md said agent: %s before this join, and this run's agent is "
+         "%s: if that membership is another agent's (one that works in this checkout too), "
+         "join as a member of your own: vcharon join %s %s --project %s --role R, and pass "
+         "--role R on every command after (vcharon guide start, \"A new session\")", None),
         # Codex's, at every join and create
         ("  note: Codex: while idle, don't end your turn: poll the watcher again with a long "
          "wait each time it returns still running (vcharon guide codex)", None),
