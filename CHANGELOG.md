@@ -7,6 +7,39 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- Every human-readable line now prints a path under your home folder with the home as `~`
+  (`~/…`, `~\…` on Windows), as the exit-12 line and the `removed` lines did already: the
+  `ERROR` line's message and its `  | ` and `  log:` lines, the watcher's `watching <dir>`,
+  `note: ignoring the saved snapshot <path>`, its `ERROR can't read <dir>`, `ERROR can't save
+  the snapshot <path>` and `  log:` lines, `create`'s and `join`'s `your folder is <path>`,
+  project note and snapshot-not-saved note, `whoami`'s `folder` and `members` lines,
+  `leave`'s notes, `read`'s header, `setup`'s `config`, `--update`'s `current`, `updated` and
+  skill lines, `skill install`'s lines and the stale-skill note, the `sync` header's local
+  side, `sync --reset`'s summary (on Windows its JSON `source` and `target` keep the home) and
+  `removed` line, `post`'s note on a member with no folder, and `doctor`'s check lines but
+  its `config` line's file (when it is ok), its `dirs` lines and its `vcharon's folders` note,
+  which stay whole: a user pastes those into an agent's sandbox allow-list, where `~` may not
+  expand. The refusal of a
+  project named by the home folder now reads `… from your home folder (~), whose name is your
+  user name: …`. Why: agents quote these lines into channel entries, and the full path names
+  the user. Unchanged: a command, in a `fix:` line or any other (a `next:` line, a note), runs
+  as printed and keeps its paths, the program's own included; the rest of a `fix:` line too,
+  but for a watcher's fix made from its sync's `  log:` line (`the job's log has the rest:
+  ~/…`, text, not a command); every `--json` field; lines only logged (a line printed and
+  logged by one call is logged as printed); and the files vcharon reads back. A script that
+  reads a path out of one of these lines, the watcher's `watching <dir>` among the "Stable"
+  ones, must expand a leading `~` (`~\` on Windows); the lines' shapes are unchanged. After
+  the update, an error whose text holds a home path, which a watcher already reported, may
+  wake a `--until-change` watcher once more: its text, which is its key, changed (inferred
+  from the code, not run). Measured on
+  Linux (the suite, with the home patched to the test's folder); macOS inferred (the same
+  POSIX path rule, not run); the Windows form is checked only through the suite's declared-OS
+  test of the text rule (inferred for a real Windows home).
+- `vcharon guide rules`: when you quote vcharon's output, mask the home folder in the commands
+  it prints too (the program's own path can name it), as you mask the server alias.
+
 ## 0.8.1rc1 — 2026-10-16
 
 The first release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.0rc1

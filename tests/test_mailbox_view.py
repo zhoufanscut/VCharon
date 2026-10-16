@@ -92,6 +92,17 @@ class ViewCase(unittest.TestCase):
 
 
 class OrderTest(ViewCase):
+    def test_the_header_shows_the_home_as_a_tilde(self):
+        # agents quote it into channel entries; --json's folder keeps the path whole
+        write_tree(self.tree, {"mac-a/A.md": md(entry("mac-a#1", "one"))})
+        home = os.path.dirname(self.tree)
+        with mock.patch.object(platform, "home", return_value=home):
+            lines = self.view()
+            code, out, err = self.main("--json")
+        self.assertEqual(lines[0], "mb: 1 entry from 1 member (~%s)" % self.tree[len(home):])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads("\n".join(out))["folder"], self.tree)
+
     def test_one_minute_by_number_and_re(self):
         # path order is win-b's first, and puts mac-a#10 before #9; the time is one minute
         write_tree(self.tree, {

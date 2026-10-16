@@ -20,6 +20,7 @@ from unittest import mock
 
 from vcharon import VERSION, cli, doctor, fsops, install, pathrules, platform, ssh, stage, state
 from vcharon import run as engine
+from vcharon.log import Log
 from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.proto import VCharonError
 
@@ -282,6 +283,33 @@ class CliTest(FakeSshCase):
         self.assertIn(cli.EXIT_CODES, out)
         self.assertLessEqual(len(out.splitlines()), 50)
         # each verb's own --help: test_commands' FixRoundTripTest parses its example
+
+
+class ShowErrorTest(unittest.TestCase):
+    def test_the_home_shows_as_a_tilde_in_the_lines_only(self):
+        # agents quote the ERROR block into channel entries; the log keeps every path whole,
+        # and so does the fix line, whose command must run as printed
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        log_path = os.path.join(tmp, "logs", "vcharon.log")
+        lock = os.path.join(tmp, "state", "x.lock")
+        run = cli._Run()
+        run.out = []
+        run.log = Log(log_path)
+        err = VCharonError("permission", "%s: Permission denied" % lock, "check %s" % lock)
+        err.tail = ["ssh said %s" % lock]
+        with mock.patch.object(platform, "home", return_value=tmp):
+            run.show_error(err)
+        short = "~" + lock[len(tmp):]
+        self.assertEqual(run.out, [
+            "ERROR permission: %s: Permission denied" % short,
+            "  | ssh said %s" % short,
+            "  fix: %s" % platform.runnable("check %s" % lock),
+            "  log: ~%s" % log_path[len(tmp):]])
+        with open(log_path, encoding="utf-8") as f:
+            logged = f.read()
+        self.assertIn("permission: %s: Permission denied" % lock, logged)
+        self.assertNotIn(short, logged)
 
 
 class Utf8ConsoleTest(FakeSshCase):
@@ -750,6 +778,27 @@ class JobTest(FakeSshCase):
         self.assertEqual(read_tree(self.inbox), read_tree(self.src))
 
     # the reset (vcharon sync C --reset up|down, for a channel section's job)
+
+    def test_the_home_shows_as_a_tilde(self):
+        # agents quote these lines: the header's local side and the reset's paths show the
+        # home as ~; the remote side is the server's, and the log keeps every path whole
+        home = self.tmp
+
+        def short(path):
+            return "~" + path[len(home):]
+
+        with mock.patch.object(platform, "home", return_value=home):
+            lines = self.ok("push")
+            code, out, err = self.reset_job("push")
+        self.assertEqual(lines[0], "vcharon: push  %s -> fake-dest:inbox" % short(self.src))
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "vcharon: state of push  (%s)" % short(state.path("push")))
+        # JSON: on Windows its doubled backslashes keep the home (DESIGN, "Rules for the code")
+        self.assertEqual(lines[2], '  source    {"end": "local", "kind": "dir", "path": "%s"}'
+                         % json_inner(self.src if os.name == "nt" else short(self.src)))
+        self.assertEqual(lines[-1], "removed %s" % short(state.path("push")))
+        self.assertIn("state reset: removed %s" % state.path("push"), self.job_log())
 
     def test_reset(self):
         def reset(name="push"):

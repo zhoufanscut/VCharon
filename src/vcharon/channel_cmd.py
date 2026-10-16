@@ -206,7 +206,7 @@ def project_note(verb, channel, project, role, cwd=None, undo=True):
         where = "this folder's name (no .git, .svn or .hg here or above)"
     else:
         # escaped alone: runnable() must never see the path, which may hold any text
-        where = "the checkout %s (%s)" % (pathrules.printable(folder), mark)
+        where = "the checkout %s (%s)" % (pathrules.printable(platform.tilde(folder)), mark)
     head = "  note: project %s is %s" % (project, where)
     if not undo:
         return head
@@ -224,8 +224,9 @@ def check_not_home(cwd=None):
     except OSError:
         return
     if is_home:
-        raise VCharonError("config", "the project's name would come from your home folder %s, "
-                           "whose name is your user name: give --project" % folder,
+        # in brackets, so the line still reads with the home shown as ~ (show_error)
+        raise VCharonError("config", "the project's name would come from your home folder "
+                           "(%s), whose name is your user name: give --project" % folder,
                            hint="for example: --project web")
 
 
@@ -1112,7 +1113,7 @@ def _create_held(args, cfg, name, log, say, take):
         return code
     _say_next(channel, name, say, plan=True, first=args.fields["agent"] != CHECK_SKIPPED,
               agent=args.fields["agent"])
-    say("OK  created %s; your folder is %s" % (channel, own))
+    say("OK  created %s; your folder is %s" % (channel, platform.tilde(own)))
     return 0
 
 
@@ -1120,11 +1121,11 @@ def _say_next(channel, name, say, plan=False, first=False, agent=None):
     """The next steps, as this box runs vcharon, with the flags that find the membership from
     any folder; before them, the note for a skill copy of another version (skill.stale_note);
     first: FIRST_CHECK right after the watcher's line; KEEP_TURN after both, for Codex.
-    On stdout with the rest: join and create print this machine's paths there already (the OK
-    line's folder), and the agent reads stdout."""
+    On stdout with the rest, which the agent reads."""
     note = skill.stale_note()
     if note is not None:
-        # escaped as the watcher's copy of it is: a home path may hold any character
+        # escaped as the watcher's copy of it is: the part of a path below the home (or all
+        # of it, for a home that is a root or a drive) may hold any character
         say("  " + pathrules.printable(note))
     flags_ = name_flags(channel, name)
     say(platform.runnable(NEXT_WATCH % (channel, flags_)))
@@ -1429,7 +1430,7 @@ def _join_held(args, cfg, name, log, say, take):
         if not rejoin:
             # a first join only: a rejoin (a new session, the leader's too) had its answer
             say(platform.runnable(LOBBY_NOTE) if kind_ is kinds.LOBBY else ASK_USER)
-        say("OK  in %s as %s; your folder is %s" % (channel, name, own))
+        say("OK  in %s as %s; your folder is %s" % (channel, name, platform.tilde(own)))
     return code
 
 
@@ -1521,7 +1522,8 @@ def _first_look(channel, name, section, say, log, created=False, keep=False):
     except (OSError, VCharonError) as e:
         why = (e.strerror or str(e)) if isinstance(e, OSError) else e.message
         log.warn("couldn't save the watcher's snapshot of %s in %s: %s" % (name, channel, why))
-        say(platform.runnable(SNAPSHOT_NOT_SAVED % (why, channel, name_flags(channel, name))))
+        say(platform.runnable(SNAPSHOT_NOT_SAVED % (platform.tilde_text(why), channel,
+                                                    name_flags(channel, name))))
         return None
 
 
@@ -1976,7 +1978,7 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
             except VCharonError as e:
                 if e.code != "not_found":
                     raise
-                say("  note    %s" % e.message)
+                say("  note    %s" % platform.tilde_text(e.message))
             else:
                 say("  closed %s: %d files and folders deleted" % (channel, done["deleted"]))
             gone = True
@@ -2014,7 +2016,8 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                 raise VCharonError("not_found", "your own folder %s has no %s on this machine"
                                    % (own, entries.MEMBER_FILE),
                                    rejoin_hint(channel, record["ssh"], name))
-            say("  note    %s has no %s: no LEAVE posted" % (own, entries.MEMBER_FILE))
+            say("  note    %s has no %s: no LEAVE posted"
+                % (platform.tilde(own), entries.MEMBER_FILE))
             own = None
         # a leave whose run failed and is tried again posts no second LEAVE
         if own is not None and not entries.has_left(own, name):
@@ -2093,7 +2096,8 @@ def _remove_membership(cfg, record, section, say, watcher):
                 _remove_tree(local)
                 say("  removed %s" % platform.tilde(local))
         elif jobs:
-            say("  note    left %s in place: it isn't %s" % (jobs[0].mailbox.local, computed))
+            say("  note    left %s in place: it isn't %s"
+                % (platform.tilde(jobs[0].mailbox.local), platform.tilde(computed)))
         for suffix in config.MAILBOX_JOBS:
             job = section + suffix
             for path in (state.path(job), os.path.join(platform.log_dir(), job + ".log"),

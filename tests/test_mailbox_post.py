@@ -17,7 +17,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, entries, plugin
+from vcharon import channel_cmd, cli, entries, platform, plugin
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
@@ -606,6 +606,13 @@ class ChannelTest(PostCase):
         self.assertEqual(err, "note: @mac-x has no folder in %s yet: posted anyway (it may not "
                               "have synced)\n" % self.tree)
         self.assertEqual(entries.parse_file(self.file)[0].to, ("@debian", "@mac-x"))
+        # the home as ~, as agents quote the note
+        home = os.path.dirname(self.tree)
+        with mock.patch.object(platform, "home", return_value=home):
+            code, _out, err = self.post("--to", "@mac-y")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "note: @mac-y has no folder in ~%s yet: posted anyway (it may not "
+                              "have synced)\n" % self.tree[len(home):])
 
     def test_a_bare_members_name(self):
         # debian, as @debian; --re's @ taken off

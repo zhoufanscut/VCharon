@@ -455,7 +455,7 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     for token in to:
         if token != entries.ALL and not os.path.isdir(os.path.join(tree, token[1:])):
             print("note: %s has no folder in %s yet: posted anyway (it may not have synced)"
-                  % (token, tree), file=sys.stderr)
+                  % (token, platform.tilde(tree)), file=sys.stderr)
     if found is not None:
         print("note: %s" % found[1], file=sys.stderr)
     if done is None:

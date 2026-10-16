@@ -677,7 +677,7 @@ def _members_lines(doc, members, unread, seen):
     this box's copy, the ages as of its last sync."""
     copy = " (this box's copy, as of its last sync)" if doc["mode"] == "remote" else ""
     if members is None:
-        _say("  members  can't read %s: %s" % (doc["tree"], unread))
+        _say("  members  can't read %s: %s" % (platform.tilde(doc["tree"]), unread))
         return
     _say("  members  %d%s" % (len(members), copy))
     now = time.time()
@@ -781,7 +781,8 @@ def _whoami_lines(doc):
                                               " --role %s" % doc["role"] if doc["role"] else ""))
     _say("  mode     %s" % ("local, on this machine" if doc["mode"] == "local"
                             else "remote, server %s" % doc["server"]))
-    _say("  folder   %s" % doc["folder"])
+    # the home as ~ in the line, as agents quote it; --json's folder stays whole
+    _say("  folder   %s" % platform.tilde(doc["folder"]))
 
 
 def _print_json(doc):
@@ -1425,7 +1426,7 @@ def _setup(args, run):
     wrote = config.setup_file(args.box)
     cfg = load_config()
     _say("vcharon: setup")
-    _say("  config   %s%s" % (cfg.path, " (written)" if wrote else ""))
+    _say("  config   %s%s" % (platform.tilde(cfg.path), " (written)" if wrote else ""))
     _say("  box      %s" % cfg.box_text())
     if args.box is None and cfg.box is None:
         _say(platform.runnable("  note: to name this machine otherwise (laptop, a name each "
@@ -1520,7 +1521,7 @@ def _update(args, run):
     if not as_json:
         _say("vcharon: update")
         _say("  current  %s (%s%s)" % (VERSION, inst.kind,
-                                       ", %s" % inst.path if inst.path else ""))
+                                       ", %s" % platform.tilde(inst.path) if inst.path else ""))
         if rc == "current":
             _say("  note: this build is a pre-release, so pre-releases count too")
         _say("  latest   %s (%s%s)" % (release.version,
@@ -1569,14 +1570,15 @@ def _update(args, run):
     doc["skills"] = {"paths": [t for _, t in skills], "ok": why is None, "fix": skill_fix}
     if as_json:
         return _print_json(dict(doc, ok=True))
-    _say("  updated %s -> %s: %s" % (VERSION, result.version, result.path))
+    _say("  updated %s -> %s: %s" % (VERSION, result.version, platform.tilde(result.path)))
     if not result.verified:
         _say("  note: the release has no checksum; the new binary passed its --version check")
     if why:
         _say("  note: the skill wasn't rewritten for %s (%s); run: %s"
-             % (result.version, why, skill_fix))
+             % (result.version, platform.tilde_text(why), skill_fix))
     elif skills:
-        _say("  skill rewritten by %s: %s" % (result.version, ", ".join(t for _, t in skills)))
+        _say("  skill rewritten by %s: %s"
+             % (result.version, ", ".join(platform.tilde(t) for _, t in skills)))
     _say("  note: running watchers end with EXIT updated (exit %d); start them again"
          % install.EXIT_UPDATED)
     _say("OK")
@@ -1758,10 +1760,12 @@ class _Run:
                 self.log_line("error", err.detail)
             if self.done_line:
                 self.log_line("error", self.done_line.strip())
-        # The log is the job's own, so only the console line names the job.
+        # The log is the job's own, so only the console line names the job. The paths in the
+        # message with the home as ~: agents quote this line into channel entries; the log
+        # keeps them whole, and the fix line too, whose command must run as printed.
         lines = ["ERROR %s%s: %s" % ("%s: " % self.job_name if self.job_name else "", err.code,
-                                     err.message)]
-        lines += ["  | %s" % line for line in err.tail]
+                                     platform.tilde_text(err.message))]
+        lines += ["  | %s" % platform.tilde_text(line) for line in err.tail]
         if self.done_line:
             lines.append(self.done_line)
         if hint:
@@ -1769,7 +1773,7 @@ class _Run:
             # person, maybe on another box
             lines.append("  fix: %s" % platform.runnable(hint))
         if self.log is not None:
-            lines.append("  log: %s" % self.log.path)
+            lines.append("  log: %s" % platform.tilde(self.log.path))
         if self.out is not None:
             self.out.extend(lines)
             return
@@ -2588,7 +2592,9 @@ def _run_one(args, jr, conn, stack):
         log.info(line)
 
     mode = [word for word, on in (("full", args.full), ("dry run", args.dry_run)) if on]
-    say("vcharon: %s  %s -> %s%s" % (name, shown[0], shown[1],
+    # a local side's home as ~; a remote side is the server's path, which the client's home
+    # doesn't name (a mailbox's is spelled from ~ already)
+    say("vcharon: %s  %s -> %s%s" % (name, platform.tilde(shown[0]), platform.tilde(shown[1]),
                                      "  (%s)" % ", ".join(mode) if mode else ""))
     # the sink binding, once the check has passed
     bound = []
@@ -2724,10 +2730,12 @@ def _show_state(name, st, why=None):
     if st is None:
         print("vcharon: no state for %s" % name)
         return
-    print("vcharon: state of %s  (%s)" % (name, state.path(name)))
+    print("vcharon: state of %s  (%s)" % (name, platform.tilde(state.path(name))))
     print("  saved     %s" % st.saved)
-    print("  source    %s" % ("none" if st.identity is None else _dumps(st.identity)))
-    print("  target    %s" % _dumps(st.sink))
+    # JSON, with the home as ~ where it shows as it is (not in Windows's escaped backslashes)
+    print("  source    %s" % ("none" if st.identity is None
+                              else platform.tilde_text(_dumps(st.identity))))
+    print("  target    %s" % platform.tilde_text(_dumps(st.sink)))
     source = st.source
     if isinstance(source, dict) and set(source) == {"sent"} and isinstance(source["sent"], dict):
         values = list(source["sent"].values())
@@ -2746,7 +2754,7 @@ def _reset(name, verbose, run):
         _show_state(name, st, why)
         p = state.path(name)
         if state.remove(name):
-            print("removed %s" % p)
+            print("removed %s" % platform.tilde(p))
             log.info("state reset: removed %s" % p)
         else:
             log.info("state reset: there was no state at %s" % p)

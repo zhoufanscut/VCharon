@@ -141,6 +141,44 @@ class TildeTest(PatchedCase):
         self.check("windows", "C:\\", (("C:\\vc\\x", "C:\\vc\\x"),))
 
 
+class TildeTextTest(PatchedCase):
+    def check(self, osn, home, cases):
+        with contextlib.ExitStack() as stack:
+            for patcher in on(osn, HOME=home):
+                stack.enter_context(patcher)
+            for text, want in cases:
+                with self.subTest(os=osn, home=home, text=text):
+                    self.assertEqual(platform.tilde_text(text), want)
+
+    def test_posix(self):
+        for home in ("/home/me", "/home/me/"):
+            self.check("linux", home, (
+                ("/home/me/.local/state/x.lock: no such file or directory",
+                 "~/.local/state/x.lock: no such file or directory"),
+                ("a watcher (/home/me/a.lock is held) and '/home/me/b', \"/home/me/c\"",
+                 "a watcher (~/a.lock is held) and '~/b', \"~/c\""),
+                ("your home folder /home/me, whose name", "your home folder ~, whose name"),
+                ("/home/me", "~"),
+                # every path in the text, and nothing that isn't the home
+                ("/home/me/a -> /tmp/b, /home/me/c", "~/a -> /tmp/b, ~/c"),
+                ("/home/meg/x /home/me.old/x /home/Me/x", "/home/meg/x /home/me.old/x /home/Me/x"),
+                # inside another path, or a server's
+                ("/srv/home/me/x devbox:/home/me/x", "/srv/home/me/x devbox:/home/me/x"),
+                ("no path here", "no path here")))
+
+    def test_windows(self):
+        self.check("windows", "C:\\Users\\me", (
+            ("C:\\Users\\me\\AppData\\Local\\vcharon\\x.lock: access denied",
+             "~\\AppData\\Local\\vcharon\\x.lock: access denied"),
+            # case and either separator: one folder to Windows
+            ("c:\\users\\ME\\x and C:/Users/me/y", "~\\x and ~/y"),
+            ("D:\\vc\\x C:\\Users\\meg\\x", "D:\\vc\\x C:\\Users\\meg\\x")))
+
+    def test_root_home_changes_nothing(self):
+        self.check("linux", "/", (("/srv/x", "/srv/x"),))
+        self.check("windows", "C:\\", (("C:\\vc\\x", "C:\\vc\\x"),))
+
+
 class SshPathTest(PatchedCase):
     def test_posix(self):
         for osn in ("linux", "darwin"):

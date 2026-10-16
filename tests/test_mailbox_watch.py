@@ -333,6 +333,17 @@ class ServerModeTest(WatchCase):
                                        "gone windows/new.patch", "gone windows/run.log"])
         self.assertEqual(sleep.seconds, [10] * 4)
 
+    def test_paths_under_the_home_print_with_a_tilde(self):
+        # agents quote these lines into channel entries: the home folder shows as ~
+        short = "~" + self.tree[len(self.tmp):]
+        with mock.patch.object(platform, "home", return_value=self.tmp):
+            code = watch.watch_dir(self.tree, "debian", 10, out=self.lines.append,
+                                   sleep=Rounds(lambda: shutil.rmtree(self.tree)), rounds=1)
+        self.assertEqual(code, 13)
+        said = self.said()
+        self.assertEqual(said[0], watching(short, 0))
+        self.assertTrue(said[1].startswith("ERROR can't read %s: " % short), said)
+
 
 class LocalStampTest(WatchCase):
     """A local member's rounds stamp its last-watched time beside the channel root, silently,
@@ -473,6 +484,36 @@ class SnapshotTest(WatchCase):
         self.assertNotEqual(self.state(me="mac"), path)
         # no temp file left
         self.assertEqual(sorted(os.listdir(os.path.dirname(path))), [name, name + ".lock"])
+
+    def test_snapshot_lines_show_the_home_as_a_tilde(self):
+        # agents quote these lines into channel entries: the home folder shows as ~
+        home = self.tmp
+
+        def short(path):
+            return "~" + path[len(home):]
+
+        write_tree(self.tree, {"mac/x": b"x"})
+        path = self.state()
+        with mock.patch.object(platform, "home", return_value=home):
+            self.assertEqual(self.run_dir(rounds=0)[1], [watching(short(self.tree), 1)])
+            # a start from the saved snapshot
+            saved = self.saved_at(path)
+            self.assertEqual(self.run_dir(rounds=0)[1],
+                             [watching(short(self.tree), 1, ", since " + saved)])
+            # one that can't be used
+            with open(path, "wb") as f:
+                f.write(b"not json")
+            lines = self.run_dir(rounds=0)[1]
+            self.assertTrue(lines[0].startswith("note: ignoring the saved snapshot %s: "
+                                                % short(path)), lines)
+
+            def full(*args):
+                raise OSError(28, "No space left on device")
+
+            with mock.patch.object(watch, "save_snapshot", full):
+                lines = self.run_dir(rounds=0, fresh=True)[1]
+        self.assertIn("ERROR can't save the snapshot %s: No space left on device" % short(path),
+                      lines)
 
     def test_a_restart_prints_what_changed_while_stopped(self):
         write_tree(self.tree, {"mac/x": b"x", "mac/gone": b"g"})
@@ -4126,7 +4167,7 @@ class StaleSkillTest(WatchCase):
         util.write_skill("claude", util.OLD_SKILL)
         util.write_skill("codex", util.OLD_SKILL)
         self.note = ("note: your vcharon skills at %s and %s are from another version: %s"
-                     % (skill.path("claude"), skill.path("codex"),
+                     % (platform.tilde(skill.path("claude")), platform.tilde(skill.path("codex")),
                         platform.runnable("vcharon skill install --claude --codex")))
 
     def watch(self, *argv, step=lambda: None):
@@ -4194,6 +4235,21 @@ class StaleSkillTest(WatchCase):
         self.assertIn("\x1b", target)
         started = []
         with mock.patch.object(watch, "watch_job", lambda *a, **kw: started.append(a) or 0):
+            code, out, err = self.cli("--until-change", project="p")
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("\x1b", out)
+        # under the home, the control character is in the part shown as ~
+        self.assertEqual(self.said(out.splitlines()), [
+            "note: your vcharon skill at %s is from another version: %s"
+            % (os.path.join("~", ".claude", "skills", "vcharon", "SKILL.md"),
+               platform.runnable("vcharon skill install --claude"))])
+        # a path shown whole, here with the home seen as another folder, is escaped
+        real = skill.path
+        with mock.patch.object(skill, "path",
+                               lambda agent: target if agent == "claude" else real(agent)), \
+                mock.patch.object(platform, "home",
+                                  return_value=os.path.join(self.tmp, "elsewhere")), \
+                mock.patch.object(watch, "watch_job", lambda *a, **kw: 0):
             code, out, err = self.cli("--until-change", project="p")
         self.assertEqual((code, err), (0, ""))
         self.assertNotIn("\x1b", out)

@@ -2253,7 +2253,9 @@ class UpdateFlagTest(FakeSshCase):
         # the installed binary, for vcharon's copy alone: the user's own file isn't named
         with open(self.ran, encoding="utf-8") as f:
             self.assertEqual(json.loads(f.read()), ["skill", "install", "--claude"])
-        self.assertIn("  skill rewritten by 9.9.9: %s" % skill.path("claude"), out.splitlines())
+        # the line shows the home as ~; --json's paths stay whole
+        self.assertIn("  skill rewritten by 9.9.9: %s" % platform.tilde(skill.path("claude")),
+                      out.splitlines())
         code, doc, err = self.run_json("--update", "--yes", "--force", "--json")
         self.assertEqual((code, doc["skills"]),
                          (0, {"paths": [skill.path("claude")], "ok": True, "fix": None}))

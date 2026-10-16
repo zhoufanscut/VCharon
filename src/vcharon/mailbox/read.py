@@ -82,7 +82,7 @@ import itertools
 import os
 import re
 
-from .. import VERSION, channels, entries, pathrules
+from .. import VERSION, channels, entries, pathrules, platform
 from .. import kind as kinds
 
 INDENT = "    "
@@ -498,7 +498,9 @@ def view(root, channel, synced=False, full=False, last=None, now=None, skip=None
     elif version is not None:
         notes.append(version)
     out = ["%s: %s from %s (%s)%s" % (channel, _counted(len(ordered), "entry", "entries"),
-                                      _counted(len(folders), "member", "members"), root,
+                                      _counted(len(folders), "member", "members"),
+                                      # the home as ~, as agents quote it; --json's is whole
+                                      platform.tilde(root),
                                       ", as of this box's last sync" if synced else "")]
     shown, missing = pick(ordered, last, ids, mine)
     full = full or bool(ids)

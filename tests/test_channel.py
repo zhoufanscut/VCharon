@@ -460,6 +460,28 @@ class CreateJoinTest(ChannelCase):
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game", "mac-web"))),
                          ["MEMBER.md", "RESULTS.md"])
 
+    def test_paths_under_the_home_print_with_a_tilde(self):
+        # agents quote these lines into channel entries: the home folder shows as ~; --json
+        # keeps the path whole
+        self.use_box("laptop")
+        home = self.homes["laptop"]
+        with mock.patch.object(platform, "home", return_value=home):
+            out = self.ok("create", "game", "--server", "fake-dest", "--project", "ui")
+            whoami = self.ok("whoami", "game", "--project", "ui")
+            doc = json.loads(self.ok("whoami", "game", "--project", "ui", "--json"))
+        own = os.path.join(self.joined("game.laptop-ui"), "laptop-ui")
+        short = "~" + own[len(home):]
+        self.assertEqual(out.splitlines()[-1], "OK  created game; your folder is %s" % short)
+        self.assertIn("  folder   %s" % short, whoami.splitlines())
+        self.assertEqual(doc["folder"], own)
+        # a local member's folder, in the channel root under the home
+        self.use_box("linux")
+        with mock.patch.object(platform, "home", return_value=self.home):
+            out = self.ok("join", "game", "--local", "--project", "x", "--role", "b")
+        own = os.path.join(self.root, "game", "linux-x-b")
+        self.assertEqual(out.splitlines()[-1], "OK  in game as linux-x-b; your folder is ~%s"
+                         % own[len(self.home):])
+
     def test_join_local(self):
         self.lead()
         self.use_box("linux")
@@ -870,9 +892,11 @@ class CreateJoinTest(ChannelCase):
                 for argv in (("join", "game", "--server", "fake-dest"),
                              ("create", "docs", "--server", "fake-dest")):
                     line, fix = self.refusal(*argv, code=3)
+                    # the folder is the home, which the line shows as ~ (the log keeps it)
                     self.assertEqual(line, "ERROR config: the project's name would come "
-                                     "from your home folder %s, whose name is your user "
-                                     "name: give --project" % home_seen)
+                                     "from your home folder (%s), whose name is your user "
+                                     "name: give --project"
+                                     % ("~" if home_named == home_seen else home_seen))
                     self.assertEqual(fix, "for example: --project web")
         with mock.patch.object(platform, "home", return_value=home):
             self.assertEqual(sorted(os.listdir(self.root)), ["game"])
@@ -1430,7 +1454,7 @@ class StaleSkillTest(ChannelCase):
         util.skill_home(self)
 
     def note(self, *agents):
-        targets = " and ".join(skill.path(a) for a in agents)
+        targets = " and ".join(platform.tilde(skill.path(a)) for a in agents)
         head = ("note: your vcharon skill at %s is from another version: " if len(agents) == 1
                 else "note: your vcharon skills at %s are from another version: ")
         return "  " + head % targets + platform.runnable(
@@ -1504,9 +1528,21 @@ class StaleSkillTest(ChannelCase):
         os.mkdir(home)
         os.environ.update(HOME=home, USERPROFILE=home)
         target = util.write_skill("claude", util.OLD_SKILL)
-        lines = self.join()
-        self.assertEqual(lines[-3], self.note("claude").replace(target, target.replace(
-            "\x1b", "\\x1b")))
+        # a path shown whole, here with the home seen as another folder, is escaped
+        real = skill.path
+        with mock.patch.object(skill, "path",
+                               lambda agent: target if agent == "claude" else real(agent)), \
+                mock.patch.object(platform, "home",
+                                  return_value=os.path.join(self.tmp, "elsewhere")):
+            lines = self.join()
+        self.assertEqual(lines[-3], self.note("claude").replace(
+            platform.tilde(target), target.replace("\x1b", "\\x1b")))
+        self.assertNotIn("\x1b", "\n".join(lines))
+        # under the home, the control character is in the part shown as ~
+        lines = self.join("y")
+        self.assertEqual(lines[-3], self.note("claude"))
+        self.assertIn("~%s.claude" % os.sep, lines[-3])
+        self.assertNotIn("\x1b", "\n".join(lines))
 
     @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0,
                          "needs a file this user can't read")
@@ -2087,6 +2123,24 @@ class LeaveCloseTest(ChannelCase):
         self.assertIn("  removed ~%sjoined%sgame.mac-web" % (os.sep, os.sep), removed)
         self.assertTrue(all(line.startswith("  removed ~" + os.sep) for line in removed),
                         removed)
+
+    def test_a_refusal_prints_the_home_as_a_tilde(self):
+        # the ERROR line and its log line show the home as ~; the log keeps the path whole
+        home = self.homes["mac"]
+        snapshot = channel_cmd.watcher_snapshot(None, "game.mac-web", "mac-web")
+        child = hold(self, snapshot + ".lock")
+        with mock.patch.object(platform, "home", return_value=home):
+            got, _out, err = self.channel("leave", "game")
+        release(child)
+        self.assertEqual(got, 1, err)
+        lines = err.splitlines()
+        self.assertEqual(lines[0], "ERROR channel: your watcher of mac-web in game is running, "
+                         "or a create, join, leave or close of it (~%s.lock is held)"
+                         % snapshot[len(home):])
+        log = os.path.join(home, "logs", "vcharon.log")
+        self.assertIn("  log: ~%s" % log[len(home):], lines)
+        with open(log, encoding="utf-8") as f:
+            self.assertIn("(%s.lock is held)" % snapshot, f.read())
 
     def test_a_lock_file_that_wont_go_doesnt_fail_the_leave(self):
         # on Windows a watcher opening the lock file at that instant makes its delete fail

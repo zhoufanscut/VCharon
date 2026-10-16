@@ -305,20 +305,23 @@ class SkillInstallTest(FakeSshCase):
     def test_both_by_default_making_the_folders(self):
         code, out, err = self.run_cli("skill", "install")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out.splitlines(), ["vcharon: skill install", "  wrote " + self.claude,
-                                            "  wrote " + self.codex, "OK"])
+        # the lines show the home as ~
+        tilde = platform.tilde
+        self.assertEqual(out.splitlines(), ["vcharon: skill install",
+                                            "  wrote " + tilde(self.claude),
+                                            "  wrote " + tilde(self.codex), "OK"])
         for path in (self.claude, self.codex):
             self.assertEqual(self.read(path), skill.text())
         # again: nothing to do
         code, out, _err = self.run_cli("skill", "install")
-        self.assertEqual(out.splitlines()[1:3], ["  unchanged " + self.claude,
-                                                 "  unchanged " + self.codex])
+        self.assertEqual(out.splitlines()[1:3], ["  unchanged " + tilde(self.claude),
+                                                 "  unchanged " + tilde(self.codex)])
 
     def test_one_agent(self):
         # --role and --project ignored, as every verb that acts on no membership does
         code, out, _err = self.run_cli("skill", "install", "--codex", "--role", "b")
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines()[1], "  wrote " + self.codex)
+        self.assertEqual(out.splitlines()[1], "  wrote " + platform.tilde(self.codex))
         self.assertFalse(os.path.exists(os.path.join(self.user, ".claude")))
 
     def test_it_overwrites_only_its_own(self):
@@ -327,7 +330,8 @@ class SkillInstallTest(FakeSshCase):
         with open(self.claude, "w", encoding="utf-8", newline="") as f:
             f.write("---\nname: vcharon\n---\n%s\nold text\n" % skill.MARKER)
         code, out, _err = self.run_cli("skill", "install", "--claude")
-        self.assertEqual((code, out.splitlines()[1]), (0, "  updated " + self.claude))
+        self.assertEqual((code, out.splitlines()[1]),
+                         (0, "  updated " + platform.tilde(self.claude)))
         self.assertEqual(self.read(self.claude), skill.text())
         # someone's own skill of that name: refused, and nothing written anywhere
         with open(self.claude, "w", encoding="utf-8", newline="") as f:
@@ -336,7 +340,7 @@ class SkillInstallTest(FakeSshCase):
         self.assertEqual((code, out), (1, "vcharon: skill install\n"))
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR refused: %s isn't a skill vcharon wrote (no marker "
-                         "line in it)" % self.claude)
+                         "line in it)" % platform.tilde(self.claude))
         self.assertEqual(lines[1], platform.runnable(
             "  fix: move it away or delete it if it's yours to drop, or ask your user; then run "
             "vcharon skill install again"))

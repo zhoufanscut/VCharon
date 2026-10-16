@@ -94,7 +94,9 @@ def stale_note():
     if not stale:
         return None
     # runnable() on the fix alone: the note's own words hold "vcharon skill" too
-    head = (STALE if len(stale) == 1 else STALE_MANY) % " and ".join(t for _, t in stale)
+    # the home as ~ in the paths, not in the fix's command
+    head = ((STALE if len(stale) == 1 else STALE_MANY)
+            % " and ".join(platform.tilde(t) for _, t in stale))
     return head + platform.runnable(FIX % " ".join("--" + a for a, _ in stale))
 
 
@@ -105,7 +107,7 @@ def install(agents, say):
     body = text()
     for _agent, target, state in states:
         if state == "same":
-            say("  unchanged %s" % target)
+            say("  unchanged %s" % platform.tilde(target))
             continue
         folder = os.path.dirname(target)
         try:
@@ -116,4 +118,4 @@ def install(agents, say):
             os.replace(tmp, target)
         except OSError as e:
             raise fsops.error(e, target)
-        say("  %s %s" % ("wrote" if state == "missing" else "updated", target))
+        say("  %s %s" % ("wrote" if state == "missing" else "updated", platform.tilde(target)))

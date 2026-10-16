@@ -2259,7 +2259,9 @@ OK  2 jobs  (0.7 s)
 - Errors go to stderr: `ERROR <code>: <message>` (a sync's jobs name themselves: `ERROR
   <job>: <code>: …`), then `  | ` lines of ssh's stderr where they help, a `  done …` line after
   a commit that failed partway, `  fix: <text>` and `  log: <path>`. A job's name holds no `:`
-  or space, so the name ends at the line's first `: `.
+  or space, so the name ends at the line's first `: `. The message, the `  | ` lines and the
+  log path show a path under the home as `~/…` (`~\…` on Windows); the `fix:` line keeps its
+  paths, and the log keeps the message's whole ([Rules for the code](#rules-for-the-code)).
 - A Ctrl-C exits 130 with no summary; ssh is killed and the helper cleans up.
 - `join` and `create` run the same sync but print `  syncing with <server> …` before it (so a
   sync that hangs or is killed isn't silent) and, when it succeeds, one line in place of its
@@ -2749,7 +2751,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   10 (quiet), 11 (error), 12 (another watcher, or a create, join, leave or close of the
   member, runs), 13 (closed), 14 (updated), 15 (orphaned), 16 (nothing new) and 17
   (stopped).
-- **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time:
+- **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time (a `<dir>` or `<path>`
+  that is absolute shows a path under the home as `~/…`, `~\…` on Windows, where older
+  versions printed it whole: expand a leading `~` where you read one out):
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, syncing
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
@@ -2907,11 +2911,23 @@ which and how to adapt. A channel format change is always a minor version at lea
   limit, is the exception).
 - Every error the user sees has a code ([Error codes](#error-codes)) and a `fix:` line.
 - No host name, path, user name or raw machine id in any file written to a channel.
-- Two kinds of line that agents quote into channel entries print a path under the home folder
-  with the home as `~` (`~/…`, `~\…` on Windows; `platform.tilde`): the watcher's exit-12
-  `ERROR another watcher …` line's lock, and `leave`'s and `close`'s `removed <path>` lines.
-  The full path names the user. Display only: a path in a `fix:` command or a `--json` field
-  stays whole.
+- Every human-readable line prints a path under the home folder with the home as `~` (`~/…`,
+  `~\…` on Windows): agents quote these lines into channel entries, and the full path names
+  the user. A path the line names goes through `platform.tilde`; text made from paths in many
+  places goes through `platform.tilde_text` where it is printed: an error's message and `  | `
+  lines (`ERROR <code>: …`), and `doctor`'s check lines. Display only. Whole: a command, in a
+  `fix:` line or any other (a `next:` line, a note), which runs as printed, its program's path
+  included; the rest of a `fix:` line, but for a watcher's fix made from its sync's `  log:`
+  line (`the job's log has the rest: ~/…`, text, not a command); `doctor`'s `config` line's
+  file (when it is ok), its `dirs` lines and its `vcharon's folders` note, which a user pastes
+  into an agent's sandbox allow-list, where `~` may not expand (a quoted argument,
+  PowerShell's native arguments, cmd.exe, a settings field); a `--json` field; a line only
+  logged (one printed and logged by the same call is logged as printed); and what a program
+  reads back (state, records, MEMBER.md, section files), though the watcher's snapshot keeps
+  its last `ERROR` line and fix as printed. A quoted path (`pathrules.show`, JSON) keeps its
+  home where the quoting changed the home's text (a home holding a character shown escaped; on
+  Windows, JSON's doubled backslashes), and so does a server's path (`<ssh>:<path>`), which
+  the client's home doesn't name.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.

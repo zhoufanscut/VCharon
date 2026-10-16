@@ -97,9 +97,13 @@ class Report:
         # every check, as --json gives them
         self.checks = []
 
-    def check(self, level, subject, text, hint=None, note=None):
+    def check(self, level, subject, text, hint=None, note=None, whole=False):
+        """whole: the line keeps its paths as they are, for the folders a user pastes into
+        an agent's sandbox allow-list, where ~ may not expand (a quoted argument, PowerShell's
+        native arguments, cmd.exe, a settings field); every other line shows the home as ~,
+        as agents quote it. --json's text is always whole."""
         head = "  %s  %s  " % (level.ljust(4), subject.ljust(self.width))
-        self.say(head + text)
+        self.say(head + (text if whole else platform.tilde_text(text)))
         if level == "FAIL":
             self.failed += 1
         elif level == "warn":
@@ -116,7 +120,8 @@ class Report:
             self.say(" " * len(head) + "note: " + note)
 
     def aside(self, text):
-        """A note under the last check's text, not a check of its own (--json has the data)."""
+        """A note under the last check's text, not a check of its own (--json has the data).
+        Its paths whole: its one use lists vcharon's folders, for a sandbox allow-list."""
         self.say(" " * (self.width + 10) + "note: " + text)
 
     def last_line(self, seconds):
@@ -281,10 +286,11 @@ def _config(rep, cfg, err, no_scope):
         return
     note = NO_JOBS_NOTE if no_scope else None
     if not cfg.exists:
-        rep.check("ok", "config", "%s doesn't exist; using the defaults" % cfg.path, note=note)
+        rep.check("ok", "config", "%s doesn't exist; using the defaults" % cfg.path, note=note,
+                  whole=True)
     else:
         rep.check("ok", "config", "%s: %s" % (cfg.path, _counted(len(cfg.jobs), "job")),
-                  note=note)
+                  note=note, whole=True)
     # a broken or clashing channels.d/ file: the other jobs still run
     for skip in cfg.skipped:
         rep.check("warn", "config", skip.line, skip.error.hint)
@@ -371,9 +377,10 @@ def _dirs(rep):
             # an agent CLI's sandbox gives these on a folder that is fine: the fix says so
             hint = (fsops.error(e, folder).hint if e.errno in fsops.SANDBOX_ERRNOS
                     else "fix its permissions, or set VCHARON_HOME to an absolute folder")
-            rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e), hint)
+            rep.check("FAIL", "dirs", "can't write in %s: %s" % (folder, e.strerror or e), hint,
+                      whole=True)
     if good:
-        rep.check("ok", "dirs", listing)
+        rep.check("ok", "dirs", listing, whole=True)
     else:
         # the folders a user allows for a sandboxed agent: listed even when a check fails,
         # which is when they are needed

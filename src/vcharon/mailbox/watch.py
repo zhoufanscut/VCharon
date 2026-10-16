@@ -1077,7 +1077,8 @@ class _Watch:
             files, saved, note, warns, error, counted, marks, fix = load_snapshot(
                 self.state, self.root, self.me)
             if note is not None:
-                self.say("note: ignoring the saved snapshot %s: %s" % (self.state, note))
+                self.say("note: ignoring the saved snapshot %s: %s"
+                         % (platform.tilde(self.state), note))
             if files is not None:
                 self.snap = files
                 self.marks = marks
@@ -1094,7 +1095,7 @@ class _Watch:
                 self.warns = set(warns)
                 self._written = self._doc()
                 self.say("watching %s, %d files in other folders, since %s%s"
-                         % (self.root, len(files), saved, self.suffix))
+                         % (platform.tilde(self.root), len(files), saved, self.suffix))
                 # shown again, as a reminder; the first round clears what's gone
                 for text in sorted(self.warns):
                     self.say("WARN %s" % text)
@@ -1106,8 +1107,8 @@ class _Watch:
             self.status(*self._error(e), baseline=True)
             warns = []
         self.say("watching %s, %d files in other folders%s%s"
-                 % (self.root, len(self.snap or {}), ", fresh start" if fresh else "",
-                    self.suffix))
+                 % (platform.tilde(self.root), len(self.snap or {}),
+                    ", fresh start" if fresh else "", self.suffix))
         self.warns = set(warns)
         for text in sorted(self.warns):
             self.say("WARN %s" % text)
@@ -1256,7 +1257,7 @@ class _Watch:
                     text, _, log = fix.partition(LOG_SEP)
                     self.say("  fix: %s" % text)
                     if log:
-                        self.say("  log: %s" % log)
+                        self.say("  log: %s" % platform.tilde(log))
             key = error_key(error)
             again = self.last_key == key
             if not again:
@@ -1307,7 +1308,7 @@ class _Watch:
             save_snapshot(self.state, self.root, self.me, self.snap, saved, self.warns,
                           self.error, self.counted, self.marks, self.fix)
         except OSError as e:
-            line = "ERROR can't save the snapshot %s: %s" % (self.state, _why(e))
+            line = "ERROR can't save the snapshot %s: %s" % (platform.tilde(self.state), _why(e))
             if line != self.save_error:
                 self.say(line)
             self.save_error = line
@@ -1329,7 +1330,7 @@ class _Watch:
         renames the folder, then deletes it). Not for an error below it, which scan skips,
         nor for any other error on it (permission, ...)."""
         fix = self.gone if isinstance(e, FileNotFoundError) else None
-        return "ERROR can't read %s: %s" % (self.root, _why(e)), fix
+        return "ERROR can't read %s: %s" % (platform.tilde(self.root), _why(e)), fix
 
 
 def _loop(w, every, sleep, step, timer, at_once, until_change, max_minutes, max_errors, rounds,

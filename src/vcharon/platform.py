@@ -85,6 +85,32 @@ def tilde(path):
     return "~" + rest if rest[0] in seps else path
 
 
+# where a path in a message may start, and what may follow the home in it: an absolute path
+# starts the text or follows a space, a quote or an opening bracket (not a colon: host:/home/me
+# is a server's path); the home ends at a separator, the text's end, a space or a closing mark
+_BEFORE = r"(?<![^\s'\"`(\[<{=])"
+_AFTER = r"(?=[%s]|\Z|[\s'\"`),;:\]>}])"
+
+
+def tilde_text(text):
+    """text, a line made from paths in many places (an error's message), with each path under
+    the home in it as tilde() shows it; for a line an agent may quote into a channel. A name
+    that only starts with the home's (/home/meg for /home/me) stays. So does a quoted path
+    (pathrules.show, JSON) whose home text the quoting changed: a home holding a character
+    shown escaped, and any Windows home, whose backslashes JSON doubles. Display only, as for
+    tilde()."""
+    mod = _path()
+    seps = mod.sep + (mod.altsep or "")
+    root = home().rstrip(seps)
+    if not mod.splitdrive(root)[1]:
+        return text
+    sep = "[%s]" % re.escape(seps)
+    # either separator, and any case, where the OS's paths allow them (normcase)
+    spelled = sep.join(re.escape(part) for part in re.split(sep, root))
+    flags = re.IGNORECASE if mod is ntpath else 0
+    return re.sub(_BEFORE + spelled + _AFTER % re.escape(seps), "~", text, flags=flags)
+
+
 def _vcharon_home():
     value = os.environ.get("VCHARON_HOME")
     if not value:

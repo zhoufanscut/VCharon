@@ -149,6 +149,41 @@ USED = "member folders are claimed with the client-id file %s (%s)"
 
 
 class DoctorTest(DoctorCase):
+    def test_the_folder_lines_keep_the_home(self):
+        # config and dirs name the folders a user pastes into a sandbox allow-list, where ~
+        # may not expand: whole; the other lines show the home as ~
+        home = self.vcharon_home
+        with mock.patch.object(platform, "home", return_value=home):
+            lines = self.doctor(code=0)
+            cfg = platform.config_path()
+        self.assertEqual(self.of(lines, "config")[0][1][:len(cfg)], cfg)
+        dirs = self.of(lines, "dirs")[0][1]
+        self.assertIn("state %s, " % os.path.join(home, "state"), dirs)
+        self.assertNotIn("~", dirs)
+        claimer = self.of(lines, "claimer")[0][1]
+        self.assertIn(" ~%sstate%sclient-id " % (os.sep, os.sep), claimer)
+        # no config file: its ok line names it whole too
+        if os.path.exists(cfg):
+            os.remove(cfg)
+        with mock.patch.object(platform, "home", return_value=home):
+            lines = self.doctor(code=0)
+        self.assertEqual(self.of(lines, "config")[0][1],
+                         "%s doesn't exist; using the defaults" % cfg)
+        # a logs folder that can't be written: its FAIL line names it whole
+        logs = os.path.join(home, "logs")
+        real = doctor.tempfile.mkstemp
+
+        def refused(*args, dir=None, **kw):
+            if dir == logs:
+                raise OSError(errno.EACCES, "Permission denied")
+            return real(*args, dir=dir, **kw)
+
+        with mock.patch.object(platform, "home", return_value=home), \
+                mock.patch.object(doctor.tempfile, "mkstemp", side_effect=refused):
+            lines = self.doctor(code=1)
+        self.assertEqual(self.of(lines, "dirs"),
+                         [("FAIL", "can't write in %s: Permission denied" % logs)])
+
     def test_everything_ok(self):
         # a checkout, whatever this suite runs from (an sdist has no .git)
         checkout = os.path.join(self.tmp, "VCharon")
@@ -907,8 +942,10 @@ class SkillTest(DoctorCase):
             ("warn", "%s: written by another version of vcharon" % older, fix)])
         # a warning: doctor still exits 0, the row after path
         lines = self.doctor(code=0)
+        # the line shows the home as ~; --json's text (rows) keeps the path whole
         self.assertEqual(self.of(lines, "skill"),
-                         [("warn", "%s: written by another version of vcharon" % older)])
+                         [("warn", "%s: written by another version of vcharon"
+                           % platform.tilde(older))])
         self.assertIn(" " * 4 + "fix: " + fix, "\n".join(lines))
         subjects = self.subjects(lines)
         self.assertEqual(subjects[subjects.index("skill") - 1:][:2], ["install", "skill"])
