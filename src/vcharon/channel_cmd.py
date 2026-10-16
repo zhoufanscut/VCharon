@@ -75,7 +75,7 @@ CHECK_SKIPPED = "claude"
 # too): Codex sees its watcher's exit only by polling, and it polls only while its turn runs, so
 # a turn ended while idle leaves entries unread until its user types again
 KEEP_TURN = ("  note: Codex: while idle, don't end your turn: poll the watcher again with a long "
-             "wait each time it returns still running (vcharon guide watch, \"Codex\")")
+             "wait each time it returns still running (vcharon guide codex)")
 # the agent KEEP_TURN is for
 KEEP_TURN_AGENT = "codex"
 # the fix of "a live session holds": the holder is the reader's own, or another agent's in the

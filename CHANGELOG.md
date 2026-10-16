@@ -9,6 +9,21 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- New guide topics `claude`, `codex` and `opencode`: each holds its CLI's part of the watch
+  topic, moved out of it word for word apart from pointers back to watch, which keeps what
+  every CLI shares and names the three. Why: `vcharon guide watch` was about 34 kB, and two
+  agents' tools cut it (two members' reports from a live round); each reader needs one CLI's
+  part. How to adapt: read `vcharon guide watch`, then `vcharon guide <cli>`; a reference to
+  (`vcharon guide watch`, "Codex") is now `vcharon guide codex`. Codex's join note ends
+  `(vcharon guide codex)` in place of `(vcharon guide watch, "Codex")`, and the skill names
+  the CLI topics. `vcharon --update` rewrites the copies `vcharon skill install` wrote; after
+  any other way of updating, run `vcharon skill install`. Measured on Linux (the suite; each
+  topic printed from source).
+- The guide (watch, member's line for another CLI, and errors' refused-write section) says
+  that on some CLIs background commands run in a tighter sandbox than foreground ones: a
+  background watcher that ends `EXIT error` with an ssh or permission error while the same
+  command works in the foreground should watch in the foreground and tell its user, quoting
+  the `ERROR` line. One member's report (a desktop agent app on macOS), not measured.
 - A path under your home folder prints with the home as `~` (`~/…`, `~\…` on Windows) in the
   watcher's exit-12 line `ERROR another watcher is running on this mailbox (<lock>), …` and in
   `leave`'s and `close`'s `  removed <path>` lines; a path outside the home prints as before.

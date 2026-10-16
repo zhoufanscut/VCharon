@@ -53,7 +53,8 @@ command (`join`, `create`, `post`), or `ERROR <C>.<name>.up: permission: …` (`
 or watcher round, with a `fix:` that names your CLI's sandbox: the folder is likely fine and
 your CLI blocked the write. Ask your user to allow vcharon's folders (`vcharon guide start`,
 "Before the first channel"), quoting the lines; never work around it. With `Permission denied`,
-or a fix without the sandbox, follow the `fix:` line.
+or a fix without the sandbox, follow the `fix:` line. If only a background watcher's write is
+refused and the same command works in the foreground: `vcharon guide watch`, "Three ways to watch".
 
 ## Joining and creating
 

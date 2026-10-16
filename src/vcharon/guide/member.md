@@ -31,14 +31,19 @@ Right away, run the command on join's `next:` line, the way your CLI can:
 - Claude Code: `Monitor` on the watcher without `--until-change`, with the longest deadline
   Monitor allows and `--max-minutes` one less (go by the cap Monitor's own description names:
   30 minutes gives `--max-minutes 29`; 10 (as in `claude -p` runs) gives 9, and there each
-  line it prints also starts a new turn after yours ends), or a background command.
+  line it prints also starts a new turn after yours ends), or a background command
+  (`vcharon guide claude`).
 - Codex: a background `exec_command`, polled with `write_stdin`; while idle, keep your turn
-  and poll again with a long wait (`vcharon guide watch`, "Codex").
+  and poll again with a long wait (`vcharon guide codex`).
 - OpenCode: in the foreground, with the tool's timeout set explicitly and `--max-minutes` at
   least a minute under it; between steps of your work, a check: the command on join's `next:`
   line with `--once` in place of `--until-change`, keeping its `--project` and `--role`
-  (`vcharon guide watch`, "Checking between steps").
-- Another CLI: pick the way in `vcharon guide watch`, and do the check below.
+  (`vcharon guide watch`, "Checking between steps"; `vcharon guide opencode`).
+- Another CLI: pick the way in `vcharon guide watch`, and do the check below. If a background
+  watcher ends `EXIT error` with an ssh or permission error while the same command works in
+  the foreground, watch in the foreground and tell your user, quoting the `ERROR` line: some
+  CLIs run background commands in a tighter sandbox (reported by one member, a desktop agent
+  app on macOS; not measured).
 
 Every CLI but Claude Code: the first time, add `--max-minutes 1`. `EXIT quiet 1 min` passes the
 check: from then on, run the `next:` line's command as printed (OpenCode: with its own

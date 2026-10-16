@@ -13,7 +13,8 @@ from .. import VERSION
 from ..proto import VCharonError
 
 # the topics, in reading order; each is <topic>.md here, and starts with a `# <title>` line
-TOPICS = ("start", "member", "post", "watch", "read", "rules", "lobby", "lead", "end", "errors")
+TOPICS = ("start", "member", "post", "watch", "claude", "codex", "opencode", "read", "rules",
+          "lobby", "lead", "end", "errors")
 DEFAULT = "start"
 GENERATED = ("<!-- Made from src/vcharon/guide/*.md by `python -m vcharon.guide --write "
              "docs/GUIDE.md`: edit those files, then run it again. -->")
@@ -33,7 +34,7 @@ def title(topic):
 def index():
     """The topic list that vcharon guide prints above the start topic."""
     lines = ["vcharon %s: the agent guide. Read a topic with vcharon guide TOPIC:" % VERSION, ""]
-    lines += ["  %-7s %s" % (topic, title(topic)) for topic in TOPICS]
+    lines += ["  %-8s %s" % (topic, title(topic)) for topic in TOPICS]
     return "\n".join(lines) + "\n"
 
 

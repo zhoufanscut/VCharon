@@ -1229,7 +1229,7 @@ agent in a folder another agent shares saw nothing of the other one's.
   would keep every watcher at one minute. A `join` or `create` run by Codex (`--agent codex`, or
   Codex found in the environment) prints, after those, `  note: Codex: while idle, don't end your
   turn: poll the watcher again with a long wait each time it returns still running (vcharon guide
-  watch, "Codex")`, at every session (a rejoin too): Codex sees its watcher's exit only by
+  codex)`, at every session (a rejoin too): Codex sees its watcher's exit only by
   polling, and polls only while its turn runs, so a turn ended while idle leaves entries unread
   until its user types. The watcher line is a command to run as printed, and it names the topic
   rather than a way to run it: a background command is right only where the agent's CLI reports
@@ -2221,6 +2221,10 @@ Every verb also takes `-v` (log lines to stderr too).
   adds its flags anywhere. Why: a member's first
   read is two topics, one command for both; any other topic is read in a tool call of its own,
   never several guide commands in one call or loop, since agents' tools cut a long output.
+  For the same reason the watch topic holds only what every CLI shares, and Claude Code, Codex
+  and OpenCode each have a topic of their own (`claude`, `codex`, `opencode`) with that CLI's
+  tools, limits and what was checked: each agent reads watch and the one for its CLI, if there
+  is one.
   `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
   only a file holding its own marker line. The skill names the topics to read by role and the

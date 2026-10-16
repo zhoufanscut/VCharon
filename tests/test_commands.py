@@ -1002,7 +1002,7 @@ HINTS = {
          "(vcharon guide watch, \"The one-minute check\")", None),
         # Codex's, at every join and create
         ("  note: Codex: while idle, don't end your turn: poll the watcher again with a long "
-         "wait each time it returns still running (vcharon guide watch, \"Codex\")", None),
+         "wait each time it returns still running (vcharon guide codex)", None),
         # the note of join and create whose watcher's snapshot couldn't be saved
         ("  note: your watcher's snapshot couldn't be saved (%s): its first start takes what "
          "is there then as seen; once it runs, read what came: vcharon read %s --to-me %s",

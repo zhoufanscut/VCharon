@@ -24,7 +24,7 @@
    1. Stop your watcher: don't start it again after its next exit, and stop the one running
       with the `next:` line's `vcharon watch … --stop` as printed (it says `stopped`, or that
       none runs); if that doesn't stop it, your CLI's way to stop a background command (Claude
-      Code: `TaskStop`; Codex: Ctrl-C through its session, `vcharon guide watch`, "Codex").
+      Code: `TaskStop`; Codex: Ctrl-C through its session, `vcharon guide codex`).
    2. Leave: run the `next:` line's `leave` as printed. With no such line (an older vcharon, or a
       title other than exactly `CLOSED`), leave from the same folder and with the same `--project`
       and `--role` you joined with (never `--server` or `--local`: leave reads the server from your

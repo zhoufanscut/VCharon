@@ -41,6 +41,9 @@ class GuideCommandTest(FakeSshCase):
         lines = index.splitlines()
         self.assertIn("the agent guide", lines[0])
         self.assertEqual([l.split()[0] for l in lines[2:]], list(guide.TOPICS))
+        # the titles line up, after the longest topic name too
+        self.assertEqual(len({l.index(guide.title(topic))
+                              for l, topic in zip(lines[2:], guide.TOPICS)}), 1, index)
         self.assertEqual("# " + start, guide.text("start"))
 
     def test_several_topics(self):
@@ -105,8 +108,8 @@ class GuideCommandTest(FakeSshCase):
         lines = err.splitlines()
         self.assertEqual(lines[0], "ERROR config: there is no guide topic 'bogus'")
         self.assertEqual(lines[1], platform.runnable(
-            "  fix: the topics are start, member, post, watch, read, rules, lobby, lead, end and "
-            "errors: vcharon guide start"))
+            "  fix: the topics are start, member, post, watch, claude, codex, opencode, read, "
+            "rules, lobby, lead, end and errors: vcharon guide start"))
         self.assertEqual(len(lines), 2, err)
 
 
@@ -481,9 +484,9 @@ def headings(path):
 
 
 class NamedSectionTest(unittest.TestCase):
-    """Lines vcharon prints name a section of the watch topic by its heading, which no other
-    test checks (DocReferenceTest checks DESIGN's and README's): renaming the heading must
-    change them too."""
+    """Lines vcharon prints name a section of the watch topic by its heading, or a topic by its
+    name, which no other test checks (DocReferenceTest checks DESIGN's and README's): renaming
+    the heading or the topic must change them too."""
 
     def test_the_one_minute_check(self):
         have = headings(os.path.join(GUIDE_DIR, "watch.md"))
@@ -492,11 +495,18 @@ class NamedSectionTest(unittest.TestCase):
         self.assertIn(named, have)
         self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_BAD_FIX)
 
-    def test_the_codex_section(self):
-        have = headings(os.path.join(GUIDE_DIR, "watch.md"))
-        [named] = re.findall(r'"([^"]+)"', channel_cmd.KEEP_TURN)
-        self.assertEqual(named, "Codex")
-        self.assertIn(named, have)
+    def test_the_codex_topic(self):
+        [argv] = commands(channel_cmd.KEEP_TURN)
+        self.assertEqual(argv, ["guide", "codex"])
+        self.assertIn(argv[1], guide.TOPICS)
+
+    def test_watch_names_each_cli_topic(self):
+        # the CLIs' parts are topics of their own: watch must say which to read next
+        text = guide.text("watch")
+        for topic in ("claude", "codex", "opencode"):
+            with self.subTest(topic=topic):
+                self.assertIn(topic, guide.TOPICS)
+                self.assertIn("`vcharon guide %s`" % topic, text)
 
     def test_references_in_the_guide(self):
         # `vcharon guide <topic>`, "<heading>": the heading must be in that topic
