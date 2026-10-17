@@ -7,7 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.1rc3 — 2026-10-17
+
+The third release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.1rc2,
+0.8.1rc1 or 0.8.0rc1 offers it (a pre-release build follows later ones), and `--update --rc` on
+0.7.1; a plain `--update` on 0.7.1 doesn't.
+
+**Updating from 0.8.1rc2:** nothing to do for channels: the format is unchanged. A script that
+matches the rejoin version line's `: nothing to do)` adapts to its new wording (below).
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). Each item: a review and a
+live test over real ssh from Linux to a Debian 13 server, against the 0.8.1rc2 binary for
+before and after (measured). Not run: macOS, Windows.
 
 - `close` that removes the channel while the leader's folder holds no entry of its own to
   `@all` titled `CLOSED` prints after its `closed` line `  note    you posted no CLOSED to
