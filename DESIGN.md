@@ -1033,10 +1033,12 @@ rules](#launch-rules)) on purpose: the name says where the agent works.
 - `vcharon:` is written at `join` and `create`, and set in place to the running version when
   it says another (or none: a `MEMBER.md` from before the line gets it added at its header's
   end) by every rejoin, which prints `  vcharon: <new> (your MEMBER.md said <old>; join updated
-  it: nothing to do)`, or `(your MEMBER.md had none; join added it: nothing to do)` (`agent:`
+  it, so there is nothing for you to do)`, or `(your MEMBER.md had none; join added it, so
+  there is nothing for you to do)` (`agent:`
   the same way, without the part after `;`; it names the file because an agent that ran no
-  update can't tell what a bare "was" means, and says it is done because a member asked what to
-  do about the line; a stale skill copy has a note of its own, the stale-skill note below), and
+  update can't tell what a bare "was" means, and says it is done, and by whom, because members
+  asked what to do about the line, and read a bare "nothing to do" after "updated it" as a
+  contradiction; a stale skill copy has a note of its own, the stale-skill note below), and
   by every start of the member's watcher (a restart after `EXIT updated` too), which prints
   nothing, its lines being a contract. Why the watcher: an update needs no rejoin (a leader never
   rejoins), but every agent restarts its watcher. The watcher's start does it before its first
@@ -1318,7 +1320,13 @@ agent in a folder another agent shares saw nothing of the other one's.
   walk. A failed delete leaves the renamed folder, which `list`
   notes. Then its own files as `leave` removes them. On Windows a rename refused because
   something holds a file or its current folder inside the channel fails cleanly, with a `fix:`
-  saying so.
+  saying so. When the leader's folder (read before the removal: a local leader's goes with
+  the channel) holds no entry of its own to `@all` titled `CLOSED`, as the watcher matches it,
+  a note follows the `closed` line: `  note    you posted no CLOSED to @all, so the members
+  weren't told C closed: each one's watcher ends with EXIT closed. Next time post CLOSED first
+  and wait for the LEAVEs; how: vcharon guide end`. A note, not a refusal: by then the close is
+  done, and refusing would only have the leader post a `CLOSED` it closes over at once. No note
+  when the channel was gone already, or with no own folder to read.
 - **Why held, not checked once**: a watcher started between the check and the command's own
   sync ran alongside it. Measured on Linux (seven overlaps seen): the watcher's round was
   skipped as busy, and once the join's own sync lost the job lock (`ERROR busy`, exit 2). Held,
@@ -2973,7 +2981,12 @@ which and how to adapt. A channel format change is always a minor version at lea
   its last `ERROR` line and fix as printed. A quoted path (`pathrules.show`, JSON) keeps its
   home where the quoting changed the home's text (a home holding a character shown escaped; on
   Windows, JSON's doubled backslashes), and so does a server's path (`<ssh>:<path>`), which
-  the client's home doesn't name.
+  the client's home doesn't name. An error raised on the server shows the server's home as
+  `~`: the helper's connection applies `platform.tilde_text` with the server's own home to the
+  message of every error it sends (a call's, a file stream's), because the client's knows only
+  the client's home. Its hint and detail go as they are. The client's log has the message as
+  sent, with the `~`. `doctor`'s checks from the server (`plugin.doctor`'s result, not an
+  error) keep the server's path: they are results, and `--json`'s text stays whole.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.

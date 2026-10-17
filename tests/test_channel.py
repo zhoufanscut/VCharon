@@ -2212,8 +2212,15 @@ class LeaveCloseTest(ChannelCase):
 
     def test_close(self):
         self.use_box("laptop")
+        # a CLOSED to one member only isn't the end the members' watchers see
+        own = os.path.join(self.joined("game.laptop-ui"), "laptop-ui")
+        entries.post(os.path.join(own, "RESULTS.md"), own, "laptop-ui", "CLOSED", ["@mac-web"])
         out = self.ok("close", "game", "--project", "ui")
         self.assertIn("OK  closed game", out)
+        # the members weren't told: a note after the closed line, the close done all the same
+        lines = out.splitlines()
+        self.assertEqual(lines[2], platform.runnable(channel_cmd.CLOSE_UNTOLD_NOTE % "game"))
+        self.assertTrue(lines[1].startswith("  closed game: "), lines[1])
         # close says it too; the laptop box has no other membership of game
         self.assertIn("  note    nothing of game as laptop-ui is left on this machine",
                       out.splitlines())
@@ -2253,9 +2260,12 @@ class LeaveCloseTest(ChannelCase):
                                         b""})
         own = os.path.join(self.root, "docs", "linux-d")
         entries.post(os.path.join(own, "STEPS.md"), own, "linux-d", "steps", ["@all"])
+        entries.post(os.path.join(own, "RESULTS.md"), own, "linux-d", "CLOSED", ["@all"])
         post_lock = entries.lock_path(own)
         out = self.ok("close", "docs", "--project", "d")
         self.assertIn("OK  closed docs", out)
+        # its CLOSED to @all told the members: no note
+        self.assertNotIn("posted no CLOSED", out)
         self.assertEqual(sorted(os.listdir(self.root)), ["game"])
         record = os.path.join(self.homes["linux"], "state", "channels", "docs.linux-d.json")
         for path in (record, snapshot, snapshot + ".lock", post_lock):
@@ -2264,6 +2274,17 @@ class LeaveCloseTest(ChannelCase):
         # the client-id file stays: it's this machine's, not the channel's
         self.assertEqual(sorted(os.listdir(os.path.join(self.homes["linux"], "state"))),
                          ["channels", "client-id"])
+
+    def test_close_of_a_server_led_channel_without_closed(self):
+        # a local leader's folder goes with the channel: close reads it before the removal
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.use_box("linux")
+        own = os.path.join(self.root, "docs", "linux-d")
+        entries.post(os.path.join(own, "STEPS.md"), own, "linux-d", "steps", ["@all"])
+        lines = self.ok("close", "docs", "--project", "d").splitlines()
+        self.assertTrue(lines[1].startswith("  closed docs: "), lines[1])
+        self.assertEqual(lines[2], platform.runnable(channel_cmd.CLOSE_UNTOLD_NOTE % "docs"))
+
 
 class LeaderOnlyTest(ChannelCase):
     """leave and close with only the leader made: LeaveCloseTest's members aren't needed."""
@@ -3755,8 +3776,8 @@ class MemberFieldsTest(ChannelCase):
         entries.set_header(path, own, "mac-web", 1, "vcharon", "0.0.9")
         out = self.ok("join", "game", "--server", "fake-dest")
         # what happened, and that nothing is left to do
-        self.assertIn("  vcharon: %s (your MEMBER.md said 0.0.9; join updated it: nothing to do)"
-                      % vcharon.VERSION, out)
+        self.assertIn("  vcharon: %s (your MEMBER.md said 0.0.9; join updated it, so there is "
+                      "nothing for you to do)" % vcharon.VERSION, out)
         # sent by the rejoin's sync
         self.assertEqual(self.member_header()["vcharon"], vcharon.VERSION)
         out = self.ok("join", "game", "--server", "fake-dest")
@@ -3768,8 +3789,8 @@ class MemberFieldsTest(ChannelCase):
         with open(path, "wb") as f:
             f.write(old)
         out = self.ok("join", "game", "--server", "fake-dest")
-        self.assertIn("  vcharon: %s (your MEMBER.md had none; join added it: nothing to do)"
-                      % vcharon.VERSION, out)
+        self.assertIn("  vcharon: %s (your MEMBER.md had none; join added it, so there is "
+                      "nothing for you to do)" % vcharon.VERSION, out)
         with open(path, "rb") as f:
             self.assertEqual(f.read(), text)
 

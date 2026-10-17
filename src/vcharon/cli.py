@@ -598,7 +598,7 @@ def _whoami(args, run):
                     and (other["role"] or None) != (record["role"] or None)):
                 _say("  also     %s  (%s): this project's other membership of %s here"
                      % (other["name"], channel_cmd.record_flags(other), args.channel))
-        _say("  box      %s" % cfg.box_text())
+        _say("  box      %s" % platform.tilde_text(cfg.box_text()))
         # the version this box runs: vcharon read notes when the members' differ
         _say("  vcharon  %s" % VERSION)
         if lobby and members is not None:
@@ -616,7 +616,7 @@ def _whoami(args, run):
     if args.json:
         return _print_json(doc)
     _say("vcharon: whoami")
-    _say("  box      %s" % cfg.box_text())
+    _say("  box      %s" % platform.tilde_text(cfg.box_text()))
     _say("  project  %s%s" % (project, "  role %s" % args.role if args.role else ""))
     _say("  name     %s (a join from here)" % name)
     _say("  vcharon  %s" % VERSION)
@@ -1427,7 +1427,7 @@ def _setup(args, run):
     cfg = load_config()
     _say("vcharon: setup")
     _say("  config   %s%s" % (platform.tilde(cfg.path), " (written)" if wrote else ""))
-    _say("  box      %s" % cfg.box_text())
+    _say("  box      %s" % platform.tilde_text(cfg.box_text()))
     if args.box is None and cfg.box is None:
         _say(platform.runnable("  note: to name this machine otherwise (laptop, a name each "
                                "of your machines has its own of): vcharon setup --box NAME"))
@@ -1762,7 +1762,8 @@ class _Run:
                 self.log_line("error", self.done_line.strip())
         # The log is the job's own, so only the console line names the job. The paths in the
         # message with the home as ~: agents quote this line into channel entries; the log
-        # keeps them whole, and the fix line too, whose command must run as printed.
+        # keeps them whole, and the fix line too, whose command must run as printed. A
+        # server's error arrives with the server's home as ~ already (helper.HelperConn).
         lines = ["ERROR %s%s: %s" % ("%s: " % self.job_name if self.job_name else "", err.code,
                                      platform.tilde_text(err.message))]
         lines += ["  | %s" % platform.tilde_text(line) for line in err.tail]

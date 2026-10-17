@@ -126,6 +126,11 @@ class FakeSshCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def server_shows(self, path):
+        """path, under the fake server's home, as an error raised on the server shows it: its
+        home as ~ (the helper's tilde, with the server's home)."""
+        return "~" + path[len(self.home):]
+
     def make_tmp(self):
         """The test's own temp folder, new and empty; removed when the test ends."""
         return tempfile.mkdtemp(prefix="vcharon-test-")

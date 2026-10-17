@@ -105,7 +105,13 @@ OLD_LOBBY_NOTE = "  note: lobby here is a work channel, not a lobby"
 # (DESIGN, "The lobby")
 TOOK_BACK = ", this machine's folder"
 # the end of a rejoin's vcharon: line, after the old value: the join wrote the new one
-VERSION_DONE = "; join %s it: nothing to do"
+VERSION_DONE = "; join %s it, so there is nothing for you to do"
+# close's note when the leader's folder holds no CLOSED to @all: a note only, since the close
+# is done by then, and a refusal would only make the leader post CLOSED into a channel it
+# closes at once (vcharon guide end, "The leader")
+CLOSE_UNTOLD_NOTE = ("  note    you posted no CLOSED to @all, so the members weren't told %s "
+                     "closed: each one's watcher ends with EXIT closed. Next time post CLOSED "
+                     "first and wait for the LEAVEs; how: vcharon guide end")
 # a take-back with no --rejoin whose MEMBER.md names another agent than this run's: a second
 # agent started in the folder takes the first one's membership with no word (DESIGN, "Which
 # membership"); a new session of the same agent is the normal case, so no note then
@@ -1990,6 +1996,8 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                                    % (server.where, channel, server.machine,
                                       record["machine"]), "check the alias")
         if close:
+            # read before the removal: a local leader's folder goes with the channel
+            told = _told_closed(_own_of(cfg, record, section), name)
             try:
                 done = server.remove(channel, name)
             except VCharonError as e:
@@ -1998,6 +2006,8 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                 say("  note    %s" % platform.tilde_text(e.message))
             else:
                 say("  closed %s: %d files and folders deleted" % (channel, done["deleted"]))
+                if told is False:
+                    say(platform.runnable(CLOSE_UNTOLD_NOTE % channel))
             gone = True
         else:
             found = _find(server.list(), channel, server.where)
@@ -2070,6 +2080,25 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                if others else ""))
     say("OK  %s %s" % ("closed" if close else "left", channel))
     return 0
+
+
+def _told_closed(own, name):
+    """Whether own, the leader's folder, holds name's entry to @all titled CLOSED, as the
+    watcher matches it (watch.CLOSED_TITLE): the members were told the channel closes. None
+    with no folder to read: close can't tell, so it says nothing."""
+    # here, not at the top: the watch module imports this one
+    from .mailbox import watch
+    if own is None or not os.path.isdir(own):
+        return None
+    for path in entries.md_files(own):
+        try:
+            found = entries.parse_file(path)
+        except OSError:
+            continue
+        if any(e.name == name and entries.ALL in e.to and e.title.strip() == watch.CLOSED_TITLE
+               for e in found):
+            return True
+    return False
 
 
 def _own_of(cfg, record, section):

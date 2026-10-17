@@ -110,6 +110,32 @@ class FrameTest(unittest.TestCase):
         self.assertEqual([len(p) for k, p in frames], [262144, 262144, 75712])
         self.assertEqual(b"".join(p for k, p in frames), data)
 
+    def test_helper_conn_errors_show_the_servers_home_as_tilde(self):
+        # the client's tilde knows only the client's home: the helper applies its own
+        fd, path = tempfile.mkstemp()
+        self.addCleanup(os.remove, path)
+        conn = helper.HelperConn(io.BytesIO(), fd)
+        err = VCharonError("not_found", "the root /srv/me/ch doesn't exist",
+                           hint="mkdir /srv/me/ch", detail="in /srv/me/x.py")
+        with mock.patch.object(helper.platform, "home", return_value="/srv/me"):
+            conn.send_json(proto.err_msg(3, err))
+            conn.send_json({"t": "end", "error": err.to_json()})
+            conn.send_file_end(err)
+            conn.send_json(proto.ok_msg(4, {"path": "/srv/me/ch"}))
+        conn.close()
+        with open(path, "rb") as f:
+            (k1, p1), (k2, p2), (k3, p3), (k4, p4) = frames_of(f.read())
+        self.assertEqual([k1, k2, k3, k4], [J, J, E, J])
+        shown = {"code": "not_found", "message": "the root ~/ch doesn't exist",
+                 "hint": "mkdir /srv/me/ch", "detail": "in /srv/me/x.py"}
+        self.assertEqual(proto.decode_json(p1)["error"], shown)
+        self.assertEqual(proto.decode_json(p2)["error"], shown)
+        self.assertEqual(json.loads(p3), shown)
+        # only errors: a result goes as it was
+        self.assertEqual(proto.decode_json(p4)["result"], {"path": "/srv/me/ch"})
+        # the error object itself is unchanged
+        self.assertEqual(err.message, "the root /srv/me/ch doesn't exist")
+
     def test_clean_end(self):
         self.assertIsNone(proto.read_frame(io.BytesIO().read))
 

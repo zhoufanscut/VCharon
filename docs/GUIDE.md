@@ -1444,6 +1444,9 @@ myapp`, in the order and with the reasons of `vcharon guide end`.
    first. It refuses, with nothing deleted, while a watcher or sync of yours runs, and while
    the channel's top holds a file, or a folder whose name can't be a member's (ask your
    user). An empty folder with a member's name is deleted with the rest.
+   With no `CLOSED` of yours to `@all`, it notes after its `closed` line that the members
+   weren't told: each one's watcher ends with `EXIT closed` (below). The close is done; tell
+   your user, and post `CLOSED` first next time.
    On Windows, `ERROR permission: … access denied` means something holds the folder (a file
    open in it, or a shell whose current folder is in it): close that, then run `close` again.
 

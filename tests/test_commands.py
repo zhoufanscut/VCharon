@@ -492,6 +492,18 @@ class SetupTest(ChannelCase):
             self.assertEqual(out.splitlines()[1], "  config   %s" % self.ini)
             self.assertEqual(json.loads(self.run_cli("whoami", "--json")[1])["box"], "win")
 
+    def test_box_line_shows_the_home_as_tilde(self):
+        # whoami's and setup's line, as agents quote it; doctor --json's text stays whole
+        self.ok("setup", "--box", "laptop")
+        shown = "  box      laptop (set in %s)" % os.path.join("~", "vcharon.ini")
+        with mock.patch.object(platform, "home", return_value=self.home_):
+            self.assertEqual(self.ok("setup").splitlines()[2], shown)
+            self.assertIn(shown, self.ok("whoami").splitlines())
+            doc = json.loads(self.run_cli("doctor", "--json")[1])
+        self.assertIn({"level": "ok", "subject": "box", "text": "laptop (set in %s)" % self.ini},
+                      [{k: c.get(k) for k in ("level", "subject", "text")}
+                       for c in doc["checks"]])
+
     def test_box_write_update_and_invalid(self):
         out = self.ok("setup", "--box", "laptop")
         self.assertEqual(out.splitlines()[2], "  box      laptop (set in %s)" % self.ini)
@@ -946,6 +958,10 @@ HINTS = {
         ("members leave after the leader's CLOSED; how: vcharon guide end", ()),
         ("a leader ends the channel with CLOSED to @all after every member's DONE, then a "
          "close; how: vcharon guide end", ()),
+        # close's note when the leader posted no CLOSED to @all
+        ("  note    you posted no CLOSED to @all, so the members weren't told %s closed: each "
+         "one's watcher ends with EXIT closed. Next time post CLOSED first and wait for the "
+         "LEAVEs; how: vcharon guide end", ("game",)),
         # a join record of an earlier channel of the name
         ("run vcharon leave %s %s (it posts nothing, and removes this machine's files of that "
          "membership), then %s again", ("game", FLAGS, "join")),

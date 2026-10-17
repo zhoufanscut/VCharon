@@ -685,7 +685,7 @@ class JobTest(FakeSshCase):
         before = self.state_bytes("pull")
         _out, err = self.failed(1, "pull")
         self.assertEqual(err[:2], ["ERROR empty_source: %s is empty, but earlier runs sent 3 paths "
-                                   "from it" % outbox,
+                                   "from it" % self.server_shows(outbox),
                                    "  fix: check that its disk is mounted; if it's really empty, "
                                    "set from.allow_empty = yes"])
         self.assertEqual(read_tree(back), everything)
@@ -1932,7 +1932,8 @@ class MailboxTest(FakeSshCase):
         code, _out, err = self.run_jobs("mb.windows.up")
         self.assertEqual(code, 1)
         self.assertEqual(err.splitlines()[:2], [
-            "ERROR not_found: the root %s doesn't exist" % os.path.join(self.server, "windows"),
+            "ERROR not_found: the root %s doesn't exist"
+            % self.server_shows(os.path.join(self.server, "windows")),
             "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p"))])
         # the job's log keeps the plain text: read later, maybe on another box
         with open(os.path.join(self.vcharon_home, "logs", "mb.windows.up.log"),
@@ -2121,7 +2122,8 @@ class MailboxTest(FakeSshCase):
         sub = os.path.join(self.server, "debian", "sub")
         os.chmod(sub, 0)
         self.addCleanup(os.chmod, sub, 0o755)
-        self.refused("down", "ERROR permission: can't list %s: Permission denied" % sub,
+        self.refused("down", "ERROR permission: can't list %s: Permission denied"
+                     % self.server_shows(sub),
                      self.DOWN_FIX % "fixes its permissions")
 
     @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0, "needs POSIX modes, not root")
@@ -2151,8 +2153,10 @@ class MailboxTest(FakeSshCase):
                 finally:
                     os.chmod(root, 0o755)
                 self.assertEqual(code, 1)
+                # the server's error shows the server's home as ~
+                shown = self.server_shows(root) if job == "down" else root
                 self.assertIn("ERROR mb.windows.%s: permission: can't list %s: Permission denied\n"
-                              "  fix: fix its permissions\n" % (job, root), err)
+                              "  fix: fix its permissions\n" % (job, shown), err)
 
     def test_a_name_too_long_for_the_target_keeps_its_hint(self):
         # fsops' hint: a root path can be too long too, which no writer fixes
@@ -2264,9 +2268,10 @@ class MailboxTest(FakeSshCase):
             errors = [l for l in err.splitlines() if l.startswith(("ERROR", "  fix"))]
             self.assertEqual(errors, [
                 "ERROR mb.windows.up: not_found: the root %s doesn't exist"
-                % os.path.join(self.server, "windows"),
+                % self.server_shows(os.path.join(self.server, "windows")),
                 "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p")),
-                "ERROR mb.windows.down: not_found: %s doesn't exist" % self.server,
+                "ERROR mb.windows.down: not_found: %s doesn't exist"
+                % self.server_shows(self.server),
                 "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p"))])
             self.assertNotIn(stage.ROOT_HINT, err)
             self.assertFalse(os.path.exists(self.server))

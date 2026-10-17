@@ -7,6 +7,27 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `close` that removes the channel while the leader's folder holds no entry of its own to
+  `@all` titled `CLOSED` prints after its `closed` line `  note    you posted no CLOSED to
+  @all, so the members weren't told C closed: each one's watcher ends with EXIT closed. Next
+  time post CLOSED first and wait for the LEAVEs; how: vcharon guide end`. The close is done
+  as before; no new flag, no refusal. Why: a leader closed without `CLOSED`, and every member's
+  watcher ended `ERROR … not_found` and `EXIT closed` with no word from the leader.
+- An error raised on the server shows the server's home as `~` too: `ERROR C.<name>.down:
+  not_found: ~/.local/state/vcharon/channels/C doesn't exist` where 0.8.1rc2 printed the
+  server's full home path to a remote member (the client's `~` knew only the client's home).
+  Its `fix:` line and what a program reads back are unchanged; the client's log now has the
+  message with the server's home as `~` too, and so does `doctor --json`'s check text when
+  the server's `plugin.doctor` call fails (that check's text is the error's message).
+  `doctor`'s checks the server returns keep the server's path.
+- `whoami` and `setup` show the config path in the `box` line's `(set in <path>)` with the
+  home as `~`, as `doctor`'s line did already.
+- A rejoin's version line reads `(your MEMBER.md said <old>; join updated it, so there is
+  nothing for you to do)` (or `join added it, so …`), in place of `…: nothing to do)`. Why:
+  agents read "updated it: nothing to do" as a contradiction.
+
 ## 0.8.1rc2 — 2026-10-16
 
 The second release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.1rc1
