@@ -2736,6 +2736,10 @@ maintainer asks before tagging.
   the unit tests, `pyinstaller vcharon.spec`, `tests/smoke.sh` with the tag's version, then
   packing and the installer check. The Linux row also pings the runner's own sshd from the binary
   and runs `tests/ssh_flow.sh` with it, so the helper bundled in the binary runs on a real server.
+  The Linux row's runner is pinned (`ubuntu-24.04`), not `ubuntu-latest`: the binary needs the
+  glibc of the image it was built on, so a newer image can raise that floor for every user
+  unannounced; moving it is a change of its own, with a CHANGELOG line. CI's jobs stay on
+  `ubuntu-latest`, so a new Ubuntu breaks a test there before it reaches a build.
 - **Assets**, nine per release, the names `--update`, `install.sh` and `install.ps1` pick. These
   agree on them and change together: `release.yml` and `tests/pack.py`, `install.sh` and
   `install.ps1` (and `tests/install_check.sh`), and `src/vcharon/update.py`:

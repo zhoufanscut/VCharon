@@ -40,8 +40,8 @@ irm https://raw.githubusercontent.com/zhoufanscut/VCharon/main/install.ps1 | iex
 ```
 
 Both download the release for your platform, check its published sha256, and say what they
-did. The Linux binary needs a glibc at least as new as that of the `ubuntu-latest` GitHub
-runner it was built on; on an older system, use pipx or uv. Intel Macs and Linux on arm64 have
+did. The Linux binary is built on GitHub's `ubuntu-24.04` runner and needs glibc 2.38 or later
+(0.8.1's binary, measured); on an older system, use pipx or uv. Intel Macs and Linux on arm64 have
 no binary: use pipx or uv.
 
 With pipx or uv, from GitHub (needs Python 3.13 or later), pinned to a release's tag:

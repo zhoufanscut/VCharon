@@ -78,7 +78,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # pinned: the binary needs the glibc of the image it is built on, and a newer
+          # image can raise that floor for every user
+          - os: ubuntu-24.04
             asset: vcharon-linux-x64
           - os: macos-latest
             asset: vcharon-darwin-arm64

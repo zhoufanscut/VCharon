@@ -7,6 +7,14 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The Linux binary is built on GitHub's `ubuntu-24.04` runner, pinned, instead of
+  `ubuntu-latest`, which GitHub moves to Ubuntu 26 from 2026-10-19: a build on a newer image
+  can need a newer glibc (**inferred**, not checked on Ubuntu 26). 0.8.1's binary, built on
+  `ubuntu-24.04`, needs glibc 2.38 or later (**measured**: `objdump -T` on the binary and the
+  libraries bundled in it).
+
 ## 0.8.1 — 2026-10-19
 
 0.8.1rc3's code plus one guide change, the first item below. Next to 0.7.1, the latest final
