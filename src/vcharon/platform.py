@@ -99,16 +99,36 @@ def tilde_text(text):
     (pathrules.show, JSON) whose home text the quoting changed: a home holding a character
     shown escaped, and any Windows home, whose backslashes JSON doubles. Display only, as for
     tilde()."""
-    mod = _path()
+    return _home_as(text, _path(), home(), "~")
+
+
+# A path under the server's home, in a line printed on the client: a bare ~ would read as the
+# client's home. The word, never the host name or ssh alias, which a quoted line would carry
+# into a channel.
+SERVER_HOME = "server:~"
+
+
+def server_tilde_text(text, server_home=None):
+    """text with each path under the server's home as server:~ (server:~/...), as tilde_text()
+    shows the home; display only. server_home: the server's home from its hello, a POSIX path
+    (the client takes only a Linux server); None on the server itself, for its own home. The
+    client's tilde_text() run after it finds no home text left to change, so call this one
+    first."""
+    if server_home is None:
+        return _home_as(text, _path(), home(), SERVER_HOME)
+    return _home_as(text, posixpath, server_home, SERVER_HOME)
+
+
+def _home_as(text, mod, home_path, shown):
     seps = mod.sep + (mod.altsep or "")
-    root = home().rstrip(seps)
+    root = home_path.rstrip(seps)
     if not mod.splitdrive(root)[1]:
         return text
     sep = "[%s]" % re.escape(seps)
     # either separator, and any case, where the OS's paths allow them (normcase)
     spelled = sep.join(re.escape(part) for part in re.split(sep, root))
     flags = re.IGNORECASE if mod is ntpath else 0
-    return re.sub(_BEFORE + spelled + _AFTER % re.escape(seps), "~", text, flags=flags)
+    return re.sub(_BEFORE + spelled + _AFTER % re.escape(seps), shown, text, flags=flags)
 
 
 def _vcharon_home():

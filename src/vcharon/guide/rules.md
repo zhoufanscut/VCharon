@@ -31,7 +31,8 @@ Each rule has its reason after the colon.
   host's name. Give the path in the repository and the revision instead, and name your machine
   by its box (the first part of your member name). A public link (a library's docs) is fine.
   Even when your user asks for paths in a report, give them relative to your project, or
-  starting `~/`. When you quote vcharon's own output, mask the server alias: its lines print
+  starting `~/`. `server:~` in vcharon's lines is the server's home, not a host name: quote
+  it as it is. When you quote vcharon's own output, mask the server alias: its lines print
   it (`sent to devbox`, `--server devbox`). `vcharon post` warns when an entry names one. Mask
   the home folder in the commands its lines print too (`fix:`, `next:`): they spell the
   program as this machine runs it, and that path can name the home folder.

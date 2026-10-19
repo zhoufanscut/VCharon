@@ -2153,7 +2153,7 @@ class MailboxTest(FakeSshCase):
                 finally:
                     os.chmod(root, 0o755)
                 self.assertEqual(code, 1)
-                # the server's error shows the server's home as ~
+                # the server's error shows the server's home as server:~
                 shown = self.server_shows(root) if job == "down" else root
                 self.assertIn("ERROR mb.windows.%s: permission: can't list %s: Permission denied\n"
                               "  fix: fix its permissions\n" % (job, shown), err)
@@ -2364,7 +2364,10 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(len(lines), 2, out)
         self.assertTrue(lines[0].endswith("%s doesn't exist yet; vcharon sync mb --project p "
                                           "makes it" % self.own), lines[0])
-        self.assertTrue(lines[1].endswith("%s: a directory" % self.server), lines[1])
+        # a check from the server: its home as server:~ (on Windows the fake server's home has
+        # backslashes, which a real server's POSIX home never has: the line keeps it whole)
+        shown = self.server if os.name == "nt" else self.server_shows(self.server)
+        self.assertTrue(lines[1].endswith(" %s: a directory" % shown), lines[1])
         # the server's tree missing is a closed channel, a FAIL that says to leave; so is up's
         # folder there
         shutil.rmtree(self.server)

@@ -36,10 +36,10 @@ def take_stdout():
 
 class HelperConn:
     """The helper's end of the connection: frames in on stdin, out on the private fd. Every
-    error it sends has the server's home in its message as ~: the client prints the message,
-    and its own tilde knows only the client's home (DESIGN, "Rules for the code"). The hint
-    keeps its paths (a fix line runs as printed), and so does the detail, which is only
-    logged."""
+    error it sends has the server's home in its message as server:~: the client prints the
+    message, its own tilde knows only the client's home, and a bare ~ would read as the
+    client's (DESIGN, "Rules for the code"). The hint keeps its paths (a fix line runs as
+    printed), and so does the detail, which is only logged."""
 
     def __init__(self, inp, out):
         self._inp = inp
@@ -52,7 +52,8 @@ class HelperConn:
     def send_json(self, obj):
         error = obj.get("error")
         if isinstance(error, dict):
-            obj = dict(obj, error=dict(error, message=platform.tilde_text(error["message"])))
+            message = platform.server_tilde_text(error["message"])
+            obj = dict(obj, error=dict(error, message=message))
         self._write(proto.frame(proto.J, proto.encode_json(obj)))
         self._flush()
 
@@ -62,8 +63,8 @@ class HelperConn:
 
     def send_file_end(self, error=None):
         if error is not None:
-            error = VCharonError(error.code, platform.tilde_text(error.message), error.hint,
-                                 error.detail)
+            error = VCharonError(error.code, platform.server_tilde_text(error.message),
+                                 error.hint, error.detail)
         self._write(proto.end_frame(error))
         self._flush()
 

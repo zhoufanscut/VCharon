@@ -178,6 +178,31 @@ class TildeTextTest(PatchedCase):
         self.check("linux", "/", (("/srv/x", "/srv/x"),))
         self.check("windows", "C:\\", (("C:\\vc\\x", "C:\\vc\\x"),))
 
+    def test_a_server_path_stays(self):
+        # what the helper sends, printed again through the client's tilde
+        self.check("linux", "/home/me", (
+            ("the root server:~/x doesn't exist", "the root server:~/x doesn't exist"),))
+
+
+class ServerTildeTextTest(PatchedCase):
+    def test_the_servers_home_as_server_tilde(self):
+        # a POSIX home from the hello, whatever this box's OS; the client's home not touched
+        for osn in ("linux", "windows"):
+            with self.subTest(os=osn), contextlib.ExitStack() as stack:
+                for patcher in on(osn, HOME="/home/me"):
+                    stack.enter_context(patcher)
+                self.assertEqual(
+                    platform.server_tilde_text("/srv/me/x: no; /srv/meg/x /home/me/x /srv/me",
+                                               "/srv/me"),
+                    "server:~/x: no; /srv/meg/x /home/me/x server:~")
+
+    def test_on_the_server_its_own_home(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in on("linux", HOME="/srv/me"):
+                stack.enter_context(patcher)
+            self.assertEqual(platform.server_tilde_text("the root /srv/me/x /tmp/y"),
+                             "the root server:~/x /tmp/y")
+
 
 class SshPathTest(PatchedCase):
     def test_posix(self):

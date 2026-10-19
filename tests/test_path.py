@@ -986,7 +986,9 @@ class PathDoctorTest(unittest.TestCase):
         self.assertEqual(self.doctor("~/d"), [("ok", "from.path %s: a directory" % d, None)])
 
     def test_missing(self):
-        self.assertEqual(self.doctor("~/nope"), [("FAIL", "from.path ~/nope doesn't exist",
+        # resolved, as the other lines: a ~ as written would read as the client's home
+        missing = os.path.join(self.tmp, "nope")
+        self.assertEqual(self.doctor("~/nope"), [("FAIL", "from.path %s doesn't exist" % missing,
                                                   "check the path")])
         self.assertEqual(os.listdir(self.tmp), [])
 

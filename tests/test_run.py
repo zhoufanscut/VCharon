@@ -374,7 +374,8 @@ class RunTest(FakeSshCase):
         self.addCleanup(os.chmod, locked, 0o755)
         e = self.failure(self.engine(*self.sides(direction, src, dst)))
         self.assertEqual(e.code, "permission")
-        # a pull's source is the server's, under its home: its error shows the home as ~
+        # a pull's source is the server's, under its home: its error shows the home as
+        # server:~
         shown = self.server_shows(locked) if direction == "pull" else locked
         self.assertEqual(e.message, "can't list %s: Permission denied" % shown)
         self.assertEqual(read_tree(dst), {})

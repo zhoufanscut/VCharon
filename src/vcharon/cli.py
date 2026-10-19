@@ -915,13 +915,18 @@ def hosts_in(text, hosts):
     hosts, sorted. A word goes on through ASCII letters, digits, '_' and '-', and through a '.'
     with one of those after it: "devbox" is in "sent to devbox.", "me@devbox:22" and
     "已发送到devbox。", but not in "devbox-2", "my-devbox" or "devbox.example.com" (a name of
-    its own, whose own entry in hosts matches it)."""
+    its own, whose own entry in hosts matches it); never at a server:~ (platform.SERVER_HOME),
+    vcharon's own word for the server's home."""
     found = set()
     for host in hosts:
         pattern = r"(?<![\w-])(?<![\w-]\.)%s(?![\w-])(?!\.[\w-])" % re.escape(host)
         # ASCII: a name written next to Chinese text (no space between) is still a word
-        if re.search(pattern, text, re.IGNORECASE | re.ASCII):
-            found.add(host)
+        for m in re.finditer(pattern, text, re.IGNORECASE | re.ASCII):
+            # vcharon's own server:~ (a path under the server's home, quoted from its lines)
+            # names no host, even for an alias spelled "server"
+            if not text.startswith(platform.SERVER_HOME, m.start()):
+                found.add(host)
+                break
     return sorted(found)
 
 
@@ -1763,7 +1768,8 @@ class _Run:
         # The log is the job's own, so only the console line names the job. The paths in the
         # message with the home as ~: agents quote this line into channel entries; the log
         # keeps them whole, and the fix line too, whose command must run as printed. A
-        # server's error arrives with the server's home as ~ already (helper.HelperConn).
+        # server's error arrives with the server's home as server:~ already
+        # (helper.HelperConn).
         lines = ["ERROR %s%s: %s" % ("%s: " % self.job_name if self.job_name else "", err.code,
                                      platform.tilde_text(err.message))]
         lines += ["  | %s" % platform.tilde_text(line) for line in err.tail]

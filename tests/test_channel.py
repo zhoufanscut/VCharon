@@ -2732,6 +2732,16 @@ class PostHostWarnTest(ChannelCase):
             with self.subTest(text=text):
                 self.assertEqual(cli.hosts_in(text, hosts), [])
 
+    def test_server_tilde_is_not_an_alias(self):
+        # vcharon's lines show the server's home as server:~; an agent quoting one names no
+        # host, even when an alias is spelled server. Elsewhere that word still warns
+        hosts = {"server", "devbox"}
+        quoted = "ERROR C.mac-web.down: not_found: the root server:~/x doesn't exist"
+        self.assertEqual(cli.hosts_in(quoted, hosts), [])
+        for text in ("synced to server", "server:/home/x", "ssh server; " + quoted):
+            with self.subTest(text=text):
+                self.assertEqual(cli.hosts_in(text, hosts), ["server"])
+
     def test_names_the_channel_has_anyway(self):
         # an alias that is also the channel's name, a box, project or role in a member's name,
         # or this box: entries name those anyway

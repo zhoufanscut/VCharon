@@ -19,6 +19,7 @@ from unittest import mock
 
 import vcharon
 from vcharon import bundle, channels, doctor, fsops, install, keys, platform, skill, ssh, state
+from vcharon.proto import VCharonError
 
 from tests import util
 from tests.util import (
@@ -137,6 +138,14 @@ class DoctorCase(FakeSshCase):
     def of(self, lines, subject):
         return [(level, text) for level, s, text in self.checks(lines) if s == subject]
 
+    def from_server(self, path):
+        """path in a check line from the server: under its home as server:~. A real server
+        is Linux; on Windows the fake server's home has backslashes, which the POSIX home
+        never matches, so the line keeps it whole."""
+        if os.name != "nt" and path.startswith(self.home + "/"):
+            return "server:~" + path[len(self.home):]
+        return path
+
     def adds(self):
         try:
             with open(os.environ["FAKE_SSH_ADD_ARGV_LOG"], encoding="utf-8") as f:
@@ -237,9 +246,10 @@ class DoctorTest(DoctorCase):
             "  ok    push       state: none yet; the first run sends everything",
             "  ok    push       from.path %s: a directory" % self.src,
             "  ok    push       to.path %s: %s"
-            % (os.path.realpath(os.path.join(home, "inbox")), WRITABLE),
+            % (self.from_server(os.path.realpath(os.path.join(home, "inbox"))), WRITABLE),
             "  ok    pull       state: none yet; the first run sends everything",
-            "  ok    pull       from.path %s: a directory" % os.path.join(home, "outbox"),
+            "  ok    pull       from.path %s: a directory"
+            % self.from_server(os.path.join(home, "outbox")),
             "  ok    pull       to.path %s: %s" % (os.path.realpath(self.dst), WRITABLE)])
         self.assertRegex(lines[17], LAST_OK)
         self.assertEqual(len(lines), 18)
@@ -602,19 +612,50 @@ class DoctorTest(DoctorCase):
 
     # a job
 
+    @unittest.skipIf(os.name == "nt", "the fake server's home is a Windows path there")
+    def test_server_checks_show_its_home_as_server(self):
+        # a bare ~ would read as the client's home; --json's text stays whole
+        outbox = os.path.join(self.home, "outbox")
+        line = ("ok", "from.path server:~/outbox: a directory")
+        self.assertIn(line, self.of(self.doctor(code=0), "pull"))
+        doc = json.loads(self.run_cli("doctor", "--json")[1])
+        self.assertIn("from.path %s: a directory" % outbox,
+                      [c["text"] for c in doc["checks"] if c["subject"] == "pull"])
+        # a client whose home has the server's text (one user name on both): still the
+        # server's, not ~/outbox
+        with mock.patch.object(platform, "home", return_value=self.home):
+            self.assertIn(line, self.of(self.doctor(code=0), "pull"))
+
+    @unittest.skipIf(os.name == "nt", "the fake server's home is a Windows path there")
+    def test_a_failed_call_is_not_rewritten_again(self):
+        # the call's error came through the helper's rewrite already, or the client made it
+        # (lost): its path is the client's, even when the homes have the same text
+        real = ssh.Session.call
+        log = os.path.join(self.home, "client.log")
+
+        def call(session, fn, *args, **kw):
+            if fn == "plugin.doctor":
+                raise VCharonError("lost", "the connection closed; see %s" % log)
+            return real(session, fn, *args, **kw)
+
+        self.patch(ssh.Session, "call", new=call)
+        with mock.patch.object(platform, "home", return_value=self.home):
+            lines = self.doctor(code=1)
+        self.assertIn(("FAIL", "the connection closed; see ~/client.log"), self.of(lines, "pull"))
+
     def test_remote_sink_root(self):
         text = CONFIG.format(src=self.src, dst=self.dst).replace("to.path   = inbox",
                                                                   "to.path   = new/inbox")
         self.write_config(text)
         lines = self.doctor(code=1)
-        missing = os.path.join(self.home, "new", "inbox")
+        missing = self.from_server(os.path.join(self.home, "new", "inbox"))
         self.assertIn(("FAIL", "the root %s doesn't exist" % missing), self.of(lines, "push"))
         self.write_config(text.replace("to.path   = new/inbox",
                                        "to.path   = new/inbox\nto.create = yes"))
         lines = self.doctor(code=0)
         # the FAIL above is the check's error, which names the root as given; this line shows
         # the root the check resolved (on macOS the temp dir is under /private)
-        missing = os.path.join(os.path.realpath(self.home), "new", "inbox")
+        missing = self.from_server(os.path.join(os.path.realpath(self.home), "new", "inbox"))
         self.assertIn(("ok", "to.path %s doesn't exist yet; the first run creates it" % missing),
                       self.of(lines, "push"))
         self.assertFalse(os.path.exists(os.path.join(self.home, "new")))

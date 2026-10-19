@@ -9,6 +9,22 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A path under the server's home shows that home as `server:~` (the word `server`, never the
+  host name or alias): in an error raised on the server, `ERROR C.<name>.down: not_found: the
+  root server:~/.local/state/vcharon/channels/C doesn't exist`, and in `doctor`'s check lines
+  from the server, `ok    pull       from.path server:~/outbox: a directory`. Why: a bare `~`
+  read as the client's home. Older versions printed the error's path as `~/…` (0.8.1rc3 and
+  0.8.1), and whole before that, or as `~/…` in 0.8.1rc2 when the client's home had the same
+  text; doctor's server checks whole, or as `~/…` from 0.8.1rc2 when the client's home had
+  the same text. Doctor's `from.path <path> doesn't exist` line names the path resolved, as
+  its other `from.path` lines do, where older versions printed it as written in the config (a
+  `~/…` or relative path, which on a remote end meant the server's home); `--json` has it
+  whole. A script that matches these human lines allows `server:~/…` where it allowed `~/…`;
+  what follows `server:` is the path on the server. The client's log has the error's message
+  as sent, now with `server:~`, and so does `doctor --json`'s check text when the server's
+  `plugin.doctor` call fails (that text is the error's message); the text of the checks the
+  server returns stays whole in `--json`, as before. `vcharon post` no longer counts the
+  `server` of `server:~` as an ssh alias named `server`.
 - The Linux binary is built on GitHub's `ubuntu-24.04` runner, pinned, instead of
   `ubuntu-latest`, which GitHub moves to Ubuntu 26 from 2026-10-19: a build on a newer image
   can need a newer glibc (**inferred**, not checked on Ubuntu 26). 0.8.1's binary, built on

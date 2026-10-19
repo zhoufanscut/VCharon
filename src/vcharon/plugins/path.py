@@ -669,13 +669,14 @@ class Source(plugin.Source):
     def doctor(self):
         """vcharon doctor: the path exists, and is a directory it can list or a file it can
         read. The top is followed, as plan() follows it. Only reads."""
-        given = self.options["path"]
-        abs_path = os.path.abspath(self.ctx.resolve(given, "from.path"))
+        # every line names the path resolved, absolute: a ~ or a relative path as written
+        # would name another home, or no folder, once the client prints it
+        abs_path = os.path.abspath(self.ctx.resolve(self.options["path"], "from.path"))
         try:
             st = os.stat(abs_path)
         except OSError as e:
             if isinstance(e, FileNotFoundError) or e.errno == errno.ENOTDIR:
-                return [("FAIL", "from.path %s doesn't exist" % given, MISSING_HINT)]
+                return [("FAIL", "from.path %s doesn't exist" % abs_path, MISSING_HINT)]
             err = fsops.error(e, abs_path)
             return [("FAIL", err.message, err.hint)]
         perm_hint = "check its permissions"

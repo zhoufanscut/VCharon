@@ -1655,7 +1655,9 @@ re: linux-api#3
   A name matches as a whole word, case-insensitively: a word runs on through ASCII
   letters, digits, `_`, `-`, and a `.` followed by one of those, so `devbox` matches in `sent
   to devbox.`, `me@devbox:22` and `已发送到devbox。` (Chinese text puts no space around a
-  name) but not in `devbox-2`, `win-devbox#3` or `devbox.example.com`. The records are read
+  name) but not in `devbox-2`, `win-devbox#3` or `devbox.example.com`; never at a `server:~`,
+  vcharon's own spelling of the server's home ([Rules for the code](#rules-for-the-code)),
+  even for an alias spelled `server`. The records are read
   one by one: one that can't be read only leaves its own name out.
   Why: vcharon's own lines (`sent to <server>`, `--server <alias>` in fix lines) print the
   alias, and an agent quoting them carries it into the channel, which the rules keep machine
@@ -2311,8 +2313,9 @@ OK  2 jobs  (0.7 s)
   <job>: <code>: …`), then `  | ` lines of ssh's stderr where they help, a `  done …` line after
   a commit that failed partway, `  fix: <text>` and `  log: <path>`. A job's name holds no `:`
   or space, so the name ends at the line's first `: `. The message, the `  | ` lines and the
-  log path show a path under the home as `~/…` (`~\…` on Windows); the `fix:` line keeps its
-  paths, and the log keeps the message's whole ([Rules for the code](#rules-for-the-code)).
+  log path show a path under the home as `~/…` (`~\…` on Windows), and one under the server's
+  home, in an error raised there, as `server:~/…`; the `fix:` line keeps its paths, and the log
+  keeps the message's whole ([Rules for the code](#rules-for-the-code)).
 - A Ctrl-C exits 130 with no summary; ssh is killed and the helper cleans up.
 - `join` and `create` run the same sync but print `  syncing with <server> …` before it (so a
   sync that hangs or is killed isn't silent) and, when it succeeds, one line in place of its
@@ -2985,12 +2988,16 @@ which and how to adapt. A channel format change is always a minor version at lea
   its last `ERROR` line and fix as printed. A quoted path (`pathrules.show`, JSON) keeps its
   home where the quoting changed the home's text (a home holding a character shown escaped; on
   Windows, JSON's doubled backslashes), and so does a server's path (`<ssh>:<path>`), which
-  the client's home doesn't name. An error raised on the server shows the server's home as
-  `~`: the helper's connection applies `platform.tilde_text` with the server's own home to the
-  message of every error it sends (a call's, a file stream's), because the client's knows only
-  the client's home. Its hint and detail go as they are. The client's log has the message as
-  sent, with the `~`. `doctor`'s checks from the server (`plugin.doctor`'s result, not an
-  error) keep the server's path: they are results, and `--json`'s text stays whole.
+  the client's home doesn't name. A path under the server's home shows that home as
+  `server:~` (`server:~/…`; the word, never the host name or alias), because a bare `~` reads
+  as the client's home: in an error raised on the server, where the helper's connection
+  applies `platform.server_tilde_text` to the message of every error it sends (a call's, a
+  file stream's), since the client's tilde knows only the client's home; and in `doctor`'s
+  checks from the server (`plugin.doctor`'s result), with the home from the hello, before the
+  client's own tilde, so a client whose home has the same text doesn't take it as its own.
+  The client's tilde, run after, finds no home text left in `server:~/…` to change. The
+  error's hint and detail go as they are; the client's log has the message as sent, and
+  `--json`'s text stays whole.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.

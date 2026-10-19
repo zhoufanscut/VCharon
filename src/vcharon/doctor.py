@@ -97,13 +97,20 @@ class Report:
         # every check, as --json gives them
         self.checks = []
 
-    def check(self, level, subject, text, hint=None, note=None, whole=False):
+    def check(self, level, subject, text, hint=None, note=None, whole=False, server_home=None):
         """whole: the line keeps its paths as they are, for the folders a user pastes into
         an agent's sandbox allow-list, where ~ may not expand (a quoted argument, PowerShell's
         native arguments, cmd.exe, a settings field); every other line shows the home as ~,
-        as agents quote it. --json's text is always whole."""
+        as agents quote it. server_home: the text came from the server, whose home it shows
+        as server:~ (first, so a client with the same home text doesn't take it as its own).
+        --json's text is always whole."""
         head = "  %s  %s  " % (level.ljust(4), subject.ljust(self.width))
-        self.say(head + (text if whole else platform.tilde_text(text)))
+        shown = text
+        if not whole:
+            if server_home:
+                shown = platform.server_tilde_text(shown, server_home)
+            shown = platform.tilde_text(shown)
+        self.say(head + shown)
         if level == "FAIL":
             self.failed += 1
         elif level == "warn":
@@ -568,6 +575,7 @@ def _job(rep, job, session, hello, log):
         rep.check("FAIL", name, "the server has no machine id, so %s can't keep state there"
                   % name, state.NO_MACHINE_HINT)
     for side, role in sides:
+        server_home = None
         if side.end == "remote":
             # skipped, without a line, when the destination failed
             if session is None or not session.usable:
@@ -577,7 +585,10 @@ def _job(rep, job, session, hello, log):
                     "plugin.doctor", {"plugin": side.plugin, "role": role,
                                       "options": side.options}))
             except VCharonError as e:
+                # a server's error came with its home as server:~ already (the helper's)
                 checks = [("FAIL", e.message, e.hint)]
+            else:
+                server_home = hello.get("home") if hello is not None else None
         else:
             prefix = role + ": "
             ctx = plugin.Ctx("local", log=lambda msg, prefix=prefix: log.info(prefix + msg))
@@ -594,7 +605,7 @@ def _job(rep, job, session, hello, log):
                 fix = cli.channel_gone_hint(job, "not_found", fix) or fix
             elif job.mailbox is not None and role == "source":
                 level, message, fix = _made_by_the_run(job, level, message, fix)
-            rep.check(level, name, message, fix)
+            rep.check(level, name, message, fix, server_home=server_home)
 
 
 def _made_by_the_run(job, level, message, fix):
