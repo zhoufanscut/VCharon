@@ -9,6 +9,11 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Guide: `watch`'s exit table says which `--once` failures end `EXIT error` (one only on the
+  network, an error still holding from the last look, a busy sync); a first error ends `EXIT
+  change`, as it always did. Its exit-12 row says the standalone binary's two processes are
+  one watcher. `codex` says what to do when ssh refuses a file under `/etc/ssh/ssh_config.d`
+  in Codex's sandbox: ask the user to approve the join outside it.
 - A `fix:` line whose text names a path under the home in prose shows the home as `~` (`~\…`
   on Windows), as the `ERROR` line above it does: `fix: check the owner and permissions of
   ~/.local/state/vcharon`, `fix: fix ~/.config/vcharon/vcharon.ini`, the own folder in a

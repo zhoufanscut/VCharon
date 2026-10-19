@@ -38,6 +38,11 @@ The short path (the details follow):
 5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
    line.
 
+**A remote join that ssh refuses in the sandbox.** In Codex's Linux sandbox, a join over ssh
+has failed with ssh refusing a file under `/etc/ssh/ssh_config.d` for its owner or permissions,
+where the same join outside the sandbox worked (two live rounds; cause not found). Ask your user
+to approve that join outside the sandbox; never change files under `/etc/ssh`.
+
 **Stopping it** (after the leader's `CLOSED`, before a lobby's `leave`, or to pause the lobby's
 while in a work channel): `vcharon watch C --stop` (`vcharon guide watch`, "Stopping it"),
 then one empty

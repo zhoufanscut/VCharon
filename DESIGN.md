@@ -3043,9 +3043,9 @@ Later:
 - Closing a lobby, and removing the folders of members that never come back: today the user
   removes them by hand at the root (never the founder's: [The lobby](#the-lobby)).
 - Sending only the helper's own modules to the server.
-- Intel Mac and Linux arm64 binaries; a Homebrew tap or a winget package; other server distros
-  once someone reports a run.
 
-Not planned: two-way merge; the server connecting back; a background service; VCharon's own ssh
-code; a `command=`-restricted key, which can't restrict anything here ([Keys without
+Not planned: Intel Mac and Linux arm64 binaries, a Homebrew tap or a winget package (pipx or
+uv covers them); support for server distros other than Debian (doctor warns and goes on);
+two-way merge; the server connecting back; a background service; VCharon's own ssh code; a
+`command=`-restricted key, which can't restrict anything here ([Keys without
 prompts](#keys-without-prompts)).
