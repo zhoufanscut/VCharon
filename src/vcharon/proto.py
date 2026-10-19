@@ -58,6 +58,27 @@ def _printable(text):
     return text.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
+class Hint(str):
+    """A fix line's text that names a path in prose, not as a command's argument: the text
+    itself is whole, for the log, --json and the wire; `shown` is the printed line, with the
+    home as ~, as agents quote it (platform.prose_hint). Any str operation on it gives a plain
+    str, so text built from it, or sent, falls back to the whole one."""
+
+    def __new__(cls, text, shown):
+        self = str.__new__(cls, text)
+        self.shown = shown
+        return self
+
+    def __getnewargs__(self):
+        # copy and pickle build it again from both texts
+        return (str(self), self.shown)
+
+
+def shown_hint(hint):
+    """The fix line's text as printed: a Hint's shown, any other text as it is."""
+    return getattr(hint, "shown", hint)
+
+
 def quote(obj, limit=200):
     """A short, printable form of something that arrived over the wire."""
     try:

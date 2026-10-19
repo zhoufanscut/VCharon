@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import os
+import pickle
 import shutil
 import site
 import struct
@@ -16,7 +18,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import platform
+from vcharon import platform, proto
 from vcharon.proto import VCharonError
 
 import tests
@@ -202,6 +204,27 @@ class ServerTildeTextTest(PatchedCase):
                 stack.enter_context(patcher)
             self.assertEqual(platform.server_tilde_text("the root /srv/me/x /tmp/y"),
                              "the root server:~/x /tmp/y")
+
+
+class ProseHintTest(PatchedCase):
+    def test_printed_with_the_home_as_tilde_whole_elsewhere(self):
+        self.patch(on("linux", HOME="/home/me"))
+        hint = platform.prose_hint("check %s and %s, at most %s", "/home/me/x", "/tmp/y", "5 MB")
+        self.assertEqual(proto.shown_hint(hint), "check ~/x and /tmp/y, at most 5 MB")
+        # the log, --json and the wire: the text whole, as a plain str once built on
+        self.assertEqual(hint, "check /home/me/x and /tmp/y, at most 5 MB")
+        self.assertEqual("fix: %s" % hint, "fix: check /home/me/x and /tmp/y, at most 5 MB")
+        self.assertNotIsInstance(hint + ".", proto.Hint)
+        self.assertEqual(VCharonError("permission", "m", hint).to_json()["hint"],
+                         "check /home/me/x and /tmp/y, at most 5 MB")
+        self.assertEqual(proto.shown_hint("plain /home/me/x"), "plain /home/me/x")
+        for again in (copy.copy(hint), copy.deepcopy(hint), pickle.loads(pickle.dumps(hint))):
+            self.assertEqual((again, proto.shown_hint(again)), (hint, hint.shown))
+
+    def test_windows(self):
+        self.patch(on("windows", HOME="C:\\Users\\me"))
+        hint = platform.prose_hint("fix %s", "C:\\Users\\me\\vcharon.ini")
+        self.assertEqual(proto.shown_hint(hint), "fix ~\\vcharon.ini")
 
 
 class SshPathTest(PatchedCase):

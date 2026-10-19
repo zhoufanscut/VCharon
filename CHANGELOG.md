@@ -9,6 +9,18 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A `fix:` line whose text names a path under the home in prose shows the home as `~` (`~\…`
+  on Windows), as the `ERROR` line above it does: `fix: check the owner and permissions of
+  ~/.local/state/vcharon`, `fix: fix ~/.config/vcharon/vcharon.ini`, the own folder in a
+  `too_big` fix, the binary in `--update`'s `install_failed` fix, a watcher's fix naming the
+  logs of a sync child that said nothing. Why: agents quote fix lines into channel entries,
+  and the full path names the user. Commands stay whole, the paths they take included (`fix:
+  fix its owner or mode (for example: chmod go-w /home/me/…), then run again`), and so do
+  `doctor`'s `dirs` fixes, a fix raised on the server (`server:~` is only in its `ERROR`
+  line), the log, but for `doctor`'s lines, which it logs as printed (so `doctor`'s fix lines in
+  `vcharon.log` show `~`), and `--json`'s `fix` (`doctor --json`, `--update --json`). Older
+  versions printed these paths whole: a script that reads a path out of a fix line expands a
+  leading `~`.
 - A path under the server's home shows that home as `server:~` (the word `server`, never the
   host name or alias): in an error raised on the server, `ERROR C.<name>.down: not_found: the
   root server:~/.local/state/vcharon/channels/C doesn't exist`, and in `doctor`'s check lines

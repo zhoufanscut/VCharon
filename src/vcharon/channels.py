@@ -548,9 +548,10 @@ def _held(e, path):
     the generic fix stays."""
     err = fsops.error(e, path)
     return VCharonError(err.code, err.message,
-                        "something has a file or its current folder inside %s (a shell, an "
-                        "editor, Explorer, or a program a shell started): close it or leave "
-                        "that folder, then run close again" % path)
+                        platform.prose_hint("something has a file or its current folder inside "
+                                            "%s (a shell, an editor, Explorer, or a program a "
+                                            "shell started): close it or leave that folder, "
+                                            "then run close again", path))
 
 
 def _not_gone(e, path):

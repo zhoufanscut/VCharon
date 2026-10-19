@@ -2820,6 +2820,18 @@ class StreamTest(WatchCase):
             with self.subTest(got=got):
                 self.assertEqual(watch.parse_failure(code, got, "mb.windows"), want)
 
+    def test_silent_fix_shows_the_home_as_tilde(self):
+        # the logs it names are prose, only printed: the home as ~
+        home = os.path.join(os.sep, "home", "me")
+        logs = os.path.join(home, "state", "logs")
+        with mock.patch.object(platform, "home", return_value=home), \
+                mock.patch.object(platform, "log_dir", return_value=logs):
+            fix = watch.silent_fix("mb.windows")
+        short = os.path.join("~", "state", "logs", "")
+        self.assertEqual(fix, "look at %smb.windows.up.log, %smb.windows.down.log and "
+                         "%svcharon.log; if it happens again, tell your user"
+                         % (short, short, short))
+
 
 class StopRemoteTest(WatchCase):
     """A remote member's watcher stops on request: streaming, its child is stopped too; with

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .. import fsops, plugin
+from .. import fsops, platform, plugin
 from ..plan import Plan
 from ..plugin import Option
 from ..proto import VCharonError
@@ -62,5 +62,5 @@ def root_check(root, ok_text, missing_text):
         up = parent
     if not os.access(up, os.W_OK | os.X_OK):
         return ("FAIL", "can't create %s: you can't write in %s" % (root, up),
-                "fix its permissions, or create %s yourself" % root)
+                platform.prose_hint("fix its permissions, or create %s yourself", root))
     return ("ok", missing_text, None)

@@ -52,7 +52,7 @@ from . import (
     state,
 )
 from .log import Log
-from .proto import VCharonError
+from .proto import VCharonError, shown_hint
 
 # the doctor's echo: all 256 byte values, then random bytes, 4 MiB in all
 ECHO_BYTES = 4 << 20
@@ -103,7 +103,7 @@ class Report:
         native arguments, cmd.exe, a settings field); every other line shows the home as ~,
         as agents quote it. server_home: the text came from the server, whose home it shows
         as server:~ (first, so a client with the same home text doesn't take it as its own).
-        --json's text is always whole."""
+        --json's text and fix are always whole."""
         head = "  %s  %s  " % (level.ljust(4), subject.ljust(self.width))
         shown = text
         if not whole:
@@ -115,14 +115,16 @@ class Report:
             self.failed += 1
         elif level == "warn":
             self.warnings += 1
-        # as this box runs vcharon
+        # as this box runs vcharon: whole in --json; printed with a path its text names in
+        # prose as ~ (proto.Hint), unless the line is whole
         fix = platform.runnable(hint) if level != "ok" and hint else None
         note = note if level == "ok" and note else None
         self.checks.append({"level": level, "subject": subject, "text": text, "fix": fix,
                             "note": note})
         # the fix or the note starts under the text
         if fix:
-            self.say(" " * len(head) + "fix: " + fix)
+            printed = fix if whole else platform.runnable(shown_hint(hint))
+            self.say(" " * len(head) + "fix: " + printed)
         if note:
             self.say(" " * len(head) + "note: " + note)
 

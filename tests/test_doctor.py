@@ -476,6 +476,8 @@ class DoctorTest(DoctorCase):
 
         self.patch(doctor.tempfile, "mkstemp", side_effect=refused)
         self.patch(platform, "self_command", return_value="vcharon")
+        # the folders under the home: the dirs lines, their fix included, keep them whole
+        self.patch(platform, "home", return_value=self.vcharon_home)
         lines = self.doctor(code=1)
         state_dir = os.path.join(self.vcharon_home, "state")
         logs_dir = os.path.join(self.vcharon_home, "logs")
@@ -750,6 +752,19 @@ class DoctorTest(DoctorCase):
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
+
+    def test_a_fix_names_the_config_with_the_home_as_tilde(self):
+        # "fix <file>" is prose: printed with the home as ~; --json's fix stays whole
+        path = self.write_config("[vcharon]\ncompress = maybe\n")
+        home = self.vcharon_home
+        short = "~" + path[len(home):]
+        with mock.patch.object(platform, "home", return_value=home):
+            lines = self.doctor(code=1)
+            doc = json.loads(self.run_cli("doctor", "--json")[1])
+        at = next(n for n, line in enumerate(lines) if line.startswith("  FAIL  config"))
+        self.assertEqual(lines[at + 1].strip(), "fix: fix %s" % short)
+        fix = next(c["fix"] for c in doc["checks"] if c["subject"] == "config")
+        self.assertEqual(fix, "fix %s" % path)
 
 
 class PathTest(DoctorCase):

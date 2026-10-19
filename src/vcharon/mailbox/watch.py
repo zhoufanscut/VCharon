@@ -1759,8 +1759,9 @@ def silent_fix(job):
     process ended that way exits 1): the logs it and its jobs write, which hold what it did
     up to then."""
     logs = platform.log_dir()
+    # printed only (the watcher's fix line, post's WARN), with the home as ~
     return ("look at %s, %s and %s; if it happens again, tell your user"
-            % tuple(os.path.join(logs, name) for name in
+            % tuple(platform.tilde(os.path.join(logs, name)) for name in
                     [job + suffix + ".log" for suffix in config.MAILBOX_JOBS] + ["vcharon.log"]))
 
 

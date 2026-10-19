@@ -192,7 +192,7 @@ def load():
     """Reads the config file (platform.config_path(), under VCHARON_HOME if set), which may be
     missing."""
     path = platform.config_path()
-    hint = "fix %s" % path
+    hint = platform.prose_hint("fix %s", path)
     try:
         with open(path, "rb") as f:
             raw = f.read()
@@ -348,7 +348,7 @@ def setup_file(box=None):
     if box is not None:
         check_box(box)
     path = platform.config_path()
-    hint = "fix %s" % path
+    hint = platform.prose_hint("fix %s", path)
     load()
     try:
         with open(path, "rb") as f:
@@ -376,7 +376,8 @@ def setup_file(box=None):
     if box is not None and _read_vcharon(parser, os.path.basename(path), hint,
                                          Settings()) != box:
         raise VCharonError("internal", "setup's edit of %s doesn't read back box = %s"
-                           % (path, box), hint="set box in [vcharon] of %s by hand" % path)
+                           % (path, box),
+                           hint=platform.prose_hint("set box in [vcharon] of %s by hand", path))
     # through a symlinked config (a dotfiles manager's): the file it points at is written,
     # the link stays
     _write_file(os.path.realpath(path), data, mode)
@@ -517,7 +518,7 @@ def _read_channels(cfg, folded):
     except OSError as e:
         cfg.skipped.append(Skipped(CHANNELS_DIR, VCharonError(
             "config", "%s: can't be listed: %s" % (CHANNELS_DIR, e.strerror or e),
-            hint="fix %s" % folder), ()))
+            hint=platform.prose_hint("fix %s", folder)), ()))
         return
     # the local tree's real path, as this OS compares names -> (section, where, names)
     trees = {}
@@ -526,7 +527,7 @@ def _read_channels(cfg, folded):
         section = f[:-len(".ini")]
         names = (section,) + tuple(section + suffix for suffix in MAILBOX_JOBS)
         path = os.path.join(folder, f)
-        hint = "fix %s, or delete it" % path
+        hint = platform.prose_hint("fix %s, or delete it", path)
         try:
             derived = _read_channel_file(path, where, section, hint, cfg.settings)
             for n in names:
@@ -556,7 +557,8 @@ def _read_channels(cfg, folded):
                 cfg.skipped.append(Skipped(s_where, VCharonError(
                     "config", "%s [%s]: its mailbox.local is the local tree of [%s] (%s) too; "
                     "each section needs its own" % (s_where, s_section, other, other_where),
-                    hint="fix %s, or delete it" % os.path.join(folder, s_where.split("/", 1)[1])),
+                    hint=platform.prose_hint("fix %s, or delete it",
+                                             os.path.join(folder, s_where.split("/", 1)[1]))),
                     s_names))
             continue
         trees[key] = (section, where, names)

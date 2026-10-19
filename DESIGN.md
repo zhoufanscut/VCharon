@@ -2314,8 +2314,9 @@ OK  2 jobs  (0.7 s)
   a commit that failed partway, `  fix: <text>` and `  log: <path>`. A job's name holds no `:`
   or space, so the name ends at the line's first `: `. The message, the `  | ` lines and the
   log path show a path under the home as `~/…` (`~\…` on Windows), and one under the server's
-  home, in an error raised there, as `server:~/…`; the `fix:` line keeps its paths, and the log
-  keeps the message's whole ([Rules for the code](#rules-for-the-code)).
+  home, in an error raised there, as `server:~/…`; the `fix:` line keeps its commands whole and
+  shows a path it names in prose as `~/…`, and the log keeps the message and fix whole ([Rules
+  for the code](#rules-for-the-code)).
 - A Ctrl-C exits 130 with no summary; ssh is killed and the helper cleans up.
 - `join` and `create` run the same sync but print `  syncing with <server> …` before it (so a
   sync that hangs or is killed isn't silent) and, when it succeeds, one line in place of its
@@ -2976,10 +2977,17 @@ which and how to adapt. A channel format change is always a minor version at lea
   `~\…` on Windows): agents quote these lines into channel entries, and the full path names
   the user. A path the line names goes through `platform.tilde`; text made from paths in many
   places goes through `platform.tilde_text` where it is printed: an error's message and `  | `
-  lines (`ERROR <code>: …`), and `doctor`'s check lines. Display only. Whole: a command, in a
-  `fix:` line or any other (a `next:` line, a note), which runs as printed, its program's path
-  included; the rest of a `fix:` line, but for a watcher's fix made from its sync's `  log:`
-  line (`the job's log has the rest: ~/…`, text, not a command); `doctor`'s `config` line's
+  lines (`ERROR <code>: …`), and `doctor`'s check lines. A `fix:` line's text that names a
+  path in prose (`check the owner and permissions of ~/…`, `fix ~/.config/vcharon/vcharon.ini`)
+  is made with `platform.prose_hint`, which keeps the text whole and the printed form beside it
+  (`proto.Hint`), so only the printers (`show_error`, `doctor`'s check, `--update`'s refusal)
+  show the `~`; never `tilde_text` on a whole fix line, which would reach its commands. A fix
+  only ever printed names its paths through `platform.tilde` (a watcher's for a sync child that
+  said nothing), and a watcher's fix made from its sync's `  log:` line keeps that line's `~`.
+  `doctor`'s `dirs` lines keep their fix whole, as they do their text (below). Display only.
+  Whole: a command, in a `fix:` line or any other (a `next:` line, a note), which runs as
+  printed, its program's path and the paths it takes included (`chmod go-w <path>`;
+  `--update`'s `rename <old> back to <new>`, a command the user types); `doctor`'s `config` line's
   file (when it is ok), its `dirs` lines and its `vcharon's folders` note, which a user pastes
   into an agent's sandbox allow-list, where `~` may not expand (a quoted argument,
   PowerShell's native arguments, cmd.exe, a settings field); a `--json` field; a line only
@@ -2996,8 +3004,9 @@ which and how to adapt. A channel format change is always a minor version at lea
   checks from the server (`plugin.doctor`'s result), with the home from the hello, before the
   client's own tilde, so a client whose home has the same text doesn't take it as its own.
   The client's tilde, run after, finds no home text left in `server:~/…` to change. The
-  error's hint and detail go as they are; the client's log has the message as sent, and
-  `--json`'s text stays whole.
+  error's hint and detail go as they are, so a server's fix line names its paths whole: the
+  wire carries the hint as text, which doesn't mark its prose paths apart from its commands'
+  arguments. The client's log has the message as sent, and `--json`'s text stays whole.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.

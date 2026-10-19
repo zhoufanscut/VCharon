@@ -36,7 +36,7 @@ from vcharon import (
 )
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
-from vcharon.proto import VCharonError
+from vcharon.proto import VCharonError, shown_hint
 
 from tests import util
 from tests.test_cli import VCHARON_DIR
@@ -2845,6 +2845,11 @@ class SkippedTest(ChannelCase):
                                        "holds only a channel section"), err)
         self.assertIn("  fix: fix %s, or delete it" % os.path.join(
             self.vcharon_home, "channels.d", "game.mac-x.ini"), err)
+        # the file is prose in the fix: printed with the home as ~
+        with mock.patch.object(platform, "home", return_value=self.vcharon_home):
+            _code, _out, err = self.run_jobs("game.mac-x.down")
+        self.assertIn("  fix: fix %s, or delete it"
+                      % os.path.join("~", "channels.d", "game.mac-x.ini"), err)
         # through the command line: the membership's record finds the broken section
         self.write_record("game", "mac-x", "laptop-ui", project="x")
         for argv in (["sync", "game"], ["watch", "game"], ["read", "game"]):
@@ -3203,6 +3208,11 @@ class ReviewTest(ChannelCase):
                                  "shell, an editor, Explorer, or a program a shell started): "
                                  "close it or leave that folder, then run close again" % path)
                 self.assertEqual(read_tree(self.root), before)
+        # the folder is prose in the fix: printed with the home as ~
+        with mock.patch.object(platform, "home", return_value=self.root):
+            hint = channels._held(PermissionError(13, "held"), path).hint
+        self.assertTrue(shown_hint(hint).startswith(
+            "something has a file or its current folder inside ~%sgame (a " % os.sep), hint)
         # any other rename error keeps fsops' own fix
         def denied(handle, old, new):
             raise PermissionError(13, "Permission denied")
@@ -3655,6 +3665,13 @@ class ClaimerTest(ChannelCase):
                     self.assertEqual(cm.exception.hint, "run the command again; if it "
                                      "keeps failing, your user can write %s by hand: 32 "
                                      "hex digits (0-9, a-f), then a line: random" % path)
+                # the file is prose in the fix: printed with the home as ~
+                home = os.path.dirname(os.path.dirname(path))
+                with (mock.patch.object(platform, "home", return_value=home),
+                      self.assertRaises(VCharonError) as cm):
+                    platform.client_id(False)
+                self.assertIn(" can write ~%s by hand" % path[len(home):],
+                              shown_hint(cm.exception.hint))
                 self.assertFalse(os.path.exists(path))
                 # the way out the fix names: a file written by hand is taken
                 os.makedirs(os.path.dirname(path), exist_ok=True)

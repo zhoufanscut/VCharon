@@ -416,8 +416,8 @@ def _download(url, dest, timeout):
             shutil.copyfileobj(response, f)
     except OSError as e:
         raise UpdateError("write_failed", "couldn't write %s: %s" % (dest, e),
-                          "nothing was changed; check the free space in %s, then try again"
-                          % os.path.dirname(dest)) from e
+                          platform.prose_hint("nothing was changed; check the free space in "
+                                              "%s, then try again", os.path.dirname(dest))) from e
     except http.client.HTTPException as e:
         raise UpdateError("network", "the download from %s ended early: %s"
                           % (_host(url) or url, e), NETWORK_FIX) from e
@@ -527,8 +527,8 @@ def apply_update(release, inst, timeout=DOWNLOAD_TIMEOUT, on_step=None, windows=
         _sync_dir(folder)
     except OSError as e:
         raise UpdateError("install_failed", "couldn't install %s: %s" % (target, e),
-                          "nothing was changed; check that no other program holds %s, then "
-                          "try again" % target) from e
+                          platform.prose_hint("nothing was changed; check that no other "
+                                              "program holds %s, then try again", target)) from e
     finally:
         # never while no binary is at target (a swap stopped half way): the work folder may
         # hold the only copy left

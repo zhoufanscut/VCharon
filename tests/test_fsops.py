@@ -16,7 +16,7 @@ import types
 import unittest
 from unittest import mock
 
-from vcharon import fsops, platform
+from vcharon import fsops, platform, proto
 from vcharon.proto import VCharonError
 
 from tests.util import fd_count, patch_stats, read_tree, unblock_fifo, write_tree
@@ -121,6 +121,21 @@ class ErrorTest(unittest.TestCase):
                 with self.subTest(errno=errno.errorcode[no]):
                     self.assertEqual(fsops.error(os_error(no), "/r").hint,
                                      "check the owner and permissions of /r")
+
+    def test_a_path_under_the_home_is_printed_as_tilde(self):
+        # prose, not a command's argument: printed with the home as ~, whole in the log
+        home = os.path.join(os.sep, "home", "me")
+        path = os.path.join(home, "state")
+        with mock.patch.object(platform, "home", return_value=home):
+            for no in (errno.EROFS, errno.EACCES):
+                with self.subTest(errno=errno.errorcode[no]):
+                    hint = fsops.error(os_error(no), path).hint
+                    self.assertTrue(hint.endswith("permissions of %s" % path))
+                    self.assertTrue(proto.shown_hint(hint).endswith(
+                        "permissions of %s" % os.path.join("~", "state")))
+            # a command's argument stays whole: it runs as printed
+            hint = fsops.unsafe_dir("the root", "is writable by others", path).hint
+            self.assertEqual(proto.shown_hint(hint), fsops.MODE_HINT % path)
 
 
 class RetryTest(unittest.TestCase):

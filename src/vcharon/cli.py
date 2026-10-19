@@ -1501,9 +1501,10 @@ def _update(args, run):
            "update_available": None}
 
     def fail(kind, message, fix):
-        fix = platform.runnable(fix)
+        # --json's fix whole, the printed one as shown (proto.Hint)
+        fix = proto.Hint(platform.runnable(fix), platform.runnable(proto.shown_hint(fix)))
         if as_json:
-            _print_json(dict(doc, ok=False, error=kind, message=message, fix=fix))
+            _print_json(dict(doc, ok=False, error=kind, message=message, fix=str(fix)))
         raise VCharonError("update", message, hint=fix)
 
     def guarded(fn):
@@ -1767,7 +1768,8 @@ class _Run:
                 self.log_line("error", self.done_line.strip())
         # The log is the job's own, so only the console line names the job. The paths in the
         # message with the home as ~: agents quote this line into channel entries; the log
-        # keeps them whole, and the fix line too, whose command must run as printed. A
+        # keeps them whole. The fix line keeps its commands whole, as they must run as
+        # printed; only a path its text names in prose shows the home as ~ (proto.Hint). A
         # server's error arrives with the server's home as server:~ already
         # (helper.HelperConn).
         lines = ["ERROR %s%s: %s" % ("%s: " % self.job_name if self.job_name else "", err.code,
@@ -1778,7 +1780,7 @@ class _Run:
         if hint:
             # as this box runs vcharon; the log keeps the plain text, read later by a
             # person, maybe on another box
-            lines.append("  fix: %s" % platform.runnable(hint))
+            lines.append("  fix: %s" % platform.runnable(proto.shown_hint(hint)))
         if self.log is not None:
             lines.append("  log: %s" % platform.tilde(self.log.path))
         if self.out is not None:

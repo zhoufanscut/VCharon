@@ -343,6 +343,15 @@ class LimitsTest(ChannelCase):
         self.assertEqual(lines[1], "  fix: move what isn't an entry (logs, builds, data) out of "
                          "%s, or delete it, until it holds at most 50.0 MB and 1000 files; "
                          "keep MEMBER.md and your .md files with entries" % own)
+        # the folder is prose in the fix: printed with the home as ~
+        home = os.path.dirname(own)
+        with mock.patch.object(platform, "home", return_value=home):
+            code, out, err = self.channel("sync", "game")
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(err.splitlines()[1], "  fix: move what isn't an entry (logs, builds, "
+                         "data) out of ~%s, or delete it, until it holds at most 50.0 MB and "
+                         "1000 files; keep MEMBER.md and your .md files with entries"
+                         % own[len(home):])
         # nothing sent
         self.assertEqual(self.server_tree(), before)
         os.remove(os.path.join(own, "out", "f0"))

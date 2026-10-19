@@ -37,7 +37,7 @@ import zipfile
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, fsops, install, platform, skill, update
+from vcharon import charter, cli, fsops, install, platform, proto, skill, update
 from vcharon.mailbox import watch
 
 from tests import pack
@@ -1395,6 +1395,20 @@ class WindowsSwapTest(unittest.TestCase):
                     self.assertEqual(caught.exception.kind, "install_failed")
                 case.assert_untouched()
 
+    def test_install_failed_names_the_binary_with_the_home_as_tilde(self):
+        # the binary is prose in the fix: printed with the home as ~, whole elsewhere
+        case, release = self.apply_case()
+        home = os.path.dirname(case.target)
+        with mock.patch.object(update, "_smoke_test", side_effect=OSError(5, "held")), \
+                mock.patch.object(platform, "home", return_value=home), \
+                self.assertRaises(update.UpdateError) as caught:
+            update.apply_update(release, case.inst, windows=True)
+        text = "nothing was changed; check that no other program holds %s, then try again"
+        self.assertEqual((caught.exception.kind, caught.exception.fix),
+                         ("install_failed", text % case.target))
+        self.assertEqual(proto.shown_hint(caught.exception.fix),
+                         text % ("~" + case.target[len(home):]))
+
     def test_apply_keeps_the_new_one_when_nothing_is_at_the_target(self):
         # both renames back fail: the work folder holds the new binary, and stays
         case, release = self.apply_case()
@@ -2179,6 +2193,22 @@ class UpdateFlagTest(FakeSshCase):
         self.assertTrue(err.startswith("ERROR update: it failed: "), err)
         self.assertIn("\n  fix: ", err)
 
+    def test_a_fix_naming_the_binary_in_prose(self):
+        # printed with the home as ~; --json's fix whole
+        home = os.path.dirname(self.bin)
+        text = "nothing was changed; check that no other program holds %s, then try again"
+
+        def fail(*args, **kwargs):
+            raise update.UpdateError("install_failed", "couldn't install it",
+                                     platform.prose_hint(text, self.target))
+
+        self.patch(update, "apply_update", new=fail)
+        with mock.patch.object(platform, "home", return_value=home):
+            code, doc, err = self.run_json("--update", "--yes", "--json")
+        self.assertEqual((code, doc["error"], doc["fix"]),
+                         (1, "install_failed", text % self.target))
+        self.assertIn("\n  fix: %s\n" % (text % ("~" + self.target[len(home):])), err)
+
     def test_a_bug_still_gives_one_object(self):
         def boom(*args, **kwargs):
             raise RuntimeError("something nobody predicted")
@@ -2473,6 +2503,24 @@ class AgentFixTest(unittest.TestCase):
                 self.assertEqual(platform.runnable("run vcharon --update by itself; then "
                                                    "vcharon doctor", command=command),
                                  "run vcharon --update by itself; then %s doctor" % command)
+
+
+class DownloadWriteTest(unittest.TestCase):
+    def test_a_failed_write_names_its_folder_with_the_home_as_tilde(self):
+        # the folder is prose in the fix: printed with the home as ~, whole elsewhere
+        home = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, home, True)
+        folder = os.path.join(home, "missing")
+        dest = os.path.join(folder, "vcharon.zip")
+        with mock.patch.object(update, "_open", return_value=io.BytesIO(b"x")), \
+                mock.patch.object(platform, "home", return_value=home), \
+                self.assertRaises(update.UpdateError) as caught:
+            update._download("https://example.com/a", dest, 5)
+        text = "nothing was changed; check the free space in %s, then try again"
+        self.assertEqual((caught.exception.kind, caught.exception.fix),
+                         ("write_failed", text % folder))
+        self.assertEqual(proto.shown_hint(caught.exception.fix),
+                         text % os.path.join("~", "missing"))
 
 
 if __name__ == "__main__":

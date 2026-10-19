@@ -11,7 +11,7 @@ from unittest import mock
 
 POSIX = os.name != "nt"
 
-from vcharon import plugin, stage
+from vcharon import platform, plugin, proto, stage
 from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.plugins import dir as dir_plugin
 from vcharon.proto import VCharonError
@@ -170,6 +170,11 @@ class SinkDoctorTest(SinkCase):
         self.assertEqual(self.doctor("dir", path=deeper, create="yes"),
                          [("FAIL", "can't create %s: you can't write in %s" % (deeper, ro),
                            "fix its permissions, or create %s yourself" % deeper)])
+        # the root is prose in the fix: printed with the home as ~
+        with mock.patch.object(platform, "home", return_value=self.root):
+            [(_level, _message, hint)] = self.doctor("dir", path=new, create="yes")
+        self.assertEqual(proto.shown_hint(hint), "fix its permissions, or create %s yourself"
+                         % os.path.join("~", "ro", "new"))
 
 if __name__ == "__main__":
     unittest.main()

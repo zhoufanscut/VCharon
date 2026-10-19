@@ -228,9 +228,10 @@ def limit_text(max_bytes, max_files):
 
 def folder_hint(folder, max_bytes, max_files):
     """The fix for the writer of an own folder over the limits: up's refusal and post's."""
-    return ("move what isn't an entry (logs, builds, data) out of %s, or delete it, until it "
-            "holds at most %s; keep MEMBER.md and your .md files with entries"
-            % (folder, limit_text(max_bytes, max_files)))
+    return platform.prose_hint("move what isn't an entry (logs, builds, data) out of %s, or "
+                               "delete it, until it holds at most %s; keep MEMBER.md and your "
+                               ".md files with entries", folder,
+                               limit_text(max_bytes, max_files))
 
 
 def over(size, files, max_bytes, max_files):

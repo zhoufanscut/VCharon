@@ -288,7 +288,7 @@ class CliTest(FakeSshCase):
 class ShowErrorTest(unittest.TestCase):
     def test_the_home_shows_as_a_tilde_in_the_lines_only(self):
         # agents quote the ERROR block into channel entries; the log keeps every path whole,
-        # and so does the fix line, whose command must run as printed
+        # and so does a fix line of plain text, whose command must run as printed
         tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, tmp, True)
         log_path = os.path.join(tmp, "logs", "vcharon.log")
@@ -309,6 +309,29 @@ class ShowErrorTest(unittest.TestCase):
         with open(log_path, encoding="utf-8") as f:
             logged = f.read()
         self.assertIn("permission: %s: Permission denied" % lock, logged)
+        self.assertNotIn(short, logged)
+
+    def test_a_path_the_fix_names_in_prose_shows_as_a_tilde(self):
+        # proto.Hint: printed with the home as ~, whole in the log; a command's argument
+        # (chmod's) in the same kind of line stays whole
+        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        log_path = os.path.join(tmp, "logs", "vcharon.log")
+        state_dir = os.path.join(tmp, "state")
+        short = "~" + state_dir[len(tmp):]
+        run = cli._Run()
+        run.out = []
+        run.log = Log(log_path)
+        with mock.patch.object(platform, "home", return_value=tmp):
+            run.show_error(VCharonError("permission", "denied",
+                                        platform.prose_hint(fsops.SANDBOX_HINT, state_dir)))
+            run.show_error(fsops.unsafe_dir("the state dir", "is writable by others", state_dir))
+        self.assertEqual(run.out[1], "  fix: %s"
+                         % platform.runnable(fsops.SANDBOX_HINT % short))
+        self.assertEqual(run.out[4], "  fix: %s" % (fsops.MODE_HINT % state_dir))
+        with open(log_path, encoding="utf-8") as f:
+            logged = f.read()
+        self.assertIn("fix: %s" % (fsops.SANDBOX_HINT % state_dir), logged)
         self.assertNotIn(short, logged)
 
 

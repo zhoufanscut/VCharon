@@ -35,7 +35,8 @@ Each rule has its reason after the colon.
   it as it is. When you quote vcharon's own output, mask the server alias: its lines print
   it (`sent to devbox`, `--server devbox`). `vcharon post` warns when an entry names one. Mask
   the home folder in the commands its lines print too (`fix:`, `next:`): they spell the
-  program as this machine runs it, and that path can name the home folder.
+  program as this machine runs it, and that path, or a path the command takes, can name the
+  home folder; so can the `fix:` line of an error from the server.
 - **A path in another member's entry is in that member's checkout**: find the file in yours,
   since the layouts may differ.
 - **One writer per folder.** Never create, edit or delete anything in another member's folder:

@@ -19,7 +19,7 @@ import tempfile
 import time
 
 from . import fsops, pathrules
-from .proto import VCharonError
+from .proto import Hint, VCharonError
 
 if os.name == "nt":
     # at start, not when the machine id is first read: a long-running command imports nothing
@@ -117,6 +117,15 @@ def server_tilde_text(text, server_home=None):
     if server_home is None:
         return _home_as(text, _path(), home(), SERVER_HOME)
     return _home_as(text, posixpath, server_home, SERVER_HOME)
+
+
+def prose_hint(fmt, *paths):
+    """fmt % paths as a fix line's text whose paths are prose ("check the owner and
+    permissions of %s"), never a command's arguments: printed with each path as tilde() shows
+    it, whole in the log and --json (proto.Hint); a value not under the home stays as it is.
+    Raised on a server, it reaches the client whole: the wire carries the text, and this
+    box's ~ would name the wrong home."""
+    return Hint(fmt % paths, fmt % tuple(tilde(p) for p in paths))
 
 
 def _home_as(text, mod, home_path, shown):
@@ -587,9 +596,9 @@ def client_id(make=True):
         raise VCharonError("io", "couldn't read this machine's id (%s), so no client id is "
                            "made" % ("ioreg's IOPlatformUUID" if os_name() == "darwin"
                                      else "the registry's MachineGuid"),
-                           "run the command again; if it keeps failing, your user can write "
-                           "%s by hand: 32 hex digits (0-9, a-f), then a line: %s"
-                           % (path, FROM_RANDOM))
+                           prose_hint("run the command again; if it keeps failing, your user "
+                                      "can write %s by hand: 32 hex digits (0-9, a-f), then a "
+                                      "line: %s", path, FROM_RANDOM))
     else:
         # a Linux box without /etc/machine-id (some containers)
         cid, origin = os.urandom(16).hex(), FROM_RANDOM
