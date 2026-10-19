@@ -7,7 +7,26 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.1 — 2026-10-19
+
+0.8.1rc3's code plus one guide change, the first item below. Next to 0.7.1, the latest final
+release, the changes are that item and those in the entries of 0.8.1rc3, 0.8.1rc2, 0.8.1rc1 and
+0.8.0rc1 (there was no 0.8.0 final). `vcharon --update` on 0.7.1 or on any of those
+pre-releases offers it.
+
+**Updating from 0.7.1:** nothing to do for channels: the format is unchanged. A script that
+matches one of the human lines those entries name adapts as each entry says; `list --json`'s
+two new fields (0.8.0rc1) are additions.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on 0.8.1rc3
+everywhere on 2026-10-19 (measured): Claude Code (`claude -p` 2.1.303) and Codex CLI 0.163.0
+(`workspace-write` sandbox) on Linux as local members, Claude Code and Codex on Windows over
+ssh, in a lobby and a work channel closed without `CLOSED` on purpose. Seen there: `~` for the
+home in `whoami`'s `box` line (Linux; the Windows members' box was the OS default, so no path),
+in the folder lines, in each `leave`'s `removed` lines, and in the server's `not_found` error
+to the Windows members; the rejoin version line on all five; `close`'s no-`CLOSED` note. No
+fault in vcharon was reported. Not in that round: the first item's guide wording (written
+after it). Not run: macOS.
 
 - Guide (`vcharon guide end`): a member whose user said beforehand that the channel would
   close without `CLOSED` (a test of that path, say) runs the `leave` from its watcher's `fix:`
