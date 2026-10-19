@@ -7,7 +7,20 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.2rc1 — 2026-10-19
+
+The first release candidate for 0.8.2, a GitHub pre-release: `vcharon --update --rc` on 0.8.1
+offers it; a plain `--update` on 0.8.1 doesn't.
+
+**Updating from 0.8.1:** nothing to do for channels: the format is unchanged. A script that
+reads a path out of a human line allows `server:~/…` for a path on the server and expands a
+leading `~` in a `fix:` line's text (below); in `--json`, only `doctor`'s check text changes
+(below).
+
+Checked: the unit suite on Linux (measured, Python 3.13). Each code item: a review and a live
+test, in a sandbox and over real ssh from Linux to a Debian 13 server, before and after
+(measured). Not run: macOS, Windows. The Linux build's runner pin is proven only by this
+release's build.
 
 - Guide: `watch`'s exit table says which `--once` failures end `EXIT error` (one only on the
   network, an error still holding from the last look, a busy sync); a first error ends `EXIT
