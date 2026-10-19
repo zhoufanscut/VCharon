@@ -7,6 +7,14 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- Guide (`vcharon guide end`): a member whose user said beforehand that the channel would
+  close without `CLOSED` (a test of that path, say) runs the `leave` from its watcher's `fix:`
+  line with no new question; that word is the confirmation the guide asks for. Why: in a
+  live round a member asked whether "with no `CLOSED`, don't leave: tell your user" still
+  held after its user had approved that close in advance.
+
 ## 0.8.1rc3 — 2026-10-17
 
 The third release candidate for 0.8.1, a GitHub pre-release: `vcharon --update` on 0.8.1rc2,

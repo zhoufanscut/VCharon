@@ -89,4 +89,6 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
   gone" can mean a folder removed by hand. Once your user confirms it was removed on purpose,
   run the `leave`: it notes that the channel has no folder `<your name>`, posts nothing, and
-  removes this machine's files of the membership as above.
+  removes this machine's files of the membership as above. If your user told you beforehand
+  that the channel would close without `CLOSED` (a test of that path, say), that is the
+  confirmation: run the `leave` as printed, with no new question.
