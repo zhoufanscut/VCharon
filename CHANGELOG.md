@@ -7,7 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.3rc1 — 2026-10-20
+
+The first release candidate for 0.8.3, a GitHub pre-release: `vcharon --update --rc` on 0.8.2
+offers it; a plain `--update` on 0.8.2 doesn't.
+
+**Updating from 0.8.2:** nothing to do: the channel format and `--json`'s fields are unchanged;
+`doctor`'s module count and check text change (below). A server gains a `cache/` folder (below).
+
+Checked: the unit suite on Linux (measured, Python 3.13). Both items: a review, and a live test
+through the tests' stand-in ssh (measured); over real ssh from Linux to a Debian 13 server
+(measured): `ping` sent once, then cached, the copy's sha256 equal to its name; connect time,
+median of 10 each, 0.635 s cached, 0.78 s sent, 0.725 s on 0.8.2; a channel with a 0.8.2 member
+and a member on this code (create, join, post, watch, read, sync, leave, close) worked, and the
+0.8.2 member left `cache/` untouched. Not run: macOS, Windows (whether a Windows build's sources
+hash the same as Linux's is not known).
 
 - A server keeps the helper's bundle in a new folder, `~/.local/state/vcharon/cache/` (beside
   the channel root), as `helper-<sha256>` files, at most 8. A connection sends the bundle's
