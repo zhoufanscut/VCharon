@@ -140,7 +140,10 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
    `version` in `pyproject.toml`.
 2. The CHANGELOG's `## Unreleased` heading becomes `## <version> — <date>`, with what was
    checked on which OS, marked measured or inferred.
-3. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
+3. Push the release commit to `main` and wait until CI passes on it; only then push the tag. Why:
+   a tag pushed while CI runs can land on a commit that fails, and moving a public tag later
+   rewrites what others may have fetched.
+4. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
    doesn't match both version strings, or whose CHANGELOG heading isn't `## <version> —
    YYYY-MM-DD`, then runs the suite, builds one binary per platform
    (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, runs the installer against it,
@@ -149,5 +152,5 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
    a plain `--update` on a final build never offer; `--update --rc` does, and a pre-release build
    follows later ones with a plain `--update`: a way to test a build in real use before the
    release.
-4. These agree on the release asset names and change together: `release.yml` and
+5. These agree on the release asset names and change together: `release.yml` and
    `tests/pack.py`, `install.sh`/`install.ps1` (and `tests/install_check.sh`), and the updater.
