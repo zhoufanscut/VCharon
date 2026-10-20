@@ -23,6 +23,7 @@ from vcharon.proto import VCharonError
 
 from tests import util
 from tests.util import (
+    PACKAGE_DIR,
     TEST_MACHINE_ID,
     FakeSshCase,
     helper_override,
@@ -356,7 +357,7 @@ class DoctorTest(DoctorCase):
         self.assertEqual(json.loads(out)["install"], {"kind": "binary", "path": target})
 
     def test_a_bundle_without_the_helper_fails(self):
-        # what a binary built without the package's .py files would show
+        # a defensive check: _sources() already refuses an install without helper.py
         self.write_config("")
         self.patch(bundle, "_sources", return_value=({"vcharon": ""}, ["vcharon"]))
         lines = self.doctor(code=1)
@@ -375,6 +376,18 @@ class DoctorTest(DoctorCase):
         _, out, _ = self.run_cli("doctor", "--json")
         doc = json.loads(out)
         self.assertEqual(doc["helper_bundle"], {"modules": 0, "has_helper": False, "bytes": None})
+
+    def test_a_module_missing_from_the_install_fails(self):
+        # what a binary built without one of the helper's modules would show: on this machine,
+        # not as an ImportError on the server
+        self.write_config("")
+        self.patch(bundle, "SERVER", new=bundle.SERVER + ("vcharon.gone",))
+        lines = self.doctor(code=1)
+        self.assertEqual(self.of(lines, "bundle"), [
+            ("FAIL", "couldn't build the helper's bundle: this install has no source (.py) of "
+                     "vcharon.gone, which the helper imports (in %s)" % PACKAGE_DIR)])
+        at = next(i for i, line in enumerate(lines) if "FAIL  bundle" in line)
+        self.assertEqual(lines[at + 1].strip(), "fix: " + doctor.BUNDLE_HINT)
 
     def test_fix_and_note_lines_start_under_the_text(self):
         self.write_config("")

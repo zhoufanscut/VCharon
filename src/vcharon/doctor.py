@@ -67,8 +67,9 @@ CLOCK_WARN = 30
 CLOCK_HINT = "sync both clocks (NTP); channel entries are ordered by each box's own clock"
 # a Linux box without /etc/machine-id
 LINUX_ID_HINT = "as root, run systemd-machine-id-setup: it writes /etc/machine-id"
-# a bundle without the helper: the package's .py files are missing from this install
-BUNDLE_HINT = "this install is broken: install vcharon again"
+# a bundle that couldn't be built (one of the helper's modules is missing from this install),
+# or one without the helper
+BUNDLE_HINT = bundle.BROKEN_HINT
 ZONE_HINT = "give both the same time zone; entry headings carry local time with no zone"
 # Other vcharon installs on PATH. Each fix asks the user: an agent follows a fix line, and
 # removing software or changing PATH is the user's to decide.
@@ -259,12 +260,13 @@ def _bundle(rep):
     try:
         found = bundle.summary()
     except Exception as e:  # noqa: BLE001
-        # a file that won't read or decode, or a bundle that won't read back: a check line,
-        # never a crash of the doctor
-        rep.check("FAIL", "bundle", "couldn't build the helper's bundle: %s: %s"
-                  % (type(e).__name__, e), BUNDLE_HINT)
+        # a module missing from the install, a file that won't read or decode, or a bundle
+        # that won't read back: a check line, never a crash of the doctor
+        why = e.message if isinstance(e, VCharonError) else "%s: %s" % (type(e).__name__, e)
+        rep.check("FAIL", "bundle", "couldn't build the helper's bundle: %s" % why, BUNDLE_HINT)
         return {"modules": 0, "has_helper": False, "bytes": None}
     if not found["has_helper"]:
+        # _sources() refuses an install without helper.py, so this is a defensive check
         rep.check("FAIL", "bundle", "the helper's bundle has %s and no vcharon.helper: no server "
                   "can run it" % _counted(found["modules"], "module"), BUNDLE_HINT)
     else:

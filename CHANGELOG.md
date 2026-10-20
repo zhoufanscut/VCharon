@@ -7,6 +7,17 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The bundle sent to the server at each connection holds only the modules the helper can import
+  (`bundle.SERVER`): 16 modules, about 81 kB compressed, where it held 31 and about 212 kB
+  (measured with `bundle.summary()` on Linux, from the source tree). `doctor`'s `bundle` line
+  and `--json`'s `helper_bundle.modules` show 16. An install that runs but lacks the source
+  (`.py`) of one of those modules, such as a binary built without it, now fails on the client
+  before ssh starts (`internal`, naming the module, fix: install vcharon again) and in
+  `doctor`'s `bundle` line; before, that module was left out of the bundle, `doctor` showed ok,
+  and the helper failed to import on the server ("bad bundle").
+
 ## 0.8.2 — 2026-10-20
 
 0.8.2rc2's code, unchanged. Next to 0.8.1, the latest final release, the changes are those in

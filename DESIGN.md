@@ -201,9 +201,15 @@ tests/             unittest, standard library only
 docs/GUIDE.md      made from src/vcharon/guide/*.md; a test fails when they differ
 ```
 
-"both" modules are sent to the server. The bundle holds every module of the package except the
-client-only subpackages (`mailbox`, `guide`, `skill`: `bundle.CLIENT_ONLY`), so a module the
-helper needs is never missing. A new subpackage is sent unless it is listed there.
+The bundle sent to the server holds the "both" and "server" modules and the package's
+`__init__.py`, the ones `bundle.SERVER` names, and nothing else: the client's code never travels.
+`tests/test_bundle.py` walks the helper's imports, function-level ones too, from `helper.py` and
+each plugin (`plugin.py` loads plugins by name, which no import shows), and fails when the helper
+can reach a module the list leaves out, or when the list names one it can't reach: a module the
+helper needs is never missing, and the list can't grow stale. A module on the list whose source
+file is missing (a binary built without it) stops the session on the client, before ssh starts
+(`internal`, naming the module; the fix line says to install vcharon again), and fails
+`doctor`'s `bundle` line, rather than showing up as an `ImportError` on the server.
 
 ## Session
 
@@ -249,8 +255,8 @@ The last line is one argument, and the only text that ever goes through the serv
 
 1. The controller writes one line to ssh's stdin: the loader's source, base64, then `\n`.
 2. Then the bundle: an 8-byte big-endian length N, then N bytes of zlib-compressed JSON:
-   `{"nonce", "packages", "modules": {name: source}}`. Sending every module rules out "module X
-   wasn't sent" bugs.
+   `{"nonce", "packages", "modules": {name: source}}`. The modules are those `bundle.SERVER`
+   names, which a test keeps equal to what the helper can import ([Files](#files)).
 3. The loader, on the server, exits with code 90 and one line if Python is older than `FLOOR`,
    and with 91 if the bundle is malformed. It parses on any Python 3 from 3.6 on, so an old
    server gets the version message, not a syntax error. It puts an import finder serving the

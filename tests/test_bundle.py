@@ -17,7 +17,8 @@ import unittest
 import zlib
 from unittest import mock
 
-from vcharon import bundle
+from vcharon import bundle, plugins
+from vcharon.proto import VCharonError
 
 from tests.util import PACKAGE_DIR
 
@@ -108,52 +109,161 @@ def newer_syntax(source):
     return found
 
 
+def module_file(name, root=PACKAGE_DIR):
+    """The file of vcharon module `name` under the package directory, or None."""
+    base = os.path.join(root, *name.split(".")[1:])
+    if os.path.isfile(os.path.join(base, "__init__.py")):
+        return os.path.join(base, "__init__.py")
+    if name != "vcharon" and os.path.isfile(base + ".py"):
+        return base + ".py"
+    return None
+
+
+def imported_by(name):
+    """The vcharon modules that module `name`'s import statements name, function-level ones
+    too: `from a import b` names a, and a.b when that is a module."""
+    path = module_file(name)
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), path)
+    package = name.split(".")
+    if not path.endswith("__init__.py"):
+        package = package[:-1]
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package[:len(package) - node.level + 1]
+                module = ".".join(base + ([node.module] if node.module else []))
+            else:
+                module = node.module
+            found.append(module)
+            found += [module + "." + alias.name for alias in node.names]
+    return [n for n in found if n.split(".")[0] == "vcharon" and module_file(n)]
+
+
+def helper_closure(roots=None):
+    """{module: the module that imports it} for every vcharon module the helper can import,
+    from vcharon.helper and each plugin (plugin.load() imports vcharon.plugins.<name> by name,
+    which no import statement shows), or from roots. Importing a.b runs a too."""
+    if roots is None:
+        roots = ["vcharon.helper"] + ["vcharon.plugins." + name.replace("-", "_")
+                                      for name in plugins.ALL]
+    reached = {}
+    todo = [(root, "a root") for root in roots]
+    while todo:
+        name, by = todo.pop()
+        parts = name.split(".")
+        for i in range(1, len(parts) + 1):
+            module = ".".join(parts[:i])
+            if module not in reached:
+                reached[module] = by
+                todo += [(n, module) for n in imported_by(module)]
+    return reached
+
+
 class BundleTest(unittest.TestCase):
-    def test_holds_every_module(self):
+    def test_holds_the_modules_server_names(self):
         blob = bundle.build(NONCE)
         size, doc = unpack(blob)
         self.assertEqual(size, len(blob) - 8)
         self.assertEqual(doc["nonce"], NONCE)
         self.assertEqual(doc["packages"], ["vcharon", "vcharon.plugins"])
         expected = {}
-        for dirpath, dirnames, filenames in os.walk(PACKAGE_DIR):
-            # the client's own commands stay home (bundle.CLIENT_ONLY)
-            dirnames[:] = [d for d in dirnames if d.isidentifier() and d != "__pycache__"
-                           and not (dirpath == PACKAGE_DIR and d in ("mailbox", "guide",
-                                                                     "skill"))]
-            for filename in filenames:
-                # editor litter such as .#helper.py isn't a module
-                if filename.endswith(".py") and filename[:-3].isidentifier():
-                    rel = os.path.relpath(os.path.join(dirpath, filename), PACKAGE_DIR)
-                    name = "vcharon." + rel[:-3].replace(os.sep, ".")
-                    name = name.removesuffix(".__init__")
-                    with open(os.path.join(dirpath, filename), "rb") as f:
-                        expected[name] = f.read().decode("utf-8")
+        for name in bundle.SERVER:
+            with open(module_file(name), "rb") as f:
+                expected[name] = f.read().decode("utf-8")
         self.assertEqual(doc["modules"], expected)
         self.assertEqual(list(doc["modules"]), sorted(expected))
-        for name in ("vcharon", "vcharon.helper", "vcharon.proto", "vcharon.plugins", "vcharon.ssh",
+        for name in ("vcharon", "vcharon.helper", "vcharon.proto", "vcharon.plugins",
                      "vcharon.plugins.path", "vcharon.plugins.dir"):
             self.assertIn(name, doc["modules"])
-        for client_only in ("vcharon.mailbox", "vcharon.guide", "vcharon.skill"):
-            self.assertFalse([m for m in doc["modules"] if m.startswith(client_only)])
+        # the client's own modules stay home
+        for client_only in ("vcharon.cli", "vcharon.ssh", "vcharon.bundle", "vcharon.mailbox",
+                            "vcharon.guide", "vcharon.skill"):
+            self.assertFalse([m for m in doc["modules"]
+                              if m == client_only or m.startswith(client_only + ".")])
+
+    def test_server_is_what_the_helper_can_import(self):
+        reached = helper_closure()
+        missing = set(reached) - set(bundle.SERVER)
+        # Name the new edge, an import from a module in the list, not whatever comes first
+        # alphabetically: a module reached only through another missing one follows it in.
+        if "vcharon.helper" in missing:
+            self.fail("bundle.SERVER must list vcharon.helper, the helper itself")
+        plugin_roots = {"vcharon.plugins." + p.replace("-", "_") for p in plugins.ALL}
+        for name in sorted(missing):
+            by = [m for m in bundle.SERVER if m in reached and name in imported_by(m)]
+            if name in plugin_roots:
+                by.append("plugin.load(), as a plugin")
+            if by:
+                others = len(missing) - 1
+                self.fail("the helper imports %s (from %s), not in bundle.SERVER%s: add it if "
+                          "the server needs it, or move the import to client code"
+                          % (name, ", ".join(by),
+                             "; %d other modules are missing too" % others if others else ""))
+        if missing:
+            self.fail("the helper imports %s: add to bundle.SERVER what the server needs"
+                      % ", ".join(sorted(missing)))
+        for name in bundle.SERVER:
+            if module_file(name) is None:
+                self.fail("bundle.SERVER names %s, which isn't a module of the package" % name)
+            if name not in reached:
+                self.fail("bundle.SERVER names %s, which the helper never imports: remove it"
+                          % name)
+        self.assertEqual(len(bundle.SERVER), len(set(bundle.SERVER)))
+
+    def test_the_walk_sees_each_kind_of_import(self):
+        # the closure's own check: what cli.py imports at the top, in a function, relatively
+        # and as `from . import x`
+        reached = imported_by("vcharon.cli")
+        self.assertIn("vcharon.ssh", reached)
+        self.assertIn("vcharon.guide", reached)
+        # imported only inside functions
+        self.assertIn("vcharon.channels", imported_by("vcharon.charter"))
+        self.assertIn("vcharon.update", reached)
+        self.assertIn("vcharon.helper", helper_closure())
+        self.assertIn("vcharon.plugins", helper_closure())
+
+    def copy_server(self, root):
+        for name in bundle.SERVER:
+            rel = os.path.relpath(module_file(name), PACKAGE_DIR)
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            shutil.copyfile(module_file(name), os.path.join(root, rel))
 
     @unittest.skipUnless(hasattr(os, "symlink") and os.name == "posix", "needs symlinks")
-    def test_skips_names_python_cant_import(self):
+    def test_reads_only_what_server_names(self):
         root = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, root, True)
-        for name, data in (("__init__.py", b"X = 1\n"), ("a.py", b"A = 1\n"),
-                           ("._a.py", b"\x00\x05\x16\x07\xff\xfe junk"),
+        self.copy_server(root)
+        for name, data in (("cli.py", b"C = 1\n"), ("._proto.py", b"\x00\x05\x16\x07\xff\xfe junk"),
                            ("notes.txt", b"not python")):
             with open(os.path.join(root, name), "wb") as f:
                 f.write(data)
         # an Emacs lock file: a dangling symlink
-        os.symlink("user@host.1234:1790000000", os.path.join(root, ".#b.py"))
-        os.mkdir(os.path.join(root, ".hidden"))
-        with open(os.path.join(root, ".hidden", "c.py"), "w") as f:
-            f.write("C = 1\n")
+        os.symlink("user@host.1234:1790000000", os.path.join(root, ".#helper.py"))
+        os.mkdir(os.path.join(root, "mailbox"))
+        with open(os.path.join(root, "mailbox", "__init__.py"), "w") as f:
+            f.write("M = 1\n")
         modules, packages = bundle._sources(root)
-        self.assertEqual(modules, {"vcharon": "X = 1\n", "vcharon.a": "A = 1\n"})
-        self.assertEqual(packages, ["vcharon"])
+        self.assertEqual(sorted(modules), sorted(bundle.SERVER))
+        self.assertEqual(packages, ["vcharon", "vcharon.plugins"])
+
+    def test_a_missing_module_is_an_error_on_the_client(self):
+        # a broken install: the bundle isn't sent, rather than failing to import on the server
+        root = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, root, True)
+        self.copy_server(root)
+        os.remove(os.path.join(root, "stage.py"))
+        os.remove(os.path.join(root, "plugins", "dir.py"))
+        with self.assertRaises(VCharonError) as caught:
+            bundle._sources(root)
+        self.assertEqual(caught.exception.code, "internal")
+        self.assertEqual(caught.exception.message, "this install has no source (.py) of "
+                         "vcharon.plugins.dir, vcharon.stage, which the helper imports (in %s)"
+                         % root)
+        self.assertEqual(caught.exception.hint, bundle.BROKEN_HINT)
 
     def test_summary_reads_back_what_a_session_sends(self):
         modules, _packages = bundle._sources()
@@ -170,21 +280,22 @@ class BundleTest(unittest.TestCase):
         meipass = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, meipass, True)
         package = os.path.join(meipass, "vcharon")
-        os.makedirs(os.path.join(package, "plugins"))
+        self.copy_server(package)
         os.makedirs(os.path.join(package, "guide"))
-        for rel, data in (("__init__.py", "X = 1\n"), ("helper.py", "H = 1\n"),
-                          ("plugins/__init__.py", ""), ("plugins/dir.py", "D = 1\n"),
-                          ("guide/__init__.py", ""), ("guide/start.md", "# start\n")):
+        for rel, data in (("cli.py", "C = 1\n"), ("guide/__init__.py", ""),
+                          ("guide/start.md", "# start\n")):
             with open(os.path.join(package, *rel.split("/")), "w", encoding="utf-8") as f:
                 f.write(data)
+        with open(os.path.join(package, "helper.py"), "w", encoding="utf-8") as f:
+            f.write("H = 1\n")
         with mock.patch.object(bundle.vcharon, "__file__",
                                os.path.join(package, "__init__.pyc")):
             modules, packages = bundle._sources()
             found = bundle.summary()
-        self.assertEqual(sorted(modules), ["vcharon", "vcharon.helper", "vcharon.plugins",
-                                           "vcharon.plugins.dir"])
+        self.assertEqual(sorted(modules), sorted(bundle.SERVER))
+        self.assertEqual(modules["vcharon.helper"], "H = 1\n")
         self.assertEqual(packages, ["vcharon", "vcharon.plugins"])
-        self.assertEqual((found["modules"], found["has_helper"]), (4, True))
+        self.assertEqual((found["modules"], found["has_helper"]), (len(bundle.SERVER), True))
 
     def test_extra_modules(self):
         _size, doc = unpack(bundle.build(NONCE, {"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"}))

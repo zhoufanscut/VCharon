@@ -18,7 +18,19 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import VERSION, cli, doctor, fsops, install, pathrules, platform, ssh, stage, state
+from vcharon import (
+    VERSION,
+    bundle,
+    cli,
+    doctor,
+    fsops,
+    install,
+    pathrules,
+    platform,
+    ssh,
+    stage,
+    state,
+)
 from vcharon import run as engine
 from vcharon.log import Log
 from vcharon.plan import Plan, delete, put_dir, put_file
@@ -104,6 +116,16 @@ class CliTest(FakeSshCase):
         # and Python are doctor's
         code, out, err = self.run_cli("--version")
         self.assertEqual((code, out, err), (0, VERSION + "\n", ""))
+
+    def test_a_module_missing_from_the_install_stops_before_ssh(self):
+        # a broken install fails here, with a fix line, not as an ImportError on the server
+        with mock.patch.object(bundle, "SERVER", bundle.SERVER + ("vcharon.gone",)), \
+                mock.patch.object(ssh, "ssh_prefix", side_effect=AssertionError("ssh ran")):
+            code, out, err = self.run_cli("ping", "fake-dest")
+        self.assertEqual((code, out), (1, "vcharon: ping fake-dest\n"), err)
+        self.assertIn("this install has no source (.py) of vcharon.gone, which the helper "
+                      "imports", err)
+        self.assertIn("fix: this install is broken: install vcharon again", err)
 
     def test_ping(self):
         code, out, err = self.run_cli("ping", "fake-dest")

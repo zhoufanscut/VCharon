@@ -10,6 +10,7 @@ import zlib
 
 import vcharon
 from vcharon import FLOOR
+from vcharon.proto import VCharonError
 
 # The only text that goes through the server's shell. It has no ' so it fits in '...'.
 BOOTSTRAP = "import sys,base64;exec(base64.b64decode(sys.stdin.buffer.readline()))"
@@ -29,7 +30,7 @@ def loader_line(floor=FLOOR):
 
 def build(nonce, extra_modules=None):
     """The bundle: an 8-byte big-endian length, then zlib-compressed JSON with the nonce and the
-    source of every module of the package. extra_modules ({name: source}) adds or replaces
+    source of each module SERVER names. extra_modules ({name: source}) adds or replaces
     modules; it's a test seam."""
     modules, packages = _sources()
     if extra_modules:
@@ -51,37 +52,57 @@ def summary():
             "bytes": len(blob)}
 
 
-# subpackages that only the client runs (post, read, watch; guide; skill install), left out of
-# the bundle
-CLIENT_ONLY = ("mailbox", "guide", "skill")
+# Every module the helper can import, and only those: the bundle a session sends. The plugins
+# are here because plugin.load() imports vcharon.plugins.<name> by name. tests/test_bundle.py
+# walks the helper's imports and fails when this list misses one or names one it can't reach.
+SERVER = (
+    "vcharon",
+    "vcharon.channels",
+    "vcharon.charter",
+    "vcharon.entries",
+    "vcharon.fsops",
+    "vcharon.helper",
+    "vcharon.lock",
+    "vcharon.pathrules",
+    "vcharon.plan",
+    "vcharon.platform",
+    "vcharon.plugin",
+    "vcharon.plugins",
+    "vcharon.plugins.dir",
+    "vcharon.plugins.path",
+    "vcharon.proto",
+    "vcharon.stage",
+)
+
+BROKEN_HINT = "this install is broken: install vcharon again"
 
 
 def _sources(root=None):
-    """{module name: source} for every module under the package directory, and the packages.
-    root: another directory to read as the package; a test seam."""
+    """{module name: source} for each module SERVER names, and the packages among them (a name
+    with a directory and an __init__.py). root: another directory to read as the package; a
+    test seam. A module whose file is missing raises here, on the client, so a broken install
+    isn't found later as an ImportError on the server."""
     if root is None:
         root = os.path.dirname(os.path.abspath(vcharon.__file__))
     found = {}
     packages = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Only names Python can import. That leaves out dot-directories, and editor and Finder
-        # litter such as .#helper.py (an Emacs lock, often a dangling symlink) and ._proto.py
-        # (a macOS AppleDouble file, binary).
-        dirnames[:] = sorted(d for d in dirnames if d.isidentifier() and d != "__pycache__")
-        rel = os.path.relpath(dirpath, root)
-        if rel == os.curdir:
-            # the client's own subpackages: the helper never imports them
-            dirnames[:] = [d for d in dirnames if d not in CLIENT_ONLY]
-        parts = ["vcharon"] + ([] if rel == os.curdir else rel.split(os.sep))
-        if "__init__.py" in filenames:
-            packages.append(".".join(parts))
-        for filename in filenames:
-            stem = filename[:-3]
-            if not filename.endswith(".py") or not stem.isidentifier():
-                continue
-            name = ".".join(parts if stem == "__init__" else parts + [stem])
-            with open(os.path.join(dirpath, filename), "rb") as f:
-                found[name] = f.read().decode("utf-8")
+    missing = []
+    for name in SERVER:
+        base = os.path.join(root, *name.split(".")[1:])
+        init = os.path.join(base, "__init__.py")
+        if os.path.isfile(init):
+            path = init
+            packages.append(name)
+        elif name != "vcharon" and os.path.isfile(base + ".py"):
+            path = base + ".py"
+        else:
+            missing.append(name)
+            continue
+        with open(path, "rb") as f:
+            found[name] = f.read().decode("utf-8")
+    if missing:
+        raise VCharonError("internal", "this install has no source (.py) of %s, which the "
+                           "helper imports (in %s)" % (", ".join(missing), root), BROKEN_HINT)
     return {name: found[name] for name in sorted(found)}, sorted(packages)
 
 

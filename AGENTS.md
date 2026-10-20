@@ -96,7 +96,7 @@ Guards that fail the suite, and what to do:
 | guard | test | when it fails |
 |---|---|---|
 | a `vcharon <verb>` string constant in `src` | `tests/test_commands.py` (`HINTS`) | list the new constant there (None for one that isn't a command) |
-| a new subpackage of `src/vcharon/` | `tests/test_bundle.py` | it is sent to the server unless listed in `bundle.CLIENT_ONLY`; list it if only the client runs it |
+| the helper's imports | `tests/test_bundle.py` | only the modules in `bundle.SERVER` are sent to the server; the failure names the new import: add that module if the server needs it, or move the import to client code; remove one the helper no longer reaches |
 | the guide | `tests/test_guide.py` | regenerate `docs/GUIDE.md`; every command and flag in the guide must parse |
 | build history | `tests/test_guide.py` (`NoHistoryTest`) | remove milestone names, review tags, plan pointers from code, tests, README, DESIGN |
 | the old tool's name | `tests/test_old_name.py` | VCharon came from another tool, whose name appears only in the CHANGELOG line that says so; `ALLOWED` counts hits per file exactly |
