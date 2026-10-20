@@ -168,9 +168,10 @@ def probe_command(settings, dest):
     return argv[:at] + ["-v"] + argv[at:]
 
 
-# rc: ssh's exit code, None when the timeout killed it; lines: its stderr, one string per line;
-# accepted: an AcceptedKey for each "Server accepts key" line, in order; error: the VCharonError a
-# session would raise for this exit (DESIGN, "Failures before the helper runs"), None when rc is 0.
+# rc: ssh's exit code, None when the timeout killed it; lines: its stderr, one string per line,
+# ssh's own lines with their escapes undone (own_text); accepted: an AcceptedKey for each "Server
+# accepts key" line, in order; error: the VCharonError a session would raise for this exit
+# (DESIGN, "Failures before the helper runs"), None when rc is 0.
 Probe = collections.namedtuple("Probe", "rc lines accepted error")
 
 # ident: the key file, or the agent's comment for the key, exactly as ssh printed it;
@@ -182,30 +183,42 @@ _ACCEPTS = "debug1: Server accepts key: "
 # After this line, stderr can carry the server's own text.
 _AUTHENTICATED = "Authenticated to "
 _FINGERPRINTS = ("SHA256:", "MD5:")
-_OCTAL = "01234567"
+_OCTAL = b"01234567"
 
 
-def unvis(text):
-    """The text ssh's log escaped as strnvis(VIS_SAFE | VIS_OCTAL) does, decoded: \\\\ is a
-    backslash, \\ and 3 octal digits a byte, anything else itself (as UTF-8); a backslash not
-    followed by either stays. The bytes are then read as UTF-8, with surrogateescape."""
+def unvis_bytes(data):
+    """The bytes ssh's log escaped as strnvis(VIS_SAFE | VIS_OCTAL) does, decoded: \\\\ is a
+    backslash, \\ and 3 octal digits a byte, anything else itself; a backslash not followed by
+    either stays (DESIGN, "Launch rules")."""
     out = bytearray()
-    i, n = 0, len(text)
+    i, n = 0, len(data)
     while i < n:
-        c = text[i]
-        if c == "\\":
-            if text[i + 1:i + 2] == "\\":
+        if data[i] == 0x5C:
+            if data[i + 1:i + 2] == b"\\":
                 out.append(0x5C)
                 i += 2
                 continue
-            digits = text[i + 1:i + 4]
+            digits = data[i + 1:i + 4]
             if len(digits) == 3 and all(d in _OCTAL for d in digits) and int(digits, 8) < 256:
                 out.append(int(digits, 8))
                 i += 4
                 continue
-        out += c.encode("utf-8", "surrogateescape")
+        out.append(data[i])
         i += 1
-    return out.decode("utf-8", "surrogateescape")
+    return bytes(out)
+
+
+def unvis(text):
+    """unvis_bytes() on text, as UTF-8 with surrogateescape both ways: no UTF-8 sequence holds
+    a backslash or a digit, so only the escapes change."""
+    return unvis_bytes(text.encode("utf-8", "surrogateescape")).decode("utf-8", "surrogateescape")
+
+
+def own_text(data):
+    """One of ssh's own stderr lines (bytes) as text: its escapes undone, then read as
+    fsops.child_text reads any program's output. ssh escapes every byte above 0x7F in its log,
+    so the system's text in a code page arrives as \\262\\273... (DESIGN, "Launch rules")."""
+    return fsops.child_text(unvis_bytes(data))
 
 
 def shown(text):
@@ -246,19 +259,26 @@ def verbose_probe(settings, dest, log):
         raise VCharonError("connect", "couldn't start %s: %s" % (argv[0], e.strerror or e),
                            hint=START_HINT)
     # line by line: one line in a code page mustn't garble the others (fsops.child_text)
-    lines = [fsops.child_text(line) for line in ran.err.replace(b"\r", b"").split(b"\n")]
-    if lines and not lines[-1]:
-        lines.pop()
-    for line in lines:
+    raw = ran.err.replace(b"\r", b"").split(b"\n")
+    if raw and not raw[-1]:
+        raw.pop()
+    lines, accepted, before_login = [], [], True
+    for data in raw:
+        line = fsops.child_text(data)
+        # as ssh wrote it, escapes and all, as the session logs its stderr
         log.debug("probe stderr: %s" % line)
+        if before_login:
+            if line.startswith(_AUTHENTICATED):
+                before_login = False
+            else:
+                # parse_accepted undoes the escapes in the part it keeps itself
+                key = parse_accepted(line)
+                if key is not None:
+                    accepted.append(key)
+            # up to and with "Authenticated to", every line is ssh's own, escaped
+            line = own_text(data)
+        lines.append(line)
     log.info("probe: ssh exited with code %s" % ran.rc)
-    accepted = []
-    for line in lines:
-        if line.startswith(_AUTHENTICATED):
-            break
-        key = parse_accepted(line)
-        if key is not None:
-            accepted.append(key)
     error = None
     if ran.rc != 0:
         own = [line for line in lines if not line.startswith("debug")]
@@ -495,7 +515,10 @@ class Session:
             killed = self._killed
             rc = self._wait_exit(5)
             self._stderr_thread.join(2)
-            raise classify_exit(rc, self._tail_lines(), self.dest, self.settings, killed=killed)
+            # Exit 255 before the marker is ssh's own failure, so its lines are its own: ssh
+            # without -v prints nothing that marks where the server's text would start.
+            raise classify_exit(rc, self._tail_lines(own=rc == 255), self.dest, self.settings,
+                                killed=killed)
         kind, msg = self._next()
         # the clock gap's other end: as soon as the hello is read
         received = time.time()
@@ -629,10 +652,11 @@ class Session:
                 line = stream.readline(8192)
                 if not line:
                     return
-                text = fsops.child_text(line).rstrip("\r\n")
+                line = line.rstrip(b"\r\n")
+                # as bytes: whether it is ssh's own, and escaped, is known only at the end
                 with self._lock:
-                    self._tail.append(text)
-                self.log.info("stderr: %s" % text)
+                    self._tail.append(line)
+                self.log.info("stderr: %s" % fsops.child_text(line))
         except (OSError, ValueError):
             return
         finally:
@@ -774,9 +798,11 @@ class Session:
         err.tail = self._tail_lines()
         return err
 
-    def _tail_lines(self):
+    def _tail_lines(self, own=False):
+        """ssh's last stderr lines as text; own: they are all ssh's own (own_text)."""
         with self._lock:
-            return list(self._tail)
+            tail = list(self._tail)
+        return [own_text(line) if own else fsops.child_text(line) for line in tail]
 
     @contextlib.contextmanager
     def _waiting_on_helper(self):

@@ -7,6 +7,20 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- ssh's own error text that isn't ASCII now reads as text in a connect error, in place of ssh's
+  octal escapes: on a Chinese Windows, `ssh: Could not resolve hostname h: 不知道这样的主机。` where it
+  showed `\262\273\326\252…`. ssh escapes every byte above 0x7F in its log messages (measured:
+  Win32-OpenSSH on a Chinese Windows 11, and OpenSSH 10.0 on Linux), so the earlier ANSI code page
+  decoding never saw those bytes. The escapes are undone for ssh's own lines only: a `-v` probe's
+  lines up to `Authenticated to`, and a session's lines when ssh exits 255 before vcharon starts.
+  The server's text stays as written, except in a 255 after the login and the server's login banner
+  (sshd's `Banner`, sent before the login); a ProxyCommand's stderr among those lines is unescaped
+  too. On every OS; the ANSI code page step is still Windows only. The log's stderr lines (probe and
+  session) keep ssh's text as written. Checked by unit tests on Linux that fake Windows and its code
+  page (measured); not run on Windows.
+
 ## 0.8.2rc1 — 2026-10-19
 
 The first release candidate for 0.8.2, a GitHub pre-release: `vcharon --update --rc` on 0.8.1

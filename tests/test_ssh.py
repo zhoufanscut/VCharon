@@ -354,9 +354,10 @@ class VerboseProbeTest(unittest.TestCase):
             calls.append((argv, timeout, new_session))
             return fsops.Ran(rc, b"", err if isinstance(err, bytes) else err.encode("utf-8"))
 
+        self.log = mock.Mock()
         with mock.patch.object(fsops, "run", run), \
                 mock.patch.object(platform, "os_name", return_value="linux"):
-            probe = ssh.verbose_probe(settings(handshake_timeout=17), "devbox", mock.Mock())
+            probe = ssh.verbose_probe(settings(handshake_timeout=17), "devbox", self.log)
         self.calls = calls
         return probe
 
@@ -405,20 +406,88 @@ class VerboseProbeTest(unittest.TestCase):
         self.assertEqual(probe.lines, ["debug1: Reading \u00e9", message])
         self.assertEqual(probe.error.tail, [message])
 
+    def test_windows_code_page_escaped(self):
+        # Win32-OpenSSH escapes the ANSI code page's bytes of the system's text in its log
+        line = (b"ssh: Could not resolve hostname h: \\262\\273\\326\\252\\265\\300\\325\\342"
+                b"\\321\\371\\265\\304\\326\\367\\273\\372\\241\\243\r\n")
+        with mock.patch.object(fsops, "WINDOWS", True), \
+                mock.patch.object(fsops, "CHILD_ENCODINGS", ["gbk"]):
+            probe = self.probe(255, line)
+        message = "ssh: Could not resolve hostname h: 不知道这样的主机。"
+        self.assertEqual(probe.lines, [message])
+        self.assertEqual(probe.error.tail, [message])
+
+    def test_escapes_only_up_to_authenticated(self):
+        # after the login, stderr is the server's own text, which ssh doesn't escape
+        probe = self.probe(1, "debug1: Server accepts key: /k\\303\\251 RSA SHA256:x\n"
+                              "debug1: a \\\\ b \\q\n"
+                              "Authenticated to devbox ([192.0.2.1]:22) using \"publickey\".\n"
+                              "a \\262 \\\\ b\n")
+        self.assertEqual(probe.lines, ["debug1: Server accepts key: /k\u00e9 RSA SHA256:x",
+                                       "debug1: a \\ b \\q",
+                                       "Authenticated to devbox ([192.0.2.1]:22) using "
+                                       "\"publickey\".",
+                                       "a \\262 \\\\ b"])
+        self.assertEqual([k.ident for k in probe.accepted], ["/k\u00e9"])
+
+    def test_log_keeps_escapes(self):
+        self.probe(255, "ssh: x \\262\n")
+        self.log.debug.assert_called_once_with("probe stderr: ssh: x \\262")
+
 
 class ReadStderrTest(unittest.TestCase):
-    """The session's stderr reader keeps each line as text for errors and the log."""
+    """The session's stderr reader keeps each line as bytes, decoded for errors and the log."""
+
+    def session(self, data):
+        session = types.SimpleNamespace(
+            _proc=types.SimpleNamespace(stderr=io.BytesIO(data)),
+            _lock=threading.Lock(), _tail=[], log=mock.Mock())
+        ssh.Session._read_stderr(session)
+        return session
 
     def test_windows_code_page(self):
         message = "ssh: Could not resolve hostname devbox: 不知道。"
-        session = types.SimpleNamespace(
-            _proc=types.SimpleNamespace(stderr=io.BytesIO(message.encode("gbk") + b"\r\n")),
-            _lock=threading.Lock(), _tail=[], log=mock.Mock())
         with mock.patch.object(fsops, "WINDOWS", True), \
                 mock.patch.object(fsops, "CHILD_ENCODINGS", ["gbk"]):
-            ssh.Session._read_stderr(session)
-        self.assertEqual(session._tail, [message])
+            session = self.session(message.encode("gbk") + b"\r\n")
+            self.assertEqual(ssh.Session._tail_lines(session), [message])
         session.log.info.assert_called_once_with("stderr: " + message)
+
+    def test_own_lines_undo_escapes(self):
+        # ssh's own failure: its escapes undone; else the text stays as it came
+        session = self.session(b"ssh: x \\344\\270\\215\r\na \\\\ b\n")
+        self.assertEqual(ssh.Session._tail_lines(session, own=True),
+                         ["ssh: x \u4e0d", "a \\ b"])
+        self.assertEqual(ssh.Session._tail_lines(session),
+                         ["ssh: x \\344\\270\\215", "a \\\\ b"])
+
+
+class UnvisTest(unittest.TestCase):
+    """ssh's log escapes, undone as bytes (unvis_bytes) and as text (unvis, own_text)."""
+
+    def test_unvis_bytes(self):
+        for data, want in [(b"a\\\\b", b"a\\b"), (b"a\\b", b"a\\b"), (b"C:\\Users", b"C:\\Users"),
+                           (b"\\262\\273", b"\xb2\xbb"), (b"\\0412", b"!2"), (b"\\777", b"\\777"),
+                           (b"\\26", b"\\26"), (b"x\\", b"x\\"), (b"\\\\262", b"\\262")]:
+            with self.subTest(data=data):
+                self.assertEqual(ssh.unvis_bytes(data), want)
+
+    def test_unvis_keeps_text_and_surrogates(self):
+        self.assertEqual(ssh.unvis("\u00e9 \\303\\251 \\377"), "\u00e9 \u00e9 \udcff")
+
+    def test_own_text_utf8(self):
+        # ssh escapes UTF-8's bytes too (measured: OpenSSH 10.0 on Linux, LC_ALL=C.UTF-8)
+        with mock.patch.object(fsops, "WINDOWS", False):
+            self.assertEqual(ssh.own_text(b"h \\344\\270\\215\\345\\217\\257"),
+                             "h \u4e0d\u53ef")
+            # not UTF-8 and not Windows: replacement characters
+            self.assertEqual(ssh.own_text(b"h \\262\\273"), "h \ufffd\ufffd")
+
+    def test_own_text_windows_code_page(self):
+        with mock.patch.object(fsops, "WINDOWS", True), \
+                mock.patch.object(fsops, "CHILD_ENCODINGS", ["cp936"]):
+            self.assertEqual(ssh.own_text(b"\\262\\273\\326\\252\\241\\243"),
+                             "\u4e0d\u77e5\u3002")
 
 
 if __name__ == "__main__":

@@ -315,6 +315,21 @@ class SessionTest(FakeSshCase):
         self.assertEqual(err.tail, ["boom"])
         self.assertIsNone(s.hello)
 
+    def test_ssh_own_failure_undoes_its_escapes(self):
+        # ssh escapes the bytes of the system's text in its log: here UTF-8's "\u4e0d"
+        os.environ["FAKE_SSH_EXIT"] = "255"
+        os.environ["FAKE_SSH_STDERR"] = "ssh: Could not resolve hostname x: \\344\\270\\215\n"
+        err = self.failure(self.session().open)
+        self.assertEqual(err.message, "ssh couldn't reach fake-dest (Could not resolve)")
+        self.assertEqual(err.tail, ["ssh: Could not resolve hostname x: \u4e0d"])
+
+    def test_other_exits_keep_backslashes(self):
+        # exit 1 is the server's shell: its text isn't escaped by ssh
+        os.environ["FAKE_SSH_EXIT"] = "1"
+        os.environ["FAKE_SSH_STDERR"] = "a \\262 b\n"
+        err = self.failure(self.session().open)
+        self.assertEqual(err.tail, ["a \\262 b"])
+
     # 6
     def test_handshake_timeout(self):
         os.environ["FAKE_SSH_STALL"] = "30"
@@ -467,6 +482,15 @@ class SessionTest(FakeSshCase):
         self.assertIn("see the log", err.hint)
         # the session is done for
         self.assertEqual(self.failure(s.echo, b"x").code, "internal")
+
+    def test_connection_lost_keeps_backslashes(self):
+        # after the marker, the tail can be the server's text, which ssh doesn't escape
+        os.environ["FAKE_SSH_STDERR"] = "a \\262 \\\\ b\n"
+        s = self.session(extra_modules=helper_override(DYING))
+        s.open()
+        err = self.failure(s.echo, b"x")
+        self.assertEqual(err.code, "lost")
+        self.assertEqual(err.tail, ["a \\262 \\\\ b"])
 
     # 14
     def test_unknown_fn(self):

@@ -2372,17 +2372,37 @@ So that a run from an agent's background shell behaves like one from a terminal:
   command acts: a Windows code page, a POSIX locale or a `PYTHONIOENCODING` that isn't UTF-8
   would fail the first name it can't hold, after a create or join has done its work, and the
   retry would say the channel exists. Every file VCharon writes is UTF-8;
-- another program's output (ssh's stderr, `ssh -V`, `ssh-add -l`) is read as UTF-8 when it is
-  valid UTF-8; on Windows, else in the ANSI code page if that decodes it all; else as UTF-8
-  with U+FFFD for the bad bytes, never an error. Win32-OpenSSH writes the system's text of some
-  errors (a host name it can't resolve) in the ANSI code page, which UTF-8 alone shows as
-  garbage on a non-English Windows. Not the console's code page: ssh sets the console to UTF-8
-  for its run, and an OEM code page (cp437, cp850, cp866) decodes any byte, so trying it first
-  would hide the ANSI text (inferred from Win32-OpenSSH's source, not run). The session's ssh
-  stderr and the `-v` probe's are decoded line by line, so one such line can't change how the
-  others read. The `vcharon sync` child of a watcher is read as UTF-8 only: it is told to write
-  UTF-8 ([Running watchers](#running-watchers)). What the server's shell prints before
-  VCharon's marker is remote text, cut at a byte count: it is read as UTF-8 with U+FFFD;
+- another program's output (ssh's stderr, `ssh -V`, `ssh-add -l`) is read as UTF-8 when it is valid
+  UTF-8; on Windows, else in the ANSI code page if that decodes it all; else as UTF-8 with U+FFFD
+  for the bad bytes, never an error. Win32-OpenSSH's text of some errors (a host name it can't
+  resolve) is the system's, in the ANSI code page, and arrives escaped by ssh (below), so it is
+  decoded once the escapes are undone. Not the console's code page: ssh sets the console to UTF-8
+  for its run, and an OEM code page (cp437, cp850, cp866) decodes any byte, so trying it first would
+  hide the ANSI text (inferred from Win32-OpenSSH's source, not run; on a Chinese Windows both code
+  pages are 936, so a run there can't tell them apart). The session's ssh stderr and the `-v`
+  probe's are decoded line by line, so one such line can't change how the others read. ssh escapes
+  its own log messages (strnvis with `VIS_SAFE | VIS_OCTAL`): a byte above 0x7F becomes `\` and
+  three octal digits, and a backslash is doubled, so the system's text arrives as `\262\273…`
+  (measured with OpenSSH 10.0 on Linux, also under a UTF-8 locale, and with Win32-OpenSSH on a
+  Chinese Windows). ssh's own lines are therefore turned back into bytes first and then decoded as
+  above: in the `-v` probe, every line up to and with `Authenticated to`; in a session, which runs
+  ssh without `-v` and so has no such line, every line of an exit 255 before the marker, which is
+  ssh's own failure (a server line among them, from a connection lost after the login, is unescaped
+  too, and so is a ProxyCommand's stderr there and in the probe before `Authenticated to`: ssh
+  passes it on as it is, measured with OpenSSH 10.0; so is the server's login banner, sshd's
+  `Banner`, sent before the login, there and in every probe, which ssh prints with high bytes
+  escaped under a non-UTF-8 locale but backslashes not doubled, so a `\` and three octal digits or
+  a `\\` in it are unescaped too, measured with OpenSSH 10.0). Every other line, the server's text
+  that ssh relays as it is among
+  them, stays as written, so a literal `\262` there is kept. A backslash not followed by another or
+  by three octal digits stays. So a Windows path in an ssh error shows with single backslashes (ssh
+  doubled them: measured on Linux with `Can't open user config file C:\\no\\cfg`; inferred for
+  Win32-OpenSSH, which shares the log code); a line ssh writes outside its log, such as `Warning:
+  Identity file … not accessible`, isn't escaped (measured), so a backslash and three octal digits
+  in it read as one byte. The log's stderr lines, the probe's and the session's, keep ssh's text as
+  written. The `vcharon sync` child of a watcher is read as UTF-8 only: it is told to write UTF-8
+  ([Running watchers](#running-watchers)). What the server's shell prints before VCharon's marker is
+  remote text, cut at a byte count: it is read as UTF-8 with U+FFFD;
 - never prompt (BatchMode, no `input()`), except `vcharon key` and `--update`'s `Update now?
   [y/N]`, which takes no terminal as "no";
 - starting itself as a child (the watcher's sync) uses `platform.self_argv()`: the binary itself,
