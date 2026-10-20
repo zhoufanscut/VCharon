@@ -7,6 +7,24 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.8.2 — 2026-10-20
+
+0.8.2rc2's code, unchanged. Next to 0.8.1, the latest final release, the changes are those in
+the entries of 0.8.2rc2 and 0.8.2rc1. `vcharon --update` on 0.8.1 or on either pre-release
+offers it.
+
+**Updating from 0.8.1:** nothing to do for channels: the format is unchanged. A script that
+reads a path out of a human line adapts as 0.8.2rc1's entry says; in `--json`, only `doctor`'s
+check text changes.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on 0.8.2rc2
+on 2026-10-20 (measured): Claude Code (`claude -p` 2.1.304) and Codex CLI 0.163.0
+(`workspace-write` sandbox) on Linux as local members, Claude Code on Windows (Git Bash, code
+page 936) over ssh, in a lobby and a work channel. Seen there: on Windows, `vcharon list
+--server` to an unknown host shows ssh's text as `不知道这样的主机。`, with the log's stderr line
+kept as ssh wrote it; on Linux, ssh's English text unchanged; `watch --once` exit 16 on all
+three. No fault in vcharon was reported. Not run: macOS.
+
 ## 0.8.2rc2 — 2026-10-20
 
 The second release candidate for 0.8.2, a GitHub pre-release: `vcharon --update` on 0.8.2rc1
