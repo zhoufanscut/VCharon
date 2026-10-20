@@ -7,7 +7,18 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.2rc2 — 2026-10-20
+
+The second release candidate for 0.8.2, a GitHub pre-release: `vcharon --update` on 0.8.2rc1
+offers it (a pre-release build follows later ones), and `--update --rc` on 0.8.1; a plain
+`--update` on 0.8.1 doesn't.
+
+**Updating from 0.8.2rc1:** nothing to do: the channel format and `--json` are unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13). The item below: a review and a live
+test on Linux, before and after, with real ssh and a stand-in ssh (measured); its Windows
+decoding by unit tests that fake Windows (measured), not yet run on Windows. The rest is as in
+0.8.2rc1.
 
 - ssh's own error text that isn't ASCII now reads as text in a connect error, in place of ssh's
   octal escapes: on a Chinese Windows, `ssh: Could not resolve hostname h: 不知道这样的主机。` where it
