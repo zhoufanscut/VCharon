@@ -235,7 +235,7 @@ class DoctorTest(DoctorCase):
             "made at the first join, from the machine id"))
         self.assertEqual(lines[7], "  ok    fake-dest  logs in")
         self.assertRegex(lines[8], r"\A  ok    fake-dest  Python \d+\.\d+\.\d+ on .+, user .*; "
-                         r"handshake \d+\.\d\d s\Z")
+                         r"handshake \d+\.\d\d s, bundle sent\Z")
         # the fake server is this machine, so its clock and zone are ours
         self.assertRegex(lines[9], r"\A  ok    fake-dest  clock [+-]\d\.\d s from this "
                          r"machine\Z")
@@ -1219,7 +1219,7 @@ class RowTest(DoctorCase):
                     "remote_python in vcharon.ini at one")
 
     def test_code_didnt_load(self):
-        self.patch(bundle, "build", return_value=struct.pack(">Q", 3) + b"abc")
+        self.patch(bundle, "frame", return_value=struct.pack(">Q", 3) + b"abc")
         self.failed("the server couldn't load vcharon's code",
                     "this is a bug in vcharon; see the log")
 

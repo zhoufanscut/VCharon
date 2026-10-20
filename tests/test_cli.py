@@ -137,7 +137,8 @@ class CliTest(FakeSshCase):
         self.assertRegex(lines[2], r"\A  server   .+, user .*, home " + re.escape(self.home)
                          + r"\Z")
         self.assertEqual(lines[3], "  machine  0123456789abcdef0123456789abcdef")
-        self.assertRegex(lines[4], r"\A  connect  \d+\.\d\d s  \(ssh start to hello\)\Z")
+        self.assertRegex(lines[4], r"\A  connect  \d+\.\d\d s  \(ssh start to hello, bundle "
+                         r"sent\)\Z")
         self.assertRegex(lines[5], r"\A  echo     1048832 bytes, byte-identical, \d+\.\d\d s "
                          r"round trip\Z")
         self.assertRegex(lines[6], r"\AOK  \(\d+\.\d s\)\Z")
@@ -147,6 +148,11 @@ class CliTest(FakeSshCase):
             text = f.read()
         self.assertIn("vcharon %s ping fake-dest" % VERSION, text)
         self.assertIn("ping OK", text)
+        # the server kept the bundle: the next connection doesn't send it
+        code, out, err = self.run_cli("ping", "fake-dest")
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out.splitlines()[4], r"\A  connect  \d+\.\d\d s  \(ssh start to hello, "
+                         r"bundle cached\)\Z")
 
     def test_ping_warnings(self):
         class NoMachineId(ssh.Session):

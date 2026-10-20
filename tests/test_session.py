@@ -12,7 +12,7 @@ import time
 import unittest
 
 import vcharon
-from vcharon import helper, platform, proto, ssh
+from vcharon import bundle, helper, platform, proto, ssh
 from vcharon.proto import VCharonError
 
 from tests.util import TEST_MACHINE_ID, FakeSshCase, helper_override, package_source
@@ -267,6 +267,30 @@ class SessionTest(FakeSshCase):
         self.assertIn("VCHARON-READY " + "f" * 32, log)
         self.assertIn("....", log)
         self.assertNotIn("after-4k", log)
+
+    def test_the_bundle_is_sent_once_then_cached(self):
+        # junk before the server's request for the bundle is skipped as junk before the marker
+        os.environ["FAKE_SSH_JUNK_B64"] = base64.b64encode(b"motd\n").decode()
+        s = self.session()
+        s.open()
+        self.assertEqual((s.bundle_sent, s.junk_bytes), (True, 5))
+        self.assert_echoes(s)
+        s.close()
+        cache = os.path.join(self.home, ".local", "state", "vcharon", "cache")
+        [name] = os.listdir(cache)
+        self.assertEqual(name, "helper-" + bundle.payload()[1])
+        s = self.session()
+        s.open()
+        self.assertEqual((s.bundle_sent, s.junk_bytes), (False, 5))
+        self.assert_echoes(s)
+        log = self.log_text()
+        self.assertIn("the server has no copy of the bundle: sending it", log)
+        self.assertIn("the server ran its cached copy of the bundle", log)
+        # a test seam's modules are another bundle, with an entry of its own
+        s = self.session(extra_modules={"vcharon.padding": "X = 1\n"})
+        s.open()
+        self.assertEqual(s.bundle_sent, True)
+        self.assertEqual(len(os.listdir(cache)), 2)
 
     # 3
     def test_files_in_the_home_dont_shadow_vcharon(self):

@@ -9,6 +9,16 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- A server keeps the helper's bundle in a new folder, `~/.local/state/vcharon/cache/` (beside
+  the channel root), as `helper-<sha256>` files, at most 8. A connection sends the bundle's
+  sha256 first and the bundle itself only when the server has no copy that hashes to it; the
+  loader the client sends checks the copy on every use. `vcharon ping`'s `connect` line and
+  `doctor`'s line for each server end in `bundle sent` or `bundle cached`. To remove the folder,
+  delete it on the server, at any time: the next connection sends the bundle again. Members on
+  older versions are unaffected: each client sends its own loader. Measured on Linux, through
+  the tests' fake ssh on this machine, not a real link: connect 0.235 s with the bundle sent,
+  0.168 s cached (median of 10 each); building the bundle 5 ms, compressing it 36 ms.
+
 - The bundle sent to the server at each connection holds only the modules the helper can import
   (`bundle.SERVER`): 16 modules, about 81 kB compressed, where it held 31 and about 212 kB
   (measured with `bundle.summary()` on Linux, from the source tree). `doctor`'s `bundle` line

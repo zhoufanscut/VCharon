@@ -496,9 +496,9 @@ def _server(rep, d, session):
     except VCharonError as e:
         rep.check("FAIL", dest, e.message, e.hint)
         return None
-    rep.check("ok", dest, "Python %s on %s, user %s; handshake %.2f s"
+    rep.check("ok", dest, "Python %s on %s, user %s; handshake %.2f s, bundle %s"
               % (hello.get("python"), hello.get("distro") or hello.get("os"), hello.get("user"),
-                 session.handshake_seconds))
+                 session.handshake_seconds, "sent" if session.bundle_sent else "cached"))
     # tested on Debian 13 or later: anything else is a warning, never a failure
     warning = platform.distro_warning(hello)
     if warning is not None:

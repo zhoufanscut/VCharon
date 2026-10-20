@@ -377,9 +377,12 @@ needs.
   password and asks for none.
 - On each run it sends its own Python code over that connection's stdin and runs it with the
   server's `python3 -I`. The code exits when the run ends; nothing is installed or left running.
-- It writes only under the channel root (`~/.local/state/vcharon/channels/` by default) on the
-  server, and under its own folders on your machine (listed per OS in
-  [Uninstall](#uninstall)).
+  The server keeps a copy of that code in `~/.local/state/vcharon/cache/`, so a later run with
+  the same version sends only its sha256; the code that runs first checks the copy against it
+  every time. Anything in `cache/` can be deleted at any time.
+- On the server it writes only under `~/.local/state/vcharon/`: the channel root `channels/`,
+  watchers' last-watched stamps in `seen/`, and `cache/`; on your machine, only under its own
+  folders (listed per OS in [Uninstall](#uninstall)).
 - Network: ssh to the servers you name, and HTTPS to GitHub only when you run `--update`. No
   telemetry, no other connection.
 
@@ -434,8 +437,9 @@ There is no uninstall command. Stop every watcher, leave (or close) your channel
 
    Before you remove the program, `vcharon doctor` lists the exact folders (`--json`: under
    `dirs`).
-4. On the server: `~/.local/state/vcharon/channels/`, the channel root, once no one uses it.
-   Nothing else of VCharon's is there.
+4. On the server: `~/.local/state/vcharon/`, once no one uses its channels: `channels/` (the
+   channel root), `seen/` (watchers' stamps) and `cache/` (copies of VCharon's code). Nothing
+   else of VCharon's is there.
 
 ## License
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -28,26 +29,44 @@ def loader_line(floor=FLOOR):
     return base64.b64encode(loader_source(floor).encode()) + b"\n"
 
 
-def build(nonce, extra_modules=None):
-    """The bundle: an 8-byte big-endian length, then zlib-compressed JSON with the nonce and the
-    source of each module SERVER names. extra_modules ({name: source}) adds or replaces
-    modules; it's a test seam."""
+def payload(extra_modules=None):
+    """(the bundle's JSON, its sha256 in hex): {"packages", "modules": {name: source}} as UTF-8
+    bytes, built the same way on every run so that one install always hashes the same and the
+    server's cached copy is found. The modules are those SERVER names; extra_modules ({name:
+    source}) adds or replaces some, a test seam that changes the hash too."""
     modules, packages = _sources()
     if extra_modules:
         modules.update(extra_modules)
-    doc = {"nonce": nonce, "packages": packages, "modules": modules}
-    blob = zlib.compress(json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
-                         .encode("utf-8"), 9)
+    doc = {"packages": packages, "modules": modules}
+    data = json.dumps(doc, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    data = data.encode("utf-8")
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def key_line(nonce, digest):
+    """The line after the loader: the session's nonce and the bundle's sha256."""
+    return ("%s %s\n" % (nonce, digest)).encode("ascii")
+
+
+def frame(data):
+    """What a session sends when the server asks for the bundle: an 8-byte big-endian length,
+    then the JSON zlib-compressed."""
+    blob = zlib.compress(data, 9)
     return struct.pack(">Q", len(blob)) + blob
 
 
 def summary():
     """{"modules", "has_helper", "bytes"}: the bundle a session sends, built as a session builds
     it and read back as the loader reads it, so doctor shows the helper's source is there (in a
-    binary, the .py files the spec collects under sys._MEIPASS). bytes: the bundle's size."""
-    blob = build(os.urandom(16).hex())
+    binary, the .py files the spec collects under sys._MEIPASS). bytes: its size when sent,
+    compressed and framed."""
+    data, digest = payload()
+    blob = frame(data)
     size = struct.unpack(">Q", blob[:8])[0]
-    modules = json.loads(zlib.decompress(blob[8:8 + size]).decode("utf-8"))["modules"]
+    back = zlib.decompress(blob[8:8 + size])
+    if hashlib.sha256(back).hexdigest() != digest:
+        raise ValueError("the bundle doesn't read back as it was built")
+    modules = json.loads(back.decode("utf-8"))["modules"]
     return {"modules": len(modules), "has_helper": "vcharon.helper" in modules,
             "bytes": len(blob)}
 
@@ -120,36 +139,140 @@ if sys.version_info[:2] < FLOOR:
     sys.exit(90)
 
 
+def _cache_dir():
+    # cache/ beside the channel root, as channels.py finds the root (DEFAULT_ROOT, ROOT_ENV and
+    # root_path); tests/test_bundle.py checks that the two agree
+    import os
+    root = os.environ.get("VCHARON_CHANNELS_ROOT") or "~/.local/state/vcharon/channels"
+    root = os.path.expanduser(root)
+    if not os.path.isabs(root):
+        root = os.path.join(os.path.expanduser("~"), root)
+    return os.path.join(os.path.dirname(os.path.normpath(root)), "cache")
+
+
 def _vcharon_main():
+    import hashlib
     import importlib.util
     import json
+    import os
     import re
+    import stat
     import struct
+    import time
     import zlib
+
+    cap = 64 << 20
+    # the newest copies kept; about one per client version and OS that connects here (a
+    # checkout's line endings, and so the hash, may differ by OS)
+    keep = 8
 
     def bad(why):
         sys.stderr.write("vcharon: bad bundle: %s\n" % why)
         sys.stderr.flush()
         sys.exit(91)
 
-    # The bootstrap read its line through this buffer, which may already hold the bundle's
-    # first bytes. Read nothing through any other object.
+    def note(why):
+        sys.stderr.write("vcharon: %s\n" % why)
+        sys.stderr.flush()
+
+    def store(path, data):
+        # Best effort: the session goes on from memory when the copy can't be written.
+        folder = os.path.dirname(path)
+        tmp = os.path.join(folder, ".tmp-%s-%d" % (nonce, os.getpid()))
+        try:
+            os.makedirs(folder, 0o700, exist_ok=True)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                         0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError as e:
+            note("couldn't keep the bundle in %s for the next connection: %s" % (folder, e))
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return
+        prune(folder, os.path.basename(path))
+
+    def prune(folder, mine):
+        # Only after a write, so a connection that finds its copy reads one file.
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return
+        found = []
+        drop = []
+        for name in names:
+            path = os.path.join(folder, name)
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if name.startswith("helper-") and name != mine:
+                found.append((mtime, path))
+            elif name.startswith(".tmp-") and mtime < time.time() - 3600:
+                # left by a loader killed while writing
+                drop.append(path)
+        found.sort(reverse=True)
+        for path in [path for _, path in found[keep - 1:]] + drop:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    # The bootstrap read its line through this buffer, which may already hold the next bytes.
+    # Read nothing through any other object.
     inp = sys.stdin.buffer
-    head = inp.read(8)
-    if len(head) != 8:
-        bad("short header")
-    size = struct.unpack(">Q", head)[0]
-    if size > 64 << 20:
-        bad("too big")
-    blob = inp.read(size)
-    if len(blob) != size:
-        bad("short body")
+    m = re.match(br"\A([0-9a-f]{32}) ([0-9a-f]{64})\n\Z", inp.readline(200))
+    if not m:
+        bad("no nonce and hash line")
+    nonce, digest = m.group(1).decode("ascii"), m.group(2).decode("ascii")
+    path = os.path.join(_cache_dir(), "helper-" + digest)
+    data = None
     try:
-        bundle = json.loads(zlib.decompress(blob).decode("utf-8"))
-        nonce, modules = bundle["nonce"], bundle["modules"]
+        # Non-blocking, and only a regular file: a FIFO there would block open() forever.
+        # O_NONBLOCK changes nothing for a regular file's reads.
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as f:
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                data = f.read(cap + 1)
+    except OSError:
+        pass
+    # Hashed on every use: nothing on the server is trusted, only reused.
+    if data is not None and hashlib.sha256(data).hexdigest() == digest:
+        try:
+            os.utime(path, None)
+        except OSError:
+            pass
+    else:
+        out = sys.stdout.buffer
+        out.write(b"VCHARON-NEED " + nonce.encode("ascii") + b"\n")
+        out.flush()
+        head = inp.read(8)
+        if len(head) != 8:
+            bad("short header")
+        size = struct.unpack(">Q", head)[0]
+        if size > cap:
+            bad("too big")
+        blob = inp.read(size)
+        if len(blob) != size:
+            bad("short body")
+        try:
+            data = zlib.decompressobj().decompress(blob, cap + 1)
+        except Exception as e:
+            bad(repr(e))
+        if len(data) > cap:
+            bad("too big")
+        if hashlib.sha256(data).hexdigest() != digest:
+            bad("its sha256 isn't the one sent before it")
+        store(path, data)
+    try:
+        bundle = json.loads(data.decode("utf-8"))
+        modules = bundle["modules"]
         packages = frozenset(bundle["packages"])
-        good = (isinstance(nonce, str) and re.match(r"\A[0-9a-f]{32}\Z", nonce)
-                and isinstance(modules, dict) and "vcharon.helper" in modules
+        good = (isinstance(modules, dict) and "vcharon.helper" in modules
                 and all(isinstance(k, str) and isinstance(v, str) for k, v in modules.items())
                 and packages <= set(modules))
     except Exception as e:

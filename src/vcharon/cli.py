@@ -1830,7 +1830,8 @@ def _ping(args, run):
             _say("  machine  %s" % hello["machine"])
         else:
             _say("  machine  none (jobs that keep state won't run)")
-        _say("  connect  %.2f s  (ssh start to hello)" % session.handshake_seconds)
+        _say("  connect  %.2f s  (ssh start to hello, bundle %s)"
+             % (session.handshake_seconds, "sent" if session.bundle_sent else "cached"))
         if session.junk_bytes:
             _say("  warn     the server's shell printed %d bytes before vcharon started; see the "
                  "log" % session.junk_bytes)

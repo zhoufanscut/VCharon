@@ -13,7 +13,8 @@ Fixes go into the next release, and its CHANGELOG entry says what was fixed.
 
 - The `vcharon` client: the command line, the channel files it reads and writes, the watcher.
 - The helper VCharon sends over ssh and runs with the server's `python3` for each connection:
-  what it reads from the client, and what it does in the channel root.
+  what it reads from the client, what it does in the channel root, and how its loader reads,
+  hash-checks, runs, writes and prunes the copies of it kept in `cache/` beside that root.
 - The installers, `install.sh` and `install.ps1`, and `vcharon --update`: what they download,
   how they check it, and where they write.
 - The standalone binaries the release workflow publishes.

@@ -60,7 +60,8 @@ reach the real ones: they may hold live channels.
   patches. Stop only your own patcher.
 - **A hand run** goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
   `joined` folders, and `VCHARON_CHANNELS_ROOT` the channel root (which doesn't follow
-  `VCHARON_HOME`); both work on every OS:
+  `VCHARON_HOME`), and with it `seen/` and the helper's `cache/` beside it; both work on every
+  OS:
 
   ```sh
   mkdir -p /tmp/vc/web/.git && cd /tmp/vc/web

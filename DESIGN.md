@@ -55,7 +55,7 @@ for remote members, a GUI.
 | Python 3.13 or later everywhere | One language level for both ends. The binaries bundle 3.13, the server VCharon targets (Debian 13) ships 3.13, and a client running the binary never uses its own Python; one floor means one CI row fewer and no code for older versions |
 | The system OpenSSH client, never an ssh library | It reuses your keys, agent, `~/.ssh/config`, `known_hosts` and jump hosts |
 | One ssh connection per sync; up and down share it | Windows' OpenSSH can't share a connection between runs (no ControlMaster), so fewer connections is the only way to save handshakes there |
-| Nothing installed on the server | The helper's code is sent over stdin on every connection, so both ends always run the same version |
+| Nothing installed on the server | On every connection the client sends the loader and the sha256 of the helper's code, and the code itself only when the server has no copy that matches it; the loader checks a kept copy each time, so both ends always run the same version; the copies are a cache anyone can delete |
 | INI config, read with `configparser` | Windows paths need no quoting or escaping |
 | Sources and sinks are plugins; two are built in, `path` and `dir` | A channel's sync is two ordinary one-way jobs; the engine knows nothing about channels |
 | Flat verbs, the channel first: `vcharon post C …` | Channels are the only thing VCharon has; an explicit channel name is easy for an agent to get right and to read back in a log |
@@ -254,22 +254,44 @@ The last line is one argument, and the only text that ever goes through the serv
 ### Start-up
 
 1. The controller writes one line to ssh's stdin: the loader's source, base64, then `\n`.
-2. Then the bundle: an 8-byte big-endian length N, then N bytes of zlib-compressed JSON:
-   `{"nonce", "packages", "modules": {name: source}}`. The modules are those `bundle.SERVER`
-   names, which a test keeps equal to what the helper can import ([Files](#files)).
-3. The loader, on the server, exits with code 90 and one line if Python is older than `FLOOR`,
-   and with 91 if the bundle is malformed. It parses on any Python 3 from 3.6 on, so an old
-   server gets the version message, not a syntax error. It puts an import finder serving the
-   bundle from memory at the front of `sys.meta_path`, so nothing on disk shadows it, then calls
-   `vcharon.helper.main(nonce)`.
-4. The helper moves the protocol output off fd 1 (`os.dup(1)`, then `os.dup2(2, 1)`), so
+   Then a second line, `<nonce> <sha256>\n`: the session's random nonce, and the sha256 of the
+   bundle, which is UTF-8 JSON `{"packages", "modules": {name: source}}`, compact and with its
+   keys sorted, so one install always hashes the same. The modules are those `bundle.SERVER`
+   names, which a test keeps equal to what the helper can import ([Files](#files)). The
+   controller builds and hashes the JSON on every connection: a hash fixed at build time would
+   go stale in an editable install, and the server would run an old helper under an unchanged
+   version. The nonce stays out of the JSON, or no two sessions would hash the same.
+2. The loader, on the server, exits with code 90 and one line if Python is older than `FLOOR`.
+   It parses on any Python 3 from 3.6 on, so an old server gets the version message, not a
+   syntax error. It then looks for `cache/helper-<sha256>` beside the channel root (by default
+   `~/.local/state/vcharon/cache/`; it follows `VCHARON_CHANNELS_ROOT` as the root does, and
+   has its own copy of `channels.root_path()`'s rule, since it runs before any of VCharon's
+   modules; a test keeps the two equal). A copy whose sha256 matches is used and its mtime
+   touched. It is hashed on every use: nothing on the server is trusted, only reused.
+3. Without a matching copy the loader writes `VCHARON-NEED <nonce>\n` to stdout. The controller
+   finds it the way it finds the marker (step 6), then sends the bundle: an 8-byte big-endian
+   length N, then N bytes of the JSON zlib-compressed. It compresses only then: zlib is most of
+   the cost of building it. The loader exits with 91 if the bundle is malformed or its sha256
+   isn't the one on the second line (64 MiB caps the compressed bundle, the JSON and a cached
+   copy), then keeps it: a temp file in `cache/`, then `os.replace`; `cache/` is made 0700. A
+   failed write (a read-only home, a quota) is one stderr line, and the session goes on from
+   memory. After a write it keeps the 8 newest `helper-*` by mtime (about one per client
+   version and OS that connects: a checkout's line endings, and so the hash, may differ by OS)
+   and removes temp files older than an hour, left by a loader that was killed. It opens a copy
+   non-blocking and reads it only if it is a regular file: a FIFO there would block forever.
+4. It puts an import finder serving the bundle from memory at the front of `sys.meta_path`, so
+   nothing on disk shadows it, then calls `vcharon.helper.main(nonce)`.
+5. The helper moves the protocol output off fd 1 (`os.dup(1)`, then `os.dup2(2, 1)`), so
    neither a stray `print` nor a child process can write into the protocol. It reads stdin only
    through `sys.stdin.buffer`, which may already hold the next bytes; children never get fd 0.
    It writes `VCHARON-READY <nonce>\n`, then a `hello`.
-5. The controller drops every byte before the marker and logs up to 4 KiB of it: shell startup
-   files on the server may print, and the marker keeps that out of the protocol. If ssh exits
-   before the marker, the connection fails at once ([Failures before the helper
-   runs](#failures-before-the-helper-runs)).
+6. The controller drops every byte before the marker (and before `VCHARON-NEED`) and logs up to
+   4 KiB of it: shell startup files on the server may print, and the marker keeps that out of
+   the protocol. If ssh exits before the marker, the connection fails at once ([Failures before
+   the helper runs](#failures-before-the-helper-runs)). `handshake_timeout` runs to the marker,
+   so it covers a miss's extra round trip. The session records whether it sent the bundle:
+   `ping`'s `connect` line and `doctor`'s line for the server end in `bundle sent` or `bundle
+   cached`.
 
 ### Threads, timeouts, shutdown
 
@@ -758,6 +780,7 @@ less the umask. Not copied: owner, ACLs, extended attributes, resource forks, fo
 | local trees (`joined`) | `%LOCALAPPDATA%\vcharon\joined\` | `~/.local/state/vcharon/joined/` | `~/.local/state/vcharon/joined/` |
 | channel root | `~/.local/state/vcharon/channels/` (under `%USERPROFILE%`) | `~/.local/state/vcharon/channels/` | `~/.local/state/vcharon/channels/` |
 | last-watched stamps (`seen`) | beside the channel root | the same | the same |
+| a server's copies of the helper's bundle (`cache`) | beside the channel root | the same | the same |
 
 Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 
@@ -774,6 +797,8 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 - The channel root is the same text on every OS (`~/.local/state/vcharon/channels`): one text
   for a local member's root and for what a remote member's section names at the server.
 - Never `$TMPDIR` on macOS: different launchers can see different ones.
+- `cache/` holds `helper-<sha256>` files, the bundles connections sent ([Start-up](#start-up)).
+  Anything in it can be deleted at any time: the next connection sends the bundle again.
 
 ### State file
 
@@ -2941,7 +2966,9 @@ which and how to adapt. A channel format change is always a minor version at lea
   `VCHARON_TEST_OS_RELEASE`, `VCHARON_TEST_CLOCK_SHIFT`, `VCHARON_TEST_UTC_OFFSET`, and
   `VCHARON_CHANNELS_ROOT`.
 - Real ssh, optional: with `VCHARON_TEST_SSH=<dest>` set, the session tests run against a real
-  server, in a temp folder under its home.
+  server, in a temp folder under its home. The helper's cache still goes to that user's real
+  `~/.local/state/vcharon/cache/` (ssh passes no test variable), at most 8 files, all safe to
+  delete.
 - Path rules are pure functions: every OS's rules run on every OS. Windows-only and POSIX-only
   tests are skipped elsewhere.
 - Guards on the repo itself: the guide's commands and flags parse with the command line's own
@@ -2965,9 +2992,10 @@ which and how to adapt. A channel format change is always a minor version at lea
   (boxes `ci1` and `ci2`, one project) create and join a channel, the second one's `watch
   --until-change` wakes on the first one's post and sync, and it ends with `read`, `leave` and
   `close`; then the real-ssh unit tests (`VCHARON_TEST_SSH=localhost`). The channel is made in the
-  ssh user's real channel root, since the server side reads no test variable over ssh, so
-  `ssh_flow.sh` runs only where `CI` is set (or `SSH_FLOW_REAL_HOME=1`), refuses a root that already
-  holds its channel, and `ci_sshd.sh` only on GitHub Actions.
+  ssh user's real channel root (and the helper's cache beside it), since the server side reads
+  no test variable over ssh, so `ssh_flow.sh` runs only where `CI` is set (or
+  `SSH_FLOW_REAL_HOME=1`), refuses a root that already holds its channel, and `ci_sshd.sh` only on
+  GitHub Actions.
 - `install.sh` runs under `sh` against a fake release on a local HTTP server, with `uname`
   faked for each platform (POSIX only). A built binary is checked by `tests/smoke.sh`
   ([Packaging](#packaging)), and its packed assets by `tests/pack.py` and

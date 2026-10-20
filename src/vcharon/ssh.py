@@ -424,6 +424,9 @@ class Session:
         self.extra_modules = extra_modules
         self.hello = None
         self.junk_bytes = 0
+        # True when the server asked for the bundle and it was sent, False when the server ran
+        # its cached copy; None before start-up gets that far (DESIGN, "Start-up")
+        self.bundle_sent = None
         self.ssh_exit = None
         self.handshake_seconds = None
         # time.time() when the hello was read, and the server's clock minus it
@@ -437,6 +440,8 @@ class Session:
         self._junk_head = b""
         # set once the reader has seen the marker, or has stopped before it
         self._ready = threading.Event()
+        # set once the reader has seen the server ask for the bundle
+        self._need = threading.Event()
         self._stop = threading.Event()
         self._marker_seen = False
         self._reader_done = False
@@ -471,7 +476,9 @@ class Session:
         if self._proc is not None or self._closed:
             raise VCharonError("internal", "a session can be opened only once")
         loader = bundle.loader_line(self.floor)
-        blob = bundle.build(self._nonce, self.extra_modules)
+        # built and hashed every time; compressed only when the server asks for it
+        data, digest = bundle.payload(self.extra_modules)
+        loader += bundle.key_line(self._nonce, digest)
         argv = ssh_command(self.settings, self.dest, probe=self.probe)
         self.log.info("starting ssh: %r" % (argv,))
         # Without a controlling terminal ssh can't prompt even where BatchMode doesn't reach,
@@ -485,7 +492,7 @@ class Session:
             raise VCharonError("connect", "couldn't start %s: %s" % (argv[0], e.strerror or e),
                                hint="install the OpenSSH client, or set ssh_path in vcharon.ini")
         try:
-            return self._start(loader, blob)
+            return self._start(loader, data)
         except BaseException as e:
             self._healthy = False
             if not isinstance(e, Exception):
@@ -493,7 +500,7 @@ class Session:
             self.close()
             raise
 
-    def _start(self, loader, blob):
+    def _start(self, loader, data):
         self._started = self._activity = time.monotonic()
         with self._lock:
             # a round that opens the session counts from its start (start_round)
@@ -502,15 +509,26 @@ class Session:
         self._stdout_thread = self._thread(self._read_stdout)
         self._stderr_thread = self._thread(self._read_stderr)
         self._watchdog = self._thread(self._watch)
-        self.log.debug("sending the loader (%d bytes) and the bundle (%d bytes)"
-                       % (len(loader), len(blob)))
+        self.log.debug("sending the loader and the bundle's hash (%d bytes)" % len(loader))
         try:
             self._write(loader)
-            self._write(blob)
         except OSError as e:
             # ssh died or was killed; the reader tells why.
-            self.log.debug("writing the bundle stopped: %s" % e)
-        self._wait_ready()
+            self.log.debug("writing the loader stopped: %s" % e)
+        self._wait_ready(self._need)
+        if self._need.is_set() and not self._marker_seen:
+            blob = bundle.frame(data)
+            self.bundle_sent = True
+            self.log.debug("the server has no copy of the bundle: sending it (%d bytes)"
+                           % len(blob))
+            try:
+                self._write(blob)
+            except OSError as e:
+                self.log.debug("writing the bundle stopped: %s" % e)
+            self._wait_ready()
+        elif self._marker_seen:
+            self.bundle_sent = False
+            self.log.debug("the server ran its cached copy of the bundle")
         if not self._marker_seen:
             killed = self._killed
             rc = self._wait_exit(5)
@@ -543,9 +561,13 @@ class Session:
         thread.start()
         return thread
 
-    def _wait_ready(self):
+    def _wait_ready(self, need=None):
+        """Waits for the marker, or for the server to ask for the bundle when need is the
+        event the reader sets then; returns early once ssh has exited."""
         exited = None
         while not self._ready.wait(0.1):
+            if need is not None and need.is_set():
+                return
             if self._proc.poll() is not None:
                 # A leftover child of ssh may hold the pipe open; don't wait for it long.
                 exited = exited or time.monotonic()
@@ -581,9 +603,11 @@ class Session:
             self._queue.put(_EOF)
 
     def _find_marker(self):
-        """Skips what the server's shell printed before the marker. Returns the bytes after
-        the marker, or None at end of file."""
+        """Skips what the server's shell printed before the marker, and sets _need at the
+        server's request for the bundle on the way. Returns the bytes after the marker, or None
+        at end of file."""
         marker = b"VCHARON-READY " + self._nonce.encode("ascii") + b"\n"
+        need = b"VCHARON-NEED " + self._nonce.encode("ascii") + b"\n"
         keep = len(marker) - 1
         buf = b""
         try:
@@ -595,6 +619,12 @@ class Session:
                     return None
                 buf += chunk
                 at = buf.find(marker)
+                asked = -1 if self._need.is_set() else buf.find(need)
+                if asked >= 0 and (at < 0 or asked < at):
+                    self._junk(buf[:asked])
+                    buf = buf[asked + len(need):]
+                    self._need.set()
+                    at = buf.find(marker)
                 if at >= 0:
                     self._junk(buf[:at])
                     with self._lock:

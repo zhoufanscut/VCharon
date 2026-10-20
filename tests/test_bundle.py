@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import json
 import os
@@ -17,7 +18,8 @@ import unittest
 import zlib
 from unittest import mock
 
-from vcharon import bundle, plugins
+import vcharon
+from vcharon import bundle, channels, plugins
 from vcharon.proto import VCharonError
 
 from tests.util import PACKAGE_DIR
@@ -28,6 +30,13 @@ NONCE = "0123456789abcdef" * 2
 def unpack(blob):
     size = struct.unpack(">Q", blob[:8])[0]
     return size, json.loads(zlib.decompress(blob[8:]).decode("utf-8"))
+
+
+def wire(extra_modules=None, floor=vcharon.FLOOR):
+    """What a session sends on a miss: the loader, the nonce and hash line, the bundle."""
+    data, digest = bundle.payload(extra_modules)
+    return (bundle.loader_line(floor) + bundle.key_line(NONCE, digest) + bundle.frame(data),
+            data, digest)
 
 
 def run_loader(stdin, timeout=30):
@@ -165,10 +174,18 @@ def helper_closure(roots=None):
 
 class BundleTest(unittest.TestCase):
     def test_holds_the_modules_server_names(self):
-        blob = bundle.build(NONCE)
+        data, digest = bundle.payload()
+        blob = bundle.frame(data)
         size, doc = unpack(blob)
         self.assertEqual(size, len(blob) - 8)
-        self.assertEqual(doc["nonce"], NONCE)
+        self.assertEqual(sorted(doc), ["modules", "packages"])
+        # the cache's key: the same bytes on every build, and their sha256
+        self.assertEqual(digest, hashlib.sha256(data).hexdigest())
+        self.assertEqual(bundle.payload(), (data, digest))
+        self.assertEqual(data, json.dumps(doc, ensure_ascii=False, separators=(",", ":"),
+                                          sort_keys=True).encode("utf-8"))
+        self.assertEqual(bundle.key_line(NONCE, digest),
+                         ("%s %s\n" % (NONCE, digest)).encode("ascii"))
         self.assertEqual(doc["packages"], ["vcharon", "vcharon.plugins"])
         expected = {}
         for name in bundle.SERVER:
@@ -269,8 +286,7 @@ class BundleTest(unittest.TestCase):
         modules, _packages = bundle._sources()
         found = bundle.summary()
         self.assertEqual((found["modules"], found["has_helper"]), (len(modules), True))
-        # compressed, so another nonce may change it by a few bytes
-        self.assertAlmostEqual(found["bytes"], len(bundle.build(NONCE)), delta=200)
+        self.assertEqual(found["bytes"], len(bundle.frame(bundle.payload()[0])))
         with mock.patch.object(bundle, "_sources", return_value=({"vcharon": ""}, ["vcharon"])):
             self.assertEqual(bundle.summary()["has_helper"], False)
 
@@ -298,9 +314,13 @@ class BundleTest(unittest.TestCase):
         self.assertEqual((found["modules"], found["has_helper"]), (len(bundle.SERVER), True))
 
     def test_extra_modules(self):
-        _size, doc = unpack(bundle.build(NONCE, {"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"}))
+        data, digest = bundle.payload({"vcharon.extra": "X = 1\n", "vcharon": "Y = 2\n"})
+        doc = json.loads(data)
         self.assertEqual(doc["modules"]["vcharon.extra"], "X = 1\n")
         self.assertEqual(doc["modules"]["vcharon"], "Y = 2\n")
+        self.assertEqual(list(doc["modules"]), sorted(doc["modules"]))
+        # another bundle, another cache entry
+        self.assertNotEqual(digest, bundle.payload()[1])
 
     def test_remote_command(self):
         self.assertNotIn("'", bundle.BOOTSTRAP)
@@ -352,14 +372,21 @@ class BundleTest(unittest.TestCase):
 
 class LoaderTest(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.mkdtemp(prefix="vcharon-test-")
-        self.addCleanup(shutil.rmtree, tmp, True)
-        patcher = mock.patch.dict(os.environ, {"VCHARON_HOME": tmp})
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        # the cache is beside the channel root, which the loader finds as channels.py does
+        patcher = mock.patch.dict(os.environ, {
+            "VCHARON_HOME": self.tmp,
+            "VCHARON_CHANNELS_ROOT": os.path.join(self.tmp, "channels")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.cache = os.path.join(self.tmp, "cache")
+
+    def cached(self, digest):
+        return os.path.join(self.cache, "helper-" + digest)
 
     def test_too_old(self):
-        result = run_loader(bundle.loader_line((99, 0)) + bundle.build(NONCE))
+        result = run_loader(wire(floor=(99, 0))[0])
         self.assertEqual(result.returncode, 90, result.stderr)
         self.assertIn(b"vcharon needs 99.0 or later", result.stderr)
         self.assertEqual(result.stdout, b"")
@@ -378,19 +405,27 @@ class LoaderTest(unittest.TestCase):
                               result.stderr)
 
     def test_bad_bundles(self):
-        good = bundle.build(NONCE)
-        _size, doc = unpack(good)
-        doc["nonce"] = "not hex"
-        wrong = zlib.compress(json.dumps(doc).encode())
-        for blob in (b"", good[:5], good[:-10], good[:8] + b"x" * (len(good) - 8),
-                     struct.pack(">Q", 65 << 20), struct.pack(">Q", len(wrong)) + wrong):
-            result = run_loader(bundle.loader_line() + blob)
-            self.assertEqual(result.returncode, 91, (blob[:20], result.stderr))
-            self.assertIn(b"vcharon: bad bundle: ", result.stderr)
+        _, data, digest = wire()
+        key = bundle.key_line(NONCE, digest)
+        good = bundle.frame(data)
+        no_helper = json.dumps({"packages": [], "modules": {"vcharon": ""}}).encode()
+        for what, stdin in (
+                ("no key line", b""), ("a nonce that isn't hex", key.replace(b"0", b"g", 1)),
+                ("short header", key + good[:5]), ("short body", key + good[:-10]),
+                ("not zlib", key + good[:8] + b"x" * (len(good) - 8)),
+                ("too big", key + struct.pack(">Q", 65 << 20)),
+                ("another bundle's hash", bundle.key_line(NONCE, "0" * 64) + good),
+                ("no helper", bundle.key_line(NONCE, hashlib.sha256(no_helper).hexdigest())
+                 + bundle.frame(no_helper))):
+            with self.subTest(what=what):
+                result = run_loader(bundle.loader_line() + stdin)
+                self.assertEqual(result.returncode, 91, result.stderr)
+                self.assertIn(b"vcharon: bad bundle: ", result.stderr)
+        self.assertFalse(os.path.exists(self.cached("0" * 64)))
 
     def test_helper_that_wont_import(self):
-        blob = bundle.build(NONCE, {"vcharon.helper": "def main(nonce):\n    return (\n"})
-        result = run_loader(bundle.loader_line() + blob)
+        stdin, _, _ = wire({"vcharon.helper": "def main(nonce):\n    return (\n"})
+        result = run_loader(stdin)
         self.assertEqual(result.returncode, 91, result.stderr)
         self.assertIn(b"SyntaxError", result.stderr)
         self.assertIn(b"vcharon-bundle/vcharon/helper.py", result.stderr)
@@ -398,12 +433,111 @@ class LoaderTest(unittest.TestCase):
         self.assertTrue(result.stderr.replace(b"\r\n", b"\n")
                         .endswith(b"vcharon: bad bundle: vcharon.helper didn't import\n"))
 
-    def test_runs_the_helper(self):
+    def test_sent_once_then_cached(self):
         # The helper answers with the marker and a hello, then sees end of file and exits.
-        result = run_loader(bundle.loader_line() + bundle.build(NONCE))
+        stdin, data, digest = wire()
+        result = run_loader(stdin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith(b"VCHARON-NEED " + NONCE.encode() + b"\n"
+                                                 + b"VCHARON-READY " + NONCE.encode() + b"\n"))
+        self.assertIn(b'"t":"hello"', result.stdout)
+        with open(self.cached(digest), "rb") as f:
+            self.assertEqual(f.read(), data)
+        self.assertEqual(os.listdir(self.cache), ["helper-" + digest])
+        if os.name == "posix":
+            self.assertEqual(os.stat(self.cache).st_mode & 0o777, 0o700)
+        # the next connection sends only the loader and the key line
+        os.utime(self.cached(digest), (1000, 1000))
+        result = run_loader(bundle.loader_line() + bundle.key_line(NONCE, digest))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.startswith(b"VCHARON-READY " + NONCE.encode() + b"\n"))
-        self.assertIn(b'"t":"hello"', result.stdout)
+        self.assertNotIn(b"VCHARON-NEED", result.stdout)
+        self.assertEqual(result.stderr, b"")
+        # used: its mtime is now, so pruning keeps it
+        self.assertGreater(os.stat(self.cached(digest)).st_mtime, 1000)
+
+    def test_a_tampered_copy_is_sent_again(self):
+        stdin, data, digest = wire()
+        os.makedirs(self.cache)
+        with open(self.cached(digest), "wb") as f:
+            f.write(data.replace(b"def main(", b"def evil("))
+        result = run_loader(stdin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith(b"VCHARON-NEED "))
+        with open(self.cached(digest), "rb") as f:
+            self.assertEqual(f.read(), data)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs FIFOs")
+    def test_a_fifo_in_the_cache_is_a_miss(self):
+        # open() of a FIFO blocks until a writer comes: the loader must not wait for one
+        stdin, data, digest = wire()
+        os.makedirs(self.cache)
+        os.mkfifo(self.cached(digest))
+        result = run_loader(stdin, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith(b"VCHARON-NEED "))
+        self.assertTrue(os.path.isfile(self.cached(digest)))
+        with open(self.cached(digest), "rb") as f:
+            self.assertEqual(f.read(), data)
+
+    def test_a_copy_that_cant_be_kept(self):
+        # a file where the folder would be: the session goes on from memory, with one line
+        stdin, _, _ = wire()
+        with open(self.cache, "wb") as f:
+            f.write(b"x")
+        result = run_loader(stdin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(b"VCHARON-READY " + NONCE.encode(), result.stdout)
+        lines = result.stderr.splitlines()
+        self.assertEqual(len(lines), 1, result.stderr)
+        self.assertTrue(lines[0].startswith(b"vcharon: couldn't keep the bundle in %s for the "
+                                            b"next connection: " % os.fsencode(self.cache)),
+                        lines[0])
+
+    def test_prunes_to_the_newest_8(self):
+        stdin, _, digest = wire()
+        os.makedirs(self.cache)
+        for i in range(10):
+            path = self.cached("%064x" % i)
+            with open(path, "wb") as f:
+                f.write(b"old")
+            os.utime(path, (1000 + i, 1000 + i))
+        # a loader killed while writing left these: an old one goes, a recent one may be live
+        for name, when in ((".tmp-old", 1000), (".tmp-new", None)):
+            with open(os.path.join(self.cache, name), "wb") as f:
+                f.write(b"part")
+            if when:
+                os.utime(os.path.join(self.cache, name), (when, when))
+        result = run_loader(stdin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(os.listdir(self.cache)), sorted(
+            [".tmp-new", "helper-" + digest] + ["helper-%064x" % i for i in range(3, 10)]))
+
+    def test_the_cache_is_beside_the_channel_root(self):
+        # the loader can't import channels.py, so it has its own copy of root_path(): the two
+        # must agree, with VCHARON_CHANNELS_ROOT and without it
+        source = bundle.loader_source()
+        last = "sys.exit(_vcharon_main())\n"
+        self.assertTrue(source.endswith(last))
+        code = source[:-len(last)] + "sys.stdout.write(_cache_dir())\n"
+
+        def loader_says(env):
+            result = subprocess.run([sys.executable, "-I", "-c", code], env=env,
+                                    capture_output=True, timeout=60, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.decode("utf-8")
+
+        for value in (None, os.path.join(self.tmp, "elsewhere", "root"), "rel/root"):
+            env = {k: v for k, v in os.environ.items() if k != channels.ROOT_ENV}
+            if value is not None:
+                env[channels.ROOT_ENV] = value
+            with self.subTest(value=value), mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(loader_says(env), os.path.join(
+                    os.path.dirname(channels.root_path()), "cache"))
+        env = {k: v for k, v in os.environ.items() if k != channels.ROOT_ENV}
+        env.update(HOME=self.tmp, USERPROFILE=self.tmp)
+        self.assertEqual(loader_says(env), os.path.join(self.tmp, ".local", "state", "vcharon",
+                                                        "cache"))
 
 
 if __name__ == "__main__":
