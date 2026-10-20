@@ -300,9 +300,11 @@ class BundleTest(unittest.TestCase):
         os.makedirs(os.path.join(package, "guide"))
         for rel, data in (("cli.py", "C = 1\n"), ("guide/__init__.py", ""),
                           ("guide/start.md", "# start\n")):
-            with open(os.path.join(package, *rel.split("/")), "w", encoding="utf-8") as f:
+            with open(os.path.join(package, *rel.split("/")), "w", encoding="utf-8",
+                      newline="") as f:
                 f.write(data)
-        with open(os.path.join(package, "helper.py"), "w", encoding="utf-8") as f:
+        # newline="": Windows' text mode would write CRLF, and the bundle carries bytes as read
+        with open(os.path.join(package, "helper.py"), "w", encoding="utf-8", newline="") as f:
             f.write("H = 1\n")
         with mock.patch.object(bundle.vcharon, "__file__",
                                os.path.join(package, "__init__.pyc")):
