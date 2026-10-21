@@ -146,7 +146,8 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
 "Releases"). The steps:
 
 1. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
-   `version` in `pyproject.toml`.
+   `version` in `pyproject.toml`. A final version also moves README's pipx and uv lines to
+   `@v<version>`; a pre-release leaves them on the last final: they are what a reader installs.
 2. The CHANGELOG's `## Unreleased` heading becomes `## <version> — <date>`, with what was
    checked on which OS, marked measured or inferred.
 3. Push the release commit to `main` and wait until CI passes on it; only then push the tag. Why:
