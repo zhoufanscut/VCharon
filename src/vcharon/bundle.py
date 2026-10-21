@@ -100,7 +100,9 @@ def _sources(root=None):
     """{module name: source} for each module SERVER names, and the packages among them (a name
     with a directory and an __init__.py). root: another directory to read as the package; a
     test seam. A module whose file is missing raises here, on the client, so a broken install
-    isn't found later as an ImportError on the server."""
+    isn't found later as an ImportError on the server. Sources are read with LF line ends
+    (CRLF becomes LF): a Windows checkout or build has CRLF, and the bundle, and so its hash,
+    must be the same on every OS, so that a server keeps one cached copy per client version."""
     if root is None:
         root = os.path.dirname(os.path.abspath(vcharon.__file__))
     found = {}
@@ -118,7 +120,7 @@ def _sources(root=None):
             missing.append(name)
             continue
         with open(path, "rb") as f:
-            found[name] = f.read().decode("utf-8")
+            found[name] = f.read().decode("utf-8").replace("\r\n", "\n")
     if missing:
         raise VCharonError("internal", "this install has no source (.py) of %s, which the "
                            "helper imports (in %s)" % (", ".join(missing), root), BROKEN_HINT)
@@ -162,8 +164,8 @@ def _vcharon_main():
     import zlib
 
     cap = 64 << 20
-    # the newest copies kept; about one per client version and OS that connects here (a
-    # checkout's line endings, and so the hash, may differ by OS)
+    # the newest copies kept; about one per client version that connects here (the client
+    # sends its sources with LF line ends whatever its OS)
     keep = 8
 
     def bad(why):

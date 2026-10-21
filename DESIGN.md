@@ -276,9 +276,10 @@ The last line is one argument, and the only text that ever goes through the serv
    copy), then keeps it: a temp file in `cache/`, then `os.replace`; `cache/` is made 0700. A
    failed write (a read-only home, a quota) is one stderr line, and the session goes on from
    memory. After a write it keeps the 8 newest `helper-*` by mtime (about one per client
-   version and OS that connects: a checkout's line endings, and so the hash, may differ by OS)
-   and removes temp files older than an hour, left by a loader that was killed. It opens a copy
-   non-blocking and reads it only if it is a regular file: a FIFO there would block forever.
+   version that connects: the client reads the sources with LF line ends whatever its OS, so
+   every OS sends the same bundle) and removes temp files older than an hour, left by a loader
+   that was killed. It opens a copy non-blocking and reads it only if it is a regular file: a
+   FIFO there would block forever.
 4. It puts an import finder serving the bundle from memory at the front of `sys.meta_path`, so
    nothing on disk shadows it, then calls `vcharon.helper.main(nonce)`.
 5. The helper moves the protocol output off fd 1 (`os.dup(1)`, then `os.dup2(2, 1)`), so
@@ -3094,6 +3095,9 @@ which and how to adapt. A channel format change is always a minor version at lea
   line ends.
 - Readers take both: entries split on `\n` and drop a trailing `\r`. Synced files are copied
   byte for byte, never converted.
+- The helper's sources are bundled with LF line ends (`\r\n` becomes `\n`; a lone `\r` stays):
+  a Windows checkout or build has CRLF, and this way every OS's client sends the same bundle,
+  so a server keeps one cached copy per version ([Start-up](#start-up)).
 - Test fixtures that need exact bytes are written with `newline=""`: Windows' text mode turns
   `\n` into `\r\n`.
 

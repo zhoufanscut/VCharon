@@ -282,6 +282,40 @@ class BundleTest(unittest.TestCase):
                          % root)
         self.assertEqual(caught.exception.hint, bundle.BROKEN_HINT)
 
+    def server_copy(self, line_end):
+        """A copy of SERVER's modules, each written with these line ends."""
+        root = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, root, True)
+        self.copy_server(root)
+        for name in bundle.SERVER:
+            path = os.path.join(root, os.path.relpath(module_file(name), PACKAGE_DIR))
+            with open(path, "rb") as f:
+                data = f.read().replace(b"\r\n", b"\n")
+            with open(path, "wb") as f:
+                f.write(data.replace(b"\n", line_end))
+        return root
+
+    def test_crlf_sources_make_the_same_bundle_as_lf(self):
+        # a Windows checkout or build has CRLF sources: its bundle must hash as Linux's does,
+        # or each OS leaves its own copy in the server's cache
+        lf, crlf = self.server_copy(b"\n"), self.server_copy(b"\r\n")
+        with open(os.path.join(crlf, "helper.py"), "rb") as f:
+            self.assertIn(b"\r\n", f.read())
+        self.assertEqual(bundle._sources(crlf), bundle._sources(lf))
+        self.assertNotIn("\r\n", bundle._sources(crlf)[0]["vcharon.helper"])
+        read = bundle._sources
+        digests = []
+        for root in (lf, crlf):
+            with mock.patch.object(bundle, "_sources", lambda root=root: read(root)):
+                digests.append(bundle.payload()[1])
+        self.assertEqual(digests[0], digests[1])
+
+    def test_a_lone_cr_stays(self):
+        root = self.server_copy(b"\n")
+        with open(os.path.join(root, "helper.py"), "wb") as f:
+            f.write(b"H = 1\r\n# a\rb\n")
+        self.assertEqual(bundle._sources(root)[0]["vcharon.helper"], "H = 1\n# a\rb\n")
+
     def test_summary_reads_back_what_a_session_sends(self):
         modules, _packages = bundle._sources()
         found = bundle.summary()
@@ -303,7 +337,7 @@ class BundleTest(unittest.TestCase):
             with open(os.path.join(package, *rel.split("/")), "w", encoding="utf-8",
                       newline="") as f:
                 f.write(data)
-        # newline="": Windows' text mode would write CRLF, and the bundle carries bytes as read
+        # newline="": the fixture's bytes are exact on every OS (DESIGN, "Line endings")
         with open(os.path.join(package, "helper.py"), "w", encoding="utf-8", newline="") as f:
             f.write("H = 1\n")
         with mock.patch.object(bundle.vcharon, "__file__",

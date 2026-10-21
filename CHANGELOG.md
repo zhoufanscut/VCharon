@@ -7,6 +7,17 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A Windows client now sends the same helper bundle as Linux and macOS, with the same sha256:
+  the client reads the helper's sources with LF line ends (`\r\n` becomes `\n`), where a
+  Windows build's CRLF sources made another bundle. A server keeps one cached copy per client
+  version instead of one per OS. Nothing to do on update. Checked: the unit suite on Linux
+  (measured), with a test that a copy of the sources with CRLF line ends gives the same bundle
+  and hash as with LF; Windows and macOS not run. That a Windows build now matches Linux is
+  inferred from 0.8.3rc1's live round, where its 16 modules with CRLF made LF were
+  byte-identical to the Linux build's (measured).
+
 ## 0.8.3 — 2026-10-21
 
 0.8.3rc1's code, unchanged. Next to 0.8.2, the latest final release, the changes are those in
