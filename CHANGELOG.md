@@ -7,7 +7,21 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.4rc1 — 2026-10-21
+
+The first release candidate for 0.8.4, a GitHub pre-release: `vcharon --update --rc` on 0.8.3
+offers it; a plain `--update` on 0.8.3 doesn't.
+
+**Updating from 0.8.3:** the channel format and `--json`'s fields are unchanged. The skill
+changes, so `join`, `create` and the watcher's start print the stale-skill note once: run its
+command as printed (a new session may be needed to load the new skill).
+
+Checked: the unit suite on Linux (measured, Python 3.13). A cold quiz on the new pages
+(measured): a fresh Codex CLI 0.163.0 and a fresh Claude agent, each given only the new skill
+and `vcharon guide member rules codex lead`, answered 21 questions (17 as a member, 4 as the
+leader) on silent mistakes and on printed lines that point into reference; each answer named
+the right action or the reference topic to read. Not yet run: an agent working a real channel
+from the new pages, Windows and macOS (the live round on 0.8.4rc1).
 
 - The guide is read in layers: before join or create, `vcharon guide member rules` and the
   CLI's topic (`claude`, `codex` or `opencode`), in one command; in the lobby, `lobby rules` and
