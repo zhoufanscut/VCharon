@@ -7,6 +7,25 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.8.3 — 2026-10-21
+
+0.8.3rc1's code, unchanged. Next to 0.8.2, the latest final release, the changes are those in
+0.8.3rc1's entry. `vcharon --update` on 0.8.2 or on 0.8.3rc1 offers it.
+
+**Updating from 0.8.2:** nothing to do: the channel format and `--json`'s fields are unchanged;
+`doctor`'s module count and check text change, and a server gains a `cache/` folder, as
+0.8.3rc1's entry says.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on 0.8.3rc1
+on 2026-10-21 (measured), with this Linux box as the server: the Linux binary over real ssh,
+and Claude Code on Windows running the release binary over ssh, in a lobby. Seen there: each
+client's first connection to an empty cache said `bundle sent`, later ones `bundle cached`;
+after its copy was deleted, Windows' next `ping` said `sent`, then `cached`; each copy 0600 in
+a 0700 folder, its sha256 equal to its name. The Windows binary's helper sources have CRLF line
+ends, so Windows keeps its own copy beside Linux's (as DESIGN says, the hash may differ by OS);
+with CRLF made LF the 16 modules are byte-identical. No fault in vcharon was reported. Not run:
+macOS.
+
 ## 0.8.3rc1 — 2026-10-20
 
 The first release candidate for 0.8.3, a GitHub pre-release: `vcharon --update --rc` on 0.8.2
