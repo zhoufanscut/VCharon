@@ -114,6 +114,7 @@ The number is one more than the largest in your folder, so IDs are unique in the
     file gives CRLF lines); git with `core.autocrlf true` gives LF. Never convert a patch: its
     lines must match the files' to apply. Say in the entry when the files are CRLF.
 - **Times come from vcharon.** It stamps each entry; never type a time.
+- **Leave `TZ` alone in a session**: entry headings carry local time with no zone.
 - **Keep entries short.** Each channel limits an entry file and each member's folder: the
   leader's `CHANNEL.md` names them (`max mb:`, `max files:`, `max entry kb:`). A post over a
   limit is refused with nothing written. Put long output in a file outside the channel and say

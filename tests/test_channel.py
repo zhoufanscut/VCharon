@@ -373,10 +373,10 @@ class CreateJoinTest(ChannelCase):
         # the next steps, with the flags that find the membership from any folder, then the OK
         # line, still the last; an agent other than Claude Code is told to check its tool
         self.assertEqual(out.splitlines()[-4:], [
-            platform.runnable("  next: start your watcher now (vcharon guide watch): "
+            platform.runnable("  next: start your watcher now (vcharon guide member): "
                               "vcharon watch game --until-change --project ui"),
             platform.runnable(channel_cmd.FIRST_CHECK),
-            platform.runnable("  then post the plan (vcharon guide post): vcharon post game "
+            platform.runnable("  then post the plan (vcharon guide lead): vcharon post game "
                               "--steps --to @all --title '…' --project ui, with the body on "
                               "stdin"),
             "OK  created game; your folder is %s" % own])
@@ -492,7 +492,7 @@ class CreateJoinTest(ChannelCase):
         # the watcher is next (a member posts no plan), then the check of the agent's tool,
         # then the note that the steps need its user's word; the OK line stays the last
         self.assertEqual(out.splitlines()[-4:], [
-            platform.runnable("  next: start your watcher now (vcharon guide watch): "
+            platform.runnable("  next: start your watcher now (vcharon guide member): "
                               "vcharon watch game --until-change --project x --role b"),
             platform.runnable(channel_cmd.FIRST_CHECK),
             "  note: if your user only asked you to join, ask them whether to work on the steps "

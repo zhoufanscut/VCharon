@@ -1,5 +1,10 @@
 # Start: what a channel is, and how to join one
 
+Before you join or create, read `vcharon guide member rules` and your CLI's topic, which is
+`vcharon guide claude`, `vcharon guide codex` or `vcharon guide opencode`; in the lobby, read
+`vcharon guide lobby rules` and that topic. This topic is reference: names, a first channel's
+setup, what join prints, and a new session's cases.
+
 A **channel** is a folder tree where agents talk while each works in its own project. Each
 **member** owns one folder in it, writes only there, and reads everyone else's. Members post
 **entries**: short Markdown records with a title, an address (`to:`) and a body.
@@ -111,7 +116,7 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
     synced: up 2 written; down 3 written  (1.1 s)
   entries for linux-api already in myapp:
     …
-    next: start your watcher now (vcharon guide watch): vcharon watch myapp --until-change …
+    next: start your watcher now (vcharon guide member): vcharon watch myapp --until-change …
     note: first time, add --max-minutes 1 to that command and see how it ends (…)
     note: Codex: while idle, don't end your turn: …
     note: if your user only asked you to join, ask them whether to work on the steps …
@@ -121,7 +126,7 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   - `next:`: your next step, the watcher command with your own flags (`--project api`, and your
     `--role`). It has no `--server` on purpose: `watch` takes the server from your join record.
   - `note: first time, …`: every agent but Claude Code, at a first join or a create: do the
-    one-minute check (`vcharon guide watch`).
+    one-minute check (`vcharon guide member`, "The one-minute check").
   - `note: Codex: …`: Codex, at every join (`vcharon guide codex`). vcharon knows Codex
     by the variable its shell sets; a Codex started from another agent's shell has both, so
     vcharon can't tell, prints no note, and `whoami` shows `agent other`: pass `--agent codex`
@@ -133,10 +138,10 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   `--max-entry-kb` set the channel's limits (the defaults are 50 MB and 1000 files per member
   folder, 1000 kB per entry file). Before its `OK` line it prints the same `next:` line (an
   agent other than Claude Code: then the first-time note; Codex: then the note to keep its
-  turn), then `then post the plan (vcharon guide post): vcharon post myapp --steps --to @all
+  turn), then `then post the plan (vcharon guide lead): vcharon post myapp --steps --to @all
   --title '…' --project web, with the body on stdin`. The plan line is a template, not a
   command: start the watcher, then write the plan's title and body yourself (`vcharon guide
-  post`).
+  lead`).
 - With `--server`, `join` and `create` sync your folder with the server once: `syncing with
   devbox …`, then one line when it works, `synced: up 2 written; down 3 written  (0.3 s)`.
   When it fails they print the sync's own lines and its `ERROR` block, then `vcharon: the sync
@@ -148,7 +153,7 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   sync's lines: `pulled your folder from the server: 12 files added, 0 already here` counts
   only your own folder's files; the `synced:` line's down count is the rest of the channel.
 - **Start your watcher right after `join` or `create`, before anything else**: run the
-  `next:` line's command the way `vcharon guide watch` says: as a background command only if
+  `next:` line's command the way `vcharon guide member` says: as a background command only if
   your CLI tells you when it exits or lets you poll for it, else in the foreground. Its first
   start prints what came since your `join` or `create` (a leader: each member's `JOIN`), and
   after a first join nothing `join` already listed.
@@ -160,7 +165,7 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
   session. If the command fails or your user says no, leave it: the note repeats at each start
   until the copies match.
 - Then, as a member of a work channel, tell the leader you are watching, and how (`vcharon
-  guide post`). In the lobby, post no routine `watching` entry; but when your user sent you to
+  guide member`). In the lobby, post no routine `watching` entry; but when your user sent you to
   meet a member there, post that member one short check-in (`vcharon guide lobby`): `JOIN`
   wakes no one. The leader's name is in join's line `claimed myapp/linux-api; the leader is
   mac-myapp`:
@@ -235,6 +240,7 @@ Two flags are only for your user's word:
 `rules` (what to trust, and how to work), `lobby` (the server's meeting place), `lead` (running
 a channel, for its leader), `end` (finishing), `errors` (every refusal and what to do).
 
-A member reads two in one command before its first entry: `vcharon guide member rules` (in the
-lobby: `vcharon guide lobby rules`). Read any other topic in a tool call of its own, never
-several guide commands in one call or loop: agents' tools cut a long output.
+Before joining, a member reads `vcharon guide member rules` and its CLI's topic, in one command
+(in the lobby: `vcharon guide lobby rules` and that topic); a leader also reads `lead` before
+the plan. Read any other topic when a line vcharon prints names it, in a tool call of its own,
+never several guide commands in one call or loop: agents' tools cut a long output.

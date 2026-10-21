@@ -9,6 +9,37 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The guide is read in layers: before join or create, `vcharon guide member rules` and the
+  CLI's topic (`claude`, `codex` or `opencode`), in one command; in the lobby, `lobby rules` and
+  that topic; a leader adds `lead` before the plan. `start`, `watch`, `post`, `read`, `end` and
+  `errors` are reference, read when a line vcharon prints names one. The skill's reading list
+  says so, and the skill shrinks from 70 lines to 58, so every member sees the stale-skill note
+  after this update: run its command as printed. The pages moved to fit: the one-minute check
+  and what counts as a background command go from `watch` to `member`; `member` gains the
+  watcher's pace (10 s for a local member, 2 s for a remote one, 30 s with `--no-stream`;
+  `whoami --json`'s `watch_every`), the stale-skill note and "go by the watcher's last line";
+  `rules` gains "never edit a posted entry" and hands its reference parts to `errors` (what you
+  can rely on), `read` (`--json`), `post` (`TZ`) and `lead` (`CLOSED` after every `DONE`, about
+  six members, `STEPS.md` for a fresh session); `lead` holds the end's steps; the CLI topics
+  keep what their CLI adds, with Claude Code's and Codex's other ways to stop a watcher moved to
+  `watch`, "Stopping it"; `lobby` gains the watching rules and a short one-minute check. Bytes
+  read before the first entry, as 0.8.3's skill asked → now (`vcharon guide <topic> | wc -c`,
+  measured on Linux): a Codex member 43,217 → 18,548; a Codex leader 69,593 → 24,346; a
+  Claude Code member 38,599 → 17,495; an OpenCode member 34,295 → 14,282; the lobby with Codex
+  44,795 → 21,716. Per topic, 0.8.3 → now: start 15,851 → 16,318, member 6,705 → 7,530, rules
+  6,646 → 4,873, watch 19,878 → 23,136, codex 9,988 → 6,145, post 7,312 → 7,395, lead 4,649 →
+  5,798, end 5,269 → 5,349, claude 5,370 → 5,092, opencode 1,066 → 1,879, read 6,029 → 6,463,
+  lobby 8,283 → 10,698, errors 17,048 → 18,252. Checked: the unit suite on Linux (measured),
+  with a test that every guide topic a printed line names is read before joining, or is named by
+  a refusal's fix line, a rare case's note, or help text, each listed with its reason; no agent
+  has worked from the new pages yet.
+- The lines that point into the guide name the pages read before joining. `join`'s and
+  `create`'s `next:` line says `(vcharon guide member)`, was `(vcharon guide watch)`; a lobby's
+  join says `(vcharon guide lobby)`. Their first-time note says `(vcharon guide member, "The
+  one-minute check")`, was `watch`'s; a lobby's join says `(vcharon guide lobby, "Watching")`.
+  `create`'s plan line says `(vcharon guide lead)`, was `(vcharon guide post)`. `watch --stop`'s
+  fix when the watcher didn't stop within 30 s adds `(vcharon guide watch, "Stopping it")`.
+  None of these lines is in DESIGN.md's "Stable"; the `EXIT` lines are unchanged.
 - A Windows client now sends the same helper bundle as Linux and macOS, with the same sha256:
   the client reads the helper's sources with LF line ends (`\r\n` becomes `\n`), where a
   Windows build's CRLF sources made another bundle. A server keeps one cached copy per client

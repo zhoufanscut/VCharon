@@ -185,6 +185,13 @@ class JoinTest(LobbyCase):
         self.assertIn(channel_cmd.LOBBY_NOTE.replace("vcharon guide",
                                                      "%s guide" % self.command()), out)
         self.assertNotIn(channel_cmd.ASK_USER, out)
+        # the next step and the first-time check name the lobby's page, not member's
+        lines = out.splitlines()
+        runnable = channel_cmd.platform.runnable
+        self.assertIn(runnable(channel_cmd.LOBBY_NEXT_WATCH % ("lobby", "--project web")), lines)
+        self.assertIn(runnable(channel_cmd.LOBBY_FIRST_CHECK), lines)
+        self.assertNotIn(runnable(channel_cmd.NEXT_WATCH % ("lobby", "--project web")), lines)
+        self.assertNotIn(runnable(channel_cmd.FIRST_CHECK), lines)
         folder = self.lobby_folder()
         self.assertEqual(self.files(), ["CHANNEL.md", "MEMBER.md", day_name(time.time())])
         info = charter.read(folder, "mac-web")
@@ -297,6 +304,11 @@ class JoinTest(LobbyCase):
         # one line says it: no note repeats it
         self.assertEqual([l for l in out.splitlines() if "took back" in l],
                          ["  took back lobby/mac-web, this machine's folder; in the lobby"])
+        # a take-back's next step names the lobby's page too
+        runnable = channel_cmd.platform.runnable
+        lines = out.splitlines()
+        self.assertIn(runnable(channel_cmd.LOBBY_NEXT_WATCH % ("lobby", "--project web")), lines)
+        self.assertNotIn(runnable(channel_cmd.NEXT_WATCH % ("lobby", "--project web")), lines)
         titles = [e.title for e in entries.parse_file(
             os.path.join(self.lobby_folder(), day))]
         self.assertEqual(titles, ["JOIN", "LEAVE", "REJOIN"])

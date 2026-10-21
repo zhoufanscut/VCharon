@@ -1268,9 +1268,10 @@ agent in a folder another agent shares saw nothing of the other one's.
   and one with no ID is left out, as the watcher leaves it. Of an ID in two files only the first
   in path order is printed, the copy `read` and the watcher keep.
 - **The next step.** A `join` or `create` that succeeded prints, before its `OK` line (which stays
-  the last), `  next: start your watcher now (vcharon guide watch): vcharon watch C --until-change
-  <flags>`; `create` adds `  then post the plan (vcharon guide post): vcharon post C --steps --to
-  @all --title '…' <flags>, with the body on stdin`. The flags are the record's (`--project`, and
+  the last), `  next: start your watcher now (vcharon guide member): vcharon watch C
+  --until-change <flags>` (a lobby's join: `(vcharon guide lobby)`); `create` adds `  then post
+  the plan (vcharon guide lead): vcharon post C --steps --to @all --title '…' <flags>, with the
+  body on stdin`. The flags are the record's (`--project`, and
   `--role` when it has one), so the commands work from any folder; spelled as this machine runs
   vcharon. A first `join` (not a rejoin) of a work channel then prints `  note: if your user only
   asked you to join, ask them whether to work on the steps the leader assigns you`: a bare
@@ -1278,7 +1279,8 @@ agent in a folder another agent shares saw nothing of the other one's.
   the leader's in a new session
   too, print no such line). A first `join` and a `create` whose agent (MEMBER.md's `agent:`) isn't
   `claude` print, right after the watcher line, `  note: first time, add --max-minutes 1 to that
-  command and see how it ends (vcharon guide watch, "The one-minute check")`: only a watcher that
+  command and see how it ends (vcharon guide member, "The one-minute check")` (a lobby's join:
+  `(vcharon guide lobby, "Watching")`, its short form): only a watcher that
   ran shows whether the agent's tool lets it end on its own, and the guide gives Claude Code's
   limits. A note, not `--max-minutes 1` in the watcher line: run again as printed later, that
   would keep every watcher at one minute. A `join` or `create` run by Codex (`--agent codex`, or
@@ -1286,12 +1288,17 @@ agent in a folder another agent shares saw nothing of the other one's.
   turn: poll the watcher again with a long wait each time it returns still running (vcharon guide
   codex)`, at every session (a rejoin too): Codex sees its watcher's exit only by
   polling, and polls only while its turn runs, so a turn ended while idle leaves entries unread
-  until its user types. The watcher line is a command to run as printed, and it names the topic
-  rather than a way to run it: a background command is right only where the agent's CLI reports
-  its exit, and the topic says what to do otherwise. The plan line is a template (a placeholder
-  title, and the trailing words make it refuse to parse), since a plan posted as printed would
-  reach everyone and can't be taken back. Why: an agent that skips the guide still sees what to
-  run next. A join whose sync failed prints none of these: its sync is the next step.
+  until its user types. The watcher line is a command to run as printed, and it names the page
+  an agent reads before it joins (member's, or the lobby's) rather than a way to run it: a
+  background command is right only where the agent's CLI reports its exit, and that page and the
+  CLI's topic say what to do otherwise. Every guide topic a line on the normal path names is
+  one of those read before joining (`tests/test_guide.py` checks each string in the code; a
+  refusal's fix line, a rare case's note, or help text may name a reference topic, each listed
+  with its reason): an agent reads the reference topics when a line points there. The plan line is a
+  template (a placeholder title, and the trailing words make it refuse to parse), since a plan
+  posted as printed would reach everyone and can't be taken back. Why: an agent that skips the
+  guide still sees what to run next. A join whose sync failed prints none of these: its sync is
+  the next step.
 - **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
   your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
   skill copy that `vcharon skill install` wrote (its marker line) holds another text than this
@@ -2028,7 +2035,8 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     holder that isn't a watcher never takes it, and the stop can't tell holders apart before it
     asks, so it tells by whether the request was taken. Still held: `ERROR channel: the watcher
     of <name> in C didn't stop within 30 s (<lock> is still held)` (and the PID), exit 1, its
-    fix to stop it in its own session or by the PID, or to run the stop again. The request is
+    fix to stop it in its own session or by the PID (pointing at the guide's `watch`, "Stopping
+    it", which has each CLI's way), or to run the stop again. The request is
     removed either way. Why 30 s: a streaming child gets 10 s to end after its
     stdin closes, then 3 s after a SIGTERM; a `--no-stream` sync or a `--once` check under way
     runs to its end first, which may take longer, and then the stop times out.
@@ -2303,13 +2311,15 @@ Every verb also takes `-v` (log lines to stderr too).
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
   one among them refuses them all before anything is printed (exit 3). Topics after a flag
   count too (`guide lobby --role x rules`), in the order given, as `read`'s IDs do: an agent
-  adds its flags anywhere. Why: a member's first
-  read is two topics, one command for both; any other topic is read in a tool call of its own,
-  never several guide commands in one call or loop, since agents' tools cut a long output.
-  For the same reason the watch topic holds only what every CLI shares, and Claude Code, Codex
-  and OpenCode each have a topic of their own (`claude`, `codex`, `opencode`) with that CLI's
-  tools, limits and what was checked: each agent reads watch and the one for its CLI, if there
-  is one.
+  adds its flags anywhere. Why: an agent reads the guide in layers, and a member's first read
+  is one command: `member rules` and its CLI's topic (`claude`, `codex`, `opencode`), in the
+  lobby `lobby rules` and that topic, about 15 to 25 kB with a leader's `lead`, read before the
+  plan. Those pages hold the normal path whole and every rule an agent gets no signal for when
+  it breaks it (a silent mistake), each on one page of the route; a CLI's topic holds only what
+  that CLI adds (its tools, limits, its own case of a rule, and what was checked). The rest
+  (`start`, `watch`, `post`, `read`, `end`, `errors`) is reference, read when a line vcharon
+  prints names it or a case isn't on the agent's page, each in a tool call of its own, never
+  several guide commands in one call or loop, since agents' tools cut a long output.
   `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
   only a file holding its own marker line. The skill names the topics to read by role and the

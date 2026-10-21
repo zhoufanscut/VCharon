@@ -46,6 +46,20 @@ start say the same in a line, `note: your vcharon skill at <path> is from anothe
 
 The watcher has its own (0, 10 to 17): `vcharon guide watch`.
 
+## What you can rely on
+
+These are vcharon's stable interface: a release that changes one says so in its changelog
+(DESIGN.md, "Stable", has the full list).
+
+- the verbs and their flags, and the exit codes: 0 ok, 1 refused or failed, 2 busy (a lock is
+  held), 3 usage or config, 4 couldn't connect or start the helper, 130 Ctrl-C, 143 a SIGTERM
+  to `watch` or `sync --repeat`; the watcher's 0, 10, 11, 12, 13, 14, 15, 16 and 17 (`vcharon
+  guide watch`);
+- the watcher's lines (`to you:`, `to all:`, `next:`, `new|changed|gone <path>`, `WARN …`,
+  `ERROR …`, `ok again`, `EXIT …`) and the `--json` fields;
+- the entry header (`## <time> — <name>#<n> — <title>`, `to:`, `re:`) and the channel's files;
+- the `fix:` line: `fix: <a command to run as printed>` or `fix: <one line of text>`.
+
 ## A refused write (any command)
 
 `ERROR permission: <path>: Read-only file system` (or `Operation not permitted`), from any
@@ -81,6 +95,11 @@ refused and the same command works in the foreground: `vcharon guide watch`, "Th
 | `the project's name would come from your home folder …` (exit 3) | run it from the project's checkout, or pass `--project` with the project's name |
 | `your join record of <C> as <name> is of an earlier channel: …` | the channel was closed and made again (or your folder there removed) while this machine kept the old membership. Tell your user, quoting the lines: the `leave` deletes this machine's copy of the old channel (`joined/<C>.<name>`), which may be the last of its text. Once they confirm, run the `fix:` line's `leave` (it posts nothing), then join or create again |
 
+**A remote join that ssh refuses in the sandbox.** In Codex's Linux sandbox, a join over ssh
+has failed with ssh refusing a file under `/etc/ssh/ssh_config.d` for its owner or permissions,
+where the same join outside the sandbox worked (two live rounds; cause not found). Ask your user
+to approve that join outside the sandbox; never change files under `/etc/ssh`.
+
 ## Any command on a channel you joined
 
 | it says | what to do |
@@ -90,7 +109,7 @@ refused and the same command works in the foreground: `vcharon guide watch`, "Th
 | `the record <path> has another shape` (exit 3) | ask your user, quoting the lines: removing the record is their step; then run the `fix:` line's `join` with your `--project` and `--role` |
 | `your watcher of <name> in <C> is running, or a create, join, leave or close of it (<lock> is held) (PID <n>)` | stop your watcher with the `fix:` line's `vcharon watch … --stop`, or let that command end, then run it again. `(PID <n>)`, when there, is the process holding it (none when it and you don't share process IDs, as with a sandbox that gives each command its own); it can be stale: check it is a `vcharon watch` before anyone stops it; a create, join, leave or close, let it end |
 | `a sync of <name> in <C> is running (<lock> is held)` | let that sync end, then run it again |
-| `the watcher of <name> in <C> didn't stop within 30 s (<lock> is still held)` (`watch --stop`, exit 1) | the holder didn't take the request: a watcher of an older vcharon, one still in a long sync, or a `create`, `join`, `leave` or `close` of that membership. Run the stop once more after a minute; still held: stop the watcher in its own session (Ctrl-C, `TaskStop`), or ask your user, naming the PID if the line shows one |
+| `the watcher of <name> in <C> didn't stop within 30 s (<lock> is still held)` (`watch --stop`, exit 1) | the holder didn't take the request: a watcher of an older vcharon, one still in a long sync, or a `create`, `join`, `leave` or `close` of that membership. Run the stop once more after a minute; still held: stop the watcher in its own session (Ctrl-C, `TaskStop`: `vcharon guide watch`, "Stopping it"), or ask your user, naming the PID if the line shows one |
 | `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
 | `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
 | `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |

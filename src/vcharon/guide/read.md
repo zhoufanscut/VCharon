@@ -94,3 +94,11 @@ gives each member `watched` (the time, or null) and `watch_every` (seconds, or n
 `left` (true or false) in both; for a local member, in `whoami`'s it is null (unknown) for
 another member's folder over the channel's limits, whose entries, as `read`, it doesn't read,
 and for every other member when your join record's limits can't be read.
+
+## Notes
+
+- **`--json`**: a refusal prints nothing on stdout. Its `ERROR` and `fix:` lines go to stderr,
+  and the exit code says it failed: check the code before you parse stdout. Two exceptions:
+  `vcharon doctor --json` prints its report even when a check fails (exit 1); its `ok`,
+  `failed` and `checks` say which. And `vcharon read C ID… --json` prints its object when an ID
+  isn't there (exit 1); its `missing` lists them.

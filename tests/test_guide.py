@@ -506,6 +506,8 @@ L3_TRIGGERS = {
     ("channel_cmd.py", "_leave", "end"): "a member's close refused: a refusal's fix line",
     ("channel_cmd.py", "_leave_held", "end"): "a leader's leave refused: a refusal's fix line",
     ("cli.py", "_parser", "start"): "the skill verb's help says what the skill points at",
+    ("mailbox/watch.py", "STOP_FIX", "watch"): "watch --stop's refusal when the watcher didn't "
+                                               "stop: each CLI's own way to stop it",
     ("guide/__init__.py", "document", "start"): "docs/GUIDE.md's header: a file for people, "
                                                 "not a line a command prints",
 }
@@ -514,13 +516,6 @@ PLACEHOLDERS = {
     ("guide/__init__.py", "index", "TOPIC"): "the index's own usage line, above the topics",
     ("guide/__init__.py", "unknown", "%s"): "an unknown topic's fix: %s is guide.DEFAULT",
     ("guide/__init__.py", "document", "TOPIC"): "docs/GUIDE.md's header, as for start above",
-}
-# (file, constant, topic, heading) of the normal-path lines that still point into the reference
-# topics: entries to be removed as the lines move; when empty, delete it
-TO_MOVE = {
-    ("channel_cmd.py", "NEXT_WATCH", "watch", None),
-    ("channel_cmd.py", "FIRST_CHECK", "watch", "The one-minute check"),
-    ("channel_cmd.py", "NEXT_PLAN", "post", None),
 }
 _MENTION = re.compile(r"\bvcharon guide\b")
 # a word after "vcharon guide", without the punctuation that ends a sentence, and a heading
@@ -617,16 +612,26 @@ def printed_mentions():
 
 
 class NamedSectionTest(unittest.TestCase):
-    """Lines vcharon prints name a section of the watch topic by its heading, or a topic by its
-    name, which no other test checks (DocReferenceTest checks DESIGN's and README's): renaming
-    the heading or the topic must change them too."""
+    """Lines vcharon prints name a section of a topic by its heading, or a topic by its name,
+    which no other test checks (DocReferenceTest checks DESIGN's and README's): renaming the
+    heading or the topic must change them too."""
 
     def test_the_one_minute_check(self):
-        have = headings(os.path.join(GUIDE_DIR, "watch.md"))
+        have = headings(os.path.join(GUIDE_DIR, "member.md"))
         [named] = re.findall(r'"([^"]+)"', channel_cmd.FIRST_CHECK)
         self.assertEqual(named, "The one-minute check")
         self.assertIn(named, have)
         self.assertIn("(%s)" % named.lower(), watch_mod.ONCE_BAD_FIX)
+        # one home: the watch topic points at it in plain text
+        self.assertNotIn(named, headings(os.path.join(GUIDE_DIR, "watch.md")))
+        self.assertIn('`vcharon guide member`, "%s"' % named, guide.text("watch"))
+        # the lobby's form names the lobby's short form of the check
+        [named] = re.findall(r'"([^"]+)"', channel_cmd.LOBBY_FIRST_CHECK)
+        self.assertIn("(vcharon guide lobby, \"%s\")" % named, channel_cmd.LOBBY_FIRST_CHECK)
+        self.assertIn(named, headings(os.path.join(GUIDE_DIR, "lobby.md")))
+        # the short form itself, in that section, not only a pointer to member's
+        section = guide.text("lobby").split("\n## %s\n" % named, 1)[1].split("\n## ", 1)[0]
+        self.assertIn("`EXIT quiet 1 min` passes the", section)
 
     def test_the_take_back_note(self):
         [named] = re.findall(r'"([^"]+)"', channel_cmd.OTHER_AGENT_NOTE)
@@ -689,8 +694,7 @@ class NamedSectionTest(unittest.TestCase):
                     rel, line, name, topic, "" if heading is None else ', "%s"' % heading)
             elif topic not in BEFORE_JOINING:
                 used[key] += 1
-        self.assertEqual(sorted(wrong, key=str), sorted(TO_MOVE, key=str),
-                         "\n" + "\n".join(wrong[k] for k in sorted(wrong, key=str)))
+        self.assertEqual(wrong, {}, "\n" + "\n".join(wrong[k] for k in sorted(wrong, key=str)))
         # every allowed entry names exactly one line: none that went, and a function's second
         # pointer is reviewed on its own (give it a constant of its own and list that)
         self.assertEqual({key: used[key] for key in itertools.chain(L3_TRIGGERS, PLACEHOLDERS)
@@ -698,6 +702,8 @@ class NamedSectionTest(unittest.TestCase):
         # the scan must keep finding the lines it is for
         found = {(rel, name, topic) for rel, line, name, topic, heading in mentions}
         self.assertLessEqual({("channel_cmd.py", "LOBBY_NOTE", "lobby"),
+                              ("channel_cmd.py", "NEXT_WATCH", "member"),
+                              ("channel_cmd.py", "LOBBY_FIRST_CHECK", "lobby"),
                               ("channel_cmd.py", "KEEP_TURN", "codex"),
                               ("channel_cmd.py", "TRUST", "rules"),
                               ("charter.py", "RULES", "rules")}, found)
@@ -706,7 +712,7 @@ class NamedSectionTest(unittest.TestCase):
     def test_the_allowed_lists(self):
         self.assertLessEqual(set(BEFORE_JOINING), set(guide.TOPICS))
         # an entry for a topic read before joining would never be used, and fail above as gone
-        for key in itertools.chain(L3_TRIGGERS, PLACEHOLDERS, TO_MOVE):
+        for key in itertools.chain(L3_TRIGGERS, PLACEHOLDERS):
             with self.subTest(key=key):
                 self.assertNotIn(key[2], BEFORE_JOINING)
 

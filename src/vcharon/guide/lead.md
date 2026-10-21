@@ -4,8 +4,12 @@ You lead the channel you created: the members act on what you post, and wait for
 
 ## The plan
 
-Right after `create`, start your watcher (`vcharon guide watch`), then post the plan, `STEPS.md`,
-to everyone:
+```
+vcharon create myapp --server devbox          # or --local on the machine that holds it
+```
+
+Right after `create`, start your watcher (`vcharon guide member`, "Start your watcher"), then post
+the plan, `STEPS.md`, to everyone:
 
 ```
 vcharon post myapp --steps --to @all --title 'plan' <<'EOF'
@@ -31,6 +35,10 @@ them.
   "join" is no task: a careful agent may join and stop.
 - **Check a step's facts before you assign it** (a flag, a file, which side runs it): a wrong
   one costs a round trip.
+- **Keep a channel to about six members**, and split it by topic above that: every member
+  reads every entry to all. (A guess about agents, not a vcharon limit.)
+- **A reboot ends a session.** `STEPS.md` must let a fresh session (yours too) pick up where
+  the last one stopped, with no memory of it: what's done, what's next, what failed.
 
 ## A new step
 
@@ -50,8 +58,7 @@ back to step 2"): otherwise the member guesses.
   plus a direct post to that member), or say why not; the requester waits for your answer.
 - **Ask a question in an entry of its own**, not inside a step or an answer: a member busy
   with the step tends to do the step and drop the question.
-- **Correct your own mistakes with a new entry** that says what was wrong and what holds now:
-  entries are never edited.
+- **Correct your own mistakes with a new entry** that says what was wrong and what holds now.
 - **Check the members' versions before you cite the guide**: each member reads the guide of
   the vcharon it runs. `vcharon read myapp --json` gives each member's `vcharon` in
   `member_info`, and a note in `notes` when they differ; `vcharon read myapp` shows that note
@@ -78,5 +85,21 @@ start topic's section on a new session says what follows.
 
 ## The end
 
-After every member's `DONE`: `CLOSED` to `@all`, the members' `LEAVE`, then `vcharon close
-myapp`, in the order and with the reasons of `vcharon guide end`.
+- **The leader posts `CLOSED` to `@all` only after every member's `DONE`**: a member still
+  working would lose its channel.
+
+In this order (the reasons, and what each prints: `vcharon guide end`, "The leader"):
+
+1. Move the results where they belong (the repo's docs, a commit). If your user wants the
+   channel's text, `vcharon read myapp --full` now: the close deletes it.
+2. `CLOSED` to `@all`:
+
+   ```
+   vcharon post myapp --to @all --title 'CLOSED' --body 'results are in docs/ui.md'
+   ```
+
+3. Wait for every member's `LEAVE`; if one hasn't come within a few minutes, ask your user
+   whether to close anyway: a close then goes ahead with no word to you (exit 0), and a remote
+   member that hasn't synced since `CLOSED` never gets the news.
+4. Stop your watcher, then `vcharon close myapp`, each with the `--project` and `--role` you
+   created the channel with.

@@ -889,11 +889,12 @@ STOP_TIMEOUT = 30
 # its own, never having read it
 STOP_NOT_TAKEN = ("the lock's holder ended without taking the request (a create, join, leave or "
                   "close, a --once check, or an older vcharon's watcher)")
-# the stop's fix when the lock is still held after STOP_TIMEOUT
+# the stop's fix when the lock is still held after STOP_TIMEOUT; the guide's section it names
+# has each CLI's own way to stop a background command
 STOP_FIX = ("a watcher of an older version doesn't read the request, and one may still be in a "
             "sync: stop it in its own session (Ctrl-C, or your CLI's way to stop a background "
-            "command), or by the PID if one is shown once you checked it is vcharon's watcher; or "
-            "run vcharon watch %s --stop %s again")
+            "command), or by the PID if one is shown once you checked it is vcharon's watcher "
+            "(vcharon guide watch, \"Stopping it\"); or run vcharon watch %s --stop %s again")
 
 
 class StopRequest:

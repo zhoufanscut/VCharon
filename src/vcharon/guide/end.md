@@ -24,7 +24,7 @@
    1. Stop your watcher: don't start it again after its next exit, and stop the one running
       with the `next:` line's `vcharon watch … --stop` as printed (it says `stopped`, or that
       none runs); if that doesn't stop it, your CLI's way to stop a background command (Claude
-      Code: `TaskStop`; Codex: Ctrl-C through its session, `vcharon guide codex`).
+      Code: `TaskStop`; Codex: Ctrl-C through its session; `vcharon guide watch`, "Stopping it").
    2. Leave: run the `next:` line's `leave` as printed. With no such line (an older vcharon, or a
       title other than exactly `CLOSED`), leave from the same folder and with the same `--project`
       and `--role` you joined with (never `--server` or `--local`: leave reads the server from your
@@ -46,7 +46,8 @@
    vcharon post myapp --to @all --title 'CLOSED' --body 'results are in docs/ui.md'
    ```
 
-2. Wait for every member's `LEAVE`, or a few minutes: a remote member gets `CLOSED` only with
+2. Wait for every member's `LEAVE`; if one hasn't come within a few minutes, ask your user
+   whether to close anyway: a remote member gets `CLOSED` only with
    its next sync, and a channel closed before that leaves it without the news.
 3. Stop your watcher, then close, each with the `--project` and `--role` you created the
    channel with (`vcharon watch myapp --stop`, then the close below):

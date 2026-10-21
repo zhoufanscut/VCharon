@@ -19,6 +19,7 @@ from unittest import mock
 
 from vcharon import VERSION, channel_cmd, channels, charter, cli, config, entries, keys, platform
 from vcharon.mailbox import read
+from vcharon.mailbox import watch as watch_mod
 from vcharon.proto import VCharonError
 
 from tests.test_channel import ChannelCase
@@ -1009,13 +1010,17 @@ HINTS = {
         # leave's and close's while the watcher's lock is held
         ("stop the watcher with vcharon watch %s --stop %s (a create, join, leave or close: let "
          "it end), then run this again", ("game", FLAGS)),
-        # the next steps join and create print
-        ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
+        # the next steps join and create print, and a lobby join's
+        ("  next: start your watcher now (vcharon guide member): vcharon watch %s "
          "--until-change %s", ("game", FLAGS)),
+        ("  next: start your watcher now (vcharon guide lobby): vcharon watch %s "
+         "--until-change %s", ("lobby", FLAGS)),
         # the first-time check after it: a pointer to a topic's section, whose comma sticks to
         # the topic, not a command to run as printed
         ("  note: first time, add --max-minutes 1 to that command and see how it ends "
-         "(vcharon guide watch, \"The one-minute check\")", None),
+         "(vcharon guide member, \"The one-minute check\")", None),
+        ("  note: first time, add --max-minutes 1 to that command and see how it ends "
+         "(vcharon guide lobby, \"Watching\")", None),
         # a take-back's when MEMBER.md named another agent: a pointer to a topic's section
         # ends it, so the join in it is parsed by its own test (test_channel's
         # TakeBackAgentTest)
@@ -1036,7 +1041,7 @@ HINTS = {
         ("if that is the wrong project: vcharon close %s %s (then create it again with "
          "--project P)", ("game", FLAGS)),
         # a template, not a command (its title is a placeholder)
-        ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
+        ("  then post the plan (vcharon guide lead): vcharon post %s --steps --to @all "
          "--title '…' %s, with the body on stdin", None)],
     "cli.py": [
         ("vcharon --help", ()),
@@ -1111,11 +1116,14 @@ HINTS = {
         ("  next: the leader closed the channel: don't start your watcher again, stop it if it "
          "runs (vcharon watch %s --stop %s), then run: vcharon leave %s %s",
          ("game", FLAGS, "game", FLAGS)),
-        # watch --stop's, when the lock is still held at the end of its wait
+        # watch --stop's, when the lock is still held at the end of its wait: a pointer to a
+        # topic's section comes before its command, so the command is parsed by its own test
+        # (StopFixTest)
         ("a watcher of an older version doesn't read the request, and one may still be in a "
          "sync: stop it in its own session (Ctrl-C, or your CLI's way to stop a background "
-         "command), or by the PID if one is shown once you checked it is vcharon's watcher; or "
-         "run vcharon watch %s --stop %s again", ("game", FLAGS)),
+         "command), or by the PID if one is shown once you checked it is vcharon's watcher "
+         "(vcharon guide watch, \"Stopping it\"); or run vcharon watch %s --stop %s again",
+         None),
         # exit 12's, after its ERROR line
         ("the PID, if shown, holds the lock: this membership's watcher, or its create, join, "
          "leave or close. Your watcher you still see: keep using it. A command of yours: let it "
@@ -1176,6 +1184,15 @@ class HintInventoryTest(unittest.TestCase):
                     self.assertTrue(found, filled)
                     for argv in found:
                         parse(self, argv)
+
+
+class StopFixTest(unittest.TestCase):
+    def test_its_pointer_and_its_command(self):
+        # the section pointer's comma sticks to the topic, so HINTS can't parse the whole text
+        pointer, command = commands(watch_mod.STOP_FIX % ("game", FLAGS))
+        self.assertEqual(pointer, ["guide", "watch,", "Stopping it"])
+        self.assertEqual(command, ["watch", "game", "--stop"] + FLAGS.split())
+        parse(self, command)
 
 
 if __name__ == "__main__":

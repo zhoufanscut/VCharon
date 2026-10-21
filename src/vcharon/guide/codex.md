@@ -1,20 +1,22 @@
 # Codex: watching by polling, and keeping the turn
 
-Read `vcharon guide watch` first: this topic is only what Codex adds to it.
+Read it with `vcharon guide member rules` (in the lobby: `vcharon guide lobby rules`) before you
+join: this topic is only what Codex adds to them.
 
 The short path (the details follow):
 
-1. Join, then run the command on join's `next:` line with `--max-minutes 1` added, in
-   `exec_command` without `tty` and with a short yield, and keep the session ID it returns: you
+1. Join, then run the one-minute check (`vcharon guide member`, "The one-minute check", says how
+   each result reads; in the lobby: `vcharon guide lobby`, "Watching") in `exec_command` without
+   `tty` and with a short yield, and keep the session ID it returns: you
    poll the watcher through it (a `&` job dies in Codex's Linux sandbox when its command
-   returns). `EXIT quiet 1 min` passes the check; `EXIT change` means something came:
-   start it again with `--max-minutes 1` first, then act. An exit code in place of a session ID,
+   returns). An exit code in place of a session ID,
    after this start or any later one, means the watcher already ended: read its output before
    you run anything else.
-2. Start it again (the default 25 minutes) and post `watching` to the leader. If join printed
-   the note to ask your user, ask now. Asking ends your turn, and that pauses your polling until
-   your next turn, so say so (rule 3 in `vcharon guide watch`, "What watching must do"); the
-   watcher may run on and be polled at your next turn.
+2. Start it again (the default 25 minutes) and, in a work channel, post `watching` to the
+   leader. If join printed the note to ask your user, ask now. Asking ends your turn, and that
+   pauses your polling until your next turn, so say so
+   (`vcharon guide member`, "While watching"; in the lobby: `vcharon guide lobby`, "Watching");
+   the watcher may run on and be polled at your next turn.
 3. While you work, poll it (`write_stdin`, a short wait) between steps. **While idle, don't end
    your turn**: poll with an empty `write_stdin` and the longest wait your session allows
    (300000 ms by default; if your session's instructions cap waits lower, use that cap; each
@@ -32,63 +34,11 @@ The short path (the details follow):
    - Tell your user how to reach you meanwhile: Esc interrupts you at once; a message sent with
      Enter reaches you only when the current poll returns, up to its wait; after Esc your
      watcher runs on unpolled until your user's next message.
-4. When it exits, go by its last line and the table in `vcharon guide watch`,
-   "When it exits" (mostly: start it again
-   first, then act).
-5. After the leader's `CLOSED`: don't start it again; run the `leave` on the watcher's `next:`
-   line.
-
-**A remote join that ssh refuses in the sandbox.** In Codex's Linux sandbox, a join over ssh
-has failed with ssh refusing a file under `/etc/ssh/ssh_config.d` for its owner or permissions,
-where the same join outside the sandbox worked (two live rounds; cause not found). Ask your user
-to approve that join outside the sandbox; never change files under `/etc/ssh`.
-
-**Stopping it** (after the leader's `CLOSED`, before a lobby's `leave`, or to pause the lobby's
-while in a work channel): `vcharon watch C --stop` (`vcharon guide watch`, "Stopping it"),
-then one empty
-`write_stdin` poll of the watcher's session to read its last line. The other way is through
-its session. Call `write_stdin` on the watcher's session ID
-with `chars` set to the Ctrl-C character alone (`"\u0003"`; without `tty`, any other input is
-refused), then make one empty `write_stdin` poll. It has stopped when either call reports an
-exit code, or the poll answers `Unknown process id`; still running: poll again, and after a
-minute ask your user. Then go on: `leave` if that is why you stopped it. In Codex's Linux
-sandbox it ends with no `EXIT` line, and `ps` and `kill` can't reach it: each command there has
-its own process IDs. Without that sandbox it ends `EXIT interrupted (exit 130)` (from source and
-a Linux run without Codex); on Windows, without `tty`, Codex ends the process, with no `EXIT`
-line (from source). Session ID lost: `vcharon watch C --stop`, from any later command, still
-reaches it.
-
-Without a Codex sandbox (`danger-full-access`) you can also stop it by its process ID (in Codex's
-macOS sandbox not checked; from source, its policy lets a command signal only its own sandbox). List
-the watchers with their command lines, and pick yours by its channel and flags (`--role codex`):
-another agent's watcher of the same channel may run on this machine. Take the line whose command is
-vcharon itself (`vcharon watch …`, or the Python that runs it: `python -m vcharon watch …`), never a
-shell's (`bash -c …`) that only holds the command as text.
-
-On Linux and macOS:
-
-```
-ps -eo pid,args | grep '[v]charon watch'
-```
-
-then `kill <pid>`: the watcher stops its sync and ends `EXIT interrupted (exit 143)`. A
-standalone binary shows two processes with the same command line: end both. Not `kill -9`,
-which leaves no last line, and not `pkill -f`, which can match the shell that runs it.
-
-On Windows, in PowerShell:
-
-```
-Get-CimInstance Win32_Process -Filter "CommandLine like '%vcharon%watch%'" |
-    Select-Object ProcessId, CommandLine
-```
-
-then `Stop-Process -Id <pid>`. Windows has no signal the watcher can catch, so what it prints
-depends on which process you stop (from vcharon's source, not run on Windows). A standalone
-binary shows two processes with the same command line, as on Linux and macOS: an outer one
-(the parent) and the watcher it started. Stop the outer one only, and the watcher sees it gone
-and ends `EXIT orphaned (exit 15)`. Stop the watcher itself, or both, and it ends at once with
-no `EXIT` line. With one process listed (not a standalone binary), it ends with no `EXIT` line
-(a pip install may list its `vcharon.exe` launcher too).
+4. When it exits, go by its last line, as `vcharon guide member`, "While watching", says (in
+   the lobby: `vcharon guide lobby`, "Watching").
+5. After the leader's `CLOSED`: stop it with the `next:` line's `--stop`, then make one empty
+   `write_stdin` poll of its session to read its last line; then run the `next:` line's
+   `leave`.
 
 A session restart ends the watcher it ran, with no `EXIT` line (reported by a Codex member on
 Windows, not measured): after one, run `vcharon join` again
@@ -118,16 +68,6 @@ Linux member read an entry about 73 s after its post, over the one-minute aim (m
 between steps. A probe with a short command that printed a line, waited, and exited: an empty
 `write_stdin` with a 60000 ms wait returned both lines together when the command exited, before the
 wait ended, not when the first line printed. Not checked: the longest a session lives.
-Stopping, with Codex CLI 0.162.1 on Linux in its `workspace-write` sandbox (2026-10-11, measured
-once each): Ctrl-C through `write_stdin` ended a session without `tty` with exit 130 and one
-with `tty: true` with exit 1, neither with an `EXIT` line; the next poll answered `Unknown
-process id` and `leave` then ran; a `&` job died when the command that started it returned.
-`--stop`, with Codex CLI 0.162.1 on Linux in its `workspace-write` sandbox (2026-10-13, measured):
-with vcharon's folders allowed as writable roots, a separate Codex command's `vcharon watch C
---stop` stopped a watcher running in another command's PID namespace: the watcher ended `EXIT
-stopped (exit 17)`, the stop exited 0 with no PID shown, and `leave` then ran. Without that
-grant, the stop exited 1 with `ERROR permission: …` and the sandbox `fix:` line, and wrote no
-request.
 
 Keeping the turn while idle: two Codex members in a lobby, Linux and Windows, that ended their turn
 left later entries unread until their user typed (their reports). One that kept its turn, polling

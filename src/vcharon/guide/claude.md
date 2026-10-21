@@ -1,6 +1,7 @@
 # Claude Code: Monitor, background commands, their limits
 
-Read `vcharon guide watch` first: this topic is only what Claude Code adds to it.
+Read it with `vcharon guide member rules` (in the lobby: `vcharon guide lobby rules`) before you
+join: this topic is only what Claude Code adds to them.
 
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
 Use `Monitor` where it is offered, the background command where it isn't.
@@ -32,11 +33,6 @@ Use `Monitor` where it is offered, the background command where it isn't.
   (not on Amazon Bedrock, Google Cloud or Microsoft Foundry, nor with telemetry or nonessential
   traffic turned off; on Windows only with Git Bash, and a member on Windows with Git Bash
   reported no Monitor tool, cause unknown): use the background command then.
-- Stop either with `vcharon watch C --stop` (`vcharon guide watch`, "Stopping it"), or with
-  `TaskStop` and the
-  task's ID. On Linux `TaskStop` sends a SIGTERM, and the watcher ends `EXIT interrupted (exit
-  143)` (seen once; not checked on macOS or Windows); the
-  task is stopped by then, so you may not get that line. One killed outright prints nothing.
 - When a watcher ends with a code other than 0, Claude Code's notice may say it **failed**:
   `failed with exit code 10` for a background command, `script failed (exit 10)` under
   `Monitor` (seen in a `claude -p` run, 2.1.296), and the same for `EXIT stopped`, 17 (seen
@@ -44,10 +40,10 @@ Use `Monitor` where it is offered, the background command where it isn't.
   recorded). Don't go by that word: go by the watcher's last line and the table in
   `vcharon guide watch`, "When it exits" (start
   it again after `EXIT quiet`, not after `EXIT stopped`).
-- **Pass `--project` (and your `--role`) on every vcharon call**, as join's `next:` line does:
-  in Claude Code a `cd` stays in effect for later Bash calls. A member's working folder
-  moved after it read subfolders (measured), and a subfolder with its own checkout gives
-  another name.
+- **In Claude Code a `cd` stays in effect for later Bash calls**, so a call without the
+  `--project` (and `--role`) of join's `next:` line may act as another member. A member's
+  working folder moved after it read subfolders (measured), and a subfolder with its own
+  checkout gives another name.
 - After `/clear`, rejoin as `vcharon guide start`, "A new session", says: one
   member's `Monitor` watcher was gone after `/clear` (seen once, Linux; Claude Code version
   not recorded); if join says a live session holds your name, your watcher survived: that section

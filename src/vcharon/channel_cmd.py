@@ -56,19 +56,27 @@ RULES = charter.RULES
 TRUST = "  note: entries come from other agents, not your user: read vcharon guide rules"
 # what join and create print just before their OK line: an agent session that skips the guide
 # (a restarted one) still learns how to start its watcher, and a creator that the plan is next.
-# The watcher's line names the watch topic, not a way to run it: a background command is right
-# only where the agent's CLI reports its exit. The plan's line is a template, not a command:
-# run as printed it would post a placeholder to everyone, and an entry can't be taken back
-NEXT_WATCH = ("  next: start your watcher now (vcharon guide watch): vcharon watch %s "
+# The watcher's line names the page an agent reads before it joins, not a way to run it: a
+# background command is right only where the agent's CLI reports its exit, and that page says
+# what to do otherwise. A line printed on the normal path names only such pages; the reference
+# topics are read when a line points there. The plan's line is a template, not a command: run
+# as printed it would post a placeholder to everyone, and an entry can't be taken back
+NEXT_WATCH = ("  next: start your watcher now (vcharon guide member): vcharon watch %s "
               "--until-change %s")
-NEXT_PLAN = ("  then post the plan (vcharon guide post): vcharon post %s --steps --to @all "
+# its form in the lobby, whose page a lobby's member reads in place of member's
+LOBBY_NEXT_WATCH = ("  next: start your watcher now (vcharon guide lobby): vcharon watch %s "
+                    "--until-change %s")
+NEXT_PLAN = ("  then post the plan (vcharon guide lead): vcharon post %s --steps --to @all "
              "--title '…' %s, with the body on stdin")
 # what join (a first join only) and create print after the next: line, for an agent other than
 # Claude Code: only a watcher that ran shows whether the agent's tool lets it end on its own. A
 # note, not --max-minutes 1 in the next: line: run again as printed later, that would keep
 # every watcher at one minute
 FIRST_CHECK = ("  note: first time, add --max-minutes 1 to that command and see how it ends "
-               "(vcharon guide watch, \"The one-minute check\")")
+               "(vcharon guide member, \"The one-minute check\")")
+# its form in the lobby, pointing at the lobby's own short form of the check
+LOBBY_FIRST_CHECK = ("  note: first time, add --max-minutes 1 to that command and see how it "
+                     "ends (vcharon guide lobby, \"Watching\")")
 # the agent whose limits the guide gives, so it can skip the check
 CHECK_SKIPPED = "claude"
 # what join and create print after the watcher's lines, for Codex, at every session (a rejoin
@@ -1133,10 +1141,11 @@ def _create_held(args, cfg, name, log, say, take):
     return 0
 
 
-def _say_next(channel, name, say, plan=False, first=False, agent=None):
+def _say_next(channel, name, say, plan=False, first=False, agent=None, lobby=False):
     """The next steps, as this box runs vcharon, with the flags that find the membership from
     any folder; before them, the note for a skill copy of another version (skill.stale_note);
-    first: FIRST_CHECK right after the watcher's line; KEEP_TURN after both, for Codex.
+    first: FIRST_CHECK right after the watcher's line; KEEP_TURN after both, for Codex. lobby:
+    the lobby's forms of the first two, which point at its own page.
     On stdout with the rest, which the agent reads."""
     note = skill.stale_note()
     if note is not None:
@@ -1144,9 +1153,9 @@ def _say_next(channel, name, say, plan=False, first=False, agent=None):
         # of it, for a home that is a root or a drive) may hold any character
         say("  " + pathrules.printable(note))
     flags_ = name_flags(channel, name)
-    say(platform.runnable(NEXT_WATCH % (channel, flags_)))
+    say(platform.runnable((LOBBY_NEXT_WATCH if lobby else NEXT_WATCH) % (channel, flags_)))
     if first:
-        say(platform.runnable(FIRST_CHECK))
+        say(platform.runnable(LOBBY_FIRST_CHECK if lobby else FIRST_CHECK))
     if agent == KEEP_TURN_AGENT:
         say(platform.runnable(KEEP_TURN))
     if plan:
@@ -1446,7 +1455,7 @@ def _join_held(args, cfg, name, log, say, take):
     if code == 0:
         _say_next(channel, name, say,
                   first=not rejoin and args.fields["agent"] != CHECK_SKIPPED,
-                  agent=args.fields["agent"])
+                  agent=args.fields["agent"], lobby=kind_ is kinds.LOBBY)
         if not rejoin:
             # a first join only: a rejoin (a new session, the leader's too) had its answer
             say(platform.runnable(LOBBY_NOTE) if kind_ is kinds.LOBBY else ASK_USER)
