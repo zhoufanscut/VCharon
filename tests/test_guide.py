@@ -1,10 +1,13 @@
 """vcharon guide and its topics, docs/GUIDE.md made from them, the commands the guide names,
 vcharon skill install, the trust line of join and create, no build history in the sources, and
-the code's references to sections of DESIGN.md and README.md."""
+the code's references to sections of DESIGN.md and README.md, and to the guide topics the
+lines vcharon prints point at."""
 
 from __future__ import annotations
 
 import argparse
+import ast
+import collections
 import itertools
 import os
 import re
@@ -487,6 +490,132 @@ def headings(path):
     return found
 
 
+# The topics an agent reads before it joins or creates: what a member, a leader or a lobby's
+# member does, the rules, and its CLI's part. The others are reference, read when something
+# points there, so a line vcharon prints on the normal path names only these
+BEFORE_JOINING = ("member", "rules", "lobby", "lead", "claude", "codex", "opencode")
+# (file in the package, the constant or function, topic) -> why that line may point into the
+# reference topics: a refusal's fix line or a note on a rare case, which the agent reads when it
+# happens. A bare `vcharon guide` names the start topic: that is what it prints
+L3_TRIGGERS = {
+    ("cli.py", "MAILBOX_DOWN_HINT", "errors"): "the hint of a sync that refused a name",
+    ("channel_cmd.py", "CLOSE_UNTOLD_NOTE", "end"): "close's note on a leader that posted no "
+                                                    "CLOSED: a mistake, told after it",
+    ("channel_cmd.py", "OTHER_AGENT_NOTE", "start"): "a second agent took over a membership in "
+                                                     "the same folder: a rare case",
+    ("channel_cmd.py", "_leave", "end"): "a member's close refused: a refusal's fix line",
+    ("channel_cmd.py", "_leave_held", "end"): "a leader's leave refused: a refusal's fix line",
+    ("cli.py", "_parser", "start"): "the skill verb's help says what the skill points at",
+    ("guide/__init__.py", "document", "start"): "docs/GUIDE.md's header: a file for people, "
+                                                "not a line a command prints",
+}
+# (file, constant or function, placeholder) -> what stands in for the topic there
+PLACEHOLDERS = {
+    ("guide/__init__.py", "index", "TOPIC"): "the index's own usage line, above the topics",
+    ("guide/__init__.py", "unknown", "%s"): "an unknown topic's fix: %s is guide.DEFAULT",
+    ("guide/__init__.py", "document", "TOPIC"): "docs/GUIDE.md's header, as for start above",
+}
+# (file, constant, topic, heading) of the normal-path lines that still point into the reference
+# topics: entries to be removed as the lines move; when empty, delete it
+TO_MOVE = {
+    ("channel_cmd.py", "NEXT_WATCH", "watch", None),
+    ("channel_cmd.py", "FIRST_CHECK", "watch", "The one-minute check"),
+    ("channel_cmd.py", "NEXT_PLAN", "post", None),
+}
+_MENTION = re.compile(r"\bvcharon guide\b")
+# a word after "vcharon guide", without the punctuation that ends a sentence, and a heading
+# after the topics
+_NEXT_WORD = re.compile(r" +([^\s,`)\"':;.?!]+)")
+_NAMED_HEADING = re.compile(r'`?,\s*"([^"]+)"')
+# what stands in for a topic: a %-format, an f-string's value, or a word such as TOPIC
+_PLACEHOLDER = re.compile(r"%s|\{\}|[A-Z]+")
+
+
+def guide_mentions(text):
+    """(topic, heading or None) for each topic each `vcharon guide` in text names; a heading
+    goes with the last topic before it. A bare one names the start topic, which it prints; one
+    followed by a word that is neither a topic nor a placeholder names that word, so a misspelt
+    topic is reported, not read as bare."""
+    out = []
+    for m in _MENTION.finditer(text):
+        at, topics = m.end(), []
+        while True:
+            word = _NEXT_WORD.match(text, at)
+            if not word or not (word.group(1) in guide.TOPICS
+                                or _PLACEHOLDER.fullmatch(word.group(1))):
+                break
+            topics.append(word.group(1))
+            at = word.end()
+        if not topics:
+            word = _NEXT_WORD.match(text, at)
+            if word:
+                topics, at = [word.group(1)], word.end()
+        heading = _NAMED_HEADING.match(text, at)
+        topics = topics or [guide.DEFAULT]
+        out += [(topic, None) for topic in topics[:-1]]
+        out.append((topics[-1], heading.group(1) if heading else None))
+    return out
+
+
+def string_constants(tree):
+    """(name, line, text) for each string in a module, named by the module-level or class-level
+    constant it is assigned to, else by its function. An f-string is one text, {} for each
+    value. Docstrings are left out: no command prints one. Comments aren't in the tree at all,
+    so a comment's `vcharon guide` (one that says why) is never read as a printed line."""
+    docs = {id(node.body[0].value) for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                 ast.AsyncFunctionDef))
+            and node.body and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)}
+    out = []
+
+    def visit(node, scope, name):
+        if id(node) in docs:
+            return
+        if isinstance(node, ast.JoinedStr):
+            out.append((name, node.lineno, "".join(
+                part.value if isinstance(part, ast.Constant) else "{}" for part in node.values)))
+            return
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            out.append((name, node.lineno, node.value))
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope = name = node.name if scope is None else "%s.%s" % (scope, node.name)
+        top = isinstance(node, (ast.Module, ast.ClassDef))
+        for child in ast.iter_child_nodes(node):
+            named = name
+            if top and isinstance(child, (ast.Assign, ast.AnnAssign)):
+                target = child.targets[0] if isinstance(child, ast.Assign) else child.target
+                if isinstance(target, ast.Name):
+                    named = target.id
+            visit(child, scope, named)
+
+    visit(tree, None, "<module>")
+    return out
+
+
+def printed_mentions():
+    """(file in the package with /, line, name, topic, heading) for each guide topic a string
+    in the package's code names. Not seen: a pointer split by an explicit + between strings, a
+    double space or a line break inside "vcharon guide <topic>", and a section named without
+    "vcharon guide"."""
+    out = []
+    for d, dirs, names in os.walk(PACKAGE_DIR):
+        dirs[:] = sorted(x for x in dirs if x != "__pycache__")
+        for file_name in sorted(names):
+            if not file_name.endswith(".py"):
+                continue
+            path = os.path.join(d, file_name)
+            rel = os.path.relpath(path, PACKAGE_DIR).replace(os.sep, "/")
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), path)
+            for name, line, text in string_constants(tree):
+                out += [(rel, line, name, topic, heading)
+                        for topic, heading in guide_mentions(text)]
+    return out
+
+
 class NamedSectionTest(unittest.TestCase):
     """Lines vcharon prints name a section of the watch topic by its heading, or a topic by its
     name, which no other test checks (DocReferenceTest checks DESIGN's and README's): renaming
@@ -540,6 +669,63 @@ class NamedSectionTest(unittest.TestCase):
                 with self.subTest(file=name, topic=topic, heading=named):
                     self.assertIn(named, headings(os.path.join(GUIDE_DIR, topic + ".md")))
         self.assertIn(("watch", "Checking between steps"), found)
+
+    def test_printed_lines_point_before_joining(self):
+        mentions = printed_mentions()
+        have = {topic: headings(os.path.join(GUIDE_DIR, topic + ".md")) for topic in guide.TOPICS}
+        wrong, used = {}, collections.Counter()
+        for rel, line, name, topic, heading in mentions:
+            key = (rel, name, topic)
+            if topic in BEFORE_JOINING:
+                ok = True
+            elif topic in guide.TOPICS:
+                ok = key in L3_TRIGGERS
+            elif _PLACEHOLDER.fullmatch(topic):
+                ok = key in PLACEHOLDERS
+            else:
+                ok = False
+            if not ok or heading is not None and heading not in have.get(topic, ()):
+                wrong[key + (heading,)] = "%s:%d %s: vcharon guide %s%s" % (
+                    rel, line, name, topic, "" if heading is None else ', "%s"' % heading)
+            elif topic not in BEFORE_JOINING:
+                used[key] += 1
+        self.assertEqual(sorted(wrong, key=str), sorted(TO_MOVE, key=str),
+                         "\n" + "\n".join(wrong[k] for k in sorted(wrong, key=str)))
+        # every allowed entry names exactly one line: none that went, and a function's second
+        # pointer is reviewed on its own (give it a constant of its own and list that)
+        self.assertEqual({key: used[key] for key in itertools.chain(L3_TRIGGERS, PLACEHOLDERS)
+                          if used[key] != 1}, {})
+        # the scan must keep finding the lines it is for
+        found = {(rel, name, topic) for rel, line, name, topic, heading in mentions}
+        self.assertLessEqual({("channel_cmd.py", "LOBBY_NOTE", "lobby"),
+                              ("channel_cmd.py", "KEEP_TURN", "codex"),
+                              ("channel_cmd.py", "TRUST", "rules"),
+                              ("charter.py", "RULES", "rules")}, found)
+        self.assertGreater(len(mentions), 15)
+
+    def test_the_allowed_lists(self):
+        self.assertLessEqual(set(BEFORE_JOINING), set(guide.TOPICS))
+        # an entry for a topic read before joining would never be used, and fail above as gone
+        for key in itertools.chain(L3_TRIGGERS, PLACEHOLDERS, TO_MOVE):
+            with self.subTest(key=key):
+                self.assertNotIn(key[2], BEFORE_JOINING)
+
+    def test_the_mention_parse(self):
+        source = ('"""vcharon guide start: a docstring"""\n'
+                  '# vcharon guide watch: a comment\n'
+                  'A = ("read vcharon guide member rules, and (vcharon guide watch, "\n'
+                  '     "\\"Stopping it\\")")\n'
+                  'def f(x):\n'
+                  '    return f"more: vcharon guide {x}"\n'
+                  'B = "points at vcharon guide."\n'
+                  'C = "see vcharon guide watch. Or vcharon guide wach, \\"Stopping it\\""\n')
+        got = [(name, line, guide_mentions(text))
+               for name, line, text in string_constants(ast.parse(source))]
+        self.assertEqual(got, [
+            ("A", 3, [("member", None), ("rules", None), ("watch", "Stopping it")]),
+            ("f", 6, [("{}", None)]),
+            ("B", 7, [("start", None)]),
+            ("C", 8, [("watch", None), ("wach", "Stopping it")])])
 
 
 def anchors(path):
