@@ -187,10 +187,11 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(bundle.key_line(NONCE, digest),
                          ("%s %s\n" % (NONCE, digest)).encode("ascii"))
         self.assertEqual(doc["packages"], ["vcharon", "vcharon.plugins"])
+        # the bundle carries LF line ends; a Windows checkout's files are CRLF
         expected = {}
         for name in bundle.SERVER:
             with open(module_file(name), "rb") as f:
-                expected[name] = f.read().decode("utf-8")
+                expected[name] = f.read().decode("utf-8").replace("\r\n", "\n")
         self.assertEqual(doc["modules"], expected)
         self.assertEqual(list(doc["modules"]), sorted(expected))
         for name in ("vcharon", "vcharon.helper", "vcharon.proto", "vcharon.plugins",
