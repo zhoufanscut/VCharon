@@ -36,7 +36,8 @@ time.sleep(60)
 
 
 def hold_in_child(path):
-    """A child process that holds the lock on path, once it has said so."""
+    """A child process that holds the lock on path, once it has said so. path must exist: the
+    child opens it without O_CREAT (test_channel's hold makes it)."""
     child = subprocess.Popen([sys.executable, "-c", HOLDER, path], stdout=subprocess.PIPE,
                              stdin=subprocess.DEVNULL)
     try:

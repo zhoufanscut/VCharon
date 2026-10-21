@@ -87,7 +87,9 @@ def helper_override(code):
 
 
 class FakeSshCase(unittest.TestCase):
-    """A temp dir with a fake server home and a log file; ssh is fake_ssh.py."""
+    """A temp dir with a fake server home and a log file; ssh is fake_ssh.py. What setUp stores
+    on self hides a subclass's method of that name, and a subclass's method hides a helper
+    here: grep tests for a new name first."""
 
     def setUp(self):
         self.tmp = self.make_tmp()

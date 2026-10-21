@@ -2964,13 +2964,31 @@ which and how to adapt. A channel format change is always a minor version at lea
   `ssh-add`.
 - Test seams in the helper's environment: `VCHARON_TEST_MACHINE_ID`, `VCHARON_TEST_OS`,
   `VCHARON_TEST_OS_RELEASE`, `VCHARON_TEST_CLOCK_SHIFT`, `VCHARON_TEST_UTC_OFFSET`, and
-  `VCHARON_CHANNELS_ROOT`.
+  `VCHARON_CHANNELS_ROOT`. The machine id is the fake server's: a test of another server sets
+  it, and a test of another client machine patches `platform.client_id`, since this box's
+  client id is kept in a file once made.
 - Real ssh, optional: with `VCHARON_TEST_SSH=<dest>` set, the session tests run against a real
   server, in a temp folder under its home. The helper's cache still goes to that user's real
   `~/.local/state/vcharon/cache/` (ssh passes no test variable), at most 8 files, all safe to
   delete.
 - Path rules are pure functions: every OS's rules run on every OS. Windows-only and POSIX-only
   tests are skipped elsewhere.
+- A test that declares another OS (patches `platform.os_name`) gets that OS's path rules
+  (`platform._path`) but keeps the host's temp folders: where what it checks depends on such a
+  path, it patches the OS only around the call it is about, or gives that OS's own paths. Why: a
+  host path read by another OS's rules isn't absolute there (`C:\…` under `"linux"`) and joins
+  with the wrong separator.
+- A test fakes what each OS's code path uses. Why: a fake the other OS never calls leaves its
+  path running for real; `install.Parent` waits on a process handle on Windows and reads
+  `os.getppid()` elsewhere, so a loop that fakes only `os.getppid` never ends on Windows (fake
+  `install.Parent`). A fake sleep that waits for a faked event raises after a few rounds, so
+  such a miss fails the test instead of hanging the job.
+- A fake stream is an `io.StringIO`, or a mock whose `fileno` raises `io.UnsupportedOperation`
+  and whose `isatty` returns False. Why: Python 3.14's argparse asks
+  `os.isatty(stream.fileno())` whether to print in colour, and a bare `mock.Mock()`'s `fileno`
+  returns a mock there: a `TypeError` on 3.14 (3.13's argparse has no colour).
+- A check that no path is shown from the home looks for `~` and a separator at a path's start,
+  never for any `~`. Why: a Windows temp path can hold an 8.3 short name such as `RUNNER~1`.
 - Guards on the repo itself: the guide's commands and flags parse with the command line's own
   parser; `docs/GUIDE.md` matches what `guide/*.md` makes; no milestone or review tag in the
   code, tests, README or DESIGN; the old tool's name nowhere but the CHANGELOG line that says

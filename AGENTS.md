@@ -19,6 +19,7 @@ From the repo root:
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once: the package, editable, and ruff
 
 .venv/bin/python -m unittest discover -s tests -t .          # the whole suite (about 5 minutes)
+CI=1 PATH=$PWD/.venv/bin:$PATH .venv/bin/python -m unittest discover -s tests -t .  # as CI (below)
 .venv/bin/python -m unittest tests.test_channel -v           # one module
 .venv/bin/python -m unittest tests.test_channel.CreateJoinTest -v  # one class
 
@@ -38,6 +39,13 @@ them on your own machine.
 
 - **`-t .` matters**: it makes `tests` a package, so `tests/__init__.py`'s sandbox loads before
   any test (below).
+- **The run as CI** is the one to trust before a push: `CI=1` arms `tests/__init__.py`'s hang
+  dump, and the venv's `vcharon` first on PATH makes fix lines spell `vcharon`, as on CI
+  (`platform.self_command`). A `.venv` made before that entry point existed needs the install
+  again.
+- **Another copy of the code** (a mutant, an old release from `git archive`): run the venv's
+  `python -m unittest` in the copy with `PYTHONPATH=<copy>/src`, which wins over the editable
+  install; check `vcharon.__file__`.
 - Lines are at most 100 characters. ruff doesn't check that (E501 is off in its defaults), so
   check it yourself, counting characters, not bytes:
 
@@ -58,7 +66,8 @@ reach the real ones: they may hold live channels.
   VCharon's folders fail on a path under the real home. So **never call
   `mock.patch.stopall()`** in a test: it would also stop the test helpers' own environment
   patches. Stop only your own patcher.
-- **A hand run** goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
+- **A hand run**, any process outside the suite that imports vcharon (a `python -` snippet
+  too), goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
   `joined` folders, and `VCHARON_CHANNELS_ROOT` the channel root (which doesn't follow
   `VCHARON_HOME`), and with it `seen/` and the helper's `cache/` beside it; both work on every
   OS:

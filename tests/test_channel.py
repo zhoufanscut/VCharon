@@ -66,7 +66,9 @@ def watcher_locked(snapshot, flags):
 
 
 def hold(case, path):
-    """A child process holding the lock file path (made first), until the test ends."""
+    """A child process holding the lock file path (made first), until the test ends. A held
+    post lock (entries.lock_path) stalls whatever posts into that folder, leave's LEAVE too,
+    for entries.LOCK_WAIT, then busy."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "ab").close()
     child = hold_in_child(path)
@@ -171,7 +173,7 @@ class ChannelCase(FakeSshCase):
         return self.refusal(*argv, code=code)[0]
 
     def refusal(self, *argv, code=1):
-        """The ERROR line and the fix line (as written, before runnable) of a refused
+        """The ERROR line and the fix line (as printed, after runnable) of a refused
         command."""
         got, out, err = self.channel(*argv)
         self.assertEqual(got, code, out + err)

@@ -160,6 +160,9 @@ def end_pid(pid):
 
 
 class WatchCase(unittest.TestCase):
+    """watch.scan keys a file by its size and mtime_ns only: a test that rewrites a file
+    changes its length, else the rewrite can land in the same mtime tick and go unseen."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -687,6 +690,10 @@ class RootTest(WatchCase):
 
 class SnapshotTest(WatchCase):
     def run_dir(self, *steps, rounds=None, **kw):
+        """watch_dir, a step per sleep, rounds=len(steps) by default. A start from a usable saved
+        snapshot runs its first round at once: a restart's steps need rounds=len(steps) + 1. Any
+        other start (none saved, fresh, one that can't be used) sleeps first: for one round there
+        with nothing to do, pass a lambda: None step (rounds=1 and no steps reaches never)."""
         lines = []
         code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
                                sleep=Rounds(*steps) if steps else never,
@@ -1351,7 +1358,9 @@ class WarnTest(WatchCase):
     @unittest.skipIf(util.folds_case(), util.FOLDS_CASE)
     def test_a_failed_start_takes_the_warnings_as_a_baseline(self):
         # the start's scan failed (not a missing root): the first good round shows what's
-        # there, files, entries and warnings alike, and none of it is a change
+        # there, files, entries and warnings alike, and none of it is a change. The old post
+        # is the bait: a normal start's baseline throws away what read_entries tells, so only
+        # here would a baseline that tells something show
         write_tree(self.tree, {"debian/STEPS.md": b"s", "Debian/": None, "mac/x": b"x"})
         self.post("mac", 1, "old", to="@debian")
         real = watch.scan
@@ -2326,7 +2335,9 @@ class StreamTest(WatchCase):
     def watch(self, *children, clock=None, steps=None, **kw):
         """watch_job, syncing every 2 s, over the children: (exit code, the lines without
         their time). steps: with clock, the seconds each round moves the clock on. timer: the
-        limits' clock, clock unless given."""
+        limits' clock, clock unless given. A child does all its actions at once, then waits for
+        its stdin's end, and the fake clock never reaches the stuck rule: a watcher that gets
+        fewer rounds than rounds= hangs on the last child, so end that one with ["exit", 0]."""
         self.children = [list(c) for c in children]
         self.procs = []
         clock = clock or Clock()
@@ -2935,6 +2946,7 @@ class EntriesTest(WatchCase):
         self.member("windows", "debian")
 
     def run_mac(self, *steps, rounds=None, **kw):
+        """SnapshotTest.run_dir as the member mac; the same count of rounds."""
         lines = []
         code = watch.watch_dir(self.tree, "mac", 10, out=lines.append,
                                sleep=Rounds(*steps) if steps else never,

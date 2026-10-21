@@ -178,7 +178,10 @@ class Parent:
     It takes the parent for this binary's own bootloader. A binary started with its launcher's
     _PYI_* environment and no PYINSTALLER_RESET_ENVIRONMENT runs without a bootloader of its
     own, and would take the launcher for it. So every place vcharon starts itself sets the
-    reset (platform.child_env) or strips _PYI_* (update.child_env); a test holds the list."""
+    reset (platform.child_env) or strips _PYI_* (update.child_env); a test holds the list.
+
+    Tests fake it with a class Parent of their own (grep tests for "class Parent"): an attribute
+    this module starts to read goes there too."""
 
     def __init__(self):
         self.pid = os.getppid()
