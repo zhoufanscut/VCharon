@@ -7,12 +7,31 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.5 — 2026-10-22
+
+0.8.5rc1's code, with `--update` taking `--project` and `--role`. Next to 0.8.4, the latest final
+release, the changes are those in 0.8.5rc1's entry and this one. `vcharon --update` on 0.8.4 or
+on 0.8.5rc1 offers it.
+
+**Updating from 0.8.4:** as 0.8.5rc1's entry says: nothing to do; each server gets one new
+helper cache entry at the first connection. From 0.8.5rc1: nothing to do; the skill is
+unchanged.
 
 - `vcharon --update` takes `--project P` and `--role R` and ignores them, as the verbs that act
   on no membership do; it refused them (exit 3) before. Why: the guide has an agent pass them on
   every command, `vcharon --update --check` included. Its refusal of anything else now says the
   two are ignored.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build: 1713 tests OK, 13 skipped,
+run as CI). A live round on 0.8.5rc1 on 2026-10-22 (measured), with this Linux box as the
+server, in its lobby and a work channel: a local Claude Code member (`claude -p` 2.1.308), a
+local Codex CLI 0.163.0 member and, remote over ssh, Claude Code and Codex on Windows. Each
+joined, watched, did its steps, posted `DONE` and left after `CLOSED` with no other help.
+`doctor` and `ping` showed machine ids only hashed, on Linux and Windows. The Windows client
+wrote one helper copy to the server's cache; Windows' later connections and the Linux binary's
+first connection found it (`bundle cached`) and wrote none. Entries posted with `--file` from
+Linux and from Windows arrived as UTF-8 with LF only, non-ASCII and leading spaces intact. The
+one fault reported was the `--update` refusal above. Not run: macOS on this build.
 
 ## 0.8.5rc1 — 2026-10-22
 
