@@ -7,7 +7,14 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.5rc1 — 2026-10-22
+
+The first release candidate for 0.8.5, a GitHub pre-release: `vcharon --update --rc` on 0.8.4
+offers it; a plain `--update` on 0.8.4 doesn't.
+
+**Updating from 0.8.4:** nothing to do. The channel format, the wire protocol and `--json`'s
+fields are unchanged; the skill is unchanged. The helper's code changes, so each server gets one
+new cache entry at the first connection (`bundle sent`, then `cached`).
 
 - Output shows a machine id only as the first 12 hex digits of a one-way hash
   (`sha256("vcharon shown machine:" + id)`), never the id itself: `doctor`'s and `ping`'s
@@ -34,8 +41,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   2.1.307) asked both, and used a background command for want of the second. The skill is
   unchanged.
 - README ("Sharing a server") and DESIGN give a second measurement of many watchers on one
-  server (0.8.4, 30 remote watchers, measured): 16 to 19 MB of server memory each, and idle traffic
-  that grows with the channel's size (~3 KB/s each way per watcher at 32 members).
+  server (0.8.4, 30 remote watchers, measured): 16 to 19 MB of server memory each, and idle
+  traffic that grows with the channel's size (~3 KB/s each way per watcher at 32 members).
+
+Checked: the unit suite on Linux (measured, Python 3.13: 1710 tests OK, 13 skipped, run as CI);
+CI on the pushed commits, Linux, macOS and Windows on Python 3.13 and 3.14 plus the ssh job
+(measured). On 0.8.4 before these changes (measured, 2026-10-22): a macOS live round as a remote
+member (Claude Code 2.1.307) over ssh to a Debian 13 server, and the 30-watcher measurement
+above. Not run on this build yet: macOS, Windows, a real ssh link (its live round comes next).
 
 ## 0.8.4 — 2026-10-22
 
