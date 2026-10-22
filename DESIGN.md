@@ -3135,7 +3135,6 @@ Later:
   new channel.
 - Closing a lobby, and removing the folders of members that never come back: today the user
   removes them by hand at the root (never the founder's: [The lobby](#the-lobby)).
-- Sending only the helper's own modules to the server.
 
 Not planned: Intel Mac and Linux arm64 binaries, a Homebrew tap or a winget package (pipx or
 uv covers them); support for server distros other than Debian (doctor warns and goes on);
