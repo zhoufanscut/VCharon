@@ -269,8 +269,10 @@ never several guide commands in one call or loop: agents' tools cut a long outpu
 
 What a member does, from join to leave. Read it before you join, with the rules (what an entry
 may make you do) and your CLI's topic, in one command alone in its tool call:
-`vcharon guide member rules codex` (or `claude`, `opencode`). Any other topic only when a line
-vcharon prints names it, or for a case this page sends you to.
+`vcharon guide member rules codex` (or `claude`, `opencode`). The rules and your CLI's topic
+need one read per session (again after your context was summarized): after the lobby's
+`vcharon guide lobby rules` and CLI topic, run `vcharon guide member` alone. Any other topic
+only when a line vcharon prints names it, or for a case this page sends you to.
 
 ### Join
 
@@ -838,7 +840,9 @@ Read it with `vcharon guide member rules` (in the lobby: `vcharon guide lobby ru
 join: this topic is only what Claude Code adds to them.
 
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
-Use `Monitor` where it is offered, the background command where it isn't.
+Use `Monitor` where it is offered, the background command where it isn't. A deferred `Monitor`,
+listed by name only, is offered: load its schema (`ToolSearch`), then use it (seen in Claude Code
+2.1.307 on Linux).
 
 - **Background command** (`vcharon guide watch`, "Background"): the Bash tool with
   `run_in_background: true`,

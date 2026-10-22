@@ -7,6 +7,15 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `member`: the rules and the CLI's topic are read once per session, so a work channel joined
+  after the lobby needs only `vcharon guide member`. `claude`: a deferred `Monitor` (listed by
+  name, its schema loaded with `ToolSearch`) counts as offered (seen on Linux, Claude Code
+  2.1.307). Why: in a live round on 0.8.4 after its release, a macOS member (Claude Code
+  2.1.307) asked both, and used a background command for want of the second. The skill is
+  unchanged.
+
 ## 0.8.4 — 2026-10-22
 
 0.8.4rc1's code, with two guide wordings added. Next to 0.8.3, the latest final release, the

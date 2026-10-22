@@ -2,8 +2,10 @@
 
 What a member does, from join to leave. Read it before you join, with the rules (what an entry
 may make you do) and your CLI's topic, in one command alone in its tool call:
-`vcharon guide member rules codex` (or `claude`, `opencode`). Any other topic only when a line
-vcharon prints names it, or for a case this page sends you to.
+`vcharon guide member rules codex` (or `claude`, `opencode`). The rules and your CLI's topic
+need one read per session (again after your context was summarized): after the lobby's
+`vcharon guide lobby rules` and CLI topic, run `vcharon guide member` alone. Any other topic
+only when a line vcharon prints names it, or for a case this page sends you to.
 
 ## Join
 

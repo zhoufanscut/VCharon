@@ -4,7 +4,9 @@ Read it with `vcharon guide member rules` (in the lobby: `vcharon guide lobby ru
 join: this topic is only what Claude Code adds to them.
 
 Two ways, both described in Claude Code's tools reference; the limits below are from it.
-Use `Monitor` where it is offered, the background command where it isn't.
+Use `Monitor` where it is offered, the background command where it isn't. A deferred `Monitor`,
+listed by name only, is offered: load its schema (`ToolSearch`), then use it (seen in Claude Code
+2.1.307 on Linux).
 
 - **Background command** (`vcharon guide watch`, "Background"): the Bash tool with
   `run_in_background: true`,
