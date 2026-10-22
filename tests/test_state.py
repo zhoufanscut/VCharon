@@ -12,7 +12,7 @@ import textwrap
 import unittest
 from unittest import mock
 
-from vcharon import config, state
+from vcharon import config, platform, state
 from vcharon.proto import VCharonError
 
 from tests.util import fd_count, use_test_jobs
@@ -169,6 +169,12 @@ class SaveLoadTest(StateCase):
         self.assertEqual(state.read("j"), (None, "its schema is 2, not 1"))
         self.write(b"\xff")
         self.assertEqual(state.read("j"), (None, "it isn't valid UTF-8 (byte 0)"))
+        # a bad sink's server id is shown hashed, as every output shows one
+        mid = "0123456789abcdef0123456789abcdef"
+        self.write(dict(GOOD, sink={"end": "remote", "root": "/r", "machine": mid, "x": 1}))
+        _st, why = state.read("j")
+        self.assertNotIn(mid, why)
+        self.assertIn('"machine": "%s"' % platform.shown_machine(mid), why)
 
     def test_remove(self):
         self.assertFalse(state.remove("j"))

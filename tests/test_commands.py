@@ -1103,6 +1103,14 @@ HINTS = {
         ("ERROR vcharon sync of ", None), ("ERROR vcharon sync of %s exited with %d", None),
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
         ("ERROR vcharon sync of %s didn't finish within %d s", None),
+        # the fixes of a sync that didn't finish, and of one that couldn't start
+        ("the watcher ended it (on POSIX its whole process group); the next round or check "
+         "syncs again. If it happens again, run vcharon doctor (it checks the servers of your "
+         "channels)", ()),
+        ("the next round or check tries again by itself (a start can fail while the system is "
+         "short of processes, open files or memory). If it keeps failing, run vcharon doctor "
+         "(it runs this same install): if that can't start either, the install was moved or "
+         "removed; ask your user to install it again", ()),
         ("%s isn't there: your folder in the channel holds it, once vcharon join --local has "
          "written it", None),
         # a --once check's: a busy sync

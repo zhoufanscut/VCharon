@@ -399,13 +399,13 @@ def _dirs(rep):
 
 
 def _machine(rep):
-    """This machine's id, so an agent checking it needs no python3 -c, and the
-    client-id file the claimer id in MEMBER.md comes from. Only a warn without a machine id:
-    a client of remote jobs needs none. Returns the claimer's source, as --json gives it, or
-    None when the file can't be read."""
+    """This machine's id as vcharon shows it (platform.shown_machine: ping shows a server's the
+    same way, so the two can be compared), and the client-id file the claimer id in MEMBER.md
+    comes from. Only a warn without a machine id: a client of remote jobs needs none. Returns
+    the claimer's source, as --json gives it, or None when the file can't be read."""
     mid = platform.machine_id()
     if mid:
-        rep.check("ok", "machine", mid)
+        rep.check("ok", "machine", "id %s (hashed)" % platform.shown_machine(mid))
     else:
         hint = platform.no_machine_hint() or LINUX_ID_HINT
         rep.check("warn", "machine", "no machine id: this machine can't hold a channel "

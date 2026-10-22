@@ -415,6 +415,34 @@ class FilesTest(unittest.TestCase):
         with mock.patch.object(platform, "winreg", fake(5, 1)):
             self.assertIsNone(platform._machine_guid())
 
+    def test_shown_machine(self):
+        mid = "3ac29748d7984ad7ba3568bd550567f5"
+        shown = platform.shown_machine(mid)
+        # one id, one text, every time: doctor's line on the server matches ping's on a client
+        self.assertEqual(shown, platform.shown_machine(mid))
+        self.assertRegex(shown, r"\A[0-9a-f]{12}\Z")
+        self.assertNotIn(mid[:8], shown)
+        self.assertNotEqual(shown, platform.shown_machine("f" * 32))
+        self.assertIsNone(platform.shown_machine(None))
+        self.assertIsNone(platform.shown_machine(""))
+        # not the client id's hash, nor a claimer made from it: a shown id can't be matched
+        # against a MEMBER.md
+        cid = hashlib.sha256(("vcharon:" + mid).encode()).hexdigest()[:32]
+        self.assertFalse(cid.startswith(shown))
+        with mock.patch.object(platform, "client_id", return_value=(cid, platform.FROM_MACHINE)):
+            for channel in ("game", "vcharon", "vcharon shown machine"):
+                self.assertFalse(platform.claimer(channel).startswith(shown), channel)
+        # a document's "machine" only, in a copy
+        doc = {"end": "remote", "machine": mid, "root": "/srv"}
+        self.assertEqual(platform.shown_doc(doc), {"end": "remote", "machine": shown,
+                                                   "root": "/srv"})
+        self.assertEqual(doc["machine"], mid)
+        self.assertEqual(platform.shown_doc({"machine": None}), {"machine": None})
+        self.assertEqual(platform.shown_doc(["x"]), ["x"])
+        # a reply's result, one level down
+        self.assertEqual(platform.shown_doc({"t": "ok", "result": [{"machine": mid}]}),
+                         {"t": "ok", "result": [{"machine": shown}]})
+
     def test_no_machine_hint(self):
         for osn, want in (("linux", None), ("darwin", "IOPlatformUUID"),
                           ("windows", "MachineGuid")):

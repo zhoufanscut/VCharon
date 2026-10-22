@@ -229,7 +229,8 @@ class DoctorTest(DoctorCase):
                          "channels %s" % (os.path.join(self.vcharon_home, "state"),
                             os.path.join(self.vcharon_home, "logs"),
                             os.path.join(self.vcharon_home, "joined"), channels.root_path()))
-        self.assertEqual(lines[6], "  ok    machine    %s" % TEST_MACHINE_ID)
+        self.assertEqual(lines[6], "  ok    machine    id %s (hashed)"
+                         % platform.shown_machine(TEST_MACHINE_ID))
         self.assertEqual(lines.pop(7), "  ok    claimer    " + USED % (
             os.path.join(self.vcharon_home, "state", "client-id"),
             "made at the first join, from the machine id"))
@@ -510,12 +511,16 @@ class DoctorTest(DoctorCase):
         # run with --server would show the same lines
         lines = self.doctor(code=0)
         # two subjects: the id, then the client-id file claims come from
-        self.assertEqual(self.of(lines, "machine"), [("ok", TEST_MACHINE_ID)])
+        # hashed, never the raw id: agents paste these lines into channel entries
+        self.assertEqual(self.of(lines, "machine"),
+                         [("ok", "id %s (hashed)" % platform.shown_machine(TEST_MACHINE_ID))])
+        self.assertFalse([line for line in lines if TEST_MACHINE_ID in line], lines)
         self.assertEqual(self.of(lines, "claimer"), [
             ("ok", USED % (platform.client_id_path(),
                            "made at the first join, from the machine id"))])
         os.environ["VCHARON_TEST_MACHINE_ID"] = "f" * 32
-        self.assertEqual(self.of(self.doctor(code=0), "machine")[0], ("ok", "f" * 32))
+        self.assertEqual(self.of(self.doctor(code=0), "machine")[0],
+                         ("ok", "id %s (hashed)" % platform.shown_machine("f" * 32)))
 
     def test_no_machine_id(self):
         # only a warn on Linux: a client of remote jobs needs no id of its own, and claims with

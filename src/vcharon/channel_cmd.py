@@ -2001,9 +2001,11 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
         _need_machine(server)
         if server.machine != record["machine"]:
             raise channels.refused("%s isn't the server %s is on (its machine id is %s, "
-                                   "the record's %s)"
-                                   % (server.where, channel, server.machine,
-                                      record["machine"]), "check the alias")
+                                   "the record's %s, both hashed)"
+                                   % (server.where, channel,
+                                      platform.shown_machine(server.machine),
+                                      platform.shown_machine(record["machine"])),
+                                   "check the alias")
         if close:
             # read before the removal: a local leader's folder goes with the channel
             told = _told_closed(_own_of(cfg, record, section), name)

@@ -483,8 +483,8 @@ def _machine_guid():
 
 
 def _hashed(uuid):
-    """A device id as vcharon keeps it: a record stores the id and a refusal
-    prints it, so never the OS's own id; 32 hex digits, as /etc/machine-id has."""
+    """A device id as vcharon keeps it: records and job state store the id, so never the
+    OS's own id; 32 hex digits, as /etc/machine-id has."""
     return hashlib.sha256(("vcharon:" + uuid.lower()).encode("ascii")).hexdigest()[:32]
 
 
@@ -653,6 +653,34 @@ def claimer(channel, make=True):
     if cid is None:
         return None
     return hashlib.sha256(("%s:%s" % (channel, cid)).encode("utf-8")).hexdigest()[:16]
+
+
+# The prefix of shown_machine's hash: neither the client id's "vcharon:" nor a claimer's
+# "<channel>:" (a channel's name holds no space), so a shown id matches neither of them.
+SHOWN_MACHINE_PREFIX = "vcharon shown machine:"
+
+
+def shown_machine(mid):
+    """A machine id as vcharon prints it: the first 12 hex digits of sha256 of
+    SHOWN_MACHINE_PREFIX and the id. machine-id(5) asks that the id itself be kept private,
+    and agents paste vcharon's lines into channel entries; the same machine shows the same
+    text everywhere (doctor on the server, ping from a client), so two outputs can still be
+    compared. None for no id."""
+    if not mid:
+        return None
+    return hashlib.sha256((SHOWN_MACHINE_PREFIX + mid).encode("utf-8")).hexdigest()[:12]
+
+
+def shown_doc(doc):
+    """doc (a hello, a reply, a saved identity or target) as vcharon prints it: a copy with
+    each "machine" text through shown_machine, at any depth (a reply holds its result's one
+    level down). Anything else is returned as it is."""
+    if isinstance(doc, dict):
+        return {k: shown_machine(v) if k == "machine" and isinstance(v, str) else shown_doc(v)
+                for k, v in doc.items()}
+    if isinstance(doc, list):
+        return [shown_doc(v) for v in doc]
+    return doc
 
 
 # The agent that runs vcharon, from what each one sets in the shells it starts; only what its

@@ -252,6 +252,19 @@ CLOSED_NEXT = ("  next: the leader closed the channel: don't start your watcher 
 # The titles of the entries join, a rejoin and leave post (in a lobby, to their poster only),
 # which a --presence watcher prints: matched whole and exact, as join and leave write them.
 PRESENCE_TITLES = ("JOIN", "REJOIN", "LEAVE")
+# The fix after the watcher's own "didn't finish within" line: a stuck sync is ended by the
+# watcher, not by the user, and the next try comes by itself; doctor checks the servers
+SYNC_TIMEOUT_FIX = ("the watcher ended it (on POSIX its whole process group); the next round "
+                    "or check syncs again. If it happens again, run vcharon doctor (it checks "
+                    "the servers of your channels)")
+# The fix after "couldn't start vcharon": a start can fail for a while (EAGAIN, EMFILE, ENOMEM)
+# and the watcher tries again by itself (error_key counts it as the connection's, the stream
+# backs off); one that keeps failing may be a gone install: the watcher starts its syncs as this
+# install runs (sync_argv), so a doctor that can't start either means the install is gone
+START_FIX = ("the next round or check tries again by itself (a start can fail while the system "
+             "is short of processes, open files or memory). If it keeps failing, run vcharon "
+             "doctor (it runs this same install): if that can't start either, the install was "
+             "moved or removed; ask your user to install it again")
 # A --once check needs a saved snapshot: without one its round would be a baseline, which takes
 # what is there as seen and prints none of it, so an entry to the member would be lost for good.
 # Join and create save one (first_look), so a missing one means a join or create by an older
@@ -1785,9 +1798,11 @@ def run_sync(job, sync_args, pace=None, timeout=None):
         ran = fsops.run(sync_argv(sync_args), timeout, new_session=True, env=env,
                         term_wait=TERM_WAIT)
     except OSError as e:
-        return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
+        return (1, "ERROR couldn't start vcharon: %s" % (e.strerror or e),
+                platform.runnable(START_FIX))
     if ran.rc is None:
-        return 1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, timeout), None
+        return (1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, timeout),
+                platform.runnable(SYNC_TIMEOUT_FIX))
     return parse_failure(ran.rc, ran.err.decode("utf-8", "replace").splitlines(), job)
 
 
@@ -1991,7 +2006,8 @@ class Stream:
                     self._start()
                 except OSError as e:
                     self.exits += 1
-                    return 1, "ERROR couldn't start vcharon: %s" % (e.strerror or e), None
+                    return (1, "ERROR couldn't start vcharon: %s" % (e.strerror or e),
+                            platform.runnable(START_FIX))
             line = self._next_line(deadline)
             if line is _LATE:
                 # --max-minutes: on time, whatever the round under way does (a dying link
@@ -2006,7 +2022,7 @@ class Stream:
                 self.stop()
                 self.exits += 1
                 return 1, ("ERROR vcharon sync of %s didn't finish within %d s"
-                           % (self.job, RUN_TIMEOUT)), None
+                           % (self.job, RUN_TIMEOUT)), platform.runnable(SYNC_TIMEOUT_FIX)
             if line is None:
                 err = self._err
                 code = self._reap()

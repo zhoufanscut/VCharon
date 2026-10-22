@@ -9,6 +9,24 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Output shows a machine id only as the first 12 hex digits of a one-way hash
+  (`sha256("vcharon shown machine:" + id)`), never the id itself: `doctor`'s and `ping`'s
+  `machine` lines as `id <12 hex> (hashed)`, and the same hash in `leave`'s and `close`'s
+  refusal of another server, in the state errors (a state saved for another source or target,
+  a state file whose sink can't be read: in `sync`, `doctor` and `sync --reset`), in
+  `sync --reset`'s identity and target, in the protocol errors for a helper of another version
+  and for a reply out of step, and in the hello line of the log. Why: machine-id(5) asks that
+  the id be kept private, and agents paste these lines into channel entries. The same machine
+  shows the same text in doctor on the server and ping from a client. Records, state and the
+  wire are unchanged. `doctor --json`'s keys are unchanged; its `machine` check's `text` (not
+  stable) changes with the line. Log lines written before this version keep the raw id until
+  the log rolls over (at 1 MiB, keeping one `.1` file: gone after the second roll).
+- The watcher's `ERROR vcharon sync of <C>.<name> didn't finish within <n> s` and `ERROR
+  couldn't start vcharon: …` lines get a `fix:` line: the first says the watcher ended that
+  sync and the next round or check syncs again, and to run `vcharon doctor` if it happens
+  again; the second that the next round or check tries again by itself, and, if it keeps
+  failing, to run `vcharon doctor`, and to reinstall if that can't start either. The `ERROR`
+  lines are unchanged.
 - `member`: the rules and the CLI's topic are read once per session, so a work channel joined
   after the lobby needs only `vcharon guide member`. `claude`: a deferred `Monitor` (listed by
   name, its schema loaded with `ToolSearch`) counts as offered (seen on Linux, Claude Code

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 import vcharon
 from vcharon import bundle, helper, platform, proto, ssh
@@ -153,6 +154,16 @@ def unreadable(h, call_id, args):
     raise VCharonError("permission", "can't read /srv/\\udcff.txt")
 
 _real.HANDLERS["unreadable"] = unreadable
+"""
+
+# a reply with another call's id, its result holding a machine id as channel.claim's does
+OUT_OF_STEP = """
+from vcharon import platform, proto
+
+def claimish(h, call_id, args):
+    h.conn.send_json(proto.ok_msg(call_id + 1000, {"machine": platform.machine_id()}))
+
+_real.HANDLERS["claimish"] = claimish
 """
 
 # fails after its ok: before the download starts, and inside its first file
@@ -533,10 +544,25 @@ class SessionTest(FakeSshCase):
         line = 'VERSION = "%s"' % vcharon.VERSION
         self.assertIn(line, source)
         s = self.session(extra_modules={"vcharon": source.replace(line, 'VERSION = "9.9.9"')})
-        err = self.failure(s.open)
+        # no distro fields, so the quoted hello's machine is within its 200 characters
+        with mock.patch.dict(os.environ, {"VCHARON_TEST_OS_RELEASE":
+                                          os.path.join(self.tmp, "missing")}):
+            err = self.failure(s.open)
         self.assertEqual(err.code, "protocol")
         self.assertIn("9.9.9", err.message)
         self.assertIn("bundling", err.hint)
+        # the hello it quotes has the server's machine id hashed
+        self.assertIn('"machine": "%s"' % platform.shown_machine(TEST_MACHINE_ID), err.message)
+        self.assertNotIn(TEST_MACHINE_ID[:12], err.message)
+
+    def test_a_reply_out_of_step_hides_the_machine_id(self):
+        s = self.session(extra_modules=helper_override(OUT_OF_STEP))
+        s.open()
+        err = self.failure(s.call, "claimish")
+        self.assertEqual(err.code, "protocol")
+        self.assertIn("expected the reply to claimish", err.message)
+        self.assertIn('"machine": "%s"' % platform.shown_machine(TEST_MACHINE_ID), err.message)
+        self.assertNotIn(TEST_MACHINE_ID[:12], err.message)
 
     # 16
     def test_echo_over_16_mib(self):

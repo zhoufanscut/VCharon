@@ -61,7 +61,7 @@ for remote members, a GUI.
 | Flat verbs, the channel first: `vcharon post C …` | Channels are the only thing VCharon has; an explicit channel name is easy for an agent to get right and to read back in a log |
 | The tool works out who you are: no `--me`, `--job`, `--dir` or `--config` | An agent can't pass the wrong name if it never passes one |
 | Member names come from the machine and the checkout, never from the agent's choice | A new session in the same checkout gets the same name back with no memory ([Member names](#member-names)) |
-| No host name, path, user name or raw machine id in any file VCharon writes to a channel | A channel's files are shared; a host name can name an employer or a network |
+| No host name, path, user name or raw machine id in any file VCharon writes to a channel; no raw machine id in what it prints or logs either (log lines older versions wrote are not rewritten) | A channel's files are shared; a host name can name an employer or a network. machine-id(5) asks that the id be kept private, and agents paste VCharon's lines into entries |
 | Never prompt, except `vcharon key` (it runs `ssh-add` on your terminal) | Agents and background commands have no terminal; a prompt would hang them |
 | One binary per platform, plus pipx and uvx from GitHub | Nothing to set up on a client; the guide inside the binary always matches the binary |
 
@@ -423,7 +423,8 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   bundled code, so a mismatch is a bundling bug. Members of one channel may run different
   versions: each client sends its own helper.
 - `machine`: `/etc/machine-id` (or `/var/lib/dbus/machine-id`). It ties a job's state and a
-  record to the actual server. A server with none can't take remote members.
+  record to the actual server. A server with none can't take remote members. Stored and
+  compared as it is; shown only hashed ([Rules for the code](#rules-for-the-code)).
 - `os` must be `linux` for a remote member: a Mac or Windows root takes local members only.
 - `distro`, `distro_id`, `distro_version`: `PRETTY_NAME`, `ID` and `VERSION_ID` from
   `/etc/os-release`. `ID=debian` with `VERSION_ID` 13 or later is the supported server
@@ -2106,6 +2107,19 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   it is the child's own exit after an unusable session ([Repeated syncs](#repeated-syncs)), so
   a kill from outside that happens to give that code goes untold; the next start says whether
   the problem holds.
+- **A sync that didn't finish, or couldn't start.** Past its timeout (900 s, a `--once`
+  check's 60 s; a streaming child with no round for 900 s plus `--every`) the watcher ends the
+  sync itself (its process group on POSIX) and says `ERROR vcharon sync of <C>.<name> didn't
+  finish within <n> s`, with a `fix:` saying so, that the next round or check syncs again, and
+  to run `vcharon doctor` (it checks the servers of the channels) if it happens again. A child
+  that can't be started gives `ERROR couldn't start vcharon: <the OS's message>`, its `fix:`
+  saying that the next round or check tries again by itself (a start can fail while the system
+  is short of processes, open files or memory), and, if it keeps failing, to run `vcharon
+  doctor`, which runs this same install: if that can't start either, the install was moved or
+  removed. Both fixes are spelled as this install runs vcharon. Neither
+  line has an error code: the watcher's own lines about its child have none, `error_key` counts
+  both as the connection's by their text, and an agent matches an `ERROR` line on its start
+  ([Stable](#stable)).
 
 ### Reading a channel
 
@@ -2290,7 +2304,9 @@ Every verb also takes `-v` (log lines to stderr too).
   ssh-agent keys, folders, machine id), each server of the channels joined or the one named (login
   through the `-v` probe, Python, distro, clock, an echo of 4 MiB), and each channel section's
   jobs; it only reads, apart from a temp file in the state and log dirs. `ping` connects,
-  echoes all 256 byte values plus 1 MiB of random bytes, and prints the round trip.
+  echoes all 256 byte values plus 1 MiB of random bytes, and prints the round trip. Both show a
+  machine id hashed, `id <12 hex> (hashed)`: doctor's own line on the server and ping's line
+  from a client show the same text, so the two can be compared.
 - `sync` is for remote members only (a local member's folder is in the channel itself). `--full`
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
@@ -3056,6 +3072,14 @@ which and how to adapt. A channel format change is always a minor version at lea
   limit, is the exception).
 - Every error the user sees has a code ([Error codes](#error-codes)) and a `fix:` line.
 - No host name, path, user name or raw machine id in any file written to a channel.
+- A machine id reaches a line VCharon prints or logs only through `platform.shown_machine` (a
+  hello, a reply, a saved identity or target through `platform.shown_doc`, at any depth): the
+  first 12 hex digits of `sha256("vcharon shown machine:" + id)`. Why: machine-id(5) asks
+  that the id be kept private, and agents paste these lines into entries; one hash everywhere
+  keeps two outputs of one
+  machine comparable. Its prefix is neither the client id's `vcharon:` nor a claimer's `<C>:`
+  (a channel's name holds no space), so a shown id can't be matched against a `claimer:`.
+  What is stored and compared (records, state, the hello) keeps the id itself.
 - Every human-readable line prints a path under the home folder with the home as `~` (`~/…`,
   `~\…` on Windows): agents quote these lines into channel entries, and the full path names
   the user. A path the line names goes through `platform.tilde`; text made from paths in many

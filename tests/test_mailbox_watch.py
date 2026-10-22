@@ -2207,7 +2207,12 @@ class ClientModeTest(WatchCase):
         with mock.patch.object(watch.fsops, "run", return_value=stuck):
             self.assertEqual(watch.run_sync("mailbox", ["mb"]),
                              (1, "ERROR vcharon sync of mailbox didn't finish within 900 s",
-                              None))
+                              platform.runnable(watch.SYNC_TIMEOUT_FIX)))
+        # its fix names doctor as this install runs it
+        with mock.patch.object(watch.fsops, "run", return_value=stuck), \
+                mock.patch.object(platform, "self_command", return_value="/opt/vc/bin/vcharon"):
+            fix = watch.run_sync("mailbox", ["mb"])[2]
+        self.assertIn("run /opt/vc/bin/vcharon doctor (it checks", fix)
 
     def test_a_stuck_vcharon_run_is_killed_with_what_it_started(self):
         # past the timeout, the sync and the processes it started end: in a binary those are
@@ -2229,7 +2234,7 @@ class ClientModeTest(WatchCase):
                 mock.patch.object(watch, "RUN_TIMEOUT", 3):
             self.assertEqual(watch.run_sync("mb.windows", SYNC),
                              (1, "ERROR vcharon sync of mb.windows didn't finish within 3 s",
-                              None))
+                              platform.runnable(watch.SYNC_TIMEOUT_FIX)))
         if os.name != "nt":
             with open(pidfile, encoding="utf-8") as f:
                 pid = int(f.read())
@@ -2242,7 +2247,11 @@ class ClientModeTest(WatchCase):
         with mock.patch.object(watch.fsops, "run", side_effect=missing):
             self.assertEqual(watch.run_sync("mailbox", ["mb"]),
                              (1, "ERROR couldn't start vcharon: No such file or directory",
-                              None))
+                              platform.runnable(watch.START_FIX)))
+        with mock.patch.object(watch.fsops, "run", side_effect=missing), \
+                mock.patch.object(platform, "self_command", return_value="/opt/vc/bin/vcharon"):
+            fix = watch.run_sync("mailbox", ["mb"])[2]
+        self.assertIn("run /opt/vc/bin/vcharon doctor (it runs", fix)
 
 
 # A stand-in for the streaming child, `vcharon sync C --repeat <every>`: it does the
@@ -2572,10 +2581,15 @@ class StreamTest(WatchCase):
                 clock.t += 451
             return clock.t
 
-        code, lines = self.watch([], [["out", "ROUND 0"]], clock=clock, rounds=2,
-                                 max_minutes=None, timer=timer)
+        # the fix as this install runs vcharon
+        with mock.patch.object(platform, "self_command", return_value="/opt/vc/bin/vcharon"):
+            code, lines = self.watch([], [["out", "ROUND 0"]], clock=clock, rounds=2,
+                                     max_minutes=None, timer=timer)
         self.assertEqual((code, lines[1:]), (0, [
-            "ERROR vcharon sync of mb.windows didn't finish within 900 s", "ok again"]))
+            "ERROR vcharon sync of mb.windows didn't finish within 900 s",
+            "  fix: " + platform.runnable(watch.SYNC_TIMEOUT_FIX, "/opt/vc/bin/vcharon"),
+            "ok again"]))
+        self.assertIn("run /opt/vc/bin/vcharon doctor (it checks", lines[2])
         self.assertEqual(self.slept, [2])
         self.assertEqual(len(self.spawned), 2)
         self.assert_all_stopped()
@@ -2591,9 +2605,12 @@ class StreamTest(WatchCase):
             return StreamTest.spawn(self, argv, env)
 
         self.spawn = spawn
-        code, lines = self.watch([["out", "ROUND 0"]], rounds=2)
+        with mock.patch.object(platform, "self_command", return_value="/opt/vc/bin/vcharon"):
+            code, lines = self.watch([["out", "ROUND 0"]], rounds=2)
         self.assertEqual((code, lines[1:]), (0, [
-            "ERROR couldn't start vcharon: No such file or directory", "ok again"]))
+            "ERROR couldn't start vcharon: No such file or directory",
+            "  fix: " + platform.runnable(watch.START_FIX, "/opt/vc/bin/vcharon"), "ok again"]))
+        self.assertIn("run /opt/vc/bin/vcharon doctor (it runs", lines[2])
         self.assertEqual(self.slept, [2])
         self.assertEqual(len(self.procs), 1)
         self.assert_all_stopped()
@@ -4142,7 +4159,8 @@ class OnceRemoteTest(WatchCase):
                                    sleep=never, once=True, stream=True, spawn=self.no_spawn)
         self.assertEqual(ran, [(60, True, watch.TERM_WAIT, "run 30")])
         self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_ERROR, [
-            "ERROR vcharon sync of mb.windows didn't finish within 60 s", "EXIT error (exit 11)"]))
+            "ERROR vcharon sync of mb.windows didn't finish within 60 s",
+            "  fix: " + platform.runnable(watch.SYNC_TIMEOUT_FIX), "EXIT error (exit 11)"]))
 
 
 class FirstLookTest(WatchCase):

@@ -1827,7 +1827,8 @@ def _ping(args, run):
             # a warning, never a failure: other servers may work
             _say("  warn     %s" % warning)
         if hello.get("machine"):
-            _say("  machine  %s" % hello["machine"])
+            # hashed, as doctor shows this machine's on the server
+            _say("  machine  id %s (hashed)" % platform.shown_machine(hello["machine"]))
         else:
             _say("  machine  none (jobs that keep state won't run)")
         _say("  connect  %.2f s  (ssh start to hello, bundle %s)"
@@ -2008,8 +2009,9 @@ SAVE_HINT = "the files were written; fix that, then run again"
 
 
 def _dumps(obj):
-    """A saved or current identity or target, as a state_mismatch message shows it."""
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True)
+    """A saved or current identity or target, as a state_mismatch message or a reset shows it:
+    its server's machine id hashed (platform.shown_machine), as every output shows one."""
+    return json.dumps(platform.shown_doc(obj), ensure_ascii=False, sort_keys=True)
 
 
 def side_text(job, side, role):

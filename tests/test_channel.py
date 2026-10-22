@@ -2059,8 +2059,11 @@ class LeaveCloseTest(ChannelCase):
         os.environ["VCHARON_TEST_MACHINE_ID"] = OTHER_MACHINE
         self.assertEqual(self.refusal("close", "game", "--project", "ui"),
                          ("ERROR channel: fake-dest isn't the server game is on (its machine id "
-                          "is %s, the record's %s)" % (OTHER_MACHINE, TEST_MACHINE_ID),
+                          "is %s, the record's %s, both hashed)"
+                          % (platform.shown_machine(OTHER_MACHINE),
+                             platform.shown_machine(TEST_MACHINE_ID)),
                           "check the alias"))
+        self.assertNotIn(OTHER_MACHINE, self.refusal("close", "game", "--project", "ui")[0])
         os.environ["VCHARON_TEST_MACHINE_ID"] = TEST_MACHINE_ID
         # a second CHANNEL.md, then a stray file at the top: the server refuses
         write_tree(self.root, {"game/mac-web/CHANNEL.md": b"c"})
@@ -3053,7 +3056,9 @@ class ReviewTest(ChannelCase):
                                           "VCHARON_CHANNELS_ROOT": other}):
             self.assertEqual(self.refusal("leave", "game"),
                              ("ERROR channel: fake-dest isn't the server game is on (its machine "
-                              "id is %s, the record's %s)" % (OTHER_MACHINE, TEST_MACHINE_ID),
+                              "id is %s, the record's %s, both hashed)"
+                              % (platform.shown_machine(OTHER_MACHINE),
+                                 platform.shown_machine(TEST_MACHINE_ID)),
                               "check the alias"))
         self.assertTrue(os.path.isdir(self.local))
         self.assertTrue(os.path.exists(channel_cmd.record_path("game", "mac-web")))
@@ -4618,8 +4623,10 @@ class OnceProcessTest(ChannelCase):
         # cap of 3 s is what ends it
         code, lines, err, took = self.once(cap=3, FAKE_SSH_STALL="60")
         self.assertEqual(code, 11, (lines, err))
-        self.assertEqual(lines[-2:], ["ERROR vcharon sync of game.mac-web didn't finish within "
-                                      "3 s", "EXIT error (exit 11)"])
+        # the fix as the child's own install spells vcharon, which this process can't tell
+        self.assertEqual(lines[-3::2], ["ERROR vcharon sync of game.mac-web didn't finish within "
+                                        "3 s", "EXIT error (exit 11)"])
+        self.assertTrue(lines[-2].startswith("  fix: the watcher ended it"), lines)
         self.assertLess(took, 20)
         # the next check, with the ssh well again, reports the recovery, not a change
         code, lines, err, _took = self.once()

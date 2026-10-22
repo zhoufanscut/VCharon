@@ -543,7 +543,8 @@ class Session:
         if (kind != proto.J or msg["t"] != "hello" or msg.get("protocol") != PROTOCOL
                 or msg.get("version") != VERSION):
             self._healthy = False
-            got = proto.quote(msg) if kind == proto.J else "a %s frame" % chr(kind)
+            got = (proto.quote(platform.shown_doc(msg)) if kind == proto.J
+                   else "a %s frame" % chr(kind))
             raise VCharonError("protocol",
                                "the helper on %s isn't vcharon %s, protocol %d: it sent %s"
                                % (self.dest, VERSION, PROTOCOL, got),
@@ -553,7 +554,9 @@ class Session:
         self.hello_received = received
         self.clock_gap = clock_gap(msg, received)
         gap = "" if self.clock_gap is None else ", clock %+.1f s" % self.clock_gap
-        self.log.info("hello from %s%s: %s" % (self.dest, gap, proto.quote(msg, limit=1000)))
+        # the machine id hashed, as every output shows it: -v prints the log on stderr
+        self.log.info("hello from %s%s: %s" % (self.dest, gap,
+                                                proto.quote(platform.shown_doc(msg), limit=1000)))
         return msg
 
     def _thread(self, target):
@@ -903,7 +906,9 @@ class Session:
             raise err
         if t != "ok" or not mine:
             self._healthy = False
-            got = proto.quote(msg) if kind == proto.J else "a %s frame" % chr(kind)
+            # a reply can carry the server's machine id (channel.claim's): hashed
+            got = (proto.quote(platform.shown_doc(msg)) if kind == proto.J
+                   else "a %s frame" % chr(kind))
             raise VCharonError("protocol", "expected the reply to %s, got %s" % (fn, got))
         if receive is not None:
             indexes, stage = receive

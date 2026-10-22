@@ -136,7 +136,10 @@ class CliTest(FakeSshCase):
                          + r", protocol 3, Python 3\.")
         self.assertRegex(lines[2], r"\A  server   .+, user .*, home " + re.escape(self.home)
                          + r"\Z")
-        self.assertEqual(lines[3], "  machine  0123456789abcdef0123456789abcdef")
+        # hashed, as doctor shows the server's own: never the raw id, nor in the -v log
+        self.assertEqual(lines[3], "  machine  id %s (hashed)"
+                         % platform.shown_machine(TEST_MACHINE_ID))
+        self.assertNotIn(TEST_MACHINE_ID, out)
         self.assertRegex(lines[4], r"\A  connect  \d+\.\d\d s  \(ssh start to hello, bundle "
                          r"sent\)\Z")
         self.assertRegex(lines[5], r"\A  echo     1048832 bytes, byte-identical, \d+\.\d\d s "
@@ -148,6 +151,8 @@ class CliTest(FakeSshCase):
             text = f.read()
         self.assertIn("vcharon %s ping fake-dest" % VERSION, text)
         self.assertIn("ping OK", text)
+        self.assertIn('"machine": "%s"' % platform.shown_machine(TEST_MACHINE_ID), text)
+        self.assertNotIn(TEST_MACHINE_ID, text)
         # the server kept the bundle: the next connection doesn't send it
         code, out, err = self.run_cli("ping", "fake-dest")
         self.assertEqual(code, 0, err)
@@ -611,7 +616,8 @@ class JobTest(FakeSshCase):
                                  'source: {"end": "remote", "kind": "dir", "machine": "%s", '
                                  '"path": "%s"}, now {"end": "remote", "kind": "dir", '
                                  '"machine": "%s", "path": "%s"}'
-                         % (TEST_MACHINE_ID, json_inner(path), "f" * 32, json_inner(path)))
+                         % (platform.shown_machine(TEST_MACHINE_ID), json_inner(path),
+                            platform.shown_machine("f" * 32), json_inner(path)))
         self.assertIn(RESET_HINT, err)
         self.assertEqual(read_tree(back), before)
         self.assertEqual(out, ["vcharon: pull  fake-dest:outbox -> %s" % back])
@@ -627,7 +633,8 @@ class JobTest(FakeSshCase):
         self.assertEqual(err[0], 'ERROR state_mismatch: the state of push was saved for another '
                                  'target: {"end": "remote", "machine": "%s", "root": "%s"}, now '
                                  '{"end": "remote", "machine": "%s", "root": "%s"}'
-                         % (TEST_MACHINE_ID, json_inner(root), "f" * 32, json_inner(root)))
+                         % (platform.shown_machine(TEST_MACHINE_ID), json_inner(root),
+                            platform.shown_machine("f" * 32), json_inner(root)))
         self.assertNotIn("new.txt", read_tree(self.inbox))
 
     @unittest.skipUnless(os.name == "posix", "needs symlinks")
@@ -867,7 +874,7 @@ class JobTest(FakeSshCase):
         self.assertEqual(lines[2:], [
             '  source    {"end": "local", "kind": "dir", "path": "%s"}' % json_inner(self.src),
             '  target    {"end": "remote", "machine": "%s", "root": "%s"}'
-            % (TEST_MACHINE_ID, json_inner(root)),
+            % (platform.shown_machine(TEST_MACHINE_ID), json_inner(root)),
             "  sent      3 files, 2 dirs",
             "removed %s" % state.path("push")])
         self.assertFalse(os.path.exists(state.path("push")))

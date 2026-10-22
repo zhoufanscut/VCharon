@@ -137,8 +137,9 @@ def _problem(name, doc):
     if not isinstance(doc["identity"], (dict, type(None))):
         return "its identity isn't an object or null"
     if not _good_sink(doc["sink"]):
+        # the server's machine id hashed, as every output shows it
         return ("its sink %s isn't {\"end\", \"root\"}, with \"machine\" for a remote one"
-                % quote(doc["sink"]))
+                % quote(platform.shown_doc(doc["sink"])))
     if not isinstance(doc["source"], (dict, type(None))):
         return "its source isn't an object or null"
     if not isinstance(doc["saved"], str):
