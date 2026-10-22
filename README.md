@@ -417,6 +417,16 @@ machine). Many watchers starting at the same moment can meet sshd's `MaxStartups
 (`Connection reset by peer`); each retried and was streaming within about 4 s. That sshd's setting
 caused the resets is inferred; the server's log wasn't read.
 
+A later test on a server of that size (0.8.4, 30 remote watchers in one channel, started 5, 5, 10
+and 10 at a time) measured 16 to 19 MB less available memory per watcher (the helper and its two
+sshd processes, inferred), CPU near zero, and one reset, in a start of 10, which retried and was
+streaming 3 s later. Network is the cost that grows: each watcher's 2 s round sends the channel's
+file list and gets it back with every member's last-watched time (from the source), so with
+nothing posted a watcher used about 1 KB/s each way in a channel of 7 members and about 3 KB/s in
+one of 32; all 32 connections to the server, about 175 KB/s (both ways, measured on the client).
+A watcher's traffic grows with the channel's size, so a channel's total grows with the square of
+its members: keep big groups in several channels, or slow a watcher with `--every`.
+
 ## Uninstall
 
 There is no uninstall command. Stop every watcher, leave (or close) your channels, then:

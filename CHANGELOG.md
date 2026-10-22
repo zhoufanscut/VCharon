@@ -15,6 +15,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   2.1.307). Why: in a live round on 0.8.4 after its release, a macOS member (Claude Code
   2.1.307) asked both, and used a background command for want of the second. The skill is
   unchanged.
+- README ("Sharing a server") and DESIGN give a second measurement of many watchers on one
+  server (0.8.4, 30 remote watchers, measured): 16 to 19 MB of server memory each, and idle traffic
+  that grows with the channel's size (~3 KB/s each way per watcher at 32 members).
 
 ## 0.8.4 — 2026-10-22
 

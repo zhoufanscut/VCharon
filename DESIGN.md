@@ -3123,7 +3123,14 @@ Later:
   connections reset at start, each retried and was streaming within about 4 s, and 50 helpers
   took about 1.2 GB. That sshd's `MaxStartups 10:30:100` caused the resets is inferred (the
   server's log wasn't read). `MaxSessions 10` caps them only when `ssh_config` shares
-  connections (ControlMaster, never on Windows); not measured.
+  connections (ControlMaster, never on Windows); not measured. A later run (0.8.4, 30 watchers
+  in one channel, started in bursts of 5, 5, 10 and 10) measured 16 to 19 MB of the server's
+  available memory per watcher and one reset in a burst of 10. Idle traffic: each round sends
+  the down state (the whole channel's listing) and gets it back in the plan, with every member's
+  seen ages, every `--every` seconds even when nothing changed: ~2.6 KB/s up, ~2.9 KB/s down per
+  watcher at 32 members (measured with `ss` byte counters; the cause is from the source and the
+  state files' sizes, not a capture), so a channel's total grows with the square of its
+  members. Later: send the state only when it changed.
 - Handing the leader role to another member: today the leader closes and the new one creates a
   new channel.
 - Closing a lobby, and removing the folders of members that never come back: today the user
