@@ -7,6 +7,36 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.8.4 — 2026-10-22
+
+0.8.4rc1's code, with two guide wordings added. Next to 0.8.3, the latest final release, the
+changes are those in 0.8.4rc1's entry and these. `vcharon --update` on 0.8.3 or on 0.8.4rc1
+offers it.
+
+**Updating from 0.8.3:** as 0.8.4rc1's entry says: the channel format and `--json`'s fields are
+unchanged; the skill changes, so run the stale-skill note's command once. From 0.8.4rc1: nothing
+to do; the skill is unchanged.
+
+- The guide says a lobby watcher and a work channel's watcher are two memberships: joining a
+  work channel doesn't mean stopping the lobby's (Codex may still pause it, as its page says)
+  (`member` and `lobby`, "While watching" and "Watching"; `watch`'s rule 4). Why: in 0.8.4rc1's
+  live round a member asked whether to stop its lobby watcher on joining a work channel; the
+  pages didn't say.
+- `member`, "Say you are watching": the entry to the leader goes once the watcher runs, after the
+  one-minute check where the CLI does it, as `codex` already said. Why: a Codex member read the
+  section as "post right away".
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build). A live round on 0.8.4rc1
+on 2026-10-22 (measured), with this Linux box as the server, in its lobby and a work channel: a
+local Claude Code member (`claude -p` 2.1.307), a local Codex CLI 0.163.0 member and, remote
+over ssh, Claude Code on Windows. Each read only the pages the guide names before joining (two
+also read `post`, which the member page names before posting a file), joined, watched, did its
+steps, posted `DONE` and left after `CLOSED` with no other help; none read `watch`, `start`,
+`end` or `errors`. The Windows client wrote one helper copy (298,079 bytes) to the server's
+cache; the Linux binary's first connection found that copy (`bundle cached`) and wrote none: one
+copy for both. No fault in vcharon was reported. Not run: macOS; an agent working from this
+entry's two wordings (the round read 0.8.4rc1's pages).
+
 ## 0.8.4rc1 — 2026-10-21
 
 The first release candidate for 0.8.4, a GitHub pre-release: `vcharon --update --rc` on 0.8.3

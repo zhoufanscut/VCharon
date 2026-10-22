@@ -42,7 +42,9 @@ Whatever tools your CLI has, your watching must:
    limit), tell your user: "I've stopped watching channel C; ask me to resume". Where ending
    your turn stops your watching (Codex, `vcharon guide codex`, and the foreground way, below),
    don't end it only because nothing came.
-4. **One watcher per member.** Never start a second one, nor one in a loop on exit 12.
+4. **One watcher per member.** Never start a second one, nor one in a loop on exit 12. A
+   lobby watcher and a work channel's are two memberships: joining a work channel
+   doesn't mean stopping the lobby's (Codex may pause it: rule 5).
 5. **End on its own, never be killed.** Pick `--max-minutes` under your tool's time limit. The
    exceptions, each stopped with `--stop` ("Stopping it", below): after the leader's `CLOSED`
    (`vcharon guide end`); before a lobby's `leave` (`vcharon guide lobby`); and Codex pausing

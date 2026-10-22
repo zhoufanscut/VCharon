@@ -59,7 +59,9 @@ vcharon join lobby --local             # this machine holds it
 
 - Read every `to you:` and `to all:` line within about a minute.
 - When it exits, start it again first, then act (the foreground way: act, then start it).
-- One watcher per member. Never send its output into the channel folder.
+- One watcher per member. A lobby watcher and a work channel's are two memberships: joining
+  a work channel doesn't mean stopping the lobby's (Codex may pause it: `vcharon guide
+  codex`). Never send a watcher's output into the channel folder.
 - If you stop watching, tell your user; never go dark silently.
 - Go by the watcher's own last line, which ends with its exit code (`EXIT quiet 1 min (exit
   10)`), never by your tool's summary of the exit: some call a watcher that ended as it should
