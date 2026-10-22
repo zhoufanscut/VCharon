@@ -2444,8 +2444,35 @@ class FlagRefusalTest(FakeSshCase):
             with self.subTest(argv=argv):
                 self.assertEqual(self.refused(*argv), [
                     "ERROR config: --update runs on its own, with only --yes, --force, --json, "
-                    "--rc and --check: not with " + rest,
+                    "--rc and --check (--project P and --role R are ignored): not with " + rest,
                     "  fix: run vcharon --update by itself; then the rest"])
+
+    def test_project_and_role_take_their_value_and_nothing_more(self):
+        # a word after an ignored flag's value is still refused, as is a flag with no value
+        for argv, rest in ((["--update", "--project", "x", "somethingelse"], "somethingelse"),
+                           (["--update", "--role=b", "doctor"], "doctor"),
+                           (["--project", "x", "--update", "list"], "list"),
+                           (["--update", "--check", "--project"], "--project"),
+                           (["--update", "--role", "--json"], "--role")):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.refused(*argv)[0],
+                                 "ERROR config: --update runs on its own, with only --yes, "
+                                 "--force, --json, --rc and --check (--project P and --role R "
+                                 "are ignored): not with " + rest)
+
+    def test_project_and_role_leave_the_other_flags_in_force(self):
+        lines = self.refused("--update", "--project", "x", "--check", "--role=b", "--yes")
+        self.assertEqual(lines[0], "ERROR config: --check never installs, so it doesn't go "
+                                   "with --yes")
+
+    def test_project_and_role_with_help(self):
+        # left in, the top parser would read the value as the verb
+        for argv in (["--update", "--project", "x", "--help"], ["--update", "--role", "b", "-h"],
+                     ["--update", "--check", "--project", "x", "--help"]):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_cli(*argv)
+                self.assertEqual(code, 0, err)
+                self.assertIn("usage: vcharon", out)
 
     def test_after_a_verb_its_unknown(self):
         lines = self.refused("doctor", "--update")
@@ -2478,7 +2505,11 @@ class FlagRefusalTest(FakeSshCase):
         # the network is a test failure here: each gets as far as asking GitHub
         for argv in (["--update"], ["--update", "--yes", "--json"], ["--update", "--force"],
                      ["--json", "--update"], ["--update", "--rc", "--yes", "--force", "--json"],
-                     ["--rc", "--update"], ["--update", "--check", "--rc", "--json"]):
+                     ["--rc", "--update"], ["--update", "--check", "--rc", "--json"],
+                     # ignored, as by the verbs that act on no membership
+                     ["--update", "--check", "--project", "vcharon", "--role", "codex"],
+                     ["--project=web", "--update", "--role=b", "--check"],
+                     ["--role", "b", "--update"]):
             with self.subTest(argv=argv):
                 code, _, err = self.run_cli(*argv)
                 self.assertEqual(code, 1, err)

@@ -7,6 +7,13 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `vcharon --update` takes `--project P` and `--role R` and ignores them, as the verbs that act
+  on no membership do; it refused them (exit 3) before. Why: the guide has an agent pass them on
+  every command, `vcharon --update --check` included. Its refusal of anything else now says the
+  two are ignored.
+
 ## 0.8.5rc1 — 2026-10-22
 
 The first release candidate for 0.8.5, a GitHub pre-release: `vcharon --update --rc` on 0.8.4

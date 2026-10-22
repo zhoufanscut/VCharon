@@ -356,6 +356,8 @@ def main(argv=None):
 
 # what may come with --update
 UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc", "--check")
+# taken with --update and ignored, as by the verbs that act on no membership
+UPDATE_IGNORED = ("--project", "--role")
 # the verbs whose list of positionals may go on after a flag, and the list's dest
 LISTS_AROUND_FLAGS = {"read": "ids", "guide": "topics"}
 
@@ -363,7 +365,7 @@ LISTS_AROUND_FLAGS = {"read": "ids", "guide": "topics"}
 def _main(argv, run):
     def command():
         words = sys.argv[1:] if argv is None else list(argv)
-        _update_alone(words)
+        words = _update_alone(words)
         parser = _parser()
         try:
             args, extra = parser.parse_known_args(words)
@@ -404,19 +406,42 @@ def _help_hint(args, words, extra):
 def _update_alone(words):
     """--update's refusal of a verb or another flag, before the parse (whose refusal of a
     verb's missing argument would hide it). Only --update before any verb counts: after one,
-    the verb's parser refuses it as unknown."""
+    the verb's parser refuses it as unknown. With --update, returns the words without
+    --project P and --role R, which it ignores: the guide has an agent pass them on every
+    command; without it, the words as given."""
+    def ignored(i):
+        """How many words from i on are an ignored --project P or --role R: 0, 1 or 2."""
+        word = words[i]
+        if "=" in word and word.split("=", 1)[0] in UPDATE_IGNORED:
+            return 1
+        if word in UPDATE_IGNORED and i + 1 < len(words) and not words[i + 1].startswith("-"):
+            return 2
+        return 0
+
+    stripped = []
+    i = 0
+    while i < len(words):
+        skip = ignored(i)
+        if not skip:
+            stripped.append(words[i])
+        i += skip or 1
     lead = []
-    for word in words:
+    for word in stripped:
         if not word.startswith("-"):
             break
         lead.append(word)
-    if "--update" not in lead or "-h" in lead or "--help" in lead:
-        return
-    others = [w for w in words if w not in UPDATE_FLAGS]
+    if "--update" not in lead:
+        return words
+    # The top parser has no --project or --role: left in, the value would read as the verb.
+    if "-h" in lead or "--help" in lead:
+        return stripped
+    others = [w for w in stripped if w not in UPDATE_FLAGS]
     if others:
         raise _usage("--update runs on its own, with only --yes, --force, --json, --rc and "
-                     "--check: not with %s" % " ".join(others),
+                     "--check (--project P and --role R are ignored): not with %s"
+                     % " ".join(others),
                      "run vcharon --update by itself; then the rest")
+    return stripped
 
 
 def _update_flags(args):

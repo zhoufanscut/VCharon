@@ -2287,8 +2287,8 @@ Other
 Every verb also takes `-v` (log lines to stderr too).
 
 - **`--project` and `--role` on every verb**: `setup`, `key`, `doctor`, `ping`, `skill install`,
-  `list` and `guide` act on no membership and ignore them. Why: the guide has a second session
-  in a folder pass `--role` on every command.
+  `list` and `guide` act on no membership and ignore them, and so does `--update`. Why: the
+  guide has a second session in a folder pass `--role` on every command.
 - **Flat verbs, the channel first, `C` always required** where a channel is meant: no "the only
   channel I joined" guess, since an explicit name is easier to get right and to read back.
 - **No abbreviations** (`allow_abbrev=False`): a prefix such as `--ful` would become part of the
@@ -2635,7 +2635,9 @@ it is run: no version check at start-up.
 - **A flag, not a verb**: the verbs are what agents run, and an agent never updates (the guide
   says to ask the user: it replaces the program every member on the machine runs). Refused, as a
   usage error (3), with a verb or any flag but `--yes`, `--force`, `--json`, `--rc` and
-  `--check`; those five are refused without it.
+  `--check`; those five are refused without it. `--project P` and `--role R` (or `=P`, `=R`)
+  are taken and ignored, as by the verbs that act on no membership: an agent passes them on
+  every command, `--update --check` included.
 - **`--check`**: reads the latest as `--update` does (`--rc` and a pre-release build count
   pre-releases the same way), prints the `current` and `latest` lines, then `<latest> is
   newer; your user can install it: <command>` (this binary's `--update [--rc]`, or another
