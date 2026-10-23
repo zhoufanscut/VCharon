@@ -33,6 +33,7 @@ from vcharon import (
     entries,
     fsops,
     install,
+    kind,
     platform,
     skill,
 )
@@ -4913,3 +4914,237 @@ class LooseTest(WatchCase):
         again = watch.read_entries(self.tree, ["mac/RESULTS.md"], marks, "debian", "debian")
         self.assertEqual((again.others, again.misplaced, again.counted()), ([], [], 0))
 
+
+
+class RemovedFolderTest(WatchCase):
+    """A member folder removed while the channel stays (as idle: vcharon list --remove-idle
+    --yes, or by hand): a local member's own ends its watcher; another's loses its marks, so a
+    member that joins again under that name, restarting at #1, is told as new (DESIGN, "The
+    watcher in a channel")."""
+
+    GONE = ClosedTest.GONE
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.member("mac", "debian")
+        self.post("mac", 2, "JOIN")
+        self.post("mac", 3, "step 1 done")
+
+    def run_debian(self, *steps):
+        """debian's watcher until each step has had its round: a start from the saved
+        snapshot has its first round at once, before the first step; one with none, after it,
+        and then a round with nothing new."""
+        lines = []
+        code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                               sleep=Rounds(*steps, lambda: None), rounds=len(steps) + 1)
+        return code, self.said(lines)
+
+    def removed(self):
+        shutil.rmtree(os.path.join(self.tree, "mac"))
+
+    def snapshot(self):
+        with open(self.state(), encoding="utf-8") as f:
+            return json.load(f)
+
+    def rejoined(self, when="2026-10-02 09:00"):
+        write_tree(self.tree, {"mac/MEMBER.md": member_md("mac", "debian").replace(
+            b"2026-10-01 09:00", when.encode("ascii"))})
+        self.post("mac", 2, "JOIN", when=when)
+
+    def test_a_local_members_own_folder_ends_its_watcher(self):
+        ClosedTest.record(self)
+        own = os.path.join(self.tree, "debian")
+        for until_change in (False, True):
+            with self.subTest(until_change=until_change):
+                self.member()
+                lines = []
+                code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                                       sleep=Rounds(lambda: shutil.rmtree(own), lambda: None),
+                                       rounds=2, until_change=until_change, max_minutes=25,
+                                       fresh=True)
+                self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_CLOSED, [
+                    "ERROR your folder %s is gone" % own, "  fix: " + self.GONE,
+                    "EXIT closed (exit 13)"]))
+        # a start while it is gone: refused, as before, with the same fix
+        code, _out, err = self.cli("--role", "b", project="web")
+        self.assertEqual((code, err.splitlines()), (1, [
+            "ERROR not_found: your folder %s in the channel is gone" % own,
+            "  fix: " + self.GONE]))
+
+    def test_an_own_folder_that_cant_be_read_isnt_gone(self):
+        # only its absence ends the watch: a permission error on it is no removal
+        own = os.path.join(self.tree, "debian")
+        real = os.lstat
+
+        def lstat(path, *a, **kw):
+            if path == own:
+                raise PermissionError(13, "Permission denied", path)
+            return real(path, *a, **kw)
+
+        with mock.patch("os.lstat", lstat):
+            code, lines = self.run_debian(lambda: self.post("mac", 4, "more"))
+        self.assertEqual((code, lines[1:]), (0, ["to you: mac#4 — more  (mac/RESULTS.md)"]))
+
+    def test_marks_go_with_a_folder_gone(self):
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+        self.assertIn("mac", self.snapshot()["seen"])
+        code, lines = self.run_debian(self.removed)
+        self.assertEqual(lines[1:], [])
+        doc = self.snapshot()
+        self.assertNotIn("mac", doc["seen"])
+        self.assertFalse([i for i in doc["heads"] if i.startswith("mac#")], doc["heads"])
+        code, lines = self.run_debian(self.rejoined)
+        self.assertEqual(code, watch.EXIT_CHANGE)
+        # the other entry (MEMBER.md's #1) is held, and printed just before the next line
+        self.assertEqual(lines[1:], ["1 other entry (mac)",
+                                     "to you: mac#2 — JOIN  (mac/RESULTS.md)"])
+
+    def test_marks_go_with_a_new_first_heading(self):
+        # removed and back within one round, or while no watcher ran: MEMBER.md's #1 heading
+        # (its time) tells a new member from an edit
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+
+        def both():
+            self.removed()
+            self.rejoined()
+            self.post("mac", 3, "hello again", when="2026-10-02 09:01")
+
+        code, lines = self.run_debian(both)
+        self.assertEqual(code, watch.EXIT_CHANGE)
+        self.assertEqual(lines[1:], ["1 other entry (mac)",
+                                     "to you: mac#2 — JOIN  (mac/RESULTS.md)",
+                                     "to you: mac#3 — hello again  (mac/RESULTS.md)"])
+        # an edit of another entry's heading still warns
+        path = os.path.join(self.tree, "mac", "RESULTS.md")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text.replace("hello again", "hello once more"))
+        self.assertEqual(self.run_debian(lambda: None)[1][1:], ["WARN entry mac#3 was edited"])
+
+    def test_a_member_md_made_again_in_place(self):
+        # a local member that lost its MEMBER.md joins again into its folder: a new #1, its
+        # old entries kept as they were, and a REJOIN after them; only what is new is told
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+
+        def made_again():
+            write_tree(self.tree, {"mac/MEMBER.md": member_md("mac", "debian").replace(
+                b"2026-10-01 09:00", b"2026-10-02 09:00")})
+            self.post("mac", 4, "REJOIN", when="2026-10-02 09:00")
+
+        _code, lines = self.run_debian(made_again)
+        self.assertEqual(lines[1:], ["1 other entry (mac)",
+                                     "to you: mac#4 — REJOIN  (mac/RESULTS.md)"])
+        # every number read again: the folder is as any other, and an edit warns again
+        self.assertNotIn("renewed", self.snapshot())
+        path = os.path.join(self.tree, "mac", "RESULTS.md")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text.replace("step 1 done", "step 1 done twice"))
+        self.assertEqual(self.run_debian(lambda: None)[1][1:], ["WARN entry mac#3 was edited"])
+
+    def test_renewed_numbers_survive_a_restart(self):
+        # the new #1 seen, the folder's other files not yet: the snapshot keeps the renewal
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+
+        def first_only():
+            write_tree(self.tree, {"mac/MEMBER.md": member_md("mac", "debian").replace(
+                b"2026-10-01 09:00", b"2026-10-02 09:00")})
+
+        self.run_debian(first_only)
+        self.assertEqual(self.snapshot()["renewed"], {"mac": {"high": 3, "done": [1]}})
+
+        def results_again():
+            os.remove(os.path.join(self.tree, "mac", "RESULTS.md"))
+            self.post("mac", 2, "JOIN", when="2026-10-02 09:00")
+
+        self.assertEqual(self.run_debian(results_again)[1][1:],
+                         ["to you: mac#2 — JOIN  (mac/RESULTS.md)"])
+
+    def test_a_lobby_member_back_while_no_watcher_ran(self):
+        # a lobby keeps no head of a day file deleted after 30 days, but keeps its numbers:
+        # a renewed number with no head is a new member's too
+        def run_lobby(*steps):
+            lines = []
+            code = watch.watch_dir(self.tree, "debian", 10, out=lines.append,
+                                   kind_=kind.LOBBY, sleep=Rounds(*steps, lambda: None),
+                                   rounds=len(steps) + 1)
+            return code, self.said(lines)
+
+        write_tree(self.tree, {"x/MEMBER.md": member_md("x", "debian", "lobby")})
+        for n in range(2, 7):
+            self.post("x", n, "old %d" % n, to="@all", file="chat-2026-08-01.md",
+                      when="2026-08-01 09:00")
+        self.post("x", 7, "old 7", to="@all", file="chat-2026-09-15.md", when="2026-09-15 09:00")
+        run_lobby(lambda: None)
+        run_lobby(lambda: os.remove(os.path.join(self.tree, "x", "chat-2026-08-01.md")))
+        doc = self.snapshot()
+        self.assertEqual((doc["seen"]["x"]["low"], sorted(i for i in doc["heads"]
+                                                         if i.startswith("x#"))),
+                         (7, ["x#1", "x#7"]))
+        # the watcher stopped: x removed, then back as a new member
+        shutil.rmtree(os.path.join(self.tree, "x"))
+        write_tree(self.tree, {"x/MEMBER.md": member_md("x", "debian", "lobby").replace(
+            b"2026-10-01 09:00", b"2026-11-20 09:00")})
+        day = "chat-2026-11-20.md"
+        self.post("x", 2, "JOIN", to="@x", file=day, when="2026-11-20 09:00")
+        self.post("x", 3, "hello all, new here", to="@all", file=day, when="2026-11-20 09:01")
+        self.post("x", 4, "q for debian", to="@debian", file=day, when="2026-11-20 09:02")
+        self.assertEqual(run_lobby(lambda: None)[1][1:], [
+            "1 other entry (x)", "to all: x#3 — hello all, new here  (x/%s)" % day,
+            "to you: x#4 — q for debian  (x/%s)" % day])
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "POSIX modes, not root")
+    def test_a_renewed_lobby_folder_read_again_tells_only_the_new(self):
+        # a day file unread for a round keeps its heads, so its old entries stay seen
+        def run_lobby(*steps):
+            lines = []
+            watch.watch_dir(self.tree, "debian", 10, out=lines.append, kind_=kind.LOBBY,
+                            sleep=Rounds(*steps, lambda: None), rounds=len(steps) + 1)
+            return self.said(lines)
+
+        write_tree(self.tree, {"x/MEMBER.md": member_md("x", "debian", "lobby")})
+        day = self.post("x", 2, "old 2", to="@all", file="chat-2026-10-01.md")
+        self.post("x", 3, "old 3", to="@debian", file="chat-2026-10-01.md")
+        run_lobby(lambda: None)
+        self.addCleanup(os.chmod, day, 0o644)
+
+        def made_again_and_unreadable():
+            write_tree(self.tree, {"x/MEMBER.md": member_md("x", "debian", "lobby").replace(
+                b"2026-10-01 09:00", b"2026-10-02 09:00")})
+            self.post("x", 4, "new 4", to="@all", file="chat-2026-10-01.md",
+                      when="2026-10-02 09:01")
+            os.chmod(day, 0)
+
+        run_lobby(made_again_and_unreadable)
+        lines = run_lobby(lambda: os.chmod(day, 0o644))
+        self.assertEqual([line for line in lines if "x#" in line],
+                         ["to all: x#4 — new 4  (x/chat-2026-10-01.md)"])
+
+    def test_a_damaged_renewal_is_another_shape(self):
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+        doc = self.snapshot()
+        for bad in ({"mac": 3}, {"mac": {"high": 3}}, {"mac": {"high": "3", "done": []}},
+                    {"mac": {"high": 3, "done": ["1"]}}, ["mac"]):
+            with self.subTest(bad=bad):
+                with open(self.state(), "w", encoding="utf-8") as f:
+                    json.dump(dict(doc, renewed=bad), f)
+                self.assertEqual(watch.load_snapshot(self.state(), self.tree, "debian")[2],
+                                 "it has another shape")
+        with open(self.state(), "w", encoding="utf-8") as f:
+            json.dump(dict(doc, renewed={"mac": {"high": 3, "done": [1]}}), f)
+        marks = watch.load_snapshot(self.state(), self.tree, "debian")[6]
+        self.assertEqual(marks.renewed, {"mac": [3, {1}]})
+
+    def test_the_same_first_heading_keeps_the_marks(self):
+        # MEMBER.md rewritten with its #1 as it was (a field refreshed below it): nothing new
+        self.assertEqual(self.run_debian(lambda: None)[0], 0)
+
+        def refreshed():
+            path = os.path.join(self.tree, "mac", "MEMBER.md")
+            with open(path, "ab") as f:
+                f.write(b"vcharon: 0.8.6\n")
+
+        self.assertEqual(self.run_debian(refreshed)[1][1:], [])

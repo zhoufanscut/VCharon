@@ -338,8 +338,11 @@ class JoinTest(LobbyCase):
         self.ok("join", "lobby", "--local")
         self.join("linux")
         self.assertEqual(self.refusal("close", "lobby", code=3), (
-            "ERROR config: a lobby isn't closed",
-            channel_cmd.platform.runnable("vcharon leave lobby --project web")))
+            channel_cmd.platform.runnable(
+                "ERROR config: closing the lobby deletes every member's folder: your user's "
+                "decision only; your user closes it with vcharon close lobby --yes --project "
+                "web"),
+            channel_cmd.platform.runnable("to leave it: vcharon leave lobby --project web")))
         self.assertTrue(os.path.isdir(os.path.join(self.root, "lobby")))
         out = self.ok("leave", "lobby")
         self.assertIn("OK  left lobby", out)
@@ -355,9 +358,76 @@ class JoinTest(LobbyCase):
                                   "remote": os.path.join(self.root, "lobby"),
                                   "machine": util.TEST_MACHINE_ID, "project": "web",
                                   "role": None, **util.record_format()})
-        out = self.ok("close", "lobby")
+        # --yes is ignored there: the leader's close, as without it
+        out = self.ok("close", "lobby", "--yes")
         self.assertIn("OK  closed lobby", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "lobby")))
+
+
+class CloseTest(LobbyCase):
+    """close lobby --yes: any member closes it, on its user's word (DESIGN, "The lobby")."""
+
+    def test_a_member_closes_it_and_the_next_join_makes_a_new_one(self):
+        self.ok("join", "lobby", "--local")
+        self.join("linux")
+        # linux-web isn't the founder
+        self.use_box("linux")
+        try:
+            out = self.ok("close", "lobby", "--yes")
+            self.assertFalse(os.path.exists(channel_cmd.record_path("lobby", "linux-web")))
+        finally:
+            self.use_box("mac")
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "vcharon: close lobby  as linux-web on this machine")
+        self.assertRegex(out, r"\n  closed lobby: \d+ files and folders deleted\n")
+        self.assertNotIn("CLOSED", out)
+        self.assertEqual(lines[-1], "OK  closed lobby")
+        self.assertFalse(os.path.exists(os.path.join(self.root, "lobby")))
+        # the founder's watcher ends with EXIT closed; its leave, then a new lobby
+        code, out, _ = self.channel("watch", "lobby", "--once")
+        self.assertEqual(code, watch.EXIT_CLOSED, out)
+        self.assertIn("nothing of lobby as mac-web is left on this machine",
+                      self.ok("leave", "lobby"))
+        self.assertIn("made the lobby", self.ok("join", "lobby", "--local"))
+
+    def test_a_record_of_an_earlier_lobby_closes_nothing(self):
+        # mac-web's record is of a lobby removed by hand; linux made a new one since
+        self.ok("join", "lobby", "--local")
+        shutil.rmtree(os.path.join(self.root, "lobby"))
+        self.join("linux")
+        line, fix = self.refusal("close", "lobby", "--yes")
+        self.assertEqual(line, "ERROR channel: your join record of lobby as mac-web is of an "
+                               "earlier channel: lobby on this machine has no folder mac-web "
+                               "(the channel was made again, or the folder removed)")
+        self.assertTrue(fix.startswith(channel_cmd.platform.runnable("run vcharon leave lobby")),
+                        fix)
+        self.assertEqual(self.files("linux-web")[0], "CHANNEL.md")
+
+    def test_over_the_wire(self):
+        self.ok("join", "lobby", "--server", "fake-dest")
+        self.join("linux", "--server", "fake-dest")
+        self.use_box("linux")
+        try:
+            self.assertIn("OK  closed lobby", self.ok("close", "lobby", "--yes"))
+        finally:
+            self.use_box("mac")
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_the_server_checks_a_lobby_and_a_member(self):
+        root = os.path.join(self.tmp, "r")
+        channels.claim(root, "lobby", "founder", True, lobby=True)
+        with self.assertRaises(VCharonError) as cm:
+            channels.remove(root, "lobby", "nobody", lobby=True)
+        self.assertEqual(cm.exception.message, "you have no folder in lobby")
+        write_tree(root, {"game/lead/CHANNEL.md": channel_md("lead", "1"),
+                          "game/mac/MEMBER.md": member_md("mac", "lead", "game")})
+        with self.assertRaises(VCharonError) as cm:
+            channels.remove(root, "game", "mac", lobby=True)
+        self.assertEqual(cm.exception.message, "game isn't a lobby by its CHANNEL.md")
+        self.assertEqual(sorted(os.listdir(root)), ["game", "lobby"])
+        # lobby/, founder/ and its CHANNEL.md
+        self.assertEqual(channels.remove(root, "lobby", "founder", lobby=True)["deleted"], 3)
+        self.assertEqual(os.listdir(root), ["game"])
 
 
 class ClaimTest(LobbyCase):

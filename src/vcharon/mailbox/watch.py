@@ -513,12 +513,17 @@ class Marks:
     folder (loose), each told once; and the (ID, file) pairs noted as duplicates, kept for this
     run only."""
 
-    def __init__(self, seen=None, heads=None, loose=()):
+    def __init__(self, seen=None, heads=None, loose=(), renewed=None):
         self.seen = {f: [s["low"], set(s["more"])] for f, s in (seen or {}).items()}
         self.heads = {i: list(h) if isinstance(h, list) else [None, h]
                       for i, h in (heads or {}).items()}
         self.loose = set(loose)
         self.dups = set()
+        # {folder: [the highest number seen of it, the numbers up to it read since]} for each
+        # folder whose MEMBER.md #1 heading changed (renew): each of its entries up to that
+        # number, read the first time since, is told when its heading differs from the one
+        # seen, as a new member's; once all are read, the folder is as any other
+        self.renewed = {f: [r["high"], set(r["done"])] for f, r in (renewed or {}).items()}
 
     def raise_low(self, folder, n):
         """Every number of folder up to n taken as seen."""
@@ -544,13 +549,50 @@ class Marks:
             s[0] += 1
             s[1].discard(s[0])
 
+    def forget(self, folder):
+        """Drops everything seen of folder's own entries: its numbers, its IDs' heads, its
+        duplicate notes and its renewal. For a member folder gone from a scan that worked
+        (removed as idle, or by hand): one that comes back starts again at #1."""
+        self.seen.pop(folder, None)
+        self.renewed.pop(folder, None)
+        for i in [i for i in self.heads if (entries.parse_id(i) or (None,))[0] == folder]:
+            del self.heads[i]
+        self.dups = {d for d in self.dups if d[1].partition("/")[0] != folder}
+
+    def renew(self, folder):
+        """folder's MEMBER.md holds a #1 with another heading than the one seen: a member of
+        that name joined again (its folder removed and made again, or its MEMBER.md made
+        again in place). Its numbers seen so far stay, but an entry among them whose heading
+        isn't the one seen is new (renewed), not edited; one whose heading is the same stays
+        seen, so an old entry kept in place isn't told twice."""
+        s = self.seen.get(folder)
+        high = max([s[0]] + list(s[1])) if s else 0
+        if high:
+            self.renewed[folder] = [high, set()]
+
+    def is_renewed(self, folder, n):
+        r = self.renewed.get(folder)
+        return r is not None and n <= r[0] and n not in r[1]
+
+    def settle(self, folder, n):
+        """n of the renewed folder was read again, told as new or kept as seen: an edit of it
+        later is an edit again."""
+        r = self.renewed[folder]
+        r[1].add(n)
+        if len(r[1]) >= r[0]:
+            del self.renewed[folder]
+
     def doc(self):
         return {"seen": {f: {"low": s[0], "more": sorted(s[1])}
                          for f, s in sorted(self.seen.items())},
                 # a head whose file isn't known yet stays a bare hash, as it came
                 "heads": {i: h if h[0] is not None else h[1]
                           for i, h in sorted(self.heads.items())},
-                "loose": sorted(self.loose)}
+                "loose": sorted(self.loose),
+                # only when there is one: a snapshot without stays as before
+                **({"renewed": {f: {"high": r[0], "done": sorted(r[1])}
+                                for f, r in sorted(self.renewed.items())}}
+                   if self.renewed else {})}
 
 
 def others_line(folders):
@@ -694,7 +736,14 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
                 # the same ID twice in one file: the first one stands
                 continue
             ids.add(e.id)
-            if marks.has(folder, e.number):
+            # a renewed folder's entry with another heading than the one seen, or with none
+            # kept (a lobby drops the heads of day files deleted after 30 days): a new
+            # member's; with the same heading, the old one kept in place
+            renewed = False
+            if marks.is_renewed(folder, e.number):
+                renewed = known is None or known[1] != head
+                marks.settle(folder, e.number)
+            if not renewed and marks.has(folder, e.number):
                 if known is not None and known[1] != head and not baseline:
                     told.edited.append("WARN entry %s was edited" % e.id)
                 marks.heads[e.id] = [path, head]
@@ -793,7 +842,7 @@ def load_snapshot(path, root, me):
         return (None, None, "it is for the member %s" % doc["me"]) + nothing
     return ({k: (v[0], v[1]) for k, v in doc["files"].items()}, doc["saved"], None,
             list(doc["warnings"]), doc.get("error"), list(doc.get("counted") or []),
-            Marks(doc["seen"], doc["heads"], doc["loose"]), doc.get("fix"))
+            Marks(doc["seen"], doc["heads"], doc["loose"], doc.get("renewed")), doc.get("fix"))
 
 
 def _int(v):
@@ -804,8 +853,8 @@ def _int(v):
 _SNAPSHOT_KEYS = {"version", "root", "me", "saved", "files", "warnings", "seen", "heads",
                   "loose"}
 # keys a snapshot may lack: "error" and "counted" are written only while a round fails, "fix"
-# only while its error has one
-_SNAPSHOT_OPTIONAL = {"error", "counted", "fix"}
+# only while its error has one, "renewed" only while a folder is (Marks.renew)
+_SNAPSHOT_OPTIONAL = {"error", "counted", "fix", "renewed"}
 _HEX = re.compile(r"\A[0-9a-f]{%d}\Z" % HEAD_HEX)
 
 
@@ -816,6 +865,12 @@ def _strings(v):
 def _marks_shape(doc):
     seen, heads, loose = doc["seen"], doc["heads"], doc["loose"]
     if not (isinstance(seen, dict) and isinstance(heads, dict) and _strings(loose)):
+        return False
+    renewed = doc.get("renewed", {})
+    if not isinstance(renewed, dict) or not all(
+            isinstance(r, dict) and set(r) == {"high", "done"} and _int(r["high"])
+            and isinstance(r["done"], list) and all(_int(n) for n in r["done"])
+            for r in renewed.values()):
         return False
     for s in seen.values():
         if not (isinstance(s, dict) and set(s) == {"low", "more"} and _int(s["low"])
@@ -1296,7 +1351,9 @@ class _Watch:
             path = head[0]
             if path is None:
                 continue
-            if path not in files:
+            if path not in files and path not in unread:
+                # a file that couldn't be read is still there: dropping its heads would have
+                # a renewed folder tell its entries as new once it reads again
                 del self.marks.heads[i]
                 continue
             folder, _, name = path.partition("/")
@@ -1320,10 +1377,21 @@ class _Watch:
             warns |= over
         except OSError as e:
             return self._error(e) + (0,)
+        if self.gone is not None:
+            # a local member's own folder, which the scan leaves out: removed (as idle, or by
+            # hand) while the channel stays, the watch ends as for a closed channel
+            own = os.path.join(self.root, self.me)
+            try:
+                os.lstat(own)
+            except FileNotFoundError:
+                return "ERROR your folder %s is gone" % platform.tilde(own), self.gone, 0
+            except OSError:
+                pass
         baseline = self.snap is None
         old = self.snap or {}
-        told = self.entries(new, [p for p in new if p not in old or old[p] != new[p]],
-                            baseline)
+        changed = [p for p in new if p not in old or old[p] != new[p]]
+        self._forget_members(new, changed)
+        told = self.entries(new, changed, baseline)
         added = ["WARN %s" % text for text in sorted(warns - self.warns)]
         # what isn't an entry, a non-.md file, is shown but wakes nobody: in a channel an
         # entry announces it
@@ -1351,6 +1419,28 @@ class _Watch:
         self.snap = new
         self.warns = warns
         return None, None, counted
+
+    def _forget_members(self, files, changed):
+        """Drops the marks (Marks.forget) of each member folder gone from files, a scan that
+        worked (a folder with no file left is gone too: it holds no entry to mark), and renews
+        (Marks.renew) each whose MEMBER.md, among changed, holds a <folder>#1 with another
+        heading than the one seen: a member of that name joined again, so its entries with a
+        heading not seen are told as new, not taken as seen or as edited."""
+        present = {p.partition("/")[0] for p in files if "/" in p}
+        for folder in [f for f in self.marks.seen if f not in present]:
+            self.marks.forget(folder)
+        for path in changed:
+            folder, _, rest = path.partition("/")
+            if rest != entries.MEMBER_FILE:
+                continue
+            try:
+                found = entries.parse_file(os.path.join(self.root, folder, rest))
+            except OSError:
+                continue
+            first = next((e for e in found if e.name == folder and e.number == 1), None)
+            known = self.marks.heads.get(first.id) if first is not None else None
+            if known is not None and known[1] != _hex(first.heading):
+                self.marks.renew(folder)
 
     def _limited(self, new, old):
         """(new with the folders over the limits held as in old, the WARN texts of those)."""

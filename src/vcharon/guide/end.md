@@ -92,7 +92,9 @@ myapp --project api` (your own flags, spelled the way this machine runs vcharon)
   channel folder <path> is gone`): the close removed it, so only a leader who wants the
   text reads it before closing.
 - With no `CLOSED`, don't leave: tell your user, quoting the lines. "Or your folder in it is
-  gone" can mean a folder removed by hand. Once your user confirms it was removed on purpose,
+  gone" can mean a folder removed by hand, or removed as idle by your user's `vcharon list
+  --remove-idle --yes --server devbox` (a local member's watcher then says `ERROR your folder
+  <path> is gone`). Once your user confirms it was removed on purpose,
   run the `leave`: it notes that the channel has no folder `<your name>`, posts nothing, and
   removes this machine's files of the membership as above. If your user told you beforehand
   that the channel would close without `CLOSED` (a test of that path, say), that is the

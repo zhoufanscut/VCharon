@@ -653,6 +653,9 @@ class ListJsonTest(ChannelCase):
                          ("game", "laptop-ui", ["laptop-ui"], None,
                           ["laptop-ui", "mac-web", "old"], ["Stray"]))
         osw = platform.os_word()
+        # idle by the server's clock: each folder was written a moment ago
+        idle = [one.pop("idle_seconds") for one in ch["member_info"]]
+        self.assertTrue(all(isinstance(n, int) and 0 <= n < 60 for n in idle), idle)
         self.assertEqual(ch["member_info"], [
             {"name": "laptop-ui", "box": "laptop", "os": osw, "agent": "other",
              "project": "ui"},
@@ -660,9 +663,9 @@ class ListJsonTest(ChannelCase):
             {"name": "old", "box": None, "os": None, "agent": None, "project": None}])
         lines = self.run_cli("list", "--server", "fake-dest")[1].splitlines()
         self.assertEqual(lines[2:5], [
-            "    laptop-ui  box laptop  os %s  agent other  project ui" % osw,
-            "    mac-web  box mac  os %s  agent other  project web" % osw,
-            "    old  box -  os -  agent -  project -"])
+            "    laptop-ui  box laptop  os %s  agent other  project ui  idle 0 min" % osw,
+            "    mac-web  box mac  os %s  agent other  project web  idle 0 min" % osw,
+            "    old  box -  os -  agent -  project -  idle 0 min"])
         self.assertRegex(ch["newest"], r"\A\d{4}-\d\d-\d\d \d\d:\d\d\Z")
         self.assertEqual([sorted(o) for o in doc["others"]], [["name", "why"]])
         self.assertEqual(doc["others"][0]["name"], "notes")
@@ -1052,7 +1055,17 @@ HINTS = {
          "--project P)", ("game", FLAGS)),
         # a template, not a command (its title is a placeholder)
         ("  then post the plan (vcharon guide lead): vcharon post %s --steps --to @all "
-         "--title '…' %s, with the body on stdin", None)],
+         "--title '…' %s, with the body on stdin", None),
+        # list --remove-idle: its usage error, the dry run's last line, a member kept as this
+        # machine's own
+        ("vcharon list --help", ()),
+        ("  to remove them, your user runs: vcharon list --remove-idle --yes %s",
+         ("--server dev --days 30 game",)),
+        ("this machine's own membership; to end it: vcharon leave %s %s", ("game", FLAGS)),
+        # close lobby without --yes: the close, the user's, in the message; the leave its fix
+        ("closing the lobby deletes every member's folder: your user's decision only; your "
+         "user closes it with vcharon close %s --yes %s", ("lobby", FLAGS)),
+        ("to leave it: vcharon leave %s %s", ("lobby", FLAGS))],
     "cli.py": [
         ("vcharon --help", ()),
         ("  note: to name this machine otherwise (laptop, a name each of your machines has its "

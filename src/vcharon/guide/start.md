@@ -99,6 +99,9 @@ vcharon join myapp --server devbox            # be a member
 vcharon create myapp --server devbox          # make it; you lead it
 ```
 
+For your user, not you: `vcharon list --remove-idle --server devbox` lists the folders of
+members idle over 14 days, and adding `--yes` removes them (never a leader's).
+
 On the machine that holds the channel, use `--local` in place of `--server ALIAS`:
 `vcharon join myapp --local`. When your user names no place, try that first; if it says
 `there is no channel myapp on this machine`, ask your user where. Never guess a server.

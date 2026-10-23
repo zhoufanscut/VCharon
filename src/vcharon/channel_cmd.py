@@ -120,6 +120,11 @@ VERSION_DONE = "; join %s it, so there is nothing for you to do"
 LEADER_LEAVE_FIX = ("to leave, first offer the lead to a member (vcharon lead %s --to @NAME) and "
                     "wait until it takes it; or end the channel with CLOSED to @all after every "
                     "member's DONE, then a close; how: vcharon guide end")
+# close lobby without --yes: the close is the user's, so the message names it; the fix is the
+# agent's own way out, the leave
+CLOSE_LOBBY_TEXT = ("closing the lobby deletes every member's folder: your user's decision only; "
+                    "your user closes it with vcharon close %s --yes %s")
+CLOSE_LOBBY_FIX = "to leave it: vcharon leave %s %s"
 # close's note when the leader's folder holds no CLOSED to @all: a note only, since the close
 # is done by then, and a refusal would only make the leader post CLOSED into a channel it
 # closes at once (vcharon guide end, "The leader")
@@ -737,8 +742,15 @@ class _Remote:
             args["keep_charter"] = True
         return self.session.call("channel.release", args)
 
-    def remove(self, channel, name):
-        return self.session.call("channel.remove", {"channel": channel, "name": name})
+    def remove(self, channel, name, lobby=False):
+        args = {"channel": channel, "name": name}
+        if lobby:
+            args["lobby"] = True
+        return self.session.call("channel.remove", args)
+
+    def prune(self, channel, name, days, budget):
+        return self.session.call("channel.prune", {"channel": channel, "name": name,
+                                                   "days": days, "budget": budget})
 
     def lead(self, channel, name, number, mode, when):
         return self.session.call("channel.lead", {"channel": channel, "name": name,
@@ -766,8 +778,11 @@ class _Local:
     def release(self, channel, name, keep_charter=False):
         return channels.release(self.root, channel, name, keep_charter=keep_charter)
 
-    def remove(self, channel, name):
-        return channels.remove(self.root, channel, name)
+    def remove(self, channel, name, lobby=False):
+        return channels.remove(self.root, channel, name, lobby=lobby)
+
+    def prune(self, channel, name, days, budget):
+        return channels.prune(self.root, channel, name, days, budget)
 
     def lead(self, channel, name, number, mode, when):
         return channels.lead(self.root, channel, name, number, mode, when)
@@ -898,7 +913,14 @@ def main(args, run):
 
 
 def _list(args, cfg, log, say):
-    """vcharon list; with --json one object (list_json)."""
+    """vcharon list; with --json one object (list_json). With --remove-idle, _remove_idle."""
+    if not args.remove_idle and (args.days is not None or args.yes or args.channels):
+        raise VCharonError("config", "--days, --yes and channel names go with --remove-idle",
+                           hint="vcharon list --help")
+    if args.remove_idle:
+        for channel in args.channels:
+            check_channel(channel)
+        return _remove_idle(args, cfg, log, say)
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         listing = server.list()
@@ -930,8 +952,9 @@ def _list(args, cfg, log, say):
         elif leader is None:
             say("    note: %s: ask the user" % _no_leader(ch["name"], ch).message)
         for one in member_info(ch):
-            say("    %s  box %s  os %s  agent %s  project %s"
-                % tuple([one["name"]] + [one[k] or "-" for k in channels.LIST_FIELDS]))
+            say("    %s  box %s  os %s  agent %s  project %s  idle %s"
+                % tuple([one["name"]] + [one[k] or "-" for k in channels.LIST_FIELDS]
+                        + [idle_text(one["idle_seconds"])]))
         for stray in ch.get("strays", []):
             say("    note: %s at its top isn't a member's folder" % pathrules.show(stray))
         if leader is not None:
@@ -1000,7 +1023,15 @@ def age_text(created, now):
     when = entries.parse_time(created) if created is not None else None
     if when is None:
         return "-"
-    minutes = max(0, int((now - when).total_seconds() // 60))
+    return _minutes_text(max(0, int((now - when).total_seconds() // 60)))
+
+
+def idle_text(seconds):
+    """A member's idle seconds, short, as age_text's: "5 min", "3 h", "12 d"; "-" for None."""
+    return "-" if seconds is None else _minutes_text(seconds // 60)
+
+
+def _minutes_text(minutes):
     if minutes < 60:
         return "%d min" % minutes
     if minutes < 24 * 60:
@@ -1016,16 +1047,24 @@ def _limits_of(ch):
 
 
 def member_info(ch):
-    """[{"name", "box", "os", "agent", "project"}] of a listed channel's members, in its
-    members' order: from their MEMBER.md, None for each field it lacks."""
+    """[{"name", "box", "os", "agent", "project", "idle_seconds"}] of a listed channel's
+    members, in its members' order: from their MEMBER.md, None for each field it lacks;
+    idle_seconds by the server's clock (channels.member_idle), None when unknown."""
     fields = ch.get("fields") if isinstance(ch.get("fields"), dict) else {}
     out = []
     for name in ch["members"]:
         one = fields.get(name) if isinstance(fields.get(name), dict) else {}
         out.append(dict([("name", name)] + [
             (k, one.get(k) if isinstance(one.get(k), str) else None)
-            for k in channels.LIST_FIELDS]))
+            for k in channels.LIST_FIELDS] + [("idle_seconds", _count(ch, "idle", name))]))
     return out
+
+
+def _count(ch, key, name):
+    """ch[key][name] of a listed channel when it is a whole number, 0 or more; else None."""
+    values = ch.get(key) if isinstance(ch.get(key), dict) else {}
+    n = values.get(name)
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
 
 
 def list_json(server, listing):
@@ -1039,8 +1078,9 @@ def list_json(server, listing):
     and "term" null and "leaders" empty, and "founder" is
     the member whose folder holds that CHANNEL.md (null in a work channel); "member_info" each
     member's {"name", "box", "os", "agent", "project"} from its MEMBER.md (null for a field it
-    lacks), "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null, "created" the
-    channel's creation time (_created) or null, "bytes" the total size of the files in its
+    lacks) and "idle_seconds" (member_info), "newest" the newest entry's local time
+    (YYYY-mm-dd HH:MM) or null, "created" the channel's creation time (_created) or null,
+    "bytes" the total size of the files in its
     folder, "format" the channel's format from its leader's CHANNEL.md (null when it has none)
     and "limits" its {"max_mb", "max_files", "max_entry_kb"} (null each when missing); each of
     "others" is {"name", "why"}, a name at the root that isn't a usable channel."""
@@ -1064,6 +1104,185 @@ def list_json(server, listing):
                     "limits": _limits_of(ch)})
     return {"server": server.ssh, "channels": out,
             "others": [{"name": o["name"], "why": o["why"]} for o in listing["others"]]}
+
+
+# --- vcharon list --remove-idle: the user removes members' idle folders (DESIGN, "Removing
+# idle members") ---
+
+# why a folder stays: channels.prune's keys, and the one only this machine knows (its own
+# membership, by its join record)
+KEPT_OWN = "own"
+KEPT_TEXT = {
+    channels.KEPT_GONE: "gone already",
+    channels.KEPT_NOT_MEMBER: "not a member's folder (a link or a file)",
+    channels.KEPT_CHARTER: "it holds CHANNEL.md (the leader's, a former leader's, or the "
+                           "lobby founder's)",
+    channels.KEPT_ACTIVE: "active again",
+    channels.KEPT_ITEMS: "it holds more than %d files and folders, more than one run removes "
+                         "for the members' syncs (each deletes at most 500 at once)"
+                         % channels.PRUNE_MAX_ITEMS,
+    channels.KEPT_BUDGET: "over %d deletes for the members' syncs in one run: run again once "
+                          "their watchers have synced" % channels.PRUNE_MAX_ITEMS}
+OWN_TEXT = "this machine's own membership; to end it: vcharon leave %s %s"
+IDLE_HEAD = "vcharon: list --remove-idle  (%s)  members idle over %d days"
+REMOVE_NEXT = "  to remove them, your user runs: vcharon list --remove-idle --yes %s"
+IDLE_CHANNEL_NOTE = ("  note: %s: every member is idle over %d days, its leader too: nothing of "
+                     "it is removed; its leader closes it, or your user deletes it at the server")
+
+
+def _own_record(server, channel, name):
+    """This machine's join record of name in channel on server; True for one that can't be
+    read (it may be this one); None for none, or one of another server."""
+    if not os.path.lexists(record_path(channel, name)):
+        return None
+    try:
+        record = read_record(channel, name)
+    except VCharonError:
+        return True
+    if record is None:
+        return True
+    if server.machine is not None and record["machine"] != server.machine:
+        return None
+    return record
+
+
+def _idle_plan(server, listing, wanted, days):
+    """([{"channel", "name", "idle_seconds", "action", "why", "deleted"}] of the members idle
+    over days in the listed channels (only those named in wanted, when it has any): action
+    "remove", or "keep" with why a KEPT_* key; the work channels whose every member, leader
+    too, is idle; {(channel, name): the folder's files and folders, as listed}). In a work
+    channel the folders to remove hold at most PRUNE_MAX_ITEMS together (channels.prune's
+    budget), since each remote member's next down deletes them all in one plan: the rest are
+    kept for a later run."""
+    over = days * 86400
+    plan, whole, items = [], [], {}
+    for ch in listing["channels"]:
+        if wanted and ch["name"] not in wanted:
+            continue
+        info = member_info(ch)
+        idle = [one for one in info
+                if one["idle_seconds"] is not None and one["idle_seconds"] > over]
+        if not idle:
+            continue
+        lobby = _kind_of(ch) == kinds.LOBBY.name
+        if not lobby and len(idle) == len(info) and _leader_of(ch)[0] is not None:
+            # a whole channel gone quiet: its close is its leader's (or the user's by hand)
+            whole.append(ch["name"])
+            continue
+        budget = channels.PRUNE_MAX_ITEMS
+        for one in idle:
+            name = one["name"]
+            n = items[(ch["name"], name)] = _count(ch, "items", name) or 0
+            why = None
+            if name in ch.get("leaders", ()):
+                why = channels.KEPT_CHARTER
+            elif _own_record(server, ch["name"], name) is not None:
+                why = KEPT_OWN
+            elif not lobby and n > channels.PRUNE_MAX_ITEMS:
+                why = channels.KEPT_ITEMS
+            elif not lobby and n > budget:
+                why = channels.KEPT_BUDGET
+            elif not lobby:
+                budget -= n
+            plan.append({"channel": ch["name"], "name": name, "idle_seconds": one["idle_seconds"],
+                         "action": "keep" if why else "remove", "why": why, "deleted": None})
+    return plan, whole, items
+
+
+def _kept_text(one):
+    if one["why"] == KEPT_OWN:
+        return platform.runnable(OWN_TEXT % (one["channel"], name_flags(
+            one["channel"], one["name"], _record_or_none(one["channel"], one["name"]))))
+    return KEPT_TEXT.get(one["why"], one["why"])
+
+
+def _record_or_none(channel, name):
+    try:
+        return read_record(channel, name)
+    except VCharonError:
+        return None
+
+
+def _remove_idle(args, cfg, log, say):
+    """vcharon list --remove-idle [--yes]: the members idle over --days, each to remove or
+    kept with why; with --yes each removal is channel.prune's, which checks again at the
+    server. Without --yes nothing changes. A removal that fails doesn't stop the others; the
+    first failure is raised at the end (exit 1), after the lines or the --json object."""
+    days = args.days if args.days is not None else channels.IDLE_DAYS
+    with contextlib.ExitStack() as stack:
+        server = _server(args, cfg, log, stack)
+        listing = server.list()
+        for channel in args.channels:
+            if _find(listing, channel, server.where) is None:
+                raise channels.no_channel(channel)
+        plan, whole, items = _idle_plan(server, listing, set(args.channels), days)
+        failed = None
+        # per channel, what this run's removals leave of a member down's deletes; the server
+        # decides by it (a member kept since the listing frees its share for the next)
+        budgets = {}
+        if args.yes:
+            for one in plan:
+                if one["action"] == "keep" and one["why"] != channels.KEPT_BUDGET:
+                    one["action"] = "kept"
+                    continue
+                key = (one["channel"], one["name"])
+                budget = budgets.setdefault(one["channel"], channels.PRUNE_MAX_ITEMS)
+                try:
+                    got = server.prune(one["channel"], one["name"], days, budget)
+                except VCharonError as e:
+                    one["action"], one["why"] = "failed", "%s: %s" % (e.code, e.message)
+                    failed = failed or e
+                    # it may be renamed already, so its copies go with the members' next downs
+                    budgets[one["channel"]] = max(0, budget - items[key])
+                    continue
+                if not isinstance(got, dict):
+                    raise VCharonError("protocol", "a malformed channel.prune result")
+                if isinstance(got.get("idle"), int) and not isinstance(got.get("idle"), bool):
+                    one["idle_seconds"] = got["idle"]
+                if got.get("kept"):
+                    one["action"], one["why"] = "kept", str(got["kept"])
+                else:
+                    one["action"], one["why"] = "removed", None
+                    n = got.get("items")
+                    n = n if isinstance(n, int) and not isinstance(n, bool) else items[key]
+                    budgets[one["channel"]] = max(0, budget - n)
+                    deleted = got.get("deleted")
+                    one["deleted"] = (deleted if isinstance(deleted, int)
+                                      and not isinstance(deleted, bool) else None)
+    if args.json:
+        print(json.dumps({"server": server.ssh, "days": days, "yes": bool(args.yes),
+                          "members": plan, "idle_channels": whole}, ensure_ascii=False))
+        sys.stdout.flush()
+    else:
+        _say_idle(args, server, plan, whole, days, say)
+    if failed is not None:
+        raise failed
+    return 0
+
+
+def _say_idle(args, server, plan, whole, days, say):
+    say(IDLE_HEAD % (server.where, days))
+    if not plan and not whole:
+        say("  none")
+    channel = None
+    for one in plan:
+        if one["channel"] != channel:
+            channel = one["channel"]
+            say("  %s" % channel)
+        line = "    %s  %s  idle %s" % (one["action"], one["name"], idle_text(one["idle_seconds"]))
+        if one["action"] in ("keep", "kept", "failed"):
+            line += ": %s" % _kept_text(one)
+        elif one["action"] == "removed" and one["deleted"] is not None:
+            line += ": %d files and folders deleted" % one["deleted"]
+        say(line)
+    for name in whole:
+        say(IDLE_CHANNEL_NOTE % (name, days))
+    if not args.yes and any(one["action"] == "remove" for one in plan):
+        flags_ = [_where_flag(server)]
+        if args.days is not None:
+            flags_.append("--days %d" % days)
+        flags_ += args.channels
+        say(platform.runnable(REMOVE_NEXT % " ".join(flags_)))
 
 
 def _another_server(record, server, channel):
@@ -2011,11 +2230,12 @@ def _leave(args, cfg, record, log, say, close):
     name = record["name"]
     section = "%s.%s" % (channel, name)
     kind_ = kinds.of(record)
-    if close and not kind_.can_close:
+    if close and not kind_.can_close and not getattr(args, "yes", False):
         # by the record's kind, not the name: a lobby made by an older vcharon is a work
         # channel, closed by its leader. Before the locks and the listing: nothing to check
-        raise VCharonError("config", "a lobby isn't closed",
-                           hint=LEAVE_COMMAND % (channel, name_flags(channel, name, record)))
+        flags_ = name_flags(channel, name, record)
+        raise VCharonError("config", platform.runnable(CLOSE_LOBBY_TEXT % (channel, flags_)),
+                           hint=CLOSE_LOBBY_FIX % (channel, flags_))
     # a lobby's founder leaves as any member does. Who leads is the server's to say (the
     # charters' terms): the record's leader is where to look first
     leads = record["leader"] == name and kind_.can_close
@@ -2069,19 +2289,25 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
         if found is not None and kind_.can_close:
             leader = _leader_of(found)[0]
         if close:
-            if found is not None and leader != name:
+            if found is not None and leader != name and kind_.can_close:
                 if leader is None:
                     raise _no_leader(channel, found)
                 # text, not a command: a member leaves only after the leader's CLOSED
                 raise channels.refused("only the leader closes %s, and that is %s"
                                        % (channel, leader), "members leave after the "
                                        "leader's CLOSED; how: vcharon guide end")
+            stale = _stale(found, name, record) if found is not None else None
+            if stale is not None and not kind_.can_close:
+                # a lobby record of an earlier lobby never closes the one made since
+                raise _stale_refusal(channel, name, record, "%s on %s %s"
+                                     % (channel, server.where, stale), "close")
             if taken is None:
                 taken = take()
-            # read before the removal: a local leader's folder goes with the channel
-            told = _told_closed(_own_of(cfg, record, section), name)
+            # read before the removal: a local leader's folder goes with the channel. A lobby
+            # (close lobby --yes, any member) has no leader, and a CLOSED there is chat
+            told = _told_closed(_own_of(cfg, record, section), name) if kind_.can_close else None
             try:
-                done = server.remove(channel, name)
+                done = server.remove(channel, name, lobby=not kind_.can_close)
             except VCharonError as e:
                 if e.code != "not_found":
                     raise

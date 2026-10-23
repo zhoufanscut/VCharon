@@ -503,12 +503,24 @@ def channel_release(h, call_id, args):
 
 
 def channel_remove(h, call_id, args):
-    _check_args("channel.remove", args, {"channel": _is_str, "name": _is_str})
-    h.ok(call_id, channels.remove(channels.root_path(), args["channel"], args["name"], h.tick))
+    # lobby: sent only by close lobby --yes
+    checks = {"channel": _is_str, "name": _is_str}
+    if "lobby" in args:
+        checks["lobby"] = _is_bool
+    _check_args("channel.remove", args, checks)
+    h.ok(call_id, channels.remove(channels.root_path(), args["channel"], args["name"], h.tick,
+                                  lobby=args.get("lobby", False)))
 
 
 def _is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def channel_prune(h, call_id, args):
+    _check_args("channel.prune", args, {"channel": _is_str, "name": _is_str, "days": _is_int,
+                                        "budget": _is_int})
+    h.ok(call_id, channels.prune(channels.root_path(), args["channel"], args["name"],
+                                 args["days"], args["budget"], h.tick))
 
 
 def channel_lead(h, call_id, args):
@@ -526,7 +538,8 @@ HANDLERS = {"echo": echo, "bye": bye, "plugin.doctor": plugin_doctor,
             "sink.receive": sink_receive, "sink.commit": sink_commit, "sink.abort": sink_abort,
             "job.reset": job_reset, "channel.list": channel_list,
             "channel.claim": channel_claim, "channel.release": channel_release,
-            "channel.remove": channel_remove, "channel.lead": channel_lead}
+            "channel.remove": channel_remove, "channel.lead": channel_lead,
+            "channel.prune": channel_prune}
 
 
 def serve(h):

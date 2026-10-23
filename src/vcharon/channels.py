@@ -24,6 +24,19 @@ CHANNEL_MAX = 24
 # A closed channel is renamed to this, then deleted. A channel's name can't start with ".", so
 # nothing takes a leftover for a channel.
 CLOSED_PREFIX = ".vcharon-closed-"
+# A member's folder removed as idle (prune) is renamed to this at the root's top, then deleted;
+# a leftover is noted by list, as a closed channel's is
+REMOVED_PREFIX = ".vcharon-removed-"
+# The most files and folders (each folder itself included) one list --remove-idle run removes
+# from a work channel, one folder or several together: every remote member's next down deletes
+# their copies in one plan, which the dir sink refuses over its max_deletes default of 500
+# (plugins/dir.py); 50 under it, so the plan's other deletes (a member's own, a moved file)
+# still fit. A folder over it is never removed; a lobby's down has no such limit (config.py,
+# MAILBOX_KIND)
+PRUNE_MAX_ITEMS = 450
+# list --remove-idle's --days: its default, and the most the command line takes
+IDLE_DAYS = 14
+IDLE_DAYS_MAX = 3650
 # a member's folder that only these files are in may be released (a failed join or create)
 RELEASABLE = frozenset([MEMBER_FILE, CHANNEL_FILE])
 
@@ -177,7 +190,7 @@ def _is_file(handle, name):
     return st is not None and fsops.kind(st) == fsops.FILE
 
 
-def _no_channel(channel):
+def no_channel(channel):
     return VCharonError("not_found", "there is no channel %s" % channel,
                         "check the name against vcharon list's output")
 
@@ -198,8 +211,10 @@ def list_channels(root, tick=_no_tick):
     newest file's mtime, or None; bytes: the size of every file below the channel's folder;
     created: the one leader's CHANNEL.md created: time text (charter.created), or None; made:
     the channel folder's mtime, which list shows when created is None; format, kind (a lobby's
-    only) and limits: from that CHANNEL.md (charter.parse), unchecked. A missing root holds no
-    channel."""
+    only) and limits: from that CHANNEL.md (charter.parse), unchecked; idle: for each member,
+    member_idle's seconds (None when unknown), and items its folder's count of files and
+    folders. A missing root holds no channel."""
+    now = server_now()
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
@@ -219,11 +234,16 @@ def list_channels(root, tick=_no_tick):
         if name.startswith(CLOSED_PREFIX):
             others.append({"name": name, "why": "a closed channel that wasn't deleted"})
             continue
+        if name.startswith(REMOVED_PREFIX):
+            others.append({"name": name, "why": "a member's folder removed as idle that wasn't "
+                           "deleted"})
+            continue
         if fsops.kind(st) != fsops.DIR or channel_problem(name):
             others.append({"name": name, "why": "not a channel's folder"})
             continue
         try:
-            channels.append(_channel_info(os.path.join(root, name), name, tick, st.st_mtime))
+            channels.append(_channel_info(os.path.join(root, name), name, tick, st.st_mtime,
+                                          now))
         except OSError as e:
             others.append({"name": name, "why": "can't be read: %s" % (e.strerror or e)})
     return {"channels": channels, "others": others}
@@ -257,9 +277,9 @@ def _files_below(path, tick, stages):
     return newest, total
 
 
-def _channel_info(path, name, tick, made):
+def _channel_info(path, name, tick, made, now):
     members, leaders, strays = [], [], []
-    fields = {}
+    fields, idle, items = {}, {}, {}
     for entry in sorted(os.scandir(path), key=lambda e: e.name):
         if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
             members.append(entry.name)
@@ -273,12 +293,15 @@ def _channel_info(path, name, tick, made):
                 st = None
             if st is not None and stat.S_ISREG(st.st_mode):
                 leaders.append(entry.name)
+            idle[entry.name], items[entry.name] = member_idle(
+                os.path.dirname(path), name, entry.name, now, tick)
         else:
             strays.append(entry.name)
     newest, total = _files_below(path, tick, True)
     chain = charter.chain(path)
     info = {"name": name, "members": members, "fields": fields, "leaders": leaders,
             "strays": strays, "newest": newest, "bytes": total, "created": None, "made": made,
+            "idle": idle, "items": items,
             "leader": chain.leader, "term": chain.term if chain.charters else None,
             "tied": chain.tied}
     if chain.leader is not None:
@@ -288,6 +311,71 @@ def _channel_info(path, name, tick, made):
     else:
         info.update(charter.parse("", ""))
     return info
+
+
+def _changed(st):
+    """When the entry of st last changed, by this machine's clock: its ctime, which the kernel
+    sets (a sync's rename or utime moves it, while a file's mtime is copied from the writer's
+    machine). On Windows st_ctime is the creation time, so its mtime: a Windows root holds
+    local members only, whose writes are this machine's."""
+    return st.st_mtime if fsops.WINDOWS else st.st_ctime
+
+
+def _stamp_time(root, channel, name):
+    """The mtime of name's last-watched stamp in seen/<channel>/ when it holds a pace (the
+    watcher's own clock on this machine), else None. Never through a link."""
+    top = seen_root(root)
+    folder = os.path.join(top, channel)
+    if not _is_real_dir(top) or not _is_real_dir(folder):
+        return None
+    path = os.path.join(folder, name)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode) or parse_pace(_read_pace(path)) is None:
+        return None
+    return st.st_mtime
+
+
+def server_now():
+    """This machine's time, as idle times count it; VCHARON_TEST_CLOCK_SHIFT (seconds, tests
+    only) moves it, as it moves the hello's clock (helper.hello): a folder's change times can't
+    be set back."""
+    return time.time() + float(os.environ.get("VCHARON_TEST_CLOCK_SHIFT") or 0)
+
+
+def member_idle(root, channel, name, now, tick=_no_tick):
+    """(how many whole seconds <root>/<channel>/<name> has been idle at now, how many files and
+    folders it holds, itself included). Idle: since the newest of its last-watched stamp
+    (_stamp_time) and the change time (_changed) of the folder and of every entry below it,
+    stage dirs too, by an lstat walk that never follows a link. (None, 0) when the folder
+    isn't a real folder. Every time is this machine's clock (DESIGN, "Clocks").
+    last_active, lead's gone check, reads less (folders' mtimes, any stamp file), and is kept:
+    it only asks whether a leader wrote in the last 30 min, where a folder's rename moves its
+    mtime. A removal deletes a folder, so this takes the newest trace of any kind, and no
+    stamp that isn't a watcher's."""
+    top = os.path.join(root, channel, name)
+    try:
+        st = os.lstat(top)
+    except OSError:
+        return None, 0
+    if fsops.kind(st) != fsops.DIR:
+        return None, 0
+    newest, count = _changed(st), 1
+    for dirpath, dirnames, filenames in os.walk(top):
+        tick()
+        for n in dirnames + filenames:
+            try:
+                one = os.lstat(os.path.join(dirpath, n))
+            except OSError:
+                continue
+            count += 1
+            newest = max(newest, _changed(one))
+    seen = _stamp_time(root, channel, name)
+    if seen is not None:
+        newest = max(newest, seen)
+    return max(0, int(now - newest)), count
 
 
 def _charter(path):
@@ -328,7 +416,7 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
             raise fsops.error(e, root)
     top = _open_root(root)
     if top is None:
-        raise _no_channel(channel)
+        raise no_channel(channel)
     ch = None
     try:
         if create:
@@ -342,7 +430,7 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
             except OSError as e:
                 raise fsops.error(e, os.path.join(root, channel))
         if _real_dir(top, channel, "the channel %s" % channel) is None:
-            raise _no_channel(channel)
+            raise no_channel(channel)
         try:
             ch = top.enter(channel)
         except OSError as e:
@@ -469,42 +557,48 @@ def release(root, channel, name, tick=_no_tick, keep_charter=False):
 
 # --- channel.remove ---
 
-def remove(root, channel, name, tick=_no_tick):
+def remove(root, channel, name, tick=_no_tick, lobby=False):
     """Closes a channel for its leader name: refused unless <channel>/<name>/CHANNEL.md exists
     and holds the top term's charter alone (charter.chain: a former leader's CHANNEL.md stays),
     no takeover's marker is under way (it takes the next term's marker first), and every entry
-    at the channel's top is a member's folder.
+    at the channel's top is a member's folder. lobby (close lobby --yes, the user's word): the
+    channel must be a lobby by its CHANNEL.md, and name any member with a folder in it; a lobby
+    has no terms, so no marker is taken.
     Then one rename to .vcharon-closed-<channel>-<stamp>, so every member's next run sees the
     channel gone at once, and the no-link walk deletes that (DESIGN, "Create, join, leave,
     close"). Returns {"closed", "deleted"}."""
     _check_names(channel, name)
     top = _open_root(root)
     if top is None:
-        raise _no_channel(channel)
+        raise no_channel(channel)
     ch = None
     try:
         if _real_dir(top, channel, "the channel %s" % channel) is None:
-            raise _no_channel(channel)
+            raise no_channel(channel)
         ch = top.enter(channel)
-        leaders, strays = [], []
+        leaders, strays, members = [], [], []
         for n, st in sorted(ch.scan()):
             tick()
             if fsops.kind(st) != fsops.DIR or pathrules.writer_problem(n) is not None:
                 strays.append(pathrules.show(n) + ("/" if fsops.kind(st) == fsops.DIR
                                                    else ""))
                 continue
+            members.append(n)
             member = ch.enter(n, owner_rule=False)
             try:
                 if _is_file(member, CHANNEL_FILE):
                     leaders.append(n)
             finally:
                 member.close()
-        if name not in leaders:
+        chain = charter.chain(os.path.join(root, channel))
+        if lobby:
+            _check_lobby(root, channel, name, chain, members)
+        elif name not in leaders:
             raise refused("%s/%s has no %s: only the channel's leader closes it"
                           % (channel, name, CHANNEL_FILE), "ask the user")
-        # the leader by terms: a former leader's CHANNEL.md stays in its folder
-        chain = charter.chain(os.path.join(root, channel))
-        _check_leader(channel, name, chain)
+        else:
+            # the leader by terms: a former leader's CHANNEL.md stays in its folder
+            _check_leader(channel, name, chain)
         if strays:
             raise refused("%s holds %s at its top, not a member's folder"
                           % (channel, ", ".join(strays)), "ask the user, and remove it first")
@@ -512,10 +606,12 @@ def remove(root, channel, name, tick=_no_tick):
         ch = None
         # the next term's marker, as a takeover takes it: of a close and a takeover at once,
         # one mkdir wins
-        now = time.time()
-        term, mine = _next_term(root, channel, chain, name, now)
-        marker = _marker_path(root, channel, term) if mine else _take_marker(
-            root, channel, term, name, chain)
+        marker = None
+        if not lobby:
+            now = time.time()
+            term, mine = _next_term(root, channel, chain, name, now)
+            marker = _marker_path(root, channel, term) if mine else _take_marker(
+                root, channel, term, name, chain)
         closed = "%s%s-%s-%s" % (CLOSED_PREFIX, channel, time.strftime("%Y%m%d-%H%M%S"),
                                  os.urandom(3).hex())
         # On Windows a rename fails while another process holds the folder: measured
@@ -548,6 +644,17 @@ def remove(root, channel, name, tick=_no_tick):
     return {"closed": closed, "deleted": deleted}
 
 
+def _check_lobby(root, channel, name, chain, members):
+    """Refused unless channel is a lobby by its one CHANNEL.md and name has a folder in it."""
+    kind = None
+    if chain.leader is not None:
+        kind = charter.read(os.path.join(root, channel, chain.leader), chain.leader).get("kind")
+    if kind != charter.LOBBY_KIND:
+        raise refused("%s isn't a lobby by its %s" % (channel, CHANNEL_FILE), "ask the user")
+    if name not in members:
+        raise refused("you have no folder in %s" % channel, "ask the user")
+
+
 def _check_leader(channel, name, chain):
     """Refused unless name holds the top term's charter of channel (chain): a former leader's
     CHANNEL.md stays, so holding one isn't leading."""
@@ -559,21 +666,21 @@ def _check_leader(channel, name, chain):
                   % (chain.leader, channel, chain.term, name), "ask the user")
 
 
-def _held(e, path):
-    """close's rename refused because something holds the folder (fsops.HELD_CODES):
-    fsops.error's line, with a fix that names what can hold it. Only for this rename: elsewhere
-    the generic fix stays."""
+def _held(e, path, again="run close again"):
+    """close's (or prune's) rename refused because something holds the folder
+    (fsops.HELD_CODES): fsops.error's line, with a fix that names what can hold it, then again.
+    Only for these renames: elsewhere the generic fix stays."""
     err = fsops.error(e, path)
     return VCharonError(err.code, err.message,
                         platform.prose_hint("something has a file or its current folder inside "
                                             "%s (a shell, an editor, Explorer, or a program a "
                                             "shell started): close it or leave that folder, "
-                                            "then run close again", path))
+                                            "then " + again, path))
 
 
 def _not_gone(e, path):
     """An error inside remove as the client must read it: not_found means "no such channel"
-    there, and close then removes the leader's records. So only _no_channel's checks give
+    there, and close then removes the leader's records. So only no_channel's checks give
     not_found; any other ENOENT (a member folder or file gone during the checks, a race with
     the rename) is vanished, which close reports and stops at."""
     err = fsops.error(e, path) if isinstance(e, OSError) else e
@@ -581,6 +688,100 @@ def _not_gone(e, path):
         return VCharonError("vanished", "%s went away while the channel was checked or closed"
                             % path, "check it in vcharon list's output, then close again")
     return err
+
+
+# --- channel.prune: a member's folder removed as idle (list --remove-idle --yes) ---
+
+# why prune kept a folder: the keys of its reply's "kept" (the client words them)
+KEPT_GONE = "gone"
+KEPT_NOT_MEMBER = "not_member"
+KEPT_CHARTER = "charter"
+KEPT_ACTIVE = "active"
+KEPT_ITEMS = "items"
+KEPT_BUDGET = "budget"
+
+
+def prune(root, channel, name, days, budget=PRUNE_MAX_ITEMS, tick=_no_tick, now=None):
+    """Removes <root>/<channel>/<name>, the folder of a member idle over days (member_idle, by
+    this machine's clock at the call: a member that came back since the listing is kept).
+    Kept, never removed: a folder that isn't a real folder with a member's name (a link, a
+    file), one holding CHANNEL.md (the leader's, a former leader's after a handoff, a lobby
+    founder's), and in a work channel one holding more than PRUNE_MAX_ITEMS, or more than
+    budget: what this run's removals in the channel left of PRUNE_MAX_ITEMS, since each remote
+    member's next down deletes every removed folder's copy in one plan. The join records
+    are on the members' machines: the client keeps its own before the call. Then one rename to
+    <root>/.vcharon-removed-<channel>-<name>-<stamp>, so every member's next run sees the folder
+    gone at once (a channel's name can't start with "."), the no-link walk deletes that, and the
+    member's last-watched stamp goes. Returns {"kept": None or a KEPT_* key, "idle": the
+    seconds, "items": how many files and folders the folder held, itself included (what a
+    member's down deletes of it), "removed": the renamed folder's name or None, "deleted": how
+    many files and folders went}. A failed delete leaves the renamed folder, which list notes."""
+    _check_names(channel, name)
+    if (not isinstance(days, int) or isinstance(days, bool)
+            or not 1 <= days <= IDLE_DAYS_MAX):
+        raise VCharonError("protocol", "a malformed prune call: %s days"
+                           % pathrules.show(str(days)))
+    if (not isinstance(budget, int) or isinstance(budget, bool)
+            or not 0 <= budget <= PRUNE_MAX_ITEMS):
+        raise VCharonError("protocol", "a malformed prune call: a budget of %s"
+                           % pathrules.show(str(budget)))
+    t = server_now() if now is None else now
+    reply = {"kept": None, "idle": None, "items": None, "removed": None, "deleted": 0}
+    path = os.path.join(root, channel)
+    if not _is_real_dir(path):
+        raise no_channel(channel)
+    try:
+        st = os.lstat(os.path.join(path, name))
+    except FileNotFoundError:
+        return dict(reply, kept=KEPT_GONE)
+    except OSError as e:
+        raise fsops.error(e, os.path.join(path, name)) from None
+    if fsops.kind(st) != fsops.DIR:
+        return dict(reply, kept=KEPT_NOT_MEMBER)
+    if os.path.lexists(os.path.join(path, name, CHANNEL_FILE)):
+        return dict(reply, kept=KEPT_CHARTER)
+    idle, items = member_idle(root, channel, name, t, tick)
+    reply.update(idle=idle, items=items)
+    if idle is None or idle <= days * 86400:
+        return dict(reply, kept=KEPT_ACTIVE)
+    if _charter(path).get("kind") != charter.LOBBY_KIND:
+        if items > PRUNE_MAX_ITEMS:
+            return dict(reply, kept=KEPT_ITEMS)
+        if items > budget:
+            return dict(reply, kept=KEPT_BUDGET)
+    removed = "%s%s-%s-%s-%s" % (REMOVED_PREFIX, channel, name, time.strftime("%Y%m%d-%H%M%S"),
+                                 os.urandom(3).hex())
+    top = _open_root(root)
+    if top is None:
+        raise no_channel(channel)
+    ch = None
+    try:
+        ch = top.enter(channel)
+        # as close's rename: on Windows something holding a file or the current folder
+        # inside it refuses the rename for a moment, or for as long as it holds it
+        try:
+            top.move_in(ch, name, removed)
+        except OSError as e:
+            if getattr(e, "winerror", None) in fsops.HELD_CODES:
+                raise _held(e, os.path.join(path, name), "run the removal again") from None
+            raise
+        ch.close()
+        ch = None
+        drop_seen(root, channel, name)
+        try:
+            reply["deleted"] = fsops.remove_tree(top, removed, tick)
+        except (OSError, VCharonError) as e:
+            err = fsops.error(e, os.path.join(root, removed)) if isinstance(e, OSError) else e
+            raise VCharonError(err.code, "%s/%s is removed, but deleting %s failed: %s"
+                               % (channel, name, removed, err.message),
+                               "delete it by hand; vcharon list's output notes it") from None
+    except OSError as e:
+        raise fsops.error(e, os.path.join(path, name)) from None
+    finally:
+        _close_all(ch, top)
+        sweep_seen(root)
+    reply["removed"] = removed
+    return reply
 
 
 # --- the watchers' stamps: seen/<channel>/<member> beside the root ---
@@ -654,17 +855,18 @@ def _read_pace(path):
 def stamp_seen(root, channel, name, pace, now=None):
     """A watcher's pull of channel worked: seen/<channel>/<name> holds pace, its mtime now (this
     process's clock, set explicitly, so a file server's own clock never counts). Only while
-    <root>/<channel> is a real folder; seen/ and seen/<channel>/ are each one mkdir (never
-    makedirs), and a seen/<channel>/ made for a channel that went away meanwhile (a close) is
-    removed again. The time is written only when SEEN_EVERY has passed, or the pace changed.
-    Returns whether it wrote. Raises OSError or VCharonError: every caller treats a stamp as
-    best effort, which never fails a pull and prints nothing."""
+    <root>/<channel> and the member's folder in it are real folders (a folder removed as idle
+    gets no stamp from a watcher still running); seen/ and seen/<channel>/ are each one mkdir
+    (never makedirs), and a seen/<channel>/ made for a channel that went away meanwhile (a
+    close) is removed again. The time is written only when SEEN_EVERY has passed, or the pace
+    changed. Returns whether it wrote. Raises OSError or VCharonError: every caller treats a
+    stamp as best effort, which never fails a pull and prints nothing."""
     _check_names(channel, name)
     if parse_pace(pace) is None:
         raise VCharonError("protocol", "a pace that isn't one: %s" % pathrules.show(pace))
     t = time.time() if now is None else now
     channel_dir = os.path.join(root, channel)
-    if not _is_real_dir(channel_dir):
+    if not _is_real_dir(channel_dir) or not _is_real_dir(os.path.join(channel_dir, name)):
         return False
     top = seen_root(root)
     _mkdir(top)
@@ -1126,7 +1328,7 @@ def lead(root, channel, name, number, mode, when, tick=_no_tick, now=None):
     t = time.time() if now is None else now
     path = os.path.join(root, channel)
     if not _is_real_dir(path):
-        raise _no_channel(channel)
+        raise no_channel(channel)
     own = os.path.join(path, name)
     if not _is_real_dir(own) or _member_file(own) is None:
         raise refused("you have no folder with a %s in %s" % (MEMBER_FILE, channel),

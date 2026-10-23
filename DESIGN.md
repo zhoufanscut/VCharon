@@ -454,10 +454,11 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 | `sink.commit` | – | `{"written", "deleted", "deletes_done", "notes"}`; an `err` also carries `"done"` | – |
 | `sink.abort` | – | `{}` | – |
 | `job.reset` | – | `{}` | – |
-| `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "format", "limits"}], "others": [{"name", "why"}]}` | – |
+| `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "idle", "items", "format", "limits"}], "others": [{"name", "why"}]}` | – |
 | `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
 | `channel.release` | `channel`, `name` | `{"removed"}` | – |
-| `channel.remove` | `channel`, `name` | `{"closed", "deleted"}` | – |
+| `channel.remove` | `channel`, `name`, optional `lobby` | `{"closed", "deleted"}` | – |
+| `channel.prune` | `channel`, `name`, `days`, `budget` | `{"kept", "idle", "items", "removed", "deleted"}` | – |
 | `channel.lead` | `channel`, `name`, `number`, `mode` (`offer` or `gone`), `time` | `{"term", "after", "from", "charter", "steps", "steps_cut"}` | – |
 | `bye` | – | `{}` | – |
 
@@ -500,7 +501,8 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only). Never an argument: every
   member must reach the same folder. Each call checks the names again, works only directly below
   the root, and never follows a symlink. `--local` calls the same functions in-process.
-  `claim`, `release` (undoing a failed claim) and `remove` also sweep `seen/` beside the root: each
+  `claim`, `release` (undoing a failed claim), `remove` and `prune` also sweep `seen/` beside
+  the root: each
   `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed (and
   `lead/<X>/`, holding only term markers: [Leader handoff](#leader-handoff)), and a
   new member's claim drops an earlier member's stamp of its name. A join's claim sends the
@@ -521,6 +523,10 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   tie: `tied` names the folders then), `term` that term (null with no charter); `fields` holds
   each member's `vcharon` version too, for `lead --to`. `channel.lead`: [Leader
   handoff](#leader-handoff).
+- `channel.list`'s `idle` is each member's idle seconds by the server's clock (null when
+  unknown), `items` how many files and folders its folder holds; `channel.prune` removes one
+  member's idle folder: [Removing idle members](#removing-idle-members). `channel.remove`'s
+  `lobby`, sent only by `close lobby --yes`: [The lobby](#the-lobby).
 
 ### Error codes
 
@@ -1037,6 +1043,11 @@ a remote member's machine:
   terms in the members' folders ([Leader handoff](#leader-handoff)): a member that writes a
   `CHANNEL.md` with a high `term:` into its own folder by hand is the leader for every reader.
   The race marker at the server stops two honest takers, not a forged charter.
+- **What deletes others' folders is the user's.** `close lobby --yes` and `list --remove-idle
+  --yes` delete other members' folders; the guide's rules tell agents never to run them on
+  their own, only on their user's word. The code can't tell an agent from its user, so the
+  guard is `--yes` and the guide, with no refusal by environment. Nothing about a removal is
+  posted into a channel: the members see their folder, or the lobby, gone (`EXIT closed`).
 
 ### Member names
 
@@ -1393,8 +1404,8 @@ agent in a folder another agent shares saw nothing of the other one's.
   as <name> is left on this machine` (and `still here: <names>` for other memberships of C on
   this machine, which stay): an agent told nothing would ask its user what to delete. `close`
   prints the same. Nothing is removed on its own when a watcher sees the channel closed: `EXIT
-  closed` also means a folder removed by hand, and after a close this machine's copy is the last
-  of the channel's text.
+  closed` also means a folder removed as idle or by hand, and after a close this machine's copy
+  is the last of the channel's text.
 - **`close C`**: the leader only, the one the listing names by the charters' terms: every
   close checks the machine id and lists first, so a member or a former leader is refused, `only
   the leader closes C, and that is X`, before any lock check (a former leader isn't told to
@@ -1426,6 +1437,80 @@ agent in a folder another agent shares saw nothing of the other one's.
   by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)), its fix `stop the watcher with
   vcharon watch C --stop <flags> (a create, join, leave or close: let it end), then run this
   again`; a job's lock held is `a sync of <name> in C is running (<lock> is held)`.
+
+### Removing idle members
+
+`vcharon list --remove-idle (--server ALIAS | --local) [C …] [--days N] [--yes] [--json]` is
+the user's way to remove the folders of members that don't come back: `leave` keeps a
+member's folder (its history, [Create, join, leave, close](#create-join-leave-close)), and so
+does a session that ends without one. It acts on no membership, as `list` does.
+
+- **Idle**: the server's time now less the newest of the member's last-watched stamp (when it
+  holds a pace: [The watcher in a channel](#the-watcher-in-a-channel)) and the change time
+  (`st_ctime`) of its folder and of every entry below it, stage dirs too, by an `lstat` walk
+  that never follows a link; on a Windows root `st_mtime`, since there `st_ctime` is the
+  creation time (a Windows root holds local members only, whose writes are its own). Every
+  time is the root's machine's ([Clocks](#clocks)). Why the change time: a sync copies each
+  file's mtime from the writer's machine, while its rename or `utime` at the server moves the
+  change time then; `list`'s `newest` is such a copied mtime. Gap: a member that only reads,
+  with no watcher, leaves no trace. `list` ends each member's line with `idle <age>` (`-` when
+  unknown), and `--json` gives it as each `member_info`'s `idle_seconds`.
+- **Which**: each member idle over `--days` days (default 14, 1 to 3650), in the channels named
+  (each must be listed: `not_found` otherwise, before anything changes), else in every
+  channel. Never removed, listed as `keep` with why: a folder holding `CHANNEL.md` (the
+  leader's, a former leader's after a handoff, whose charter the terms' chain still reads, or
+  a lobby founder's); this machine's own membership, a join record of the name for this server
+  (`this machine's own membership; to end it: vcharon leave C <flags>`; another machine's
+  record can't be seen from here, which is why the idle time is the guard); in a work channel,
+  a folder holding more than 450 files and folders, itself included, since every remote
+  member's down would delete its copy in one plan, which the dir sink refuses over its
+  `max_deletes` of 500 (a lobby's down has no limit: [The lobby](#the-lobby)); and for the
+  same reason, in a work channel, the folders one run removes hold at most 450 together
+  (counted as the down's stage step counts them, each folder itself included), in the members'
+  order: one past what is left is kept, `over 450 deletes for the members' syncs in one run:
+  run again once their watchers have synced`. Why 450, not 500: the same down plan may hold
+  other deletes (the member's own, a file moved), and 50 leaves them room; one number for the
+  folder and the run, since a folder over the run's budget could never go. The limit: a remote
+  member whose down didn't run between two runs (offline, no watcher), or a second run before
+  its watcher synced, still gets both runs' deletes in one plan, over 500, and its down refuses
+  them (`too_many_deletes`). A name at a channel's top that isn't a
+  member's folder, or is a link, is no member and never listed. A work channel whose every
+  member, its leader too, is idle gets one note, `note: C: every member is idle over N days,
+  its leader too: nothing of it is removed; its leader closes it, or your user deletes it at
+  the server`, and none of its members is listed: a whole channel is its leader's to close.
+- **Without `--yes`** nothing changes: under each channel's line, one line per idle member,
+  `remove <name>  idle <age>` or `keep <name>  idle <age>: <why>`, then `to remove them, your
+  user runs: vcharon list --remove-idle --yes <the same flags>`; `none` when nothing is idle;
+  exit 0, never a prompt.
+- **With `--yes`** each candidate is one `channel.prune`, which checks again at the server, by
+  its clock at the call: still a real folder with no `CHANNEL.md`, still idle over the days (a
+  member back since the listing is `kept`, `active again`), and the 450 rules, the run's
+  budget sent with the call (`budget`: what the run's removals in the channel left of 450; a
+  member kept since the listing frees its share for the next). Then one rename
+  to `<root>/.vcharon-removed-<C>-<name>-<stamp>`, so every member's next run sees the folder
+  gone at once (a channel's name can't start with `.`), then the no-link walk deletes it, and
+  the member's stamp goes, as at a close. A failed delete leaves the renamed folder, which
+  `list` notes (`a member's folder removed as idle that wasn't deleted`), and its error's fix
+  is `delete it by hand`. Lines: `removed <name>  idle <age>: <n> files and folders deleted`,
+  `kept <name>  idle <age>: <why>`, `failed <name>  idle <age>: <code>: <message>`; a failure
+  doesn't stop the others, and the first one is the command's error at the end (exit 1).
+- **What the member sees**: a remote member's next sync fails on its missing folder with the
+  channel-gone fix, `the channel is closed, or your folder in it is gone: vcharon leave C
+  <flags>`, so its watcher ends with `EXIT closed`; a local member's watcher sees its own
+  folder gone at its next round, `ERROR your folder <path> is gone`, the same fix, and `EXIT
+  closed` ([The watcher in a channel](#the-watcher-in-a-channel)). Its `leave` then removes
+  the membership here, and a later `join` makes a new folder, whose `JOIN` the others'
+  watchers print as new.
+- **`--json`**: `{"server", "days", "yes", "members", "idle_channels"}`; each member
+  `{"channel", "name", "idle_seconds", "action", "why", "deleted"}`: `action` `remove` or
+  `keep` without `--yes`, `removed`, `kept` or `failed` with it; `why` the reason's key
+  (`charter`, `own`, `items`, `budget`, `active`, `gone`, `not_member`), a failure's
+  `<code>: <message>`, or null; `deleted` the count deleted, else null. `idle_channels` names
+  the whole idle work channels. With a failure the object is printed, then the error (exit 1).
+- `--days`, `--yes` or a channel name without `--remove-idle` is a usage error (exit 3).
+- Why a flag of `list` and not a verb: it decides from the listing and acts on no membership,
+  as `list` does. Why the user's only: it deletes other members' folders ([Trust and
+  access](#trust-and-access)).
 
 ### Leader handoff
 
@@ -1558,7 +1643,7 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   <root>/lobby` wins; the other's claim is refused as `create`'s is, and that join lists again
   and joins the lobby the winner made. The claim writes `CHANNEL.md` a moment after its
   `mkdir`s, so a `lobby` listed without `CHANNEL.md` is listed again, for up to 10 s, before
-  the refusal in "Never closed" below. The folder that holds `CHANNEL.md` is the lobby's
+  the refusal in "Closed by the user" below. The folder that holds `CHANNEL.md` is the lobby's
   **founder**: it has no power the other members lack. The record's and `MEMBER.md`'s
   `leader:` name it all the same, since the code finds a channel's `CHANNEL.md` by that key.
   The claim line says `claimed lobby/<name>; made the lobby`, or `claimed lobby/<name>; in the
@@ -1575,8 +1660,8 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
 - **Anyone posts to all.** Every member may post `@all`; in a lobby the watcher, `read
   --to-me` and join's count line take any member's `@all` as to all. `--steps` is refused,
   exit 3, `a lobby has no plan`, `fix: post without --steps`: a usage error, as `create lobby`
-  and `close lobby` are. The watcher never prints the `next:` line after a `CLOSED` entry in a
-  lobby: there it is chat.
+  and `close lobby` without `--yes` are. The watcher never prints the `next:` line after a
+  `CLOSED` entry in a lobby: there it is chat.
 - **Day files.** A lobby post with no `--file` goes into `chat-YYYY-MM-DD.md` in the own folder:
   the date is the poster's local one, taken under the post lock from the same clock reading as
   the heading's time, so an entry posted at midnight is in the file of its heading's day. So do
@@ -1666,18 +1751,30 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
   lobby never closes. A dropped hash only means no `edited` warning if that entry turns up
   again, and a day file deleted after 30 days doesn't come back. A work channel's watcher keeps
   them all: it ends with its close.
-- **Never closed.** `close` of a channel whose record says lobby is refused for every member,
-  exit 3, `a lobby isn't closed`, `fix: vcharon leave lobby <flags>`. `leave` works for every
-  member, the founder too. Removing a lobby is the user's, by hand at the root: the whole
-  `lobby/` folder, never only the founder's folder, which holds `CHANNEL.md`. A `lobby` without
+- **Closed by the user.** `close` of a channel whose record says lobby, without `--yes`, is
+  refused for every member, exit 3, `closing the lobby deletes every member's folder: your
+  user's decision only; your user closes it with vcharon close lobby --yes <flags>`, `fix: to
+  leave it: vcharon leave lobby <flags>`: the fix line is the agent's way out, the close only
+  named in the message. With `--yes` any member closes it, the founder or not: the lock checks
+  and the listing of a work channel's close, a record of an earlier lobby refused as `leave`'s
+  check finds it (`your join record of lobby as <name> is of an earlier channel: …`, so a
+  stale record never closes a lobby made since), then `channel.remove` with `lobby`, which
+  refuses unless the channel is a lobby by its `CHANNEL.md` and the caller has a folder in it
+  (no leader to check and no term marker: a lobby has neither), and renames and deletes it as
+  a close does. No `CLOSED` note: in a lobby
+  that is chat. Every member's watcher ends with `EXIT closed`; each member runs `leave lobby`
+  once, and its next `join lobby` makes a new lobby or joins it. On a work channel `--yes` is
+  ignored. Why the user's: it deletes every member's folder, each one's history. `leave` works
+  for every member, the founder too. By hand at the root, a lobby goes whole: the `lobby/`
+  folder, never only the founder's folder, which holds `CHANNEL.md`. A `lobby` without
   it (still so after the 10 s of re-listing) is refused at every join, `the lobby has no
   CHANNEL.md: it is gone or was never finished`, `fix: ask your user to remove the whole lobby
-  folder at the channel root; the next join makes a new one`. Once the lobby folder is removed,
-  a member with a join record of it is refused at its next join as for any channel made again,
-  `your join record of lobby as <name> is of an earlier channel: lobby is gone from <where>`,
-  `fix: run vcharon leave lobby <flags> (…), then join again`: each member runs that `leave`
-  once, and its next `join lobby` makes the new lobby or joins it. Why: the record names the
-  old founder, and a join that made a lobby over it would mix the two.
+  folder at the channel root; the next join makes a new one`. Once the lobby is closed or
+  removed, a member with a join record of it is refused at its next join as for any channel
+  made again, `your join record of lobby as <name> is of an earlier channel: lobby is gone from
+  <where>`, `fix: run vcharon leave lobby <flags> (…), then join again`: each member runs that
+  `leave` once, and its next `join lobby` makes the new lobby or joins it. Why: the record
+  names the old founder, and a join that made a lobby over it would mix the two.
 - **What `join` prints.** In a lobby, of the entries already there, only those addressed to the
   member from the last 24 h, then, when any are left out, up to two lines. When j or n isn't 0:
   `  not shown: <j> to you before your leave, <n> to all in the last 24 h; to see them: vcharon
@@ -1995,7 +2092,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   `local 10`: its mode and `--every`), its mtime the time. Why: a `watching` entry is a claim,
   and nothing else showed whether a member's watcher still ran.
   - Who stamps: a local member's watcher after a round's scan worked; a remote member's through
-    its down plan, the helper stamping after the plan opened the channel folder. The watcher
+    its down plan, the helper stamping after the plan opened the channel folder. Only while the
+    member's folder is there: a watcher still running once its folder was removed (as idle)
+    stamps nothing. The watcher
     marks its sync child (streaming or not) with the private `VCHARON_WATCHER=<pace>`, and the
     sync then adds `watch` to `source.plan`. A sync by hand, or a join's pull, stamps nothing:
     it would make a member look watched. A channel down gets the ages back at the session's
@@ -2218,7 +2317,11 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   whose `fix:` starts with the channel-gone text; a local member's channel folder missing), after
   the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays gone. Why
   its own code: `EXIT change` means "restart, then read", a closed channel means "don't restart;
-  leave".
+  leave". A local member's own folder gone while the channel stays (removed as idle, or by
+  hand: the scan leaves the own folder out, so each round `lstat`s it) is the same, `ERROR your
+  folder <path> is gone` with the channel-gone fix; a start then is refused as before, `your
+  folder <path> in the channel is gone`, with that fix (exit 1). A remote member's own folder
+  gone at the server fails its up the same way as a closed channel.
 - **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by the
   channel folder's normalized real path: the files seen, the entry numbers seen per member (every
   number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's file and
@@ -2240,6 +2343,20 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   machine's copy as of its last sync), none of it printed; what the first round brings prints
   and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT
   error`.
+  - A member folder gone from a scan that worked loses its marks (its numbers seen, its IDs'
+    heads, its duplicate notes); a folder with no file left is gone too (it holds no entry to
+    mark). One whose `MEMBER.md` changed and holds a `<folder>#1` whose heading isn't the one
+    seen is **renewed**: each of its numbers seen so far, the next time it is read, is told as
+    new when its heading isn't the one seen (no `WARN … edited`), and stays seen when it is;
+    once each is read the folder is as any other. The snapshot keeps the renewal (`renewed`)
+    until then. Why: a member removed (as idle, or by hand) that joins again under its name
+    restarts at #1, so the old marks would take its new entries as seen, or as edited; and a
+    member that made its `MEMBER.md` again in place (a rejoin after losing it) keeps its old
+    entries, which must not be told twice. Limits: a hand edit of a `MEMBER.md` #1 heading
+    renews too, so an entry edited before its next read is told as new, not as edited; an
+    entry of a new member with the very heading (time to the second, title) of the old one's
+    is taken as seen. An older vcharon refuses a snapshot holding `renewed` (another shape)
+    and starts from a baseline.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
   is running on this mailbox (<lock>), or a create, join, leave or close of this member`
   (`<lock>` under the home as `~/…`, `~\…` on Windows):
@@ -2390,6 +2507,9 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   near a minute's end, and 30 s does it often), and a warning when the server's time zone differs
   from this machine's.
 - The guide tells agents to leave `TZ` alone and never to type a time.
+- A member's idle time (`list`, `--remove-idle`) is worked out on the root's machine alone,
+  from its kernel's change times and the stamps it wrote, so no two machines' clocks are
+  compared ([Removing idle members](#removing-idle-members)).
 
 ### Mixed versions
 
@@ -2411,6 +2531,11 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   undo) doesn't sweep `seen/`; the next claim or close on that machine does. The `watch` arg
   and the `seen` reply pass only between a client and its own helper, as do states by
   reference ([Calls](#calls)).
+- A member folder removed as idle, or a lobby closed, with members on a vcharon before 0.8.6:
+  a remote member's sync gives the channel-gone fix, as before; an older local member's watcher
+  goes on without its folder until stopped; an older watcher keeps a removed folder's marks,
+  so after a rejoin under that name it takes the new entries up to the old highest number as
+  seen (or warns them edited). An older `close lobby` is refused, `a lobby isn't closed`.
 - The record and the section hold everything a later command needs, so a membership made by one
   version is used by the next. A record in another shape (an older layout, or a hand edit) is
   refused, with the fix: the user removes it, then the member rejoins with `--rejoin`. It has
@@ -2428,12 +2553,13 @@ Set up (once per machine)
 
 Channels
   vcharon list   (--server ALIAS | --local) [--json] [--project P] [--role R]
+                 [--remove-idle [C ...] [--days N] [--yes]]
   vcharon create C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
                  [--max-mb N] [--max-files N] [--max-entry-kb N]
   vcharon join   C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
                  [--rejoin] [--takeover]
   vcharon leave  C [--project P] [--role R]
-  vcharon close  C [--project P] [--role R]
+  vcharon close  C [--yes] [--project P] [--role R]
   vcharon lead   C [--to @NAME | --gone] [--project P] [--role R]
   vcharon whoami [C] [--all] [--project P] [--role R] [--json]
 
@@ -2482,7 +2608,8 @@ Every verb also takes `-v` (log lines to stderr too).
   handoff](#leader-handoff).
 - `list` prints one line per channel: its leader (a lobby's founder; `(term T)` after it once a
   handoff made it term 2 or later), members, newest file,
-  format, `age` and `size`; then one line per member (box, os, agent, project) and the notes.
+  format, `age` and `size`; then one line per member (box, os, agent, project, idle: [Removing
+  idle members](#removing-idle-members)) and the notes.
   `age` counts from `CHANNEL.md`'s `created:`, else from the channel folder's mtime, which a
   later join or leave moves on. `created:` has no zone, as a heading's ([Clocks](#clocks)): a
   work channel's is the creating client's clock, a lobby's the server helper's, so the age is
@@ -2491,7 +2618,8 @@ Every verb also takes `-v` (log lines to stderr too).
   neither followed nor counted): disk use, not what the limits count (`charter.folder_total`,
   per member folder, skips stage dirs and stage files), so it can pass `max mb` with no limit hit.
   `--json` gives them as `created` (a heading's time) and `bytes`. Why: only `close` deletes
-  a channel, so a forgotten one stays until someone sees it.
+  a channel, so a forgotten one stays until someone sees it. `--remove-idle`: [Removing idle
+  members](#removing-idle-members).
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
   matches the program it runs. Several topics (`guide member rules`) print in the order given,
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
@@ -3096,8 +3224,11 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
     "term", "leaders", "founder", "members", "member_info", "newest", "created", "bytes",
     "strays", "format", "limits"}` (`leader` and `term` by the charters' terms, null for none
-    or a tie; `leaders` every folder holding a `CHANNEL.md`, a former leader's too), `member_info` each `{"name", "box", "os", "agent", "project"}`,
+    or a tie; `leaders` every folder holding a `CHANNEL.md`, a former leader's too), `member_info` each `{"name", "box", "os", "agent", "project", "idle_seconds"}`,
     `limits` `{"max_mb", "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
+  - `list --remove-idle`: `{"server", "days", "yes", "members", "idle_channels"}`, each member
+    `{"channel", "name", "idle_seconds", "action", "why", "deleted"}` ([Removing idle
+    members](#removing-idle-members)).
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "term", "founder", "leads",
     "mode", "server", "folder", "tree", "box", "box_source", "members", "kind"}` (`leader`,
     `term` and `leads` by the charters' terms in the tree on this box), each member
@@ -3166,9 +3297,10 @@ which and how to adapt. A channel format change is always a minor version at lea
   `ssh-add`.
 - Test seams in the helper's environment: `VCHARON_TEST_MACHINE_ID`, `VCHARON_TEST_OS`,
   `VCHARON_TEST_OS_RELEASE`, `VCHARON_TEST_CLOCK_SHIFT`, `VCHARON_TEST_UTC_OFFSET`, and
-  `VCHARON_CHANNELS_ROOT`. The machine id is the fake server's: a test of another server sets
-  it, and a test of another client machine patches `platform.client_id`, since this box's
-  client id is kept in a file once made.
+  `VCHARON_CHANNELS_ROOT` (`VCHARON_TEST_CLOCK_SHIFT` moves the idle times' clock too: a
+  folder's change times can't be set back). The machine id is the fake server's: a test of
+  another server sets it, and a test of another client machine patches `platform.client_id`,
+  since this box's client id is kept in a file once made.
 - Real ssh, optional: with `VCHARON_TEST_SSH=<dest>` set, the session tests run against a real
   server, in a temp folder under its home. The helper's cache still goes to that user's real
   `~/.local/state/vcharon/cache/` (ssh passes no test variable), at most 8 files, all safe to
@@ -3325,8 +3457,6 @@ Later:
   connections (ControlMaster, never on Windows); not measured. A later run (0.8.4, 30 watchers
   in one channel, started in bursts of 5, 5, 10 and 10) measured 16 to 19 MB of the server's
   available memory per watcher and one reset in a burst of 10.
-- Closing a lobby, and removing the folders of members that never come back: today the user
-  removes them by hand at the root (never the founder's: [The lobby](#the-lobby)).
 
 Not planned: Intel Mac and Linux arm64 binaries, a Homebrew tap or a winget package (pipx or
 uv covers them); support for server distros other than Debian (doctor warns and goes on);

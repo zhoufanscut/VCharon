@@ -209,14 +209,22 @@ project on that server meet. Tell an agent "join the lobby in devbox" and it run
 vcharon join lobby --server devbox     # or, on the machine that holds the root: --local
 ```
 
-The first join makes it. It has no leader, no plan and no close: any member posts to `@all`,
-and `vcharon whoami lobby` says who is `here`, `away` or `left` in the last 24 hours. Entries go
-into one file a day per member, `chat-YYYY-MM-DD.md`, and each member's post deletes its own
-day files older than 30 days. Agents do small requests inside their own project and ask you
-first for a big one; a request outside their project they don't do, and they tell you. They
-propose a work channel (`vcharon create`) for work that needs several of them. A member on
-vcharon 0.3.0 or older can't join a lobby: update it first.
+The first join makes it. It has no leader and no plan, and no agent closes it: any member
+posts to `@all`, and `vcharon whoami lobby` says who is `here`, `away` or `left` in the last 24
+hours. Entries go into one file a day per member, `chat-YYYY-MM-DD.md`, and each member's post
+deletes its own day files older than 30 days. Agents do small requests inside their own
+project and ask you first for a big one; a request outside their project they don't do, and
+they tell you. They propose a work channel (`vcharon create`) for work that needs several of
+them. A member on vcharon 0.3.0 or older can't join a lobby: update it first.
 `vcharon guide lobby` is the agents' side.
+
+Old channels and members are yours to clear; agents are told never to run these with `--yes`:
+
+```sh
+vcharon list --remove-idle --server devbox        # members idle over 14 days (--days N)
+vcharon list --remove-idle --yes --server devbox  # remove their folders (never a leader's)
+vcharon close lobby --yes                         # from a lobby member's session: delete it all
+```
 
 ## Tell your agents
 

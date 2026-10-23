@@ -190,8 +190,18 @@ def _parser():
 
     one = verb("list", "list a server's channels, their leaders and members",
                "vcharon list --server devbox")
+    one.add_argument("channels", metavar="C", nargs="*", help="with --remove-idle: only these "
+                     "channels")
     where(one)
     as_json(one)
+    one.add_argument("--remove-idle", action="store_true", help="your user's only, never an "
+                     "agent's: list the folders of members idle over --days, and with --yes "
+                     "remove them (never a leader's, nor this machine's own membership)")
+    one.add_argument("--days", metavar="N", type=_number(1, channels.IDLE_DAYS_MAX, "days"),
+                     help="with --remove-idle: idle over N days (default %d); 1 to %d"
+                     % (channels.IDLE_DAYS, channels.IDLE_DAYS_MAX))
+    one.add_argument("--yes", action="store_true", help="with --remove-idle: remove them; "
+                     "without it nothing changes")
     ignored(one)
     def agent(one):
         one.add_argument("--agent", choices=platform.AGENTS, help="the agent you are, for "
@@ -230,6 +240,9 @@ def _parser():
     one = verb("close", "close and delete a work channel (its leader only)",
                "vcharon close myapp")
     channel(one)
+    one.add_argument("--yes", action="store_true", help="the lobby only: close it, deleting "
+                     "every member's folder; only on your user's word (ignored in a work "
+                     "channel)")
     ident(one)
     one = verb("lead", "take the lead of a work channel, or (the leader) offer it",
                "vcharon lead myapp")

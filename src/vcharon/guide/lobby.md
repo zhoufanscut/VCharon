@@ -156,7 +156,11 @@ refused while it runs): `vcharon watch lobby --stop`, with your `--project` and 
 project (`vcharon join lobby --server devbox`, or `--local`) takes it back (`took back
 lobby/<name>, this machine's folder`), with no `--rejoin`, and posts `REJOIN`.
 
-Nothing closes a lobby: `close` is refused. Removing one is your user's, by hand: the whole
-`lobby` folder at the channel root. After that, each member's next join is refused (`your join
-record of lobby … is of an earlier channel`): run the `fix:` line's `vcharon leave lobby` once,
-then join again, which makes the new lobby or joins it.
+Your user closes a lobby, never you: `vcharon close lobby --yes` deletes every member's folder,
+so `close lobby` without `--yes` is refused (`closing the lobby deletes every member's folder:
+your user's decision only`), and its `fix:` line's `leave` is yours to run if you want out.
+Once it is closed (or removed by hand), every member's watcher ends with `EXIT closed`: there
+is no leader and no `CLOSED` in a lobby, so run the `fix:` line's `vcharon leave lobby` once,
+then tell your user if it matters. A later `join lobby` makes the new lobby or joins it; one
+run before that `leave` is refused (`your join record of lobby … is of an earlier channel`):
+run its `fix:` line's `leave`, then join again.

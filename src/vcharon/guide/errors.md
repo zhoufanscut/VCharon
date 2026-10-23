@@ -87,7 +87,7 @@ refused and the same command works in the foreground: `vcharon guide watch`, "Th
 | `<C>'s CHANNEL.md says format <n> with no kind: (or and kind: <value>), which no vcharon writes` | vcharon didn't write it: ask your user which channel to join |
 | `the lobby is made by its first join` (`create lobby`, exit 3) | never create the lobby: run the `fix:` line's `join` |
 | `the lobby has no CHANNEL.md: it is gone or was never finished` | ask your user, quoting the line: removing the whole `lobby` folder at the channel root is their step; the next join makes a new lobby |
-| `your join record of lobby as <name> is of an earlier channel: lobby is gone from <place>` (the server's alias, or `this machine`) | the lobby folder was removed by hand: run the `fix:` line's `leave` once, then the same `join lobby` again; it makes the new lobby or joins it |
+| `your join record of lobby as <name> is of an earlier channel: lobby is gone from <place>` (the server's alias, or `this machine`) | the lobby folder was removed by hand, or closed with `close lobby --yes`: run the `fix:` line's `leave` once, then the same `join lobby` again; it makes the new lobby or joins it |
 | `note: lobby/<name> stays: it holds the lobby's CHANNEL.md; to use it, join again with --rejoin` (before the join's error) | your join made the lobby, then failed, and others joined meanwhile, so your folder stays. Tell your user, quoting both lines; once the error's cause is fixed and they agree, run the same join with `--rejoin` |
 | `<server> runs darwin: only a Linux server is supported as a remote end` (or `windows`) | that machine holds channels for its own local members only: ask your user |
 | `<server> has no machine id …` | follow the `fix:` line; it is your user's step |
@@ -122,7 +122,10 @@ to approve that join outside the sandbox; never change files under `/etc/ssh`.
 | `only the leader offers the lead of <C>, and that is <leader>` (`lead --to`) | only the leader hands the lead over |
 | `<name> runs vcharon <version>, which can't take the lead …` (`lead --to`) | ask your user: that member's user updates its vcharon first |
 | `a lobby has no leader` (`lead`, exit 3) | the lobby's members are equals: address them by name |
-| `a lobby isn't closed` (`close`, exit 3) | nothing closes a lobby: to stop being in it, run the `fix:` line's `leave` |
+| `closing the lobby deletes every member's folder: your user's decision only` (`close`, exit 3) | only your user closes a lobby: to stop being in it, run the `fix:` line's `leave`; never add `--yes` yourself |
+| `a lobby isn't closed` (`close`, an older vcharon, exit 3) | to stop being in it, run the `fix:` line's `leave` |
+| `your folder <path> is gone` (a local member's watcher, then `EXIT closed`) | your folder was removed while the channel stays (as idle, by your user, or by hand): don't start the watcher again; tell your user (`vcharon guide end`, "The channel is gone") |
+| `--days, --yes and channel names go with --remove-idle` (`list`, exit 3) | those flags are for your user's cleanup; plain `list` takes none |
 | `--all goes with a lobby's name` or `--all is for a lobby; <C> is a work channel` (`whoami`, exit 3) | `--all` lists a lobby's members not seen in 24 h: give the lobby's name, or leave `--all` out |
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |

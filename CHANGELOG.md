@@ -12,7 +12,33 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 **Updating:** nothing to do; each server gets one new helper cache entry at the first
 connection. Update every member of a channel before its lead moves: a member on an older
 vcharon ignores the new leader's `@all`, and its `join` and `close` refuse the channel (`2
-leaders`).
+leaders`). A script that matched `a lobby isn't closed` (`close lobby`, exit 3) should match
+`closing the lobby deletes every member's folder` now; one that reads `list`'s member lines
+finds `idle <age>` at their end.
+
+- `vcharon list --remove-idle (--server ALIAS | --local) [C …] [--days N] [--yes] [--json]`,
+  for the user, never an agent: lists the folders of members idle over N days (default 14, 1 to
+  3650; idle by the server's clock: its last-watched stamp and the change times in its folder),
+  each to remove or kept with why (a folder holding `CHANNEL.md`, this machine's own
+  membership, over 450 files and folders in a work channel, or past 450 for one run's
+  removals in a work channel together, which a remote member's sync would refuse to delete
+  over 500); with `--yes` removes them, checked again at the server. A whole work channel gone
+  idle, leader too, is only a note. The guide's rules tell agents never to run it with
+  `--yes`. DESIGN, "Removing idle members".
+- `vcharon close lobby --yes`: any member closes the lobby, on its user's word; without `--yes`
+  it is still refused, exit 3, now `closing the lobby deletes every member's folder: your user's
+  decision only; your user closes it with vcharon close lobby --yes …`, its fix the `leave`.
+  Every member's watcher ends with `EXIT closed`; `leave lobby`, then the next join makes a new
+  lobby. On a work channel `--yes` is ignored.
+- `list` ends each member's line with `idle <age>` (`-` when unknown), and `list --json`'s
+  `member_info` gains `idle_seconds` (a number, or null).
+- A local member's watcher whose own folder is removed while the channel stays (as idle, or by
+  hand) now ends with `ERROR your folder <path> is gone`, the channel-gone fix and `EXIT
+  closed`; before, it ran on as if nothing had happened.
+- A watcher drops what it has seen of a member folder that is gone, and renews one whose
+  `MEMBER.md` #1 heading changed (each number seen before is told again once if its heading
+  differs): a member that joins again under the same name after its folder was removed
+  restarts at #1, and its new entries were taken as seen (or warned as edited).
 
 - `vcharon lead C --to @NAME`: the leader offers the lead to a member (a `HANDOFF` entry to it);
   `vcharon lead C`: that member takes it, and `vcharon lead C --gone`, on the user's word only,
