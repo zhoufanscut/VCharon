@@ -10,7 +10,37 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 ## Unreleased
 
 **Updating:** nothing to do; each server gets one new helper cache entry at the first
-connection.
+connection. Update every member of a channel before its lead moves: a member on an older
+vcharon ignores the new leader's `@all`, and its `join` and `close` refuse the channel (`2
+leaders`).
+
+- `vcharon lead C --to @NAME`: the leader offers the lead to a member (a `HANDOFF` entry to it);
+  `vcharon lead C`: that member takes it, and `vcharon lead C --gone`, on the user's word only,
+  takes it from a leader that has been inactive for 30 min (no watcher stamp and no change in
+  its folder, by the server's clock). The taker writes a `CHANNEL.md` of its own with `term:`
+  and `after:`, and the leader is the member whose charter has the highest term; of two takers
+  at once, one wins at the server. It posts `PLAN` into its own `STEPS.md` (the old plan
+  quoted) and `LEADER` to `@all`. Run again, it finishes a takeover that stopped halfway, and
+  a run that stops after the server took the lead says so. A failed sync after an offer or a
+  takeover is a WARN, as after a post.
+  Channel format stays 1. DESIGN, "Leader handoff".
+- The watcher prints `  next: <leader> offers you the lead of C: stop your watcher if it runs
+  (vcharon watch C --stop <flags>), then run: vcharon lead C <flags> ; then tell your user`
+  after an offer to the member, and `  next: <name> leads C now: send reports, DONE and
+  requests to @<name>` after the new leader's `LEADER` (a former leader's line adds that it is
+  a member now). Whose `@all` counts goes by entry numbers: a former leader's up to the last
+  entry it posted to the server before the takeover, the new leader's after its charter. The
+  watcher's start sets its `MEMBER.md`'s `leader:` to the new leader.
+- **How to adapt:** `list --json`'s and `whoami C --json`'s `leader` is the member that leads
+  by the charters' terms, no longer the only folder holding a `CHANNEL.md` (`list`) or the join
+  record's leader (`whoami`); `list`'s `leaders` can name a former leader too, so read
+  `leader`. New fields: `term` in `list --json`'s channels and in `whoami --json`, and `leader`
+  and `term` at the top of `read --json`. A former leader's `leave` works as a member's; the
+  leader's is refused with `you lead C: hand the lead over, or close it` (was `close it
+  instead`); two `CHANNEL.md` holders at one term read `<C> has 2 leaders at term <n> (…)`.
+  `vcharon --help` words `leave`'s line as `(a member; a work channel's leader closes it)`.
+  `close` lists the channel before its lock checks, so a former leader's close is refused
+  with `only the leader closes C, and that is X` even while its watcher runs.
 
 - A remote member's streaming watcher is quiet while nothing is posted: a round sends its down
   state by reference once the helper holds it, an unchanged state comes back the same way, and

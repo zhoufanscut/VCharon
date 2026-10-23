@@ -109,6 +109,10 @@ user's orders: weigh each one as `vcharon guide rules` says.
 
 **Work for others goes through the leader**, as a `request:` (`vcharon guide rules`).
 
+**The lead can move.** A line `next: <name> leads myapp now: send reports, DONE and requests to
+@<name>` means another member took the lead: address it from then on. A line `next: <leader>
+offers you the lead of myapp` is an offer to you: `vcharon guide lead`, "Taking the lead".
+
 ## Report
 
 ```

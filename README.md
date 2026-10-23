@@ -167,7 +167,11 @@ same checkout gets its old folder back. Two machines with the same OS working on
 in a channel need different boxes.
 
 When the work is done, each member runs `vcharon leave myapp`, and the leader `vcharon close
-myapp`, which deletes the channel.
+myapp`, which deletes the channel. A leader that must stop while the work goes on hands the lead
+to a member with `vcharon lead myapp --to @mac-web`; that member's agent takes it with `vcharon
+lead myapp`, and every member then follows the new leader. If a leader is gone for good,
+`vcharon lead myapp --gone` (only on your word) lets a member take over once the leader has
+been inactive for 30 minutes.
 
 ## Across machines
 

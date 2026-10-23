@@ -114,6 +114,12 @@ OLD_LOBBY_NOTE = "  note: lobby here is a work channel, not a lobby"
 TOOK_BACK = ", this machine's folder"
 # the end of a rejoin's vcharon: line, after the old value: the join wrote the new one
 VERSION_DONE = "; join %s it, so there is nothing for you to do"
+# the leader's leave refused: it hands the lead to a member first, or ends the channel. The
+# close is text, not a command: run as printed it would delete the channel with no CLOSED and
+# before the members' DONE
+LEADER_LEAVE_FIX = ("to leave, first offer the lead to a member (vcharon lead %s --to @NAME) and "
+                    "wait until it takes it; or end the channel with CLOSED to @all after every "
+                    "member's DONE, then a close; how: vcharon guide end")
 # close's note when the leader's folder holds no CLOSED to @all: a note only, since the close
 # is done by then, and a refusal would only make the leader post CLOSED into a channel it
 # closes at once (vcharon guide end, "The leader")
@@ -734,6 +740,11 @@ class _Remote:
     def remove(self, channel, name):
         return self.session.call("channel.remove", {"channel": channel, "name": name})
 
+    def lead(self, channel, name, number, mode, when):
+        return self.session.call("channel.lead", {"channel": channel, "name": name,
+                                                  "number": number, "mode": mode,
+                                                  "time": when})
+
 
 class _Local:
     """This machine's channel root, for a server member: the same functions, in-process."""
@@ -757,6 +768,9 @@ class _Local:
 
     def remove(self, channel, name):
         return channels.remove(self.root, channel, name)
+
+    def lead(self, channel, name, number, mode, when):
+        return channels.lead(self.root, channel, name, number, mode, when)
 
 
 def _listing(result):
@@ -878,6 +892,8 @@ def main(args, run):
             return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
     record = membership(args.channel, args.project, args.role)
+    if args.command == "lead":
+        return _lead(args, cfg, record, log, say)
     return _leave(args, cfg, record, log, say, close=args.command == "close")
 
 
@@ -897,28 +913,28 @@ def _list(args, cfg, log, say):
         say("  no channels")
     for ch in listing["channels"]:
         leaders = ch["leaders"]
+        leader, term = _leader_of(ch)
         newest = ch.get("newest")
         fmt = _format_of(ch)
         size = _bytes_of(ch)
         # a lobby has no leader: the folder that holds CHANNEL.md is its founder
-        say("  %s  %s %s  members %s  newest %s  format %s  age %s  size %s"
+        say("  %s  %s %s%s  members %s  newest %s  format %s  age %s  size %s"
             % (ch["name"], "a lobby, founder" if _kind_of(ch) == kinds.LOBBY.name else "leader",
-               leaders[0] if len(leaders) == 1 else "?",
+               leader or "?", " (term %d)" % term if leader and term and term > 1 else "",
                ", ".join(ch["members"]) or "none",
                entries.minute_stamp(newest) if isinstance(newest, (int, float)) else "-",
                "-" if fmt is None else fmt, age_text(_created(ch), now),
                "-" if size is None else charter.size_text(size)))
         if not leaders:
             say("    note: no member's folder holds %s: ask the user" % entries.CHANNEL_FILE)
-        elif len(leaders) > 1:
-            say("    note: %s all hold %s: ask the user"
-                % (", ".join(l + "/" for l in leaders), entries.CHANNEL_FILE))
+        elif leader is None:
+            say("    note: %s: ask the user" % _no_leader(ch["name"], ch).message)
         for one in member_info(ch):
             say("    %s  box %s  os %s  agent %s  project %s"
                 % tuple([one["name"]] + [one[k] or "-" for k in channels.LIST_FIELDS]))
         for stray in ch.get("strays", []):
             say("    note: %s at its top isn't a member's folder" % pathrules.show(stray))
-        if len(leaders) == 1:
+        if leader is not None:
             # the join's own check, as a note: the other channels are still listed
             note = charter.format_note(ch["name"], ch)
             if note is not None:
@@ -926,6 +942,23 @@ def _list(args, cfg, log, say):
     for other in listing["others"]:
         say("  note: %s: %s" % (pathrules.show(other["name"]), other["why"]))
     return 0
+
+
+def _leader_of(ch):
+    """(the leader, its term) of a listed channel: the helper's, by the charters' terms; (None,
+    None) when no one leads, or two at the top term."""
+    leader, term = ch.get("leader"), ch.get("term")
+    if not isinstance(leader, str) or leader not in ch.get("leaders", ()):
+        return None, None
+    return leader, term if isinstance(term, int) and not isinstance(term, bool) else None
+
+
+def _no_leader(channel, ch):
+    """The refusal for a listed channel with CHANNEL.md holders but no leader: two or more
+    hold its top term."""
+    tied = [t for t in ch.get("tied") or () if isinstance(t, str)] or list(ch["leaders"])
+    term = ch.get("term") if isinstance(ch.get("term"), int) else charter.FIRST_TERM
+    return channels.refused(charter.tied_text(channel, tied, term), "ask the user")
 
 
 def _format_of(ch):
@@ -997,11 +1030,13 @@ def member_info(ch):
 
 def list_json(server, listing):
     """vcharon list --json: {"server", "channels", "others"}. "server" is the alias, or null
-    for --local; each channel is {"name", "kind", "leader", "leaders", "founder", "members",
-    "member_info", "newest", "created", "bytes", "strays", "format", "limits"}: "kind" is
-    "work" or "lobby" (null for a format or kind this vcharon can't use), "leader" is the one
-    leader, or null when there are none or several ("leaders" lists them); a lobby (its kind
-    read from its one CHANNEL.md) has none, "leader" null and "leaders" empty, and "founder" is
+    for --local; each channel is {"name", "kind", "leader", "term", "leaders", "founder",
+    "members", "member_info", "newest", "created", "bytes", "strays", "format", "limits"}:
+    "kind" is "work" or "lobby" (null for a format or kind this vcharon can't use), "leader" is
+    the member that leads it by the charters' terms and "term" its term, both null when none
+    or two lead at the top term ("leaders" lists every folder that holds a CHANNEL.md, a
+    former leader's too); a lobby (its kind read from its one CHANNEL.md) has none, "leader"
+    and "term" null and "leaders" empty, and "founder" is
     the member whose folder holds that CHANNEL.md (null in a work channel); "member_info" each
     member's {"name", "box", "os", "agent", "project"} from its MEMBER.md (null for a field it
     lacks), "newest" the newest entry's local time (YYYY-mm-dd HH:MM) or null, "created" the
@@ -1012,12 +1047,14 @@ def list_json(server, listing):
     out = []
     for ch in listing["channels"]:
         holders = list(ch["leaders"])
-        one = holders[0] if len(holders) == 1 else None
+        one, term = _leader_of(ch)
         newest = ch.get("newest")
         kind = _kind_of(ch)
         lobby = kind == kinds.LOBBY.name
         out.append({"name": ch["name"], "kind": kind,
-                    "leader": None if lobby else one, "leaders": [] if lobby else holders,
+                    "leader": None if lobby else one,
+                    "term": None if lobby or one is None else term,
+                    "leaders": [] if lobby else holders,
                     "founder": one if lobby else None, "members": list(ch["members"]),
                     "member_info": member_info(ch),
                     "newest": entries.minute_stamp(newest) if isinstance(newest, (int, float))
@@ -1501,15 +1538,15 @@ def _leader(server, channel, found):
     if not leaders:
         raise channels.refused("%s has no leader (no member's folder holds %s)"
                                % (channel, entries.CHANNEL_FILE), "ask the user")
-    if len(leaders) > 1:
-        raise channels.refused("%s has %d leaders (%s hold %s)"
-                               % (channel, len(leaders), ", ".join(l + "/" for l in leaders),
-                                  entries.CHANNEL_FILE), "ask the user")
+    # by the charters' terms: a former leader's CHANNEL.md stays in its folder
+    leader = _leader_of(found)[0]
+    if leader is None:
+        raise _no_leader(channel, found)
     # the channel's format and limits, read at the server: a newer format, or none, is
     # refused before any claim
     info = {"format": found.get("format"), "kind": found.get("kind"),
             "limits": charter.check(channel, found)}
-    return found, leaders[0], info
+    return found, leader, info
 
 
 def _make_lobby(server, channel, name):
@@ -1655,6 +1692,26 @@ def refresh_version(own, name):
     try:
         _update_fields(own, name, {"agent": None, "agent_given": False}, lambda line: None,
                        wait=0)
+    except (VCharonError, OSError):
+        pass
+
+
+def _member_leader(path, name):
+    """The leader: of MEMBER.md's entry name#1 at path; None for none. OSError when it can't
+    be read."""
+    return entries.header_of(entries.read_text(path), name, 1).get("leader")
+
+
+def refresh_leader(own, name, leader):
+    """At a watcher's start: the own MEMBER.md's leader: set to leader (the charters' chain's)
+    when it says another, as refresh_version sets vcharon:, with its rules: silent, one try at
+    the post lock, a failure leaves the line. None (no one leads at the top term) leaves it."""
+    if leader is None:
+        return
+    path = os.path.join(own, entries.MEMBER_FILE)
+    try:
+        if _member_leader(path, name) != leader:
+            entries.set_header(path, own, name, 1, "leader", leader, wait=0)
     except (VCharonError, OSError):
         pass
 
@@ -1808,6 +1865,8 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
     # here, not at the top: the watch module imports this one
     from .mailbox import watch
     lobby = kind_ is kinds.LOBBY
+    # whose @all is to all: by the charters' terms in the tree, as the watcher's
+    chain = charter.chain(tree, leader)
     since = _now() - datetime.timedelta(hours=24)
     left_at = (entries.parse_time(entries.last_leave(os.path.join(tree, name), name))
                if lobby else None)
@@ -1846,8 +1905,8 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                 if (lobby and e.number == 1
                         and os.path.basename(md) == entries.MEMBER_FILE):
                     continue
-                if "@" + name not in e.to and not (entries.ALL in e.to
-                                                   and kind_.may_post_all(folder, leader)):
+                if "@" + name not in e.to and not (
+                        entries.ALL in e.to and kind_.may_post_all(folder, e.number, chain)):
                     continue
                 if marks is not None and not watch.marked(marks, folder, e):
                     continue
@@ -1930,7 +1989,7 @@ def _not_shown(tree, name, leader, kind_, wheres):
     except OSError:
         return [len(where) for where in wheres]
     ordered, _ = read.order(items, read._now())
-    listed = read.pick(ordered, mine=(name, leader, kind_))[0]
+    listed = read.pick(ordered, mine=(name, charter.chain(tree, leader), kind_))[0]
     at = [(item.path, item.e.line) for item in listed]
     lasts = []
     for where in wheres:
@@ -1957,13 +2016,9 @@ def _leave(args, cfg, record, log, say, close):
         # channel, closed by its leader. Before the locks and the listing: nothing to check
         raise VCharonError("config", "a lobby isn't closed",
                            hint=LEAVE_COMMAND % (channel, name_flags(channel, name, record)))
-    # a lobby's founder leaves as any member does
+    # a lobby's founder leaves as any member does. Who leads is the server's to say (the
+    # charters' terms): the record's leader is where to look first
     leads = record["leader"] == name and kind_.can_close
-    if close and not leads:
-        # text, not a command: a member leaves only after the leader's CLOSED
-        raise channels.refused("only the leader closes %s, and that is %s"
-                               % (channel, record["leader"]),
-                               "members leave after the leader's CLOSED; how: vcharon guide end")
     # before anything on the server changes: a held lock can't leave a half-closed channel.
     # The watcher's lock stays held to the end, so no watcher starts during the command; the
     # removal releases it just before it deletes the lock file
@@ -1972,10 +2027,12 @@ def _leave(args, cfg, record, log, say, close):
             watcher, snapshot = _check_locks(record, section, channel)
             locks.enter_context(watcher)
             return watcher, snapshot
-        # a leader's leave lists the server first (no change there either): on a live channel
-        # its answer is close, and a lock refusal first would have it stop the watcher of a
-        # channel it still leads
-        taken = None if leads and not close else take()
+        # a close, and the record's leader's leave, list the server first (no change there
+        # either): the close is refused by the leader the listing names, so a former leader
+        # isn't told to stop its watcher for a close it may not make, and on a live channel a
+        # leader's answer is close, and a lock refusal first would have it stop the watcher of
+        # a channel it still leads. The locks come before the removal
+        taken = None if leads or close else take()
         return _leave_held(args, cfg, record, log, say, close, take, taken)
 
 
@@ -1983,7 +2040,6 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
     channel = args.channel
     name = record["name"]
     kind_ = kinds.of(record)
-    leads = record["leader"] == name and kind_.can_close
     section = "%s.%s" % (channel, name)
     job = cfg.named(section)
     settings = job[0].settings if job else cfg.settings
@@ -2006,7 +2062,22 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                                       platform.shown_machine(server.machine),
                                       platform.shown_machine(record["machine"])),
                                    "check the alias")
+        # the leader by the charters' terms, as the server lists it: a handoff moves it, and
+        # only the taker's record follows (the record's leader stays where nothing is listed)
+        found = _find(server.list(), channel, server.where)
+        leader = record["leader"]
+        if found is not None and kind_.can_close:
+            leader = _leader_of(found)[0]
         if close:
+            if found is not None and leader != name:
+                if leader is None:
+                    raise _no_leader(channel, found)
+                # text, not a command: a member leaves only after the leader's CLOSED
+                raise channels.refused("only the leader closes %s, and that is %s"
+                                       % (channel, leader), "members leave after the "
+                                       "leader's CLOSED; how: vcharon guide end")
+            if taken is None:
+                taken = take()
             # read before the removal: a local leader's folder goes with the channel
             told = _told_closed(_own_of(cfg, record, section), name)
             try:
@@ -2021,9 +2092,8 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                     say(platform.runnable(CLOSE_UNTOLD_NOTE % channel))
             gone = True
         else:
-            found = _find(server.list(), channel, server.where)
             # a local member's server is this machine
-            where = "on the server" if record["ssh"] else "on this machine"
+            where = "on the server" if record["ssh"] is not None else "on this machine"
             stale = _stale(found, name, record) if found is not None else None
             gone = found is None or stale is not None
             if found is None:
@@ -2032,15 +2102,14 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
                 # the own folder gone there (or a channel made again): a LEAVE would go
                 # nowhere, and a sync fails on it, so the removal comes at once
                 say("  note    %s %s %s" % (channel, where, stale))
-            if leads and not gone:
+            if leader == name and kind_.can_close and not gone:
                 # only a live channel is the leader's to close; a gone or stale one's record is
                 # left like a member's, since close can't remove a channel that isn't its own.
-                # Text, not a command: a close run as printed would delete the channel with no
-                # CLOSED and before the members' DONE
-                raise channels.refused("you lead %s: close it instead" % channel,
-                                       "a leader ends the channel with CLOSED to @all after "
-                                       "every member's DONE, then a close; how: vcharon "
-                                       "guide end")
+                # A former leader leaves as a member. The close is text, not a command: run as
+                # printed it would delete the channel with no CLOSED and before the members'
+                # DONE
+                raise channels.refused("you lead %s: hand the lead over, or close it" % channel,
+                                       LEADER_LEAVE_FIX % channel)
         if taken is None:
             taken = take()
     watcher, snapshot = taken
@@ -2061,9 +2130,10 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
         if own is not None and not entries.has_left(own, name):
             # the cleanup's lines after the posted line, in post's order
             cleanup = []
-            (entry_id, _), path = _announce(own, name, record["leader"], kind_, "LEAVE",
-                                            "%s left %s." % (name, channel), cleanup.append)
-            to = kind_.announce_to(name, record["leader"])
+            (entry_id, _), path = _announce(own, name, leader or record["leader"], kind_,
+                                            "LEAVE", "%s left %s." % (name, channel),
+                                            cleanup.append)
+            to = kind_.announce_to(name, leader or record["leader"])
             say("  posted LEAVE %s into %s, to %s%s"
                 % (entry_id, os.path.basename(path), to,
                    " (wakes no one)" if to == "@" + name else ""))
@@ -2189,3 +2259,289 @@ def _remove_tree(path):
             handle.close()
     except OSError as e:
         raise fsops.error(e, path)
+
+
+# --- vcharon lead: the leader offers the lead, a member takes it (DESIGN, "Leader handoff") ---
+
+# the entries vcharon lead posts: the offer (to the member, with lead: <name>), the taker's
+# plan (into its own STEPS.md, to itself: the old leader's STEPS.md quoted) and its word to all
+HANDOFF_TITLE = channels.HANDOFF_TITLE
+PLAN_TITLE = "PLAN"
+LEADER_TITLE = "LEADER"
+# a refusal that is no channel's fault: a lobby has no leader to hand over
+LOBBY_LEAD_HINT = "a lobby's members are equals: address them by name"
+# the taker's last lines: its watcher was stopped for the takeover
+LEAD_NEXT = ("  next: tell your user you lead %s now (term %d); then start your watcher again "
+             "(vcharon guide lead): vcharon watch %s --until-change %s")
+# a take that stopped after the server wrote the charter: the lead is taken, and a re-run
+# (the server's same reply) finishes the record, MEMBER.md, PLAN, LEADER and the sync
+LEAD_UNFINISHED = ("  note: you lead %s at the server now (term %d), but the takeover stopped "
+                   "before its end: once the error below is dealt with, run: vcharon lead %s %s "
+                   "again")
+
+
+def _record_server(cfg, record, log, stack):
+    """The server of record's membership, its machine id checked against the record's, as
+    leave and close check it."""
+    section = "%s.%s" % (record["channel"], record["name"])
+    if record["ssh"] is None:
+        server = _Local(log)
+    else:
+        job = cfg.named(section)
+        settings = job[0].settings if job else cfg.settings
+        ssh.check_dest(record["ssh"])
+        session = stack.enter_context(ssh.Session(settings, record["ssh"], log))
+        server = _Remote(session, record["ssh"], session.open(), log)
+    _need_machine(server)
+    if server.machine != record["machine"]:
+        raise channels.refused("%s isn't the server %s is on (its machine id is %s, the "
+                               "record's %s, both hashed)"
+                               % (server.where, record["channel"],
+                                  platform.shown_machine(server.machine),
+                                  platform.shown_machine(record["machine"])),
+                               "check the alias")
+    return server
+
+
+def _listed(server, channel):
+    found = _find(server.list(), channel, server.where)
+    if found is None:
+        raise VCharonError("not_found", "there is no channel %s on %s" % (channel, server.where),
+                           "check its name: vcharon list %s" % _where_flag(server))
+    return found
+
+
+def _own_checked(cfg, record, section):
+    """The own folder on this box, which must hold MEMBER.md (leave's rule: a remote member
+    whose tree here lost it rejoins)."""
+    own = _own_of(cfg, record, section)
+    if own is None or fsops.missing(os.path.join(own, entries.MEMBER_FILE)):
+        where = own or local_text(section)
+        if record["ssh"] is not None:
+            raise VCharonError("not_found", "your own folder %s has no %s on this machine"
+                               % (where, entries.MEMBER_FILE),
+                               rejoin_hint(record["channel"], record["ssh"], record["name"]))
+        raise VCharonError("not_found", "your own folder %s has no %s" % (where,
+                                                                           entries.MEMBER_FILE),
+                           CHANNEL_GONE_HINT % (record["channel"],
+                                                name_flags(record["channel"], record["name"],
+                                                           record)))
+    return own
+
+
+def _lead(args, cfg, record, log, say):
+    """vcharon lead C: with --to @NAME the leader offers the lead (_offer); without, a member
+    takes it (_take): on the leader's offer naming it, or with --gone once the leader has been
+    inactive channels.GONE_AFTER."""
+    if not kinds.of(record).can_close:
+        raise VCharonError("config", "a lobby has no leader", hint=LOBBY_LEAD_HINT)
+    if args.to is not None and args.gone:
+        raise VCharonError("config", "--to and --gone don't go together",
+                           hint="--to @NAME offers the lead (the leader); --gone takes it, on "
+                           "your user's word only")
+    if args.to is not None:
+        return _offer(args, cfg, record, log, say)
+    return _take(args, cfg, record, log, say)
+
+
+def _offer(args, cfg, record, log, say):
+    """The leader's offer: a HANDOFF entry to @X with the header lead: X, into RESULTS.md,
+    then a remote leader's sync. Refused for a member with no folder, one that left, and one
+    whose MEMBER.md says a vcharon without lead (charter.lacks_lead)."""
+    channel, name = args.channel, record["name"]
+    section = "%s.%s" % (channel, name)
+    target = args.to.removeprefix("@")
+    if pathrules.writer_problem(target) is not None:
+        raise VCharonError("config", "--to %s isn't a member's name" % pathrules.show(args.to),
+                           hint="give --to @NAME, the name of a member of the channel")
+    if target == name:
+        raise VCharonError("config", "--to names you", hint="give another member's name")
+    with contextlib.ExitStack() as stack:
+        server = _record_server(cfg, record, log, stack)
+        say("vcharon: lead %s --to @%s  as %s on %s" % (channel, target, name, server.where))
+        found = _listed(server, channel)
+        leader = _leader_of(found)[0]
+        if leader != name:
+            raise channels.refused("only the leader offers the lead of %s, and that is %s"
+                                   % (channel, leader or "no one at its top term"),
+                                   "ask your user")
+        if target not in found["members"]:
+            raise channels.refused("%s has no folder in %s" % (target, channel),
+                                   "check the name: vcharon whoami %s %s"
+                                   % (channel, name_flags(channel, name, record)))
+        own = _own_checked(cfg, record, section)
+        tree = os.path.dirname(own)
+        if entries.has_left(os.path.join(tree, target), target):
+            raise channels.refused("%s left %s" % (target, channel),
+                                   "offer the lead to a member that is in the channel")
+        fields = found.get("fields", {}).get(target) or {}
+        version = fields.get("vcharon") if isinstance(fields, dict) else None
+        if charter.lacks_lead(version):
+            raise channels.refused("%s runs vcharon %s, which can't take the lead (it came in "
+                                   "%s)" % (target, version or "unknown",
+                                            ".".join(map(str, charter.LEAD_SINCE))),
+                                   "ask your user: %s's user updates its vcharon, then offer "
+                                   "it again" % target)
+        limits = channel_limits(record)
+        post_mod = _post_module()
+        (entry_id, _), _path = _post_into(
+            own, name, kinds.WORK, os.path.join(own, post_mod.RESULTS_FILE), HANDOFF_TITLE,
+            ["@" + target], say, header=[(channels.HANDOFF_KEY, target)],
+            body="%s offers %s the lead of %s. Take it, then tell your user."
+            % (name, target, channel), check=post_mod.limit_check(own, limits))
+        say("  posted %s %s into %s, to @%s" % (HANDOFF_TITLE, entry_id, post_mod.RESULTS_FILE,
+                                                target))
+    if record["ssh"] is not None:
+        _send(record)
+    say("  next: %s's watcher tells it to take the lead; you lead %s until it does"
+        % (target, channel))
+    say("OK  offered the lead of %s to %s" % (channel, target))
+    return 0
+
+
+def _send(record):
+    """A remote member's new entries go to the server as a post's do (cli._send_post): its up
+    job; a running watcher's round holding the lock is a note, any other failure a WARN, never
+    a failed command, since the entries are written and a re-run would post them again."""
+    from . import cli
+    cli._send_post(record["channel"], record, ["--project", record["project"]]
+                   + (["--role", record["role"]] if record["role"] else []))
+
+
+def _post_module():
+    # here, not at the top: the mailbox package imports this module
+    from .mailbox import post
+    return post
+
+
+def _has_entry(own, name, title, term):
+    """Whether own holds name's entry titled title with the header term: term: a step of a
+    takeover done already (a re-run finishes a half-done one)."""
+    for path in entries.md_files(own):
+        try:
+            found = entries.parse_file(path)
+        except OSError:
+            continue
+        for e in found:
+            if (e.name == name and e.title.strip() == title
+                    and dict(reversed(e.header)).get("term") == str(term)):
+                return True
+    return False
+
+
+def _write_charter_copy(own, text):
+    """A remote taker's own CHANNEL.md, written as the server's text, byte for byte, so its up
+    sends the server's own bytes back: through a stage file and one replace. Nothing when it
+    holds that text already."""
+    path = os.path.join(own, entries.CHANNEL_FILE)
+    data = text.encode("utf-8")
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return
+    except FileNotFoundError:
+        pass
+    _check_member_file(own)
+    umask = os.umask(0)
+    os.umask(umask)
+    try:
+        entries._swap(path, own, data, 0o666 & ~umask)
+    except OSError as e:
+        raise fsops.error(e, path) from e
+
+
+def _take(args, cfg, record, log, say):
+    """A member takes the lead (DESIGN, "Leader handoff"), each step skipped when done already,
+    so a run that stopped halfway is finished by running it again: the watcher's lock (and the
+    job locks checked), as close takes them; under the post lock, the next number and
+    channel.lead, whose reply's charter a remote taker writes into its tree; the record's,
+    the section's and MEMBER.md's leader; a PLAN entry into its own STEPS.md to itself, the
+    old leader's STEPS.md quoted; LEADER to @all, and to each member whose vcharon has no lead;
+    then a remote taker's sync. A run that stops once the server wrote the charter says to run
+    it again (LEAD_UNFINISHED)."""
+    channel, name = args.channel, record["name"]
+    mode = "gone" if args.gone else "offer"
+    post_mod = _post_module()
+    taken = []
+    try:
+        return _take_steps(args, cfg, record, log, say, mode, post_mod, taken)
+    except BaseException:
+        if taken:
+            say(platform.runnable(LEAD_UNFINISHED % (channel, taken[0], channel,
+                                                     name_flags(channel, name, record))))
+        raise
+
+
+def _take_steps(args, cfg, record, log, say, mode, post_mod, taken):
+    """_take's steps; taken gets the term once the server wrote the charter."""
+    channel, name = args.channel, record["name"]
+    section = "%s.%s" % (channel, name)
+    with contextlib.ExitStack() as locks:
+        watcher, _snapshot = _check_locks(record, section, channel)
+        locks.enter_context(watcher)
+        with contextlib.ExitStack() as stack:
+            server = _record_server(cfg, record, log, stack)
+            say("vcharon: lead %s%s  as %s on %s" % (channel, " --gone" if args.gone else "",
+                                                     name, server.where))
+            own = _own_checked(cfg, record, section)
+            limits = channel_limits(record)
+            with entries.lock(own):
+                number = entries.next_number(own, name)
+                got = server.lead(channel, name, number, mode, entries.stamp(time.time()))
+                taken.append(got["term"])
+                if record["ssh"] is not None:
+                    _write_charter_copy(own, got["charter"])
+            term, after, before = got["term"], got["after"], got["from"]
+            say("  you lead %s: term %d, after %s" % (channel, term, after))
+            found = _listed(server, channel)
+        if record["leader"] != name:
+            write_record(dict(record, leader=name))
+        if record["ssh"] is not None:
+            jobs = cfg.named(section)
+            if not jobs or jobs[0].mailbox.leader != name:
+                write_section(cfg, section, record["ssh"], name, name, record["remote"],
+                              record["limits"], kinds.of(record))
+        path = os.path.join(own, entries.MEMBER_FILE)
+        if _member_leader(path, name) != name:
+            entries.set_header(path, own, name, 1, "leader", name)
+        check = post_mod.limit_check(own, limits)
+        if not _has_entry(own, name, PLAN_TITLE, term):
+            intro = ("%s took the lead of %s from %s (term %d, after %s). %s's %s as it was:"
+                     % (name, channel, before, term, after, before, post_mod.STEPS_FILE))
+            steps = got.get("steps") or "(none)"
+            if got.get("steps_cut"):
+                intro += " (cut to fit the channel's entry limit)"
+            plan_path = os.path.join(own, post_mod.STEPS_FILE)
+            try:
+                (entry_id, _), _ = _post_into(own, name, kinds.WORK, plan_path, PLAN_TITLE,
+                                              ["@" + name], say, header=[("term", str(term))],
+                                              body=intro + "\n\n" + steps, check=check)
+            except VCharonError as e:
+                if e.code != "too_big":
+                    raise
+                (entry_id, _), _ = _post_into(
+                    own, name, kinds.WORK, plan_path, PLAN_TITLE, ["@" + name], say,
+                    header=[("term", str(term))], check=check,
+                    body=intro + " too big to quote here; it is in %s/%s"
+                    % (before, post_mod.STEPS_FILE))
+            say("  posted %s %s into %s, to @%s" % (PLAN_TITLE, entry_id, post_mod.STEPS_FILE,
+                                                    name))
+        if not _has_entry(own, name, LEADER_TITLE, term):
+            fields = found.get("fields") if isinstance(found.get("fields"), dict) else {}
+            older = [m for m in found["members"] if m != name and charter.lacks_lead(
+                (fields.get(m) or {}).get("vcharon") if isinstance(fields.get(m), dict)
+                else None)]
+            to = [entries.ALL] + ["@" + m for m in older]
+            (entry_id, _), _ = _post_into(
+                own, name, kinds.WORK, os.path.join(own, post_mod.RESULTS_FILE), LEADER_TITLE,
+                to, say, header=[("term", str(term))], check=check,
+                body="%s leads %s now (term %d, after %s): send reports, DONE and requests to "
+                "@%s." % (name, channel, term, after, name))
+            say("  posted %s %s into %s, to %s" % (LEADER_TITLE, entry_id,
+                                                   post_mod.RESULTS_FILE, " ".join(to)))
+        if record["ssh"] is not None:
+            # the server has the charter already: the lead is taken; the entries wait
+            _send(record)
+    say(platform.runnable(LEAD_NEXT % (channel, term, channel, name_flags(channel, name))))
+    say("OK  you lead %s (term %d)" % (channel, term))
+    return 0

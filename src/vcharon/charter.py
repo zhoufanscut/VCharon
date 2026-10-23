@@ -12,7 +12,13 @@ The leader's CHANNEL.md entry #2, written by create, carries them in its header:
 
 A lobby's (format 2) holds `kind: lobby` right after format:, and the lobby's fixed limits
 (DESIGN, "The lobby"). Sizes are decimal, as the sync's lines print them: 1 MB is 1,000,000
-bytes, 1 kB 1,000."""
+bytes, 1 kB 1,000.
+
+A member that takes the lead writes a CHANNEL.md of its own (its folder is its own to write),
+whose entry carries `term: T` and `after: <L>#<m>`; a charter without term: is term 1. The
+leader is the folder whose charter has the highest term (chain, DESIGN, "Leader handoff"). A
+charter's header is that of the folder's own last entry in its CHANNEL.md: a member that leads
+a second time appends one there."""
 
 from __future__ import annotations
 
@@ -22,7 +28,7 @@ import re
 import stat
 import tempfile
 
-from . import entries, pathrules, platform
+from . import VERSION, entries, pathrules, platform
 from .proto import VCharonError
 
 # The newest channel format this vcharon reads. Raised only for a change an older vcharon
@@ -97,12 +103,30 @@ def _number(value):
     return int(value)
 
 
+def own_entry(text, name):
+    """The last entry of name in a CHANNEL.md's text: its charter (create's #2, or the entry a
+    takeover wrote); None when it holds none."""
+    found = [e for e in entries.parse(text) if e.name == name]
+    return found[-1] if found else None
+
+
+def header_of(text, name):
+    """The other header lines of name's charter in CHANNEL.md's text (own_entry), as a dict,
+    the first value of each key; {} when it holds none."""
+    entry = own_entry(text, name)
+    out = {}
+    for key, value in entry.header if entry is not None else ():
+        if key and key not in out:
+            out[key] = value
+    return out
+
+
 def parse(text, leader):
-    """{"format", "limits"} from CHANNEL.md's text: the header of the leader's entry #2;
-    "format" an int or None, "limits" {max_mb, max_files, max_entry_kb}, each an int or None;
-    and "kind", the kind: line's text, only when it has one (a work channel's has none). Not
-    checked here: the client does that (check)."""
-    found = entries.header_of(text, leader, 2)
+    """{"format", "limits"} from CHANNEL.md's text: the header of the leader's charter
+    (own_entry); "format" an int or None, "limits" {max_mb, max_files, max_entry_kb}, each an
+    int or None; and "kind", the kind: line's text, only when it has one (a work channel's has
+    none). Not checked here: the client does that (check)."""
+    found = header_of(text, leader)
     out = {"format": _number(found.get("format")),
            "limits": {k: _number(found.get(HEADER_KEYS[k])) for k in LIMIT_KEYS}}
     if found.get("kind") is not None:
@@ -137,10 +161,168 @@ def read_text(member_folder):
 
 
 def created(text, leader):
-    """The created: time of CHANNEL.md's #2 (text) as written, a heading's local time with no
-    zone; None when it has none in that shape."""
-    value = entries.header_of(text, leader, 2).get("created")
+    """The created: time of the leader's charter in CHANNEL.md's text as written, a heading's
+    local time with no zone; None when it has none in that shape."""
+    value = header_of(text, leader).get("created")
     return value if entries.parse_time(value) is not None else None
+
+
+# --- leadership by terms (DESIGN, "Leader handoff") ---
+
+# a charter without term: is term 1: create's, and every one an older vcharon wrote
+FIRST_TERM = 1
+# the most a term: line may say; one bigger isn't vcharon's
+TERM_MAX = 999999999
+# the first release with vcharon lead: a member whose MEMBER.md says an older one ignores a new
+# leader's @all, so the LEADER entry names it too, and an offer to it is refused
+LEAD_SINCE = (0, 8, 6)
+_RELEASE = re.compile(r"\A(\d+)\.(\d+)\.(\d+)")
+
+
+def _release(version):
+    m = _RELEASE.match(version) if isinstance(version, str) else None
+    return None if m is None else tuple(int(n) for n in m.groups())
+
+
+def lacks_lead(version):
+    """Whether a member whose MEMBER.md says version (None: none) runs a vcharon without
+    vcharon lead: older than LEAD_SINCE, and older than this build (a build that has it but
+    still carries an older number writes that number too)."""
+    numbers, this = _release(version), _release(VERSION)
+    return numbers is None or (numbers < LEAD_SINCE and (this is None or numbers < this))
+
+
+class Charter:
+    """One charter: folder's entry #number in its CHANNEL.md, of term term; after: the
+    (name, number) its after: names, or None (term 1's)."""
+
+    def __init__(self, folder, number, term, after):
+        self.folder = folder
+        self.number = number
+        self.term = term
+        self.after = after
+
+    def __repr__(self):
+        return "Charter(%r, %r, %r, %r)" % (self.folder, self.number, self.term, self.after)
+
+
+def charters_of(text, folder):
+    """The charters in folder's CHANNEL.md text: each entry of folder's own, in file order. A
+    file with none (a hand edit) still makes folder a holder: one term 1 charter numbered 0."""
+    out = []
+    for e in entries.parse(text):
+        if e.name != folder:
+            continue
+        head = {}
+        for key, value in e.header:
+            head.setdefault(key, value)
+        term = _number(head.get("term"))
+        after = entries.parse_id(head.get("after") or "")
+        out.append(Charter(folder, e.number, term if term and term <= TERM_MAX
+                           else FIRST_TERM, after))
+    return out or [Charter(folder, 0, FIRST_TERM, None)]
+
+
+class Chain:
+    """Who leads a work channel, and whose @all counts, from the charters of its tree: the
+    leader holds the highest term; a tie there is no leader. fallback: the leader to go by
+    while the tree holds no charter (a remote member before its first pull: its record's)."""
+
+    def __init__(self, charters, fallback=None):
+        self.charters = sorted(charters, key=lambda c: (c.term, c.folder, c.number))
+        self.fallback = fallback
+        if not self.charters:
+            self.term = FIRST_TERM if fallback is not None else None
+            self.leader = fallback
+            self.tied = []
+            return
+        self.term = self.charters[-1].term
+        top = sorted({c.folder for c in self.charters if c.term == self.term})
+        self.leader = top[0] if len(top) == 1 else None
+        self.tied = top if len(top) > 1 else []
+
+    def holders(self):
+        """Every folder that holds a charter, in name order."""
+        return sorted({c.folder for c in self.charters})
+
+    def top(self):
+        """The leader's charter of the top term, or None."""
+        for c in reversed(self.charters):
+            if c.term == self.term and c.folder == self.leader:
+                return c
+        return None
+
+    def former(self, folder):
+        """Whether folder held an earlier term and leads no more."""
+        return folder != self.leader and any(c.folder == folder for c in self.charters)
+
+    def term_of(self, folder):
+        """The term folder leads in, or None."""
+        return self.term if folder is not None and folder == self.leader else None
+
+    def counts_all(self, folder, number):
+        """Whether folder's entry #number to @all is to all, by entry numbers, never clocks:
+        the top term's holder (charter #c) from #c + 1 on; the holder of an earlier term from
+        #c + 1 to the #m its successor's after: names, and none after. Term 1 counts from #1,
+        as before any handoff. number None: a new entry, which only the leader's counts. A tie
+        at the top counts nobody's new @all."""
+        if not self.charters:
+            return folder is not None and folder == self.fallback
+        for c in self.charters:
+            if c.folder != folder:
+                continue
+            low = 0 if c.term == FIRST_TERM else c.number
+            later = [d.term for d in self.charters if d.term > c.term]
+            if not later:
+                if folder == self.leader and (number is None or number > low):
+                    return True
+                continue
+            ends = [d.after[1] for d in self.charters if d.term == min(later)
+                    and d.after is not None and d.after[0] == folder]
+            if number is not None and ends and low < number <= max(ends):
+                return True
+        return False
+
+
+def tied_text(channel, tied, term):
+    """The refusal's text for a channel two or more lead at its top term."""
+    return ("%s has %d leaders at term %d (%s hold its charter)"
+            % (channel, len(tied), term, ", ".join(f + "/" for f in tied)))
+
+
+def chain(tree, fallback=None):
+    """The Chain of the channel tree (a channel folder, or a remote member's copy): the
+    charters in each member folder's CHANNEL.md, its own folder's too. A tree that can't be
+    listed holds none."""
+    found = []
+    try:
+        names = sorted(os.listdir(tree))
+    except OSError:
+        names = []
+    for name in names:
+        if pathrules.writer_problem(name) is not None:
+            continue
+        folder = os.path.join(tree, name)
+        try:
+            if not stat.S_ISDIR(os.lstat(folder).st_mode):
+                continue
+            if not stat.S_ISREG(os.lstat(os.path.join(folder, entries.CHANNEL_FILE)).st_mode):
+                continue
+        except OSError:
+            continue
+        found += charters_of(read_text(folder), name)
+    return Chain(found, fallback)
+
+
+def takeover_entry(channel, name, term, after, old):
+    """(title, to, header) of the charter a taker writes into its own CHANNEL.md: leader:,
+    term: and after:, then the fields of the old leader's charter (old: its header_of): its
+    created:, rules:, format:, created by: and limits, so every reader finds the channel's.
+    To the taker itself: its LEADER entry to @all is the one that tells."""
+    keys = ["created", "rules", "format", "created by"] + [HEADER_KEYS[k] for k in LIMIT_KEYS]
+    return ("lead of %s taken (term %d)" % (channel, term), ["@" + name],
+            [("leader", name), ("term", str(term)), ("after", "%s#%d" % after)]
+            + [(k, old[k]) for k in keys if old.get(k) is not None])
 
 
 def limits_problem(limits):

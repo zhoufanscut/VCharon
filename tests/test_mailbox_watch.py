@@ -434,7 +434,7 @@ class HoldTest(WatchCase):
         _code, lines = self.watch(third, rounds=3)
         self.assertEqual(lines, [watching(self.tree, 1), *self.HELD] + [
             "to all: mac#3 — CLOSED  (mac/RESULTS.md)",
-            watch.closed_next("mb", "debian", "mac")])
+            watch.Nexts("mb", "debian").closed])
 
     def test_merged_before_a_warn(self):
         def third():
@@ -3034,15 +3034,15 @@ class EntriesTest(WatchCase):
             "1 other entry (linux)",
             "EXIT change (exit 0)"])
 
-    def test_the_leader_is_the_records(self):
+    def test_the_leader_is_the_records_until_a_charter(self):
         # a server member's leader is its record's (vcharon join --local wrote it), not
-        # MEMBER.md's, nor the holder of CHANNEL.md
+        # MEMBER.md's, while no folder holds a CHANNEL.md; once one does, the charters' terms
+        # say who leads (DESIGN, "Leader handoff")
         from vcharon import channel_cmd
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "mac",
                                   "leader": "windows", "ssh": None, "remote": self.tree,
                                   "machine": util.TEST_MACHINE_ID, "project": "p",
                                   "role": None, **util.record_format()})
-        write_tree(self.tree, {"debian/CHANNEL.md": b"# CHANNEL\n"})
 
         def posted():
             self.post("debian", 2, "from debian", to="@all")
@@ -3051,6 +3051,17 @@ class EntriesTest(WatchCase):
         _code, lines = self.run_mac(posted)
         self.assertEqual(lines[1:], ["to all: windows#2 — from windows  (windows/RESULTS.md)",
                                      "note: @all from debian, not the leader: ignored"])
+        self.lines.clear()
+        write_tree(self.tree, {"debian/CHANNEL.md": b"# CHANNEL\n"})
+
+        def more():
+            self.post("debian", 3, "again debian", to="@all")
+            self.post("windows", 3, "again windows", to="@all")
+
+        # a restart from the saved snapshot: its first round comes at once, the posts after it
+        _code, lines = self.run_mac(more, rounds=2)
+        self.assertEqual(lines[1:], ["to all: debian#3 — again debian  (debian/RESULTS.md)",
+                                     "note: @all from windows, not the leader: ignored"])
 
     def test_the_client_leader_is_the_sections(self):
         sync_args = ClientModeTest.write_config(self)
@@ -3412,7 +3423,6 @@ class ClosingTest(WatchCase):
 
     def test_not_for_the_leader(self):
         # the leader closes instead; its own folder, which holds its CLOSED, is never read
-        self.assertIsNone(watch.closed_next("mb", "debian", "debian"))
         self.assertEqual(self.watch("debian", lambda: self.post("debian", 2, "CLOSED",
                                                               to="@all"))[1], [])
 

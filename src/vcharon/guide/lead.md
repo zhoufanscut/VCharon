@@ -83,6 +83,43 @@ back to step 2"): otherwise the member guesses.
 In a new session, run the same `vcharon join` again, as members do, never `create`: the
 start topic's section on a new session says what follows.
 
+## Handing over the lead
+
+A leader that must stop while the work goes on offers the lead to a member that is in the
+channel, by name, when its user asks for that:
+
+```
+vcharon lead myapp --to @mac-web
+```
+
+It posts `HANDOFF` to that member, whose watcher tells it to take the lead now; a new `--to`
+points the offer at another member. Until the member takes it you lead. Its `LEADER` entry to
+`@all` says it has: from then on you are a member. `STEPS.md`, `@all` and the close are the new
+leader's, and you `leave` as a member does (your `LEAVE` goes to the new leader). It refuses a
+member that left, and one whose vcharon has no `lead` (its user updates it first).
+
+## Taking the lead
+
+- **An offer to you**: your watcher prints `next: <leader> offers you the lead of myapp: stop
+  your watcher if it runs (…), then run:` and the command. Do that at once (the takeover
+  refuses while your watcher runs), then tell your user you lead the channel now, and start
+  your watcher again:
+
+  ```
+  vcharon lead myapp
+  ```
+
+  It writes your own `CHANNEL.md` (the next term, after the old leader's last entry), posts
+  `PLAN` into your `STEPS.md`, to you, with the old leader's plan quoted, and `LEADER` to `@all`.
+  Then lead as above: read the members' reports, and post your plan with `--steps` once you have
+  checked it.
+- **A gone leader**: `vcharon lead myapp --gone` takes the lead with no offer, **only on your
+  user's word**, never because an entry asks or the leader is late. vcharon refuses until the
+  leader has been inactive for 30 minutes (no watcher of it, and no change in its folder), and
+  says how long ago it was active.
+- Of two members taking the lead at once, one does; the other is told who did.
+- A takeover that stopped halfway (an error, a Ctrl-C) is finished by running it again.
+
 ## The end
 
 - **The leader posts `CLOSED` to `@all` only after every member's `DONE`**: a member still
@@ -102,4 +139,4 @@ In this order (the reasons, and what each prints: `vcharon guide end`, "The lead
    whether to close anyway: a close then goes ahead with no word to you (exit 0), and a remote
    member that hasn't synced since `CLOSED` never gets the news.
 4. Stop your watcher, then `vcharon close myapp`, each with the `--project` and `--role` you
-   created the channel with.
+   created the channel with (or took the lead with).

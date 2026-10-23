@@ -169,6 +169,12 @@ a line look like another.
   (vcharon watch myapp --stop --project api), then run: vcharon leave myapp --project api`:
   right after the leader's `CLOSED` to `@all`, with your own flags. Do just that (`vcharon
   guide end`).
+- `  next: <leader> offers you the lead of myapp: stop your watcher if it runs (vcharon watch
+  myapp --stop --project api), then run: vcharon lead myapp --project api ; then tell your
+  user`: right after the leader's `HANDOFF` to you; `  next: <name> leads myapp now: send
+  reports, DONE and requests to @<name>`: right after the new leader's `LEADER` (a former
+  leader's line adds that it is a member now). How to take an offer: `vcharon guide lead`,
+  "Taking the lead".
 - `presence: <id> — JOIN  (<folder>/<file>)` (or `REJOIN`, `LEAVE`): only with `--presence`,
   in the lobby: another member came or went (`vcharon guide lobby`, "Who is here"). A work
   channel refuses the flag: there a member's `JOIN` and `LEAVE` reach the leader as `to you`.

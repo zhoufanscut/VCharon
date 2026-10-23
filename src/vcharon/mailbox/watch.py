@@ -25,8 +25,9 @@ rounds.
 
 Both skip the member's own folder <me>/ and vcharon's stage dirs. In the other members' folders
 it reads the entries of every .md file (vcharon/entries.py's format) and prints the new ones
-addressed to <me>, or to @all from the leader (the section's mailbox.leader; in server mode
-the record's, else MEMBER.md's), in a lobby from any member. In a lobby an entry addressed
+addressed to <me>, or to @all from the leader by the charters' terms in the tree, read each
+round (charter.chain; while the tree holds no charter, the section's mailbox.leader, in server
+mode the record's, else MEMBER.md's), in a lobby from any member. In a lobby an entry addressed
 only to its own poster (a JOIN, REJOIN, LEAVE, a MEMBER.md #1) prints nothing at all. Every
 line starts with the local time, `YYYY-mm-dd HH:MM:SS `, and goes through pathrules.printable:
 titles, IDs and file names come from other members, and a control character in one could forge
@@ -48,6 +49,13 @@ Lines; * marks the ones that count for --until-change:
           runs (vcharon watch C --stop <flags>), then run: vcharon leave C <flags>
                                    right after the leader's entry to @all titled CLOSED, for a
                                    member (never the leader); with the flags from its record
+      next: <leader> offers you the lead of C: stop your watcher if it runs (vcharon watch C
+          --stop <flags>), then run: vcharon lead C <flags> ; then tell your user
+                                   right after the leader's HANDOFF to the member, whose lead:
+                                   header names it
+      next: <name> leads C now: send reports, DONE and requests to @<name>
+                                   right after the leader's LEADER to all; a former leader's
+                                   line goes on `; you are a member now; only <name> closes`
   * WARN entry <id> was edited     a heading seen before with another text, in the same file;
                                    once
     WARN entry <id> in <folder>/: not its folder's
@@ -245,10 +253,21 @@ _MORE = re.compile(r" \(and \d+ more; see the log\)")
 # member to leave a channel that goes on, while a miss only leaves it to the guide's example.
 CLOSED_TITLE = "CLOSED"
 # The line after that entry's: the stop and leave commands for this membership, as this box runs
-# vcharon (closed_next). Stop first: leave refuses while the watcher holds the member's lock,
+# vcharon (Nexts). Stop first: leave refuses while the watcher holds the member's lock,
 # and a streaming watcher (a Monitor's) doesn't end on its own.
 CLOSED_NEXT = ("  next: the leader closed the channel: don't start your watcher again, stop it if "
                "it runs (vcharon watch %s --stop %s), then run: vcharon leave %s %s")
+# The lines after the leader's offer of the lead to a member (vcharon lead C --to @<name>, the
+# header lead: <name>) and after the taker's word to all once it leads (channel_cmd.LEADER_TITLE),
+# their titles matched whole and exact but for spaces around them: the offered member takes it
+# at once (its user's word isn't needed to take an offer; it tells its user after), with the
+# flags from its record, its watcher stopped first, as CLOSED_NEXT's, since the takeover refuses
+# while it runs; each member is told where its reports go now, and a former leader that it
+# closes nothing now (Nexts)
+HANDOFF_NEXT = ("  next: %s offers you the lead of %s: stop your watcher if it runs (vcharon "
+                "watch %s --stop %s), then run: vcharon lead %s %s ; then tell your user")
+LEADER_NEXT = "  next: %s leads %s now: send reports, DONE and requests to @%s"
+LEADER_NEXT_FORMER = "; you are a member now; only %s closes"
 # The titles of the entries join, a rejoin and leave post (in a lobby, to their poster only),
 # which a --presence watcher prints: matched whole and exact, as join and leave write them.
 PRESENCE_TITLES = ("JOIN", "REJOIN", "LEAVE")
@@ -568,18 +587,55 @@ class Told:
         return len(self.entries) + len(self.edited)
 
 
+class Nexts:
+    """The next: lines a work channel's watcher prints right after an entry's line, with the
+    flags from me's record (a placeholder without one, as gone_fix), as this box runs vcharon:
+    after the leader's CLOSED to @all (CLOSED_NEXT, never to the leader, who closes instead),
+    after the leader's HANDOFF to me naming me (HANDOFF_NEXT), and after the leader's LEADER to
+    all (LEADER_NEXT). The leader is the chain's of the round: a handoff moves it while a
+    watcher runs."""
+
+    def __init__(self, channel, me):
+        self.channel = channel
+        self.me = me
+        flags = channel_cmd.name_flags(channel, me)
+        self.closed = platform.runnable(CLOSED_NEXT % (channel, flags, channel, flags))
+        self.flags = flags
+
+    def after(self, e, folder, chain):
+        """The lines after e's (read in folder, whose @all counts by chain), or []."""
+        title = e.title.strip()
+        to_all = entries.ALL in e.to and chain.counts_all(folder, e.number)
+        if title == CLOSED_TITLE and to_all and self.me != chain.leader:
+            return [self.closed]
+        if (title == channels.HANDOFF_TITLE and "@" + self.me in e.to
+                and folder == chain.leader
+                and dict(reversed(e.header)).get(channels.HANDOFF_KEY) == self.me):
+            return [platform.runnable(HANDOFF_NEXT % (folder, self.channel, self.channel,
+                                                      self.flags, self.channel, self.flags))]
+        if title == channel_cmd.LEADER_TITLE and to_all and folder == chain.leader:
+            line = LEADER_NEXT % (folder, self.channel, folder)
+            if chain.former(self.me):
+                line += LEADER_NEXT_FORMER % folder
+            return [line]
+        return []
+
+
 def read_entries(root, paths, marks, me, leader, baseline=False, present=None, closing=None,
                  kind_=kinds.WORK, presence=False):
     """Reads the entries of the entry files paths (relative to root) into marks; returns the
-    round's Told. baseline: marks them seen, tells nothing. The leader's @all is to all; a
-    member's is ignored, since any member can write anything into its own folder; in a lobby
-    (kind_) any member's is to all, and an entry addressed only to its poster is told to
-    nobody, not even as an other entry (kind_.silent). present:
+    round's Told. baseline: marks them seen, tells nothing. leader: the round's
+    charter.Chain, or the leader's name for a tree that holds no charter: the leader's @all
+    is to all, by the charters' terms and entry numbers (kind.Work.may_post_all); a member's
+    is ignored, since any member can write anything into its own folder; in a lobby (kind_)
+    any member's is to all, and an entry addressed only to its poster is told to nobody, not
+    even as an other entry (kind_.silent). present:
     every file in the tree now (None: all those the marks name); an ID's head in a file gone
     from it, or in a file that no longer holds the ID, gives way to the next copy seen.
-    closing: the line printed right after the leader's CLOSED to @all (CLOSED_NEXT), or None
+    closing: the Nexts whose lines follow an entry's (a CLOSED, HANDOFF or LEADER's), or None
     for none. presence: of the entries told to nobody, a JOIN, REJOIN or LEAVE (PRESENCE_TITLES)
     outside MEMBER.md and CHANNEL.md is told as a presence line, which counts."""
+    chain = leader if isinstance(leader, charter.Chain) else charter.Chain([], leader)
     told = Told()
     ids = set()
     for path in sorted(paths):
@@ -648,9 +704,9 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
             if baseline:
                 continue
             where = "%s — %s  (%s)" % (e.id, e.title, path)
-            # the leader's end of the channel, to @all (with @<me> too, it prints as to you)
-            after = ([closing] if closing is not None and folder == leader
-                     and entries.ALL in e.to and e.title.strip() == CLOSED_TITLE else [])
+            # the leader's end of the channel, its offer of the lead, a new leader's word (to
+            # @all with @<me> too, it prints as to you)
+            after = closing.after(e, folder, chain) if closing is not None else []
             if kind_.silent(e, folder):
                 # every agent rejoins at each session: a wake is a turn for every member, so
                 # only a watcher that asked for them (--presence) tells who came and went
@@ -664,7 +720,7 @@ def read_entries(root, paths, marks, me, leader, baseline=False, present=None, c
                 told.others.append(folder)
             elif "@" + me in e.to:
                 told.entries.append((e.time or "", path, e.line, ["to you: " + where] + after))
-            elif entries.ALL in e.to and kind_.may_post_all(folder, leader):
+            elif entries.ALL in e.to and kind_.may_post_all(folder, e.number, chain):
                 told.entries.append((e.time or "", path, e.line, ["to all: " + where] + after))
             elif entries.ALL in e.to:
                 told.all_from.append(folder)
@@ -1059,9 +1115,10 @@ class _Watch:
         self.hold = hold
         self.key_since = None
         self.suffix = suffix
-        # whose @all is to all: the record's, never the holder of CHANNEL.md
+        # whose @all is to all while the tree holds no charter (a remote member before its
+        # first pull): the record's; else the charters' chain, read each round
         self.leader = leader
-        # the line after the leader's CLOSED to @all (closed_next), or None
+        # the next: lines after a CLOSED, HANDOFF or LEADER entry (Nexts), or None
         self.closing = closing
         self.marks = Marks()
         self.out = out
@@ -1211,9 +1268,11 @@ class _Watch:
         that couldn't be read leaves files, so the next round reads it again."""
         # each folder's highest number seen before this round: the cap of _prune's floor
         prior = {f: max([s[0]] + list(s[1])) for f, s in self.marks.seen.items()}
+        # each round: a handoff moves the lead while the watcher runs. The own folder's
+        # CHANNEL.md counts too (a former leader's, or the taker's own)
         told = read_entries(self.root, [p for p in paths if is_entry_file(p)], self.marks,
-                            self.me, self.leader, baseline, files, self.closing, self.kind,
-                            self.presence)
+                            self.me, charter.chain(self.root, self.leader), baseline, files,
+                            self.closing, self.kind, self.presence)
         for path in told.unread:
             files.pop(path, None)
         if self.kind.prune_heads:
@@ -1628,7 +1687,7 @@ def _dir_watch(root, me, out, clock, leader, folder_limits, gone=None, kind_=kin
     first round would show a false WARN or held folder, and count it as a change."""
     return _Watch(root, me, out, clock, state=snapshot_path(root, me), check=warnings,
                   leader=leader, gone=gone, folder_limits=folder_limits,
-                  closing=closed_next(os.path.basename(root), me, leader, kind_), kind_=kind_,
+                  closing=_nexts(os.path.basename(root), me, kind_), kind_=kind_,
                   presence=presence, hold_quiet=hold_quiet)
 
 
@@ -1641,7 +1700,7 @@ def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic
     return _Watch(local, me, out, clock, fold=FOLDS, state=snapshot_path(local, me, job),
                   leader=leader, timer=timer, hold=hold, suffix=suffix,
                   check=lambda root, me: charter.left_out_notes(job),
-                  closing=closed_next(channel, me, leader, kind_), kind_=kind_,
+                  closing=_nexts(channel, me, kind_), kind_=kind_,
                   presence=presence, hold_quiet=hold_quiet)
 
 
@@ -2214,15 +2273,10 @@ def gone_fix(root, me):
                              % (channel, channel_cmd.name_flags(channel, me)))
 
 
-def closed_next(channel, me, leader, kind_=kinds.WORK):
-    """The line after the leader's CLOSED to @all: the stop and leave commands with the flags
-    from me's record (a placeholder without one, as gone_fix), as this box runs vcharon. None for
-    the leader, who closes instead (its own folder is never read anyway), and in a lobby, where
-    a CLOSED is chat."""
-    if me == leader or not kind_.closing_line:
-        return None
-    flags = channel_cmd.name_flags(channel, me)
-    return platform.runnable(CLOSED_NEXT % (channel, flags, channel, flags))
+def _nexts(channel, me, kind_):
+    """A work channel's Nexts for me; None in a lobby, where a CLOSED is chat and nobody
+    leads."""
+    return Nexts(channel, me) if kind_.closing_line else None
 
 
 def is_gone(fix):

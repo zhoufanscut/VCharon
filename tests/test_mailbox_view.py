@@ -318,8 +318,10 @@ class OutputTest(ViewCase):
         self.assertEqual((code, err), (0, ""))
         [line] = lines
         doc = json.loads(line)
+        # the leader by the charters' terms; with no CHANNEL.md in the tree, the record's
         self.assertEqual(doc, {
-            "channel": "mb", "folder": self.tree, "synced": False, "members": ["aa", "bb"],
+            "channel": "mb", "leader": "aa", "term": 1, "folder": self.tree, "synced": False,
+            "members": ["aa", "bb"],
             "member_info": [{"name": n, "box": None, "os": None, "agent": None,
                              "project": None, "vcharon": None, "watched": None,
                              "watch_every": None, "left": False} for n in ("aa", "bb")],

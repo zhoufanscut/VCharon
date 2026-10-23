@@ -641,7 +641,7 @@ class WatchTest(LobbyWatchCase):
         self.assertEqual(self.run_dir(joins, says, kind_=kind.WORK), [
             "4 other entries (mac, win)",
             "to all: mac#4 — CLOSED  (mac/%s)" % TODAY,
-            watch.closed_next("mb", "debian", "mac"),
+            watch.Nexts("mb", "debian").closed,
             "note: @all from win, not the leader: ignored"])
 
     def test_the_snapshot_drops_the_heads_of_gone_files(self):

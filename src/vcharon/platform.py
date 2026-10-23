@@ -38,8 +38,8 @@ _UNSAFE = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
 # vcharon's commands, as runnable() takes them: `vcharon` at the text's start or after a space, (
 # or `, then one of these and a space, the end, or a mark that ends a clause; never `vcharon's`,
 # `vcharon/`, `vcharon sync's`, a path, or the `-m vcharon` of a command runnable() wrote
-COMMANDS = ("setup", "key", "doctor", "ping", "list", "create", "join", "leave", "close", "whoami",
-            "post", "read", "watch", "sync", "guide", "skill", "--version", "--help")
+COMMANDS = ("setup", "key", "doctor", "ping", "list", "create", "join", "leave", "close", "lead",
+            "whoami", "post", "read", "watch", "sync", "guide", "skill", "--version", "--help")
 _VCHARON_WORD = re.compile(r"(?:\A|(?<=[ (`]))(?<!-m )vcharon (%s)(?=\Z|[\s),.;`])"
                            % "|".join(re.escape(c) for c in COMMANDS))
 IOREG = "/usr/sbin/ioreg"

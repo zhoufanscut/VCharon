@@ -47,8 +47,9 @@ from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
 # leave's fix for the leader, as written (before runnable)
-LEADER_LEAVE_FIX = ("a leader ends the channel with CLOSED to @all after every member's DONE, "
-                    "then a close; how: vcharon guide end")
+LEADER_LEAVE_FIX = ("to leave, first offer the lead to a member (vcharon lead %s --to @NAME) and "
+                    "wait until it takes it; or end the channel with CLOSED to @all after every "
+                    "member's DONE, then a close; how: vcharon guide end")
 # a watcher's exit-12 line: another watcher, or a create, join, leave or close, holds its lock;
 # here the holder is the test's own process, which wrote its PID
 WATCHER_LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, "
@@ -560,7 +561,8 @@ class CreateJoinTest(ChannelCase):
                           "CHANNEL.md)", "ask the user"))
         write_tree(self.root, {"game/a/CHANNEL.md": b"c", "game/b/CHANNEL.md": b"c"})
         self.assertEqual(self.refused("join", "game", "--local"),
-                         "ERROR channel: game has 2 leaders (a/, b/ hold CHANNEL.md)")
+                         "ERROR channel: game has 2 leaders at term 1 (a/, b/ hold its "
+                         "charter)")
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "game"))), ["a", "b"])
         self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "state", "channels")))
         self.assertFalse(os.path.exists(os.path.join(self.vcharon_home, "joined")))
@@ -1829,7 +1831,7 @@ class ServerCallsTest(ChannelCase):
         self.assertIsNone(channels.claim(self.root, "game", "c", False)["claimer"])
         [ch] = channels.list_channels(self.root)["channels"]
         self.assertEqual(ch["fields"]["c"], {"box": None, "os": None, "agent": None,
-                                             "project": None})
+                                             "project": None, "vcharon": None})
 
     def test_member_fields_skip_lines_they_dont_know(self):
         # a newer vcharon's MEMBER.md may hold more header lines: each field is still read, the
@@ -1844,11 +1846,12 @@ class ServerCallsTest(ChannelCase):
                 self.assertEqual(found, {"box": "aaa", "os": None, "agent": None,
                                          "project": None, "claimer": "a" * 16,
                                          "vcharon": want})
-        # vcharon list shows its four fields, never the version
+        # vcharon list shows its four fields, never the version; the listing carries it for
+        # vcharon lead --to (charter.lacks_lead)
         write_tree(self.root, {"game/a/MEMBER.md": (text % "0.1.0").encode("utf-8")})
         [ch] = channels.list_channels(self.root)["channels"]
         self.assertEqual(ch["fields"]["a"], {"box": "aaa", "os": None, "agent": None,
-                                             "project": None})
+                                             "project": None, "vcharon": "0.1.0"})
         self.assertEqual(channels.claim(self.root, "game", "a", False)["claimer"], "a" * 16)
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
@@ -1903,7 +1906,8 @@ class ServerCallsTest(ChannelCase):
         self.assertIn("  leader lead  members a, lead  newest ", game)
         self.assertIn("    note: notes.md at its top isn't a member's folder", lines)
         self.assertTrue(any(l.startswith("  two  leader ?") for l in lines), out)
-        self.assertIn("    note: x/, y/ all hold CHANNEL.md: ask the user", lines)
+        self.assertIn("    note: two has 2 leaders at term 1 (x/, y/ hold its charter): ask the "
+                      "user", lines)
         self.assertTrue(any(l.startswith("  empty  leader ?  members none  newest -")
                             for l in lines), out)
         self.assertIn("  note: .vcharon-closed-old-1: a closed channel that wasn't deleted", lines)
@@ -2015,8 +2019,8 @@ class LeaveCloseTest(ChannelCase):
         got, _out, err = self.channel("leave", "game", "--project", "ui")
         self.assertEqual(got, 1)
         self.assertEqual(err.splitlines()[:2], [
-            "ERROR channel: you lead game: close it instead",
-            "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
+            "ERROR channel: you lead game: hand the lead over, or close it",
+            "  fix: " + platform.runnable(LEADER_LEAVE_FIX % "game")])
         # text, never a close to run: that would skip CLOSED and the members' DONE
         self.assertNotIn("vcharon close", err)
         # its own watcher running: still close, not "stop the watcher", which would stop the
@@ -2025,8 +2029,8 @@ class LeaveCloseTest(ChannelCase):
         got, _out, err = self.channel("leave", "game", "--project", "ui")
         self.assertEqual(got, 1)
         self.assertEqual(err.splitlines()[:2], [
-            "ERROR channel: you lead game: close it instead",
-            "  fix: " + platform.runnable(LEADER_LEAVE_FIX)])
+            "ERROR channel: you lead game: hand the lead over, or close it",
+            "  fix: " + platform.runnable(LEADER_LEAVE_FIX % "game")])
         release(child)
         self.use_box("mac")
         # the watcher's lock names the watcher; a job's names a sync
@@ -2070,8 +2074,8 @@ class LeaveCloseTest(ChannelCase):
         # a second CHANNEL.md, then a stray file at the top: the server refuses
         write_tree(self.root, {"game/mac-web/CHANNEL.md": b"c"})
         self.assertEqual(self.refusal("close", "game", "--project", "ui"),
-                         ("ERROR channel: game has 2 leaders (laptop-ui/, mac-web/ hold "
-                          "CHANNEL.md)", "ask the user"))
+                         ("ERROR channel: game has 2 leaders at term 1 (laptop-ui/, mac-web/ "
+                          "hold its charter)", "ask the user"))
         os.remove(os.path.join(self.root, "game", "mac-web", "CHANNEL.md"))
         write_tree(self.root, {"game/notes.md": b"n"})
         self.assertEqual(self.refusal("close", "game", "--project", "ui"),
@@ -2177,15 +2181,16 @@ class LeaveCloseTest(ChannelCase):
     def test_close_holds_the_watcher_lock(self):
         self.use_box("laptop")
         snapshot = channel_cmd.watcher_snapshot(None, "game.laptop-ui", "laptop-ui")
-        real = channel_cmd._need_machine
+        real = channel_cmd._told_closed
         tries = []
 
-        def need_machine(server):
-            # mid-close: a watcher's start finds the lock held
+        def told_closed(*a):
+            # mid-close, just before the removal (the listing comes first: a former leader is
+            # refused by it, not told to stop its watcher): a watcher's start finds the lock held
             tries.append(watch.take_lock(snapshot))
-            return real(server)
+            return real(*a)
 
-        with mock.patch.object(channel_cmd, "_need_machine", need_machine):
+        with mock.patch.object(channel_cmd, "_told_closed", told_closed):
             out = self.ok("close", "game", "--project", "ui")
         self.assertEqual(tries, [None])
         self.assertIn("  removed %s.lock" % snapshot, out.splitlines())
@@ -2257,8 +2262,8 @@ class LeaveCloseTest(ChannelCase):
         self.lead("docs", where=("--local",), box="linux", project="d")
         self.use_box("linux")
         self.assertEqual(self.refusal("leave", "docs", "--project", "d"),
-                         ("ERROR channel: you lead docs: close it instead",
-                          platform.runnable(LEADER_LEAVE_FIX)))
+                         ("ERROR channel: you lead docs: hand the lead over, or close it",
+                          platform.runnable(LEADER_LEAVE_FIX % "docs")))
         # its watcher ran (server mode, keyed by the channel folder) and it posted
         snapshot = channel_cmd.watcher_snapshot(None, "docs.linux-d", "linux-d",
                                                 os.path.join(self.root, "docs"))

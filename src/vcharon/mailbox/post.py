@@ -25,7 +25,8 @@ read, the append and the swap, so two posts at once can't take one number or los
 The time is the clock's when it writes: an agent never types a time.
 
 --to is required: @<name> separated by spaces, or @all, which in a work channel only the leader
-posts (the leader MEMBER.md names), and in a lobby any member. An @<name> that isn't a folder in
+posts (by the charters' terms in the tree: charter.chain; MEMBER.md's leader: while the tree
+holds no charter), and in a lobby any member. An @<name> that isn't a folder in
 the local tree is posted anyway, with a note on stderr: it may not have synced yet. A bare <name>
 (no @) is taken as @<name> when it is a member's folder in the tree; any other is refused with the
 members' names, since a typo there would go to nobody. --re is optional, an ID (<name>#<n>, an @
@@ -448,9 +449,18 @@ def post(path, me, to, title, re_=None, body="", clock=None, limits=None, channe
     tree = os.path.dirname(own)
     to = resolve_to(to, tree, channel)
     if entries.ALL in to:
-        leader = leader_of(own)
-        if not kind_.may_post_all(name, leader):
-            raise _refuse("@all is the leader's (%s)" % (leader or "MEMBER.md names none"),
+        # by the charters' terms in the tree, MEMBER.md's leader: while it holds none (a
+        # remote member before its first pull): a new entry's @all is the leader's
+        chain = charter.chain(tree, leader_of(own))
+        if not kind_.may_post_all(name, None, chain):
+            if chain.tied:
+                leader = charter.tied_text(channel or os.path.basename(tree), chain.tied,
+                                           chain.term)
+            else:
+                leader = chain.leader or "MEMBER.md names none"
+            if chain.former(name) and chain.leader is not None:
+                leader = "%s since term %d" % (chain.leader, chain.term)
+            raise _refuse("@all is the leader's (%s)" % leader,
                           "address members by name: --to @<name> ...")
     for token in to:
         if token != entries.ALL and not os.path.isdir(os.path.join(tree, token[1:])):

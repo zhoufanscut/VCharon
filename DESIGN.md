@@ -74,7 +74,8 @@ for remote members, a GUI.
 | channel root | the folder that holds the channels on one machine, `~/.local/state/vcharon/channels` |
 | channel | one folder in the root: one folder per member below it |
 | member | an agent with its own folder in a channel. A **local member** (`--local`) runs on the machine that holds the root and writes there directly; a **remote member** (`--server ALIAS`) runs on another machine and syncs over ssh |
-| leader | the member that created a work channel: it writes `CHANNEL.md` and `STEPS.md`, alone posts to `@all`, and closes the channel |
+| leader | the member that leads a work channel: its creator, until it hands the lead to a member ([Leader handoff](#leader-handoff)); it writes `STEPS.md`, alone posts to `@all`, and closes the channel |
+| charter, term | a `CHANNEL.md` entry that says who leads: create's #2 is term 1, and each takeover writes one of the next term into the taker's own `CHANNEL.md`; the leader holds the highest term ([Leader handoff](#leader-handoff)) |
 | work channel, lobby | the two kinds of channel: one made by `create`, with a leader and a plan; and the one `lobby` of a channel root, made by its first `join`, where any member posts to `@all` and nothing closes it ([The lobby](#the-lobby)) |
 | founder | the lobby member whose folder holds its `CHANNEL.md`: its first joiner, with no power the others lack |
 | member name | `<box>-<project>[-<role>]`, also its folder's name |
@@ -453,10 +454,11 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 | `sink.commit` | – | `{"written", "deleted", "deletes_done", "notes"}`; an `err` also carries `"done"` | – |
 | `sink.abort` | – | `{}` | – |
 | `job.reset` | – | `{}` | – |
-| `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "strays", "newest", "format", "limits"}], "others": [{"name", "why"}]}` | – |
+| `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "format", "limits"}], "others": [{"name", "why"}]}` | – |
 | `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
 | `channel.release` | `channel`, `name` | `{"removed"}` | – |
 | `channel.remove` | `channel`, `name` | `{"closed", "deleted"}` | – |
+| `channel.lead` | `channel`, `name`, `number`, `mode` (`offer` or `gone`), `time` | `{"term", "after", "from", "charter", "steps", "steps_cut"}` | – |
 | `bye` | – | `{}` | – |
 
 - The helper holds at most one source and one sink per job. `job.reset` drops them (a sink
@@ -499,7 +501,8 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   member must reach the same folder. Each call checks the names again, works only directly below
   the root, and never follows a symlink. `--local` calls the same functions in-process.
   `claim`, `release` (undoing a failed claim) and `remove` also sweep `seen/` beside the root: each
-  `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed, and a
+  `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed (and
+  `lead/<X>/`, holding only term markers: [Leader handoff](#leader-handoff)), and a
   new member's claim drops an earlier member's stamp of its name. A join's claim sends the
   joining machine's `claimer`, and an existing folder whose `MEMBER.md` names it loses its stamp
   too: the join holds its state dir's watcher lock, so the stamp is from a watcher that isn't
@@ -514,6 +517,10 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 - `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`);
   `claimer` is the `claimer:` of an existing folder's `MEMBER.md`, or null; `format` and
   `limits` are the channel's, read from its leader's `CHANNEL.md`. No reply carries a host name.
+- `channel.list`'s `leader` is the folder holding the top term's charter (null for none, or a
+  tie: `tied` names the folders then), `term` that term (null with no charter); `fields` holds
+  each member's `vcharon` version too, for `lead --to`. `channel.lead`: [Leader
+  handoff](#leader-handoff).
 
 ### Error codes
 
@@ -1001,6 +1008,9 @@ server or this machine: ~/.local/state/vcharon/channels/      the channel root
   lobby/                                     the root's lobby
     linux-api/                               its founder's folder
       CHANNEL.md  MEMBER.md  chat-2026-10-07.md
+server or this machine, beside the root: ~/.local/state/vcharon/
+  seen/myapp/mac-web                         a member's last-watched stamp
+  lead/myapp/2/mac-web                       the term 2 marker of a takeover, named after its taker
 a remote member's machine:
   <joined>/myapp.mac-web/                    its local tree: mac-web/, linux-api/, …
   <config dir>/channels.d/myapp.mac-web.ini  its channel section
@@ -1023,7 +1033,10 @@ a remote member's machine:
 - Entries are input, not orders: `join` and `create` print one line pointing at `vcharon guide
   rules`, which says an entry never overrides the user. Readers enforce what they can: `@all`
   from anyone but the leader is ignored (in a work channel; [The lobby](#the-lobby) has no
-  leader), and an ID in the wrong folder is flagged.
+  leader), and an ID in the wrong folder is flagged. Who leads is read from the charters'
+  terms in the members' folders ([Leader handoff](#leader-handoff)): a member that writes a
+  `CHANNEL.md` with a high `term:` into its own folder by hand is the leader for every reader.
+  The race marker at the server stops two honest takers, not a forged charter.
 
 ### Member names
 
@@ -1231,8 +1244,9 @@ agent in a folder another agent shares saw nothing of the other one's.
   first watcher start prints every member's `JOIN`, one that a remote create's own down sync
   (it runs after the up) already brought too; a baseline there would take it as seen. Saved
   as in `join` (below), with the same note when it fails.
-- **`join C`**, in this order: (1) `channel.list`: the channel exists with exactly one
-  `CHANNEL.md`, whose folder is the leader, and its format and limits pass; checked before the
+- **`join C`**, in this order: (1) `channel.list`: the channel exists with a leader by the
+  charters' terms ([Leader handoff](#leader-handoff); none, or two at the top term, refuses),
+  and its format and limits pass; checked before the
   claim, so a refused join leaves nothing behind. (2) This machine's watcher lock for the name,
   taken without waiting: held by another means a live session already is that member: refused,
   `a live session holds <name> in C` (its watcher, or a `create`, `join`, `leave` or `close` of
@@ -1257,7 +1271,7 @@ agent in a folder another agent shares saw nothing of the other one's.
   one makes a new file at the path.
   A record of this name for another server (the same channel name on a second server) is
   refused too, `you are in C on another server`. So is a record of this name whose folder
-  isn't in the listed channel, or whose leader isn't the channel's: it is of an earlier
+  isn't in the listed channel, or whose leader holds no `CHANNEL.md` there: it is of an earlier
   channel of the name (closed and made again, with no `leave` here), `your join record of C as
   <name> is of an earlier channel: …`, with `vcharon leave C` as the fix. Why: reused, the new
   channel would get the old `MEMBER.md`'s `leader:` and old entries, and the full down would
@@ -1353,10 +1367,12 @@ agent in a folder another agent shares saw nothing of the other one's.
   member's folder, or with another leader than the record's (the own folder removed at the
   server, or the channel made again), with a `note` saying which: a `LEAVE` would reach no one,
   and the sync would fail on the missing folder and point back at `leave`. Only then is a work
-  channel's leader refused (it closes; a lobby's founder leaves as any member does): a live
-  channel is the leader's to close, but a gone or made-again one isn't there for its close to
-  remove, and the stale record's fix line is this `leave`. The
-  leader's `leave` lists before it checks the locks (the listing changes nothing): a lock refusal
+  channel's leader refused, the one the listing names by the charters' terms (it hands the
+  lead over or closes: `you lead C: hand the lead over, or close it`; a former leader leaves as
+  a member, and every `LEAVE` goes to the listed leader; a lobby's founder leaves as any member
+  does): a live channel is the leader's to close, but a gone or made-again one isn't there for
+  its close to remove, and the stale record's fix line is this `leave`. The `leave` of the
+  record's leader lists before it checks the locks (the listing changes nothing): a lock refusal
   first would have it stop the watcher of a channel it still leads.
   Else, a remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with
   the rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
@@ -1379,10 +1395,16 @@ agent in a folder another agent shares saw nothing of the other one's.
   prints the same. Nothing is removed on its own when a watcher sees the channel closed: `EXIT
   closed` also means a folder removed by hand, and after a close this machine's copy is the last
   of the channel's text.
-- **`close C`**: the leader only. The same lock checks first (a held lock can't leave a
-  half-closed channel; the watcher lock held to the end, as `leave` holds it), the machine id
-  check, then `channel.remove`, which refuses unless the leader's folder holds the only
-  `CHANNEL.md` and every top-level entry is a folder with a valid member name. It renames
+- **`close C`**: the leader only, the one the listing names by the charters' terms: every
+  close checks the machine id and lists first, so a member or a former leader is refused, `only
+  the leader closes C, and that is X`, before any lock check (a former leader isn't told to
+  stop its watcher for a close it may not make). The leader then takes the same lock checks
+  as `leave` (a held lock can't leave a half-closed channel; the watcher lock held to the end,
+  as `leave` holds it), then `channel.remove`, which refuses unless the caller holds the top term's charter
+  (a former leader's `CHANNEL.md` in another folder is fine; two at the top term refuse) and
+  every top-level entry is a folder with a valid member name, and takes the next term's marker
+  first, as a takeover does ([Leader handoff](#leader-handoff)), dropped again when the rename
+  fails, so a close and a takeover exclude each other. It renames
   `<root>/C` to `.vcharon-closed-<C>-<stamp>` in one step, so every member's next sync sees the
   channel gone at once (a channel name can't start with `.`), then deletes it with the no-link
   walk. A failed delete leaves the renamed folder, which `list`
@@ -1404,6 +1426,94 @@ agent in a folder another agent shares saw nothing of the other one's.
   by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)), its fix `stop the watcher with
   vcharon watch C --stop <flags> (a create, join, leave or close: let it end), then run this
   again`; a job's lock held is `a sync of <name> in C is running (<lock> is held)`.
+
+### Leader handoff
+
+A work channel's leader can hand the lead to a member, and a member can take it from a leader
+that is gone, on its user's word. A member writes only its own folder, so the old leader's
+`CHANNEL.md` stays where it is: the lead moves by **terms**.
+
+- **Charters and terms.** A folder's charter is its own last entry in its `CHANNEL.md`: create's
+  #2, or the one a takeover writes ([Formats](#formats)). Its header may hold `term: T` (none:
+  term 1) and `after: <L>#<m>`. The **leader** is the folder whose charter has the highest term
+  (`charter.chain`); two at the top term is no leader: `join` and `close` refuse, `<C> has 2
+  leaders at term T (…)`, and `list` notes it. `list`'s `leaders` still names every folder
+  holding a `CHANNEL.md`; its `leader` and `term` say who leads. Why terms: no member may delete
+  another's file, so the old charter can't go.
+- **Whose `@all` counts**, by entry numbers, never clocks: the leader's from its charter's
+  number on (`#c + 1`); a former leader's from `#c + 1` to the `#m` its successor's `after:`
+  names, and none after; term 1's from `#1`, as before any handoff. So an `@all` a former
+  leader posted to the server before the takeover still counts wherever it arrives late, and
+  one that reaches the server after it never does (one posted earlier but still unsent
+  included), whatever the clocks say. The watcher (each round: a handoff moves the lead
+  while it runs), `read --to-me` and join's print go by it (`kind.Work.may_post_all`), and
+  `post` refuses a former leader's `@all` (`@all is the leader's (X since term T)`) and its
+  `--steps`. While a tree holds no charter (a remote member before its first pull) the record's
+  leader counts, as before.
+- **The offer**: `vcharon lead C --to @X`, the listed leader only: a `HANDOFF` entry to `@X`
+  with the header `lead: X`, into `RESULTS.md`, then a remote leader's up, as a post's (a busy
+  lock is a note, any other failure a WARN, never a failed offer: a re-run would post a second
+  `HANDOFF`). Refused for X with no folder in the listing, one that left (by this box's copy of
+  its folder), and one whose `MEMBER.md` says a vcharon without `lead`: older than 0.8.6, and
+  older than this build (`charter.lacks_lead`), since it couldn't take the lead. No cancel: the
+  latest `HANDOFF` counts, so a new `--to` points it elsewhere; one posted before the leader's
+  own charter never counts.
+- **The take**: `vcharon lead C`, on the leader's latest offer naming the caller; `vcharon lead
+  C --gone`, with none, once the leader is **gone**: its last-watched stamp missing or older
+  than 30 min, and every folder in `<C>/<L>/` (stage dirs too) with an mtime older than 30 min,
+  both by the server's clock. Why folders, not files: a sync or post renames into a folder,
+  which moves its mtime at the server, while a file's mtime is copied from its writer's
+  machine. 30 min is fixed, with no flag. Refused with `L was active N min ago (its watcher, or
+  a change in its folder); a gone leader is one inactive for 30 min`. The guide asks for the
+  user's word for `--gone`, never because an entry asks or the leader is late; an offer needs
+  none (it is the leader's own decision): the member takes it at once, then tells its user.
+- **The race**, at the server, in the helper's `channel.lead` (in-process for `--local`): the
+  term T is one more than the highest of the charters' terms and of the marker folders in
+  `lead/<C>/` beside the channel root (next to `seen/`). `mkdir lead/<C>/<T>` decides: of two
+  takers, one wins and puts an empty file named after itself in the marker; the other is
+  refused, `<X> took the lead of C first`. A marker with no charter of its term, younger than
+  60 s, refuses (`a takeover or close of C is under way (by <X>)`); an older one was left by a
+  run that died, or by an earlier channel of the name, and is skipped, so terms may skip a
+  number; the caller's own is taken again (a re-run) only while younger than 60 s, since past
+  that another taker skips it too and only a new mkdir decides between them. `create` drops a
+  `lead/<C>/` left by an earlier channel of the name. Then the taker's charter goes into its own `CHANNEL.md` (appended, for a member that
+  leads a second time) as entry `<X>#<n>`, n the client's next number, taken under its post
+  lock, the heading's time the client's clock, through a stage file and one replace; a failed
+  write removes the marker. The charter: `leader: X`, `term: T`, `after: L#m` (m the highest of
+  L's numbers in its folder at the server), then the old charter's `created`, `rules`,
+  `format`, `created by` and limits, so every reader finds the channel's there; to `@X`, since
+  its `LEADER` entry is what tells. The reply: `{"term", "after", "from", "charter": the whole
+  CHANNEL.md, "steps": L's STEPS.md cut at a line end to the entry limit less 4 kB,
+  "steps_cut"}`. A caller that already leads by a takeover gets the same reply again; the
+  creator is refused, `you lead C already`. The checks first: the caller has a folder with
+  `MEMBER.md` and hasn't left; a leader, not the caller; not a lobby.
+- **The taker's steps**, each skipped when done, so a run that stopped halfway is finished by
+  running it again: the watcher's lock (held, so its own running watcher is refused, with the
+  stop as the fix) and the job locks checked, as `close` takes them; under the post lock, the
+  number and the call; a remote taker writes the reply's charter, byte for byte, into its local
+  tree, as a lobby's founder does, so its up sends the server's own bytes back; the record's
+  `leader`, the section's `mailbox.leader` and `MEMBER.md`'s `leader:`; `PLAN` into its own
+  `STEPS.md`, to itself, header `term: T`, with L's `STEPS.md` quoted (its heading lines behind
+  `> `; too big for the entry limit: a pointer to it); `LEADER` into `RESULTS.md`, header `term:
+  T`, to `@all` and to `@` each member whose `MEMBER.md` says a vcharon without `lead` (its
+  watcher ignores the new leader's `@all`, so this wakes it once); then a remote taker's up,
+  as the offer's (the lead is taken already: a failure is a WARN). A run that stops after the
+  call prints `  note: you lead C at the server now (term T), but the takeover stopped before
+  its end: …, run: vcharon lead C <flags> again` above its error.
+  Its lines: `  you lead C: term T, after L#m`, `  posted PLAN …`, `  posted LEADER …`, `  next:
+  tell your user you lead C now (term T); then start your watcher again (vcharon guide lead):
+  vcharon watch C --until-change <flags>`, `OK  you lead C (term T)`. Exit 0, 1 (`channel`), 2
+  (busy) or 3 (usage: `--to` with `--gone`, `--to` naming itself, a lobby's `a lobby has no
+  leader`); no `--json`: `whoami C --json` shows `leader` and `term`.
+- **What the others see**: the watcher's `next:` lines after the leader's `HANDOFF` to the
+  member and after its `LEADER` ([The watcher in a channel](#the-watcher-in-a-channel)); a
+  watcher's start sets the own `MEMBER.md`'s `leader:` to the chain's, as it sets `vcharon:`
+  ([Member names](#member-names)), silently. `join` takes the listed leader into the record and
+  the section, and sends `JOIN` to it; `leave` posts `LEAVE` to the listed leader, a former
+  leader leaves as a member, and the leader is refused (`you lead C: hand the lead over, or
+  close it`). Only the leader closes; the close takes the next term's marker first ([Create,
+  join, leave, close](#create-join-leave-close)), and sweeps `lead/<C>/` with `seen/<C>/`.
+
 
 ### The lobby
 
@@ -1659,8 +1769,8 @@ re: linux-api#3
   `@<name>`, or `@all`), then `re:` (optional), then any other `key: value`.
 - `<n>` is one more than the largest `<name>#<n>` in any heading of any `.md` file of the own
   folder (headings only, never bodies). IDs are unique per channel because names are.
-- `MEMBER.md` holds #1 and `CHANNEL.md` the leader's #2; VCharon writes both, and `post` refuses
-  them.
+- `MEMBER.md` holds #1 and `CHANNEL.md` the leader's #2 (and a taker's charter, [Leader
+  handoff](#leader-handoff)); VCharon writes both, and `post` refuses them.
 - Entries are split on `\n` only, a trailing `\r` dropped: `str.splitlines()` also splits on
   `\x85`, `\u2028` and others, which would let a body forge a heading. A title or header value
   holding any of those breaks is refused, and so is one holding any other control or format
@@ -1691,7 +1801,9 @@ re: linux-api#3
 - One lock per own folder, in the state dir and keyed by the folder's normalized real path,
   covers the numbering, the append and the swap: two posts at once can't take one number or lose
   an entry. It waits up to 30 s, then `busy`.
-- `@all` only from the leader its record names (in a lobby, from any member); a `@name` with
+- `@all` only from the leader, by the charters' terms in the tree (`MEMBER.md`'s `leader:` while
+  it holds none), a former leader refused with `@all is the leader's (X since term T)`; in a
+  lobby, from any member. A `@name` with
   no folder in the tree yet is a note on stderr, and the post goes on (it may not have synced
   yet). A bare `name` is taken as
   `@name` when it is a member's folder in the tree, and refused otherwise, with the members'
@@ -1791,6 +1903,11 @@ with `MEMBER.md`'s entry #1 fields ([Member names](#member-names)), entries as
   a new optional field an older one can ignore. Add the new format's description here, under
   this one. A format change is a minor version at least ([Stable](#stable)).
 - `vcharon list` shows each channel's format; `doctor` the highest this VCharon reads.
+- A charter is the folder's own last entry in its `CHANNEL.md`, not entry #2: a takeover appends
+  its charter there, with two more optional header lines, `term: T` (none: term 1) and `after:
+  <name>#<n>` ([Leader handoff](#leader-handoff)). Still format 1: an older vcharon ignores the
+  two lines, and misreads nothing; it just doesn't follow the new leader ([Mixed
+  versions](#mixed-versions)).
 
 **Format 2** is format 1 plus `kind: lobby` in `CHANNEL.md`'s #2 header, right after
 `format:`, and the lobby's rules ([The lobby](#the-lobby)): day files, any member's `@all`, no
@@ -1912,8 +2029,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   (`pathrules.printable`), since titles, IDs and file names come from other members and a
   control character in one could forge a line such as `EXIT closed`:
   - `to you: <id> — <title>  (<path>)` for an entry whose `to:` holds `@<me>` (even with
-    `@all`), and `to all: …` for `@all` from the leader (the record's leader, never "whoever holds
-    `CHANNEL.md`"; in a lobby, from any member); in the entries' own time order;
+    `@all`), and `to all: …` for `@all` from the leader by the charters' terms and entry numbers,
+    read each round ([Leader handoff](#leader-handoff); the record's leader while the tree holds
+    no charter; in a lobby, from any member); in the entries' own time order;
   - in a work channel only, `  next: the leader closed the channel: don't start your watcher
     again, stop it if it runs (vcharon watch C --stop <flags>), then run: vcharon leave C
     <flags>` right after the line of the leader's entry to `@all` (a `to all`, or a `to you`
@@ -1925,7 +2043,14 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     `CLOSED` and the leader close after the `LEAVE`s, so the channel is still there and no `EXIT
     closed` fix line gives the command. Why the exact title: a looser match ("Closed", "CLOSED
     soon") could tell a member to leave a channel that goes on, while a miss only leaves the
-    member to the guide's example;
+    member to the guide's example. It goes by the leader of the round: a former leader gets it
+    after the new leader's `CLOSED`;
+  - in a work channel, `  next: L offers you the lead of C: stop your watcher if it runs
+    (vcharon watch C --stop <flags>), then run: vcharon lead C <flags> ; then tell your user`
+    right after the leader's `HANDOFF` to the member whose `lead:` header names it, and `  next:
+    X leads C now: send reports, DONE and requests to @X` right after the leader's `LEADER` to
+    all (a former leader's line goes on `; you are a member now; only X closes`): [Leader
+    handoff](#leader-handoff);
   - with `--presence`, in a lobby only, `presence: <id> — <title>  (<path>)` for another
     member's `JOIN`, `REJOIN` or `LEAVE` ([The lobby](#the-lobby), "Silent entries"), among
     the `to you` lines in the entries' time order;
@@ -2208,7 +2333,8 @@ shows the local tree as of the last sync, and says so.
   the watcher's line prints it` alone (nothing is known about the number then).
 - **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:`
   ([The watcher in a channel](#the-watcher-in-a-channel)): a placed entry in another member's
-  folder addressed to `@<me>`, or to `@all` from the leader (in a lobby, from any member). A
+  folder addressed to `@<me>`, or to `@all` from the leader by the charters' terms and entry
+  numbers ([Leader handoff](#leader-handoff); in a lobby, from any member). A
   member's `@all` (in a work channel) and the own
   folder are left out, as the watcher leaves them out. `--last` and `--full` apply to that
   subset; the bodies line keeps `--to-me`.
@@ -2272,6 +2398,14 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   member last ran (`vcharon:`), `whoami` prints the running one, and `read` notes when the
   members' differ. Why: nothing else in a channel shows which version a member runs.
 - A channel's files are guarded by the format ([Formats](#formats)).
+- A channel whose lead moved ([Leader handoff](#leader-handoff)), with a member on a vcharon
+  before `lead` (0.8.6): that member goes by its record's leader, so it ignores the new
+  leader's `@all` (the `LEADER` entry names it with `@`, so it is woken once) and its `CLOSED`
+  line; its `join`, rejoin and `close` see two folders holding `CHANNEL.md` and refuse, `<C> has 2
+  leaders`. The cure is its update. The leader can't offer the lead to such a member. An old
+  leader on such a vcharon whose lead was taken with `--gone` still leads by its record: its
+  `leave` is refused, `you lead C: close it instead`, and its `close`, `C has 2 leaders`, so it
+  can do neither until its update (loud, never a wrong close).
 - Last-watched stamps: a member on 0.2.3 or older never stamps; `whoami C` shows it as `watched
   ?` with its version, not as never watched. An older version's close (or a failed create's
   undo) doesn't sweep `seen/`; the next claim or close on that machine does. The `watch` arg
@@ -2300,6 +2434,7 @@ Channels
                  [--rejoin] [--takeover]
   vcharon leave  C [--project P] [--role R]
   vcharon close  C [--project P] [--role R]
+  vcharon lead   C [--to @NAME | --gone] [--project P] [--role R]
   vcharon whoami [C] [--all] [--project P] [--role R] [--json]
 
 Messages
@@ -2343,7 +2478,10 @@ Every verb also takes `-v` (log lines to stderr too).
   compares by content; `--dry-run` prints the plan and changes nothing; `--reset up|down`
   forgets one job's state (refused for up while the own folder lacks `MEMBER.md`: the next sync
   would make it again, empty).
-- `list` prints one line per channel: its leader (a lobby's founder), members, newest file,
+- `lead` hands the lead over (`--to @NAME`, the leader) or takes it: [Leader
+  handoff](#leader-handoff).
+- `list` prints one line per channel: its leader (a lobby's founder; `(term T)` after it once a
+  handoff made it term 2 or later), members, newest file,
   format, `age` and `size`; then one line per member (box, os, agent, project) and the notes.
   `age` counts from `CHANNEL.md`'s `created:`, else from the channel folder's mtime, which a
   later join or leave moves on. `created:` has no zone, as a heading's ([Clocks](#clocks)): a
@@ -2928,7 +3066,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, syncing
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
-    leader's `CLOSED` to `@all`, `  next: <text>`, its commands to run as printed
+    leader's `CLOSED` to `@all`, its `HANDOFF` to the member, or its `LEADER`, `  next: <text>`,
+    its commands to run as printed
   - with `--presence`, in a lobby: `presence: <id> — <JOIN|REJOIN|LEAVE>  (<path>)`
   - `<n> other entries (<folders>)` (`1 other entry (<folder>)` for one), `note: @all from
     <folders>, not the leader: ignored`, `note: ignoring the saved snapshot <path>: <why>`,
@@ -2955,11 +3094,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     the prefix.
 - **`--json` fields**:
   - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
-    "leaders", "founder", "members", "member_info", "newest", "created", "bytes", "strays",
-    "format", "limits"}`, `member_info` each `{"name", "box", "os", "agent", "project"}`,
+    "term", "leaders", "founder", "members", "member_info", "newest", "created", "bytes",
+    "strays", "format", "limits"}` (`leader` and `term` by the charters' terms, null for none
+    or a tie; `leaders` every folder holding a `CHANNEL.md`, a former leader's too), `member_info` each `{"name", "box", "os", "agent", "project"}`,
     `limits` `{"max_mb", "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
-  - `whoami C`: `{"channel", "name", "project", "role", "leader", "founder", "leads", "mode",
-    "server", "folder", "tree", "box", "box_source", "members", "kind"}`, each member
+  - `whoami C`: `{"channel", "name", "project", "role", "leader", "term", "founder", "leads",
+    "mode", "server", "folder", "tree", "box", "box_source", "members", "kind"}` (`leader`,
+    `term` and `leads` by the charters' terms in the tree on this box), each member
     `{"name", "agent", "box", "os", "leader", "newest", "watched", "watch_every", "left"}`,
     plus `"presence"` in a lobby. `founder` is in `list`'s channels too: in a lobby the
     founder's name, with the top-level `leader` null (`list`'s `leaders` empty), `leads` false
@@ -2967,8 +3108,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     in `list` too (null there for a channel whose format, kind or limits this vcharon refuses).
     `whoami` without C: `{"box", "box_source", "project", "role", "name", "channels"}`, each
     channel as with C without `box`, `box_source` and `members`.
-  - `read`: `{"channel", "folder", "synced", "members", "member_info", "count", "entries",
-    "notes", "missing"}`; each of `member_info` `{"name", "box", "os", "agent", "project",
+  - `read`: `{"channel", "leader", "term", "folder", "synced", "members", "member_info",
+    "count", "entries", "notes", "missing"}` (`leader` and `term` null in a lobby); each of `member_info` `{"name", "box", "os", "agent", "project",
     "vcharon", "watched", "watch_every", "left"}`; each entry `{"time", "id", "name",
     "number", "to", "re", "title", "file", "header", "body"}`; `count` counts every entry in the
     channel, the same as the text's first line; IDs, `--last` and `--to-me` narrow only
@@ -2987,8 +3128,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 - **The entry header**: `## <time> — <name>#<n> — <title>`, `<time>` as `YYYY-mm-dd HH:MM:SS`
   (a time without seconds is a bad time to `read`), then `to:`, `re:`, and other `key: value`
   lines up to the first blank line ([Entries](#entries)).
-- **The channel files**: the layout ([Layout](#layout)); `MEMBER.md`'s #1 fields, `CHANNEL.md`'s
-  #2 fields ([Formats](#formats)); `STEPS.md` (the leader's) and `RESULTS.md`; a lobby's
+- **The channel files**: the layout ([Layout](#layout)); `MEMBER.md`'s #1 fields, a charter's
+  fields, `term:` and `after:` included ([Formats](#formats)); `STEPS.md` (the leader's) and `RESULTS.md`; a lobby's
   `chat-YYYY-MM-DD.md` day files; any `.md` file of a member's folder holds entries.
 - **A lobby's `whoami` lines**: `here`, `away`, `left` or `gone` on each member's line, the
   channel line `channel lobby (a lobby, founded by <founder>)`, and `+<n> not seen in 24 h
@@ -3184,8 +3325,6 @@ Later:
   connections (ControlMaster, never on Windows); not measured. A later run (0.8.4, 30 watchers
   in one channel, started in bursts of 5, 5, 10 and 10) measured 16 to 19 MB of the server's
   available memory per watcher and one reset in a burst of 10.
-- Handing the leader role to another member: today the leader closes and the new one creates a
-  new channel.
 - Closing a lobby, and removing the folders of members that never come back: today the user
   removes them by hand at the root (never the founder's: [The lobby](#the-lobby)).
 

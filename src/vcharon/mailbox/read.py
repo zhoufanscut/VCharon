@@ -55,8 +55,10 @@ on stderr (cli.py's _read; a local member's channel folder that is gone gives th
 command, as the watcher does). With IDs, an ID no placed entry has is exit 1 too, after the
 view is printed: `ERROR not_found: no entry <ids> in <C>` and its fix line.
 
---json prints one object instead (view_json): {"channel", "folder", "synced", "members",
-"member_info", "count", "entries", "notes", "missing"}. "folder" is the tree read; "synced" is
+--json prints one object instead (view_json): {"channel", "leader", "term", "folder", "synced",
+"members", "member_info", "count", "entries", "notes", "missing"}. "leader" is the member that
+leads the work channel by the charters' terms, and "term" its term (both null in a lobby, and
+when no one or two lead at the top term); "folder" is the tree read; "synced" is
 true for a remote member's copy; "members" the member folders read; "member_info" each one's
 {"name", "box", "os", "agent", "project", "vcharon"} from its MEMBER.md #1 (null for a field it
 lacks; "vcharon" the version the member last joined or watched with), and "watched" (the time
@@ -451,21 +453,23 @@ def _collect(root, now, skip=None, notes=(), seen=None):
     return folders, ordered, notes, info, version_note(info)
 
 
-def to_me(item, me, leader, kind_=kinds.WORK):
+def to_me(item, me, chain, kind_=kinds.WORK):
     """Whether the watcher of me would print item as `to you:` or `to all:`: a placed entry in
-    another member's folder addressed to @<me>, or to @all from the leader (in a lobby, from
-    any member: kind_.may_post_all). Its own folder is never watched, and a work channel
-    member's @all is ignored, so neither is here either."""
+    another member's folder addressed to @<me>, or to @all from the leader by the charters'
+    terms (chain, a charter.Chain; in a lobby, from any member: kind_.may_post_all). Its own
+    folder is never watched, and a work channel member's @all is ignored, so neither is here
+    either."""
     e = item.e
     if not item.placed or item.folder == me:
         return False
-    return "@" + me in e.to or (entries.ALL in e.to and kind_.may_post_all(item.folder, leader))
+    return "@" + me in e.to or (entries.ALL in e.to
+                                and kind_.may_post_all(item.folder, e.number, chain))
 
 
 def pick(ordered, last=None, ids=None, mine=None):
     """(the items shown, in the view's order; the IDs asked for that no placed entry has).
     ids: only the placed entries with those IDs (a forged copy in another folder is never
-    taken for the entry); mine: (me, leader[, kind]), only the entries to_me; last: the newest
+    taken for the entry); mine: (me, chain[, kind]), only the entries to_me; last: the newest
     N of what is left."""
     shown = ordered
     missing = []
@@ -514,10 +518,10 @@ def view(root, channel, synced=False, full=False, last=None, now=None, skip=None
 
 
 def view_json(root, channel, synced=False, full=False, last=None, now=None, skip=None,
-              notes=(), ids=None, mine=None, seen=None):
+              notes=(), ids=None, mine=None, seen=None, lead=(None, None)):
     """The view as one JSON object (the module's docstring has its fields); OSError when the
     root can't be read. skip and notes: view's; ids and mine: pick's (ids imply full); seen:
-    member_info's."""
+    member_info's; lead: (the leader, its term), the caller's from the charters' chain."""
     folders, ordered, notes, info, version = _collect(root, now, skip, notes, seen)
     if version is not None:
         notes.append(version)
@@ -530,6 +534,7 @@ def view_json(root, channel, synced=False, full=False, last=None, now=None, skip
                       "to": list(e.to), "re": e.re or None, "title": e.title, "file": item.path,
                       "header": [[k or "", v] for k, v in e.header] if full else None,
                       "body": e.body if full else None})
-    return {"channel": channel, "folder": root, "synced": synced, "members": folders,
+    return {"channel": channel, "leader": lead[0], "term": lead[1], "folder": root,
+            "synced": synced, "members": folders,
             "member_info": info, "count": len(ordered), "entries": items,
             "notes": [n.removeprefix("note: ") for n in notes], "missing": missing}

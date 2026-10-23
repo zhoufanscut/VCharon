@@ -503,8 +503,9 @@ L3_TRIGGERS = {
                                                     "CLOSED: a mistake, told after it",
     ("channel_cmd.py", "OTHER_AGENT_NOTE", "start"): "a second agent took over a membership in "
                                                      "the same folder: a rare case",
-    ("channel_cmd.py", "_leave", "end"): "a member's close refused: a refusal's fix line",
-    ("channel_cmd.py", "_leave_held", "end"): "a leader's leave refused: a refusal's fix line",
+    ("channel_cmd.py", "_leave_held", "end"): "a member's close refused: a refusal's fix line",
+    ("channel_cmd.py", "LEADER_LEAVE_FIX", "end"): "a leader's leave refused: a refusal's fix "
+                                                   "line",
     ("cli.py", "_parser", "start"): "the skill verb's help says what the skill points at",
     ("mailbox/watch.py", "STOP_FIX", "watch"): "watch --stop's refusal when the watcher didn't "
                                                "stop: each CLI's own way to stop it",

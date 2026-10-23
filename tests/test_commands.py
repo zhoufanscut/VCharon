@@ -185,8 +185,8 @@ class WhoamiTest(ChannelCase):
         members = doc.pop("members")
         self.assertEqual(doc, {
             "channel": "game", "name": "mac-web-b", "project": "web", "role": "b",
-            "leader": "laptop-ui", "founder": None, "leads": False, "mode": "remote",
-            "server": "fake-dest",
+            "leader": "laptop-ui", "term": 1, "founder": None, "leads": False,
+            "mode": "remote", "server": "fake-dest",
             "folder": os.path.join(tree, "mac-web-b"), "tree": tree, "kind": "work",
             "box": "mac", "box_source": "config"})
         # a remote member's: this box's copy, the leader's folder as the last sync brought it
@@ -644,7 +644,7 @@ class ListJsonTest(ChannelCase):
         [ch] = doc["channels"]
         self.assertEqual(sorted(ch), ["bytes", "created", "format", "founder", "kind", "leader",
                                       "leaders", "limits", "member_info", "members", "name",
-                                      "newest", "strays"])
+                                      "newest", "strays", "term"])
         self.assertEqual(ch["kind"], "work")
         self.assertEqual((ch["format"], ch["limits"]),
                          (1, {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}))
@@ -927,7 +927,7 @@ class FixRoundTripTest(ChannelCase):
         self.assertGreaterEqual(n, 20, self.seen)
         verbs = {argv[0] for text in self.seen for argv in commands(text)}
         self.assertEqual(verbs, {"post", "join", "list", "guide", "leave", "sync", "read", "key",
-                                 "setup"}, self.seen)
+                                 "setup", "lead"}, self.seen)
         self.assertEqual(len([t for t in self.seen if "--takeover" in t]), 2, self.seen)
 
     def test_the_help_examples_parse(self):
@@ -957,8 +957,18 @@ HINTS = {
         ("vcharon leave %s %s", ("game", FLAGS)),
         # close's for a member, and leave's for the leader: text, never the command itself
         ("members leave after the leader's CLOSED; how: vcharon guide end", ()),
-        ("a leader ends the channel with CLOSED to @all after every member's DONE, then a "
-         "close; how: vcharon guide end", ()),
+        # the leader's leave: the offer is a template (@NAME), the close is text
+        ("to leave, first offer the lead to a member (vcharon lead %s --to @NAME) and wait "
+         "until it takes it; or end the channel with CLOSED to @all after every member's DONE, "
+         "then a close; how: vcharon guide end", ("game",)),
+        # vcharon lead's: an offer's checks, the taker's last line
+        ("check its name: vcharon list %s", ("--server dev",)),
+        ("check the name: vcharon whoami %s %s", ("game", FLAGS)),
+        ("  next: tell your user you lead %s now (term %d); then start your watcher again "
+         "(vcharon guide lead): vcharon watch %s --until-change %s", ("game", 2, "game", FLAGS)),
+        ("  note: you lead %s at the server now (term %d), but the takeover stopped before its "
+         "end: once the error below is dealt with, run: vcharon lead %s %s again",
+         ("game", 2, "game", FLAGS)),
         # close's note when the leader posted no CLOSED to @all
         ("  note    you posted no CLOSED to @all, so the members weren't told %s closed: each "
          "one's watcher ends with EXIT closed. Next time post CLOSED first and wait for the "
@@ -1094,6 +1104,11 @@ HINTS = {
                   "sync %s --full %s", ("game", "up", FLAGS, "game", FLAGS))],
     # CHANNEL.md's rules: line, written by create and by a lobby's claim
     "charter.py": [("vcharon guide rules", ())],
+    # channel.lead's refusals, at the server
+    "channels.py": [
+        ("ask %s to offer it to you: the leader runs vcharon lead %s --to @%s ; if the leader "
+         "is gone, ask your user", ("laptop-ui", "game", "mac-web")),
+        ("check the channel's leader: vcharon whoami %s", ("game",))],
     "config.py": [("%s [%s]: %s holds only [vcharon]; a channel's section goes in %s, which "
                    "vcharon join writes", None),
                   ("# box = %s   (the default: this OS); to set another: vcharon setup --box "
@@ -1124,6 +1139,10 @@ HINTS = {
         ("  next: the leader closed the channel: don't start your watcher again, stop it if it "
          "runs (vcharon watch %s --stop %s), then run: vcharon leave %s %s",
          ("game", FLAGS, "game", FLAGS)),
+        # the line after the leader's offer of the lead to this member
+        ("  next: %s offers you the lead of %s: stop your watcher if it runs (vcharon watch %s "
+         "--stop %s), then run: vcharon lead %s %s ; then tell your user",
+         ("laptop-ui", "game", "game", FLAGS, "game", FLAGS)),
         # watch --stop's, when the lock is still held at the end of its wait: a pointer to a
         # topic's section comes before its command, so the command is parsed by its own test
         # (StopFixTest)

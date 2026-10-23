@@ -36,10 +36,11 @@ class Work:
     # the watcher keeps every heading hash (a work channel ends)
     prune_heads = False
 
-    def may_post_all(self, folder, leader):
-        """Whether an @all from folder is to all: the leader's only, the record's leader, never
-        whoever holds CHANNEL.md."""
-        return folder == leader
+    def may_post_all(self, folder, number, chain):
+        """Whether folder's entry #number to @all is to all: the leader's, by the charters'
+        terms and entry numbers (charter.Chain.counts_all; number None: a new entry), never
+        whoever holds a CHANNEL.md."""
+        return chain.counts_all(folder, number)
 
     def day_file(self, when):
         """The file a post with no --file goes into, from its heading's time; None for
@@ -69,7 +70,7 @@ class Lobby(Work):
     closing_line = False
     prune_heads = True
 
-    def may_post_all(self, folder, leader):
+    def may_post_all(self, folder, number, chain):
         return True
 
     def day_file(self, when):

@@ -39,6 +39,10 @@
 
 ## The leader
 
+To stop while the channel goes on, hand the lead to a member first (`vcharon guide lead`,
+"Handing over the lead"), then leave as a member does. After a handoff, `DONE` and `LEAVE` go to
+the new leader, and only it closes.
+
 1. Move the results where they belong (the repo's docs, a commit), then post `CLOSED` to
    `@all`, only after every member's `DONE`:
 

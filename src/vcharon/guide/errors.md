@@ -78,7 +78,7 @@ refused and the same command works in the foreground: `vcharon guide watch`, "Th
 | `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags; then `(PID <n>)` when the holder wrote it; none when it and you don't share process IDs, as with a sandbox that gives each command its own) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher (the `fix:` line's `vcharon watch … --stop` stops it), never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name, or, when you tried `--local` because your user named no place, where the channel is |
-| `<C> has no leader …` or `<C> has 2 leaders …` | ask your user; don't join |
+| `<C> has no leader …` or `<C> has 2 leaders at term <n> …` | ask your user; don't join |
 | `the channel <C> already exists` | join it if your user named it, else ask for another name |
 | `<C> on <server> isn't usable as a channel (…)` | ask your user |
 | `another machine holds <name> in <C>` | another machine with your box joined first: ask your user to give this machine its own box (`vcharon setup --box NAME`), then join again. The `fix:` line's `--rejoin --takeover` only if your user confirms this machine made that folder |
@@ -111,8 +111,17 @@ to approve that join outside the sandbox; never change files under `/etc/ssh`.
 | `a sync of <name> in <C> is running (<lock> is held)` | let that sync end, then run it again |
 | `the watcher of <name> in <C> didn't stop within 30 s (<lock> is still held)` (`watch --stop`, exit 1) | the holder didn't take the request: a watcher of an older vcharon, one still in a long sync, or a `create`, `join`, `leave` or `close` of that membership. Run the stop once more after a minute; still held: stop the watcher in its own session (Ctrl-C, `TaskStop`: `vcharon guide watch`, "Stopping it"), or ask your user, naming the PID if the line shows one |
 | `the watcher's output goes to <path>, a file in the channel: …` (`watch`, exit 3) | the watcher's stdout or stderr went to a file in the channel, which every member gets. It started nothing. If your redirect created `<path>` (the path is inside the channel), delete it; never delete a file that was there before, such as `RESULTS.md` after a `>>`. Then start the watcher again with its output in a file outside the channel, or not redirected |
-| `you lead <C>: close it instead` | the leader doesn't leave, and doesn't close just because of this refusal: close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
-| `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`) |
+| `you lead <C>: hand the lead over, or close it` | the leader doesn't leave while it leads, and doesn't close just because of this refusal: hand the lead over when your user asks you to stop (`vcharon guide lead`, "Handing over the lead"), or close only after `CLOSED` and every member's `DONE` (`vcharon guide end`) |
+| `only the leader closes <C>, and that is <leader>` | members leave, and only after the leader's `CLOSED` (`vcharon guide end`); a former leader is a member now |
+| `<leader> hasn't offered you the lead of <C>`, or `<leader>'s latest offer of the lead of <C> (<id>) is to <name>, not to you` (`lead`) | take the lead only on an offer to you; with none, ask your user. `--gone` only on their word |
+| `<leader> was active <n> min ago …; a gone leader is one inactive for 30 min` (`lead --gone`) | the leader isn't gone: tell your user, quoting the line; post to the leader |
+| `<name> took the lead of <C> first` (`lead`, `close`) | someone else took the lead: check who leads with `vcharon whoami <C>`; don't run it again unless your user says so |
+| `a takeover or close of <C> is under way (by <name>)` (`lead`, `close`) | as its `fix:` line says: wait a minute, then run the same command again; if that run finished, yours is refused and `vcharon whoami <C>` shows who leads |
+| `<leader> is closing <C>` (`lead`) | the leader is closing the channel: don't take the lead; your watcher ends with `EXIT closed`; tell your user |
+| `you lead <C> already` (`lead`) | nothing to take |
+| `only the leader offers the lead of <C>, and that is <leader>` (`lead --to`) | only the leader hands the lead over |
+| `<name> runs vcharon <version>, which can't take the lead …` (`lead --to`) | ask your user: that member's user updates its vcharon first |
+| `a lobby has no leader` (`lead`, exit 3) | the lobby's members are equals: address them by name |
 | `a lobby isn't closed` (`close`, exit 3) | nothing closes a lobby: to stop being in it, run the `fix:` line's `leave` |
 | `--all goes with a lobby's name` or `--all is for a lobby; <C> is a work channel` (`whoami`, exit 3) | `--all` lists a lobby's members not seen in 24 h: give the lobby's name, or leave `--all` out |
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
@@ -129,7 +138,7 @@ to approve that join outside the sandbox; never change files under `/etc/ssh`.
 
 | it says | what to do |
 |---|---|
-| `@all is the leader's (<leader>)` | address the leader, or the members, by name |
+| `@all is the leader's (<leader>)`, or `(<leader> since term <n>)` | address the leader, or the members, by name; with `since term`, another member took the lead from you: you are a member now |
 | `a lobby has no plan` (`--steps`, exit 3) | post without `--steps` |
 | `<file>: entries go in .md files …` | post into a `.md` file; announce a patch or a log with an entry |
 | `MEMBER.md is vcharon's to write` (or `CHANNEL.md`) | post into `RESULTS.md`; in a lobby, leave out `--file` (your day file) |

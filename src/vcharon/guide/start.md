@@ -10,8 +10,8 @@ A **channel** is a folder tree where agents talk while each works in its own pro
 **entries**: short Markdown records with a title, an address (`to:`) and a body.
 
 - There are two kinds. A **work channel**, made by `create`, is for one piece of work: its
-  creator is its **leader**, which writes the plan (`STEPS.md`), assigns the steps by name,
-  alone posts to everyone (`@all`), and closes it. The **lobby**, one per server, named `lobby`
+  creator is its **leader** (until it hands the lead to a member), which writes the plan
+  (`STEPS.md`), assigns the steps by name, alone posts to everyone (`@all`), and closes it. The **lobby**, one per server, named `lobby`
   and made by its first `join`, has no leader, no plan and no end: the agents there find each
   other and talk (`vcharon guide lobby`). This topic is about work channels.
 - A **local member** (`--local`) runs on the machine that holds the channel and writes its

@@ -264,7 +264,9 @@ def _channel_info(path, name, tick, made):
         if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
             members.append(entry.name)
             found = read_member(entry.path, entry.name)
-            fields[entry.name] = {k: found.get(k) for k in LIST_FIELDS}
+            # the version too: a leader's offer of the lead is refused to a member whose
+            # vcharon has none (vcharon list shows LIST_FIELDS only)
+            fields[entry.name] = {k: found.get(k) for k in LIST_FIELDS + ("vcharon",)}
             try:
                 st = os.lstat(os.path.join(entry.path, CHANNEL_FILE))
             except OSError:
@@ -274,37 +276,28 @@ def _channel_info(path, name, tick, made):
         else:
             strays.append(entry.name)
     newest, total = _files_below(path, tick, True)
+    chain = charter.chain(path)
     info = {"name": name, "members": members, "fields": fields, "leaders": leaders,
-            "strays": strays, "newest": newest, "bytes": total, "created": None, "made": made}
-    if len(leaders) == 1:
-        text = charter.read_text(os.path.join(path, leaders[0]))
-        info.update(charter.parse(text, leaders[0]))
-        info["created"] = charter.created(text, leaders[0])
+            "strays": strays, "newest": newest, "bytes": total, "created": None, "made": made,
+            "leader": chain.leader, "term": chain.term if chain.charters else None,
+            "tied": chain.tied}
+    if chain.leader is not None:
+        text = charter.read_text(os.path.join(path, chain.leader))
+        info.update(charter.parse(text, chain.leader))
+        info["created"] = charter.created(text, chain.leader)
     else:
         info.update(charter.parse("", ""))
     return info
 
 
-def _charter(path, leaders):
-    """{"format", "limits"}, and "kind" for a lobby, from the one leader's CHANNEL.md
-    (charter.parse); no format when the channel has no leader or several."""
-    if len(leaders) != 1:
+def _charter(path):
+    """{"format", "limits"}, and "kind" for a lobby, from the leader's CHANNEL.md
+    (charter.parse; the leader by the charters' terms); no format when the channel has no
+    leader, or two at the top term."""
+    leader = charter.chain(path).leader
+    if leader is None:
         return charter.parse("", "")
-    return charter.read(os.path.join(path, leaders[0]), leaders[0])
-
-
-def _leaders(path):
-    """The members whose folder holds CHANNEL.md as a regular file, in name order."""
-    found = []
-    for entry in sorted(os.scandir(path), key=lambda e: e.name):
-        if entry.is_dir(follow_symlinks=False) and pathrules.writer_problem(entry.name) is None:
-            try:
-                st = os.lstat(os.path.join(entry.path, CHANNEL_FILE))
-            except OSError:
-                continue
-            if stat.S_ISREG(st.st_mode):
-                found.append(entry.name)
-    return found
+    return charter.read(os.path.join(path, leader), leader)
 
 
 # --- channel.claim, channel.release ---
@@ -339,6 +332,8 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
     ch = None
     try:
         if create:
+            # markers left by an earlier channel of this name would skip its terms
+            _sweep_lead_of(root, channel)
             try:
                 top.mkdir(channel)
             except FileExistsError:
@@ -384,7 +379,7 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
     # a new work channel's CHANNEL.md isn't written yet: create writes it after the claim
     path = os.path.join(root, channel)
     try:
-        reply.update(_charter(path, _leaders(path)))
+        reply.update(_charter(path))
     except OSError:
         reply.update(charter.parse("", ""))
     return reply
@@ -476,7 +471,9 @@ def release(root, channel, name, tick=_no_tick, keep_charter=False):
 
 def remove(root, channel, name, tick=_no_tick):
     """Closes a channel for its leader name: refused unless <channel>/<name>/CHANNEL.md exists
-    and is the only CHANNEL.md, and every entry at the channel's top is a member's folder.
+    and holds the top term's charter alone (charter.chain: a former leader's CHANNEL.md stays),
+    no takeover's marker is under way (it takes the next term's marker first), and every entry
+    at the channel's top is a member's folder.
     Then one rename to .vcharon-closed-<channel>-<stamp>, so every member's next run sees the
     channel gone at once, and the no-link walk deletes that (DESIGN, "Create, join, leave,
     close"). Returns {"closed", "deleted"}."""
@@ -505,15 +502,20 @@ def remove(root, channel, name, tick=_no_tick):
         if name not in leaders:
             raise refused("%s/%s has no %s: only the channel's leader closes it"
                           % (channel, name, CHANNEL_FILE), "ask the user")
-        if len(leaders) > 1:
-            raise refused("%s has %d leaders (%s hold %s)"
-                          % (channel, len(leaders), ", ".join(l + "/" for l in leaders),
-                             CHANNEL_FILE), "ask the user")
+        # the leader by terms: a former leader's CHANNEL.md stays in its folder
+        chain = charter.chain(os.path.join(root, channel))
+        _check_leader(channel, name, chain)
         if strays:
             raise refused("%s holds %s at its top, not a member's folder"
                           % (channel, ", ".join(strays)), "ask the user, and remove it first")
         ch.close()
         ch = None
+        # the next term's marker, as a takeover takes it: of a close and a takeover at once,
+        # one mkdir wins
+        now = time.time()
+        term, mine = _next_term(root, channel, chain, name, now)
+        marker = _marker_path(root, channel, term) if mine else _take_marker(
+            root, channel, term, name, chain)
         closed = "%s%s-%s-%s" % (CLOSED_PREFIX, channel, time.strftime("%Y%m%d-%H%M%S"),
                                  os.urandom(3).hex())
         # On Windows a rename fails while another process holds the folder: measured
@@ -524,9 +526,13 @@ def remove(root, channel, name, tick=_no_tick):
         try:
             fsops.retry_in_use(top.rename, channel, closed, codes=fsops.HELD_CODES)
         except OSError as e:
+            _drop_marker(marker)
             if getattr(e, "winerror", None) not in fsops.HELD_CODES:
                 raise
             raise _held(e, os.path.join(root, channel))
+        except BaseException:
+            _drop_marker(marker)
+            raise
         try:
             deleted = fsops.remove_tree(top, closed, tick)
         except (OSError, VCharonError) as e:
@@ -540,6 +546,17 @@ def remove(root, channel, name, tick=_no_tick):
         _close_all(ch, top)
     sweep_seen(root)
     return {"closed": closed, "deleted": deleted}
+
+
+def _check_leader(channel, name, chain):
+    """Refused unless name holds the top term's charter of channel (chain): a former leader's
+    CHANNEL.md stays, so holding one isn't leading."""
+    if chain.leader == name:
+        return
+    if chain.leader is None:
+        raise refused(charter.tied_text(channel, chain.tied, chain.term), "ask the user")
+    raise refused("%s leads %s since term %d; %s led it before: only the leader closes it"
+                  % (chain.leader, channel, chain.term, name), "ask the user")
 
 
 def _held(e, path):
@@ -749,8 +766,13 @@ def sweep_seen(root):
     """Removes each seen/<X>/ whose channel folder <root>/<X> is gone: after a close, the
     undo of a failed create, or a watcher's stamp that raced a close. Only what a stamp makes is
     removed: a folder whose name can be a channel's, holding only small regular files whose
-    names can be a member's (and a stamp's temp files); anything else is left. Best effort:
-    never raises."""
+    names can be a member's (and a stamp's temp files); anything else is left. Then lead/<X>/,
+    the term markers, the same way (_sweep_lead). Best effort: never raises."""
+    _sweep_seen(root)
+    _sweep_lead(root)
+
+
+def _sweep_seen(root):
     top = seen_root(root)
     if not _is_real_dir(top):
         # a link: a sweep through it would delete files outside the store
@@ -790,3 +812,371 @@ def sweep_seen(root):
             os.rmdir(folder)
         except OSError:
             continue
+
+
+# --- channel.lead: a member takes the lead (DESIGN, "Leader handoff") ---
+
+# The folder beside the channel root that holds, per channel, one marker folder per term taken:
+# lead/<channel>/<term>/, holding an empty file named after its taker. Its mkdir decides a race
+# of two takers (or of a taker and a close): one wins. Beside the root, as seen/.
+LEAD = "lead"
+# a marker with no charter of its term yet is a takeover (or a close) under way for this long;
+# an older one was left by a run that died, and is skipped (terms may skip a number)
+LEAD_WAIT = 60
+# a gone leader: no last-watched stamp and no change in its folder for this long, both by the
+# server's own clock (file mtimes are copied from the writer's machine, so they don't count)
+GONE_AFTER = 30 * 60
+# the title of the leader's offer, and its header key naming the member offered the lead
+HANDOFF_TITLE = "HANDOFF"
+HANDOFF_KEY = "lead"
+# how much of the old leader's STEPS.md the reply carries: the taker quotes it in its own
+# STEPS.md, one entry file, so it is cut below the channel's entry limit
+STEPS_MARGIN = 4000
+# the most of the taker's CHANNEL.md the reply carries; vcharon's is a few kB
+CHARTER_MAX = 1 << 20
+# how often, and how far apart, a run that lost a marker's mkdir looks for the winner's name
+MARKER_TRIES = 10
+MARKER_PAUSE = 0.05
+_TERM_NAME = re.compile(r"\A[1-9][0-9]{0,8}\Z")
+OFFER_HINT = ("ask %s to offer it to you: the leader runs vcharon lead %s --to @%s ; if the "
+              "leader is gone, ask your user")
+GONE_HINT = ("ask your user; or have %s hand the lead over to you: the leader's offer reaches "
+             "your watcher")
+
+
+def lead_root(root):
+    """The term markers' folder of the channel root root: lead beside it."""
+    return os.path.join(os.path.dirname(root), LEAD)
+
+
+def _marker_path(root, channel, term):
+    return os.path.join(lead_root(root), channel, str(term))
+
+
+def _markers(root, channel):
+    """{term: (its marker's mtime, the names in it)} of lead/<channel>/; {} for none. Never
+    through a link."""
+    top = lead_root(root)
+    folder = os.path.join(top, channel)
+    if not _is_real_dir(top) or not _is_real_dir(folder):
+        return {}
+    out = {}
+    for n in os.listdir(folder):
+        if not _TERM_NAME.match(n):
+            continue
+        path = os.path.join(folder, n)
+        try:
+            st = os.lstat(path)
+            if not stat.S_ISDIR(st.st_mode):
+                continue
+            inside = sorted(x for x in os.listdir(path) if pathrules.writer_problem(x) is None)
+        except OSError:
+            continue
+        out[int(n)] = (st.st_mtime, inside)
+    return out
+
+
+def _next_term(root, channel, chain, name, now):
+    """(the term the next takeover or close of channel takes, whether its marker is name's
+    own already: a run of name's that stopped between the marker and its charter). Refused
+    while another's marker with no charter is younger than LEAD_WAIT: its run may still write
+    one. An older marker, name's own too, was left by a run that died, or by an earlier
+    channel of this name: skipped, with a new mkdir, since another taker may skip it too and
+    only a mkdir decides between them."""
+    marks = _markers(root, channel)
+    top = chain.term or 0
+    high = max([top] + list(marks))
+    if high > top:
+        mtime, inside = marks[high]
+        young = abs(now - mtime) < LEAD_WAIT
+        if young and inside == [name]:
+            return high, True
+        if young:
+            raise refused("a takeover or close of %s is under way (by %s)"
+                          % (channel, ", ".join(inside) or "a member"),
+                          "wait a minute, then run this again")
+    return high + 1, False
+
+
+def _take_marker(root, channel, term, name, chain):
+    """mkdir lead/<channel>/<term> (lead/ and lead/<channel>/ one mkdir each, never through a
+    link), then the empty file name in it. Of two runs, one mkdir wins; the other is
+    refused, naming the winner. Returns the marker's path."""
+    top = lead_root(root)
+    folder = os.path.join(top, channel)
+    for path in (top, folder):
+        _mkdir(path)
+        if not _is_real_dir(path):
+            raise refused("%s isn't a folder (a link, or a file)" % path, "remove it by hand")
+    marker = os.path.join(folder, str(term))
+    try:
+        os.mkdir(marker)
+    except FileExistsError:
+        who = []
+        # the winner names itself in it a moment after its mkdir
+        for _ in range(MARKER_TRIES):
+            try:
+                who = sorted(x for x in os.listdir(marker)
+                             if pathrules.writer_problem(x) is None)
+            except OSError:
+                who = []
+            if who:
+                break
+            time.sleep(MARKER_PAUSE)
+        if who and who[0] == chain.leader:
+            raise refused("%s is closing %s" % (who[0], channel), "ask your user") from None
+        raise refused("%s took the lead of %s first" % (who[0] if who else "another member",
+                                                        channel),
+                      "check the channel's leader: vcharon whoami %s" % channel) from None
+    try:
+        with open(os.path.join(marker, name), "xb"):
+            pass
+    except OSError as e:
+        _drop_marker(marker)
+        raise fsops.error(e, marker) from None
+    return marker
+
+
+def _drop_marker(marker):
+    """Removes a marker folder and the files in it. Best effort: never raises."""
+    if marker is None:
+        return
+    try:
+        for n in os.listdir(marker):
+            os.remove(os.path.join(marker, n))
+        os.rmdir(marker)
+    except OSError:
+        pass
+
+
+def _sweep_lead(root):
+    """Removes each lead/<X>/ whose channel folder <root>/<X> is gone (_sweep_lead_of).
+    Best effort."""
+    top = lead_root(root)
+    if not _is_real_dir(top):
+        return
+    try:
+        names = os.listdir(top)
+    except OSError:
+        return
+    for x in names:
+        if not channel_problem(x):
+            _sweep_lead_of(root, x)
+
+
+def _sweep_lead_of(root, x):
+    """Removes lead/<x>/ when the channel folder <root>/<x> is gone and it holds only marker
+    folders (a term's number, holding empty files named after members). Best effort."""
+    try:
+        os.lstat(os.path.join(root, x))
+        return
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return
+    folder = os.path.join(lead_root(root), x)
+    try:
+        if not _is_real_dir(folder):
+            return
+        markers = os.listdir(folder)
+        ok = all(_TERM_NAME.match(m) and _is_real_dir(os.path.join(folder, m))
+                 for m in markers)
+        for m in markers if ok else ():
+            for n in os.listdir(os.path.join(folder, m)):
+                st = os.lstat(os.path.join(folder, m, n))
+                if (pathrules.writer_problem(n) is not None or not stat.S_ISREG(st.st_mode)
+                        or st.st_size):
+                    ok = False
+        if not ok:
+            return
+        for m in markers:
+            _drop_marker(os.path.join(folder, m))
+        os.rmdir(folder)
+    except OSError:
+        return
+
+
+def _check_offer(path, leader, name, chain):
+    """Refused unless the leader's latest HANDOFF entry, posted since it took its term, has
+    the header lead: name."""
+    top = chain.top()
+    low = 0 if top is None or top.term == charter.FIRST_TERM else top.number
+    folder = os.path.join(path, leader)
+    latest = None
+    for md in entries.md_files(folder):
+        if os.path.basename(md) in (MEMBER_FILE, CHANNEL_FILE):
+            continue
+        try:
+            found = entries.parse_file(md)
+        except OSError:
+            continue
+        for e in found:
+            if (e.name == leader and e.title.strip() == HANDOFF_TITLE
+                    and (latest is None or e.number > latest.number)):
+                latest = e
+    hint = OFFER_HINT % (leader, os.path.basename(path), name)
+    if latest is None or latest.number <= low:
+        raise refused("%s hasn't offered you the lead of %s" % (leader, os.path.basename(path)),
+                      hint)
+    to = dict(reversed(latest.header)).get(HANDOFF_KEY)
+    if to != name:
+        raise refused("%s's latest offer of the lead of %s (%s) is to %s, not to you"
+                      % (leader, os.path.basename(path), latest.id, pathrules.show(str(to))),
+                      hint)
+
+
+def last_active(root, channel, leader):
+    """The newest of leader's last-watched stamp and the mtime of every folder in
+    <root>/<channel>/<leader>/ (the folder itself, stage dirs too), all by this machine's
+    clock: a sync or a post renames into a folder, which moves its mtime here, while a file's
+    mtime is the writer's own. None when there is neither."""
+    times = []
+    top = seen_root(root)
+    if _is_real_dir(top) and _is_real_dir(os.path.join(top, channel)):
+        try:
+            st = os.lstat(os.path.join(top, channel, leader))
+            if stat.S_ISREG(st.st_mode):
+                times.append(st.st_mtime)
+        except OSError:
+            pass
+    for dirpath, _dirnames, _files in os.walk(os.path.join(root, channel, leader)):
+        try:
+            times.append(os.lstat(dirpath).st_mtime)
+        except OSError:
+            continue
+    return max(times) if times else None
+
+
+def _check_gone(root, channel, leader, now):
+    """Refused unless leader has been inactive GONE_AFTER (last_active)."""
+    newest = last_active(root, channel, leader)
+    if newest is not None and now - newest < GONE_AFTER:
+        raise refused("%s was active %d min ago (its watcher, or a change in its folder); a "
+                      "gone leader is one inactive for %d min"
+                      % (leader, max(0, int(now - newest)) // 60, GONE_AFTER // 60),
+                      GONE_HINT % leader)
+
+
+def _read_bytes(path, limit):
+    """path's bytes, at most limit + 1 of them; None for a file that is missing, a link, or
+    can't be read."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+        try:
+            data = b""
+            while len(data) <= limit:
+                got = os.read(fd, limit + 1 - len(data))
+                if not got:
+                    break
+                data += got
+            return data
+        finally:
+            os.close(fd)
+    except OSError:
+        return None
+
+
+def _steps_of(path, leader, limits):
+    """(the old leader's STEPS.md text, cut at a line end to fit the channel's entry limit
+    less STEPS_MARGIN; whether it was cut). "" for none."""
+    limit = max(0, (limits.get("max_entry_kb") or 0) * charter.KB - STEPS_MARGIN)
+    data = _read_bytes(os.path.join(path, leader, "STEPS.md"), limit)
+    if data is None:
+        return "", False
+    cut = len(data) > limit
+    if cut:
+        data = data[:limit]
+        data = data[:data.rfind(b"\n") + 1]
+    return data.decode("utf-8", "replace"), cut
+
+
+def _lead_reply(path, name, top):
+    """channel.lead's reply for name's charter top: {"term", "after", "from", "charter": its
+    CHANNEL.md's whole text, "steps", "steps_cut"}."""
+    data = _read_bytes(os.path.join(path, name, CHANNEL_FILE), CHARTER_MAX)
+    if data is None or len(data) > CHARTER_MAX:
+        raise refused("%s/%s can't be read" % (name, CHANNEL_FILE), "ask the user")
+    before = top.after[0]
+    info = charter.read(os.path.join(path, name), name)
+    steps, cut = _steps_of(path, before, info.get("limits") or {})
+    return {"term": top.term, "after": "%s#%d" % top.after, "from": before,
+            "charter": data.decode("utf-8"), "steps": steps, "steps_cut": cut}
+
+
+def lead(root, channel, name, number, mode, when, tick=_no_tick, now=None):
+    """name takes the lead of channel: mode "offer", on the leader's latest HANDOFF naming it;
+    "gone", when the leader has been inactive GONE_AFTER (_check_gone). The term is one more
+    than the highest charter's or marker's (_next_term); its marker's mkdir decides a race.
+    Then name's CHANNEL.md gets the charter, entry name#number (the client's next number,
+    taken under its post lock) at the time text when (the client's clock), with term: and
+    after: <leader>#<its highest number here>, through a stage file and one replace; a failed
+    write removes the marker. Returns _lead_reply's. A run of name's that wrote the charter
+    already gets the same reply: a re-run of the client finishes a half-done takeover."""
+    _check_names(channel, name)
+    if mode not in ("offer", "gone"):
+        raise VCharonError("protocol", "a lead mode that isn't one: %s"
+                           % pathrules.show(str(mode)))
+    if (not isinstance(number, int) or isinstance(number, bool) or not 1 <= number < 10 ** 9
+            or entries.parse_time(when) is None):
+        raise VCharonError("protocol", "a malformed lead call: %s#%s at %s"
+                           % (name, number, pathrules.show(str(when))))
+    t = time.time() if now is None else now
+    path = os.path.join(root, channel)
+    if not _is_real_dir(path):
+        raise _no_channel(channel)
+    own = os.path.join(path, name)
+    if not _is_real_dir(own) or _member_file(own) is None:
+        raise refused("you have no folder with a %s in %s" % (MEMBER_FILE, channel),
+                      "join it first")
+    if entries.has_left(own, name):
+        raise refused("you left %s" % channel, "join it again first")
+    chain = charter.chain(path)
+    if chain.leader is None:
+        if chain.tied:
+            _check_leader(channel, name, chain)
+        raise refused("%s has no leader (no member's folder holds %s)" % (channel, CHANNEL_FILE),
+                      "ask your user")
+    info = charter.read(os.path.join(path, chain.leader), chain.leader)
+    if info.get("kind") == charter.LOBBY_KIND:
+        raise refused("a lobby has no leader", "post to the members by name")
+    if chain.leader == name:
+        top = chain.top()
+        if top is None or top.after is None:
+            raise refused("you lead %s already" % channel, "nothing to take")
+        return _lead_reply(path, name, top)
+    leader = chain.leader
+    if mode == "offer":
+        _check_offer(path, leader, name, chain)
+    else:
+        _check_gone(root, channel, leader, t)
+    term, mine = _next_term(root, channel, chain, name, t)
+    have = entries.next_number(own, name)
+    if number < have:
+        raise refused("your folder at the server holds %s#%d already" % (name, have - 1),
+                      "sync your folder, then run this again")
+    target = os.path.join(own, CHANNEL_FILE)
+    try:
+        st = os.lstat(target)
+    except FileNotFoundError:
+        st = None
+    except OSError as e:
+        raise fsops.error(e, target) from None
+    if st is not None and not stat.S_ISREG(st.st_mode):
+        raise VCharonError("unsafe_path", "%s isn't a regular file" % target,
+                           "remove it by hand")
+    marker = _marker_path(root, channel, term) if mine else _take_marker(
+        root, channel, term, name, chain)
+    after = (leader, entries.next_number(os.path.join(path, leader), leader) - 1)
+    old = charter.header_of(charter.read_text(os.path.join(path, leader)), leader)
+    try:
+        title, to, header = charter.takeover_entry(channel, name, term, after, old)
+        entries.append(target, entries.build(when, name, number, title, to, header=header))
+    except BaseException as e:
+        _drop_marker(marker)
+        if isinstance(e, OSError):
+            raise fsops.error(e, target) from None
+        raise
+    return _lead_reply(path, name, charter.Charter(name, number, term, after))

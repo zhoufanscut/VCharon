@@ -223,13 +223,22 @@ def _parser():
     one.add_argument("--takeover", action="store_true", help="with --rejoin: take the folder "
                      "though another machine's id holds it; only when the user confirms this "
                      "is that machine")
-    one = verb("leave", "leave a channel (a member; in a work channel the leader closes it)",
+    one = verb("leave", "leave a channel (a member; a work channel's leader closes it)",
                "vcharon leave myapp")
     channel(one)
     ident(one)
     one = verb("close", "close and delete a work channel (its leader only)",
                "vcharon close myapp")
     channel(one)
+    ident(one)
+    one = verb("lead", "take the lead of a work channel, or (the leader) offer it",
+               "vcharon lead myapp")
+    channel(one)
+    one.add_argument("--to", metavar="@NAME", help="the leader only: offer the lead to this "
+                     "member, with a HANDOFF entry to it; it takes it with vcharon lead C")
+    one.add_argument("--gone", action="store_true", help="take it though no offer names you: "
+                     "only on your user's word, and only once the leader has been inactive %d "
+                     "min" % (channels.GONE_AFTER // 60))
     ident(one)
     one = verb("whoami", "your name, folder, local or remote, server; without C, every "
                "channel you joined from this project", "vcharon whoami myapp --json")
@@ -564,19 +573,31 @@ def _member_doc(cfg, record):
     kind_ = kinds.of(record)
     # a lobby has no leader: the record's leader is its founder, who leads nothing
     lobby = kind_ is kinds.LOBBY
+    # a work channel's by the charters' terms in the tree (the record's while it holds none):
+    # a handoff moves the lead, and only the taker's record follows it
+    chain = None if lobby else _chain(record, tree)
     return {"channel": record["channel"], "name": name, "project": record["project"],
-            "role": record["role"], "leader": None if lobby else record["leader"],
+            "role": record["role"], "leader": None if lobby else chain.leader,
+            "term": None if lobby else chain.term_of(chain.leader),
             "founder": record["leader"] if lobby else None,
-            "leads": record["leader"] == name and kind_.can_close,
+            "leads": not lobby and chain.leader == name,
             "mode": "local" if record["ssh"] is None else "remote", "server": record["ssh"],
             "folder": os.path.join(tree, name), "tree": tree, "kind": kind_.name}
 
 
+def _chain(record, tree):
+    """The work channel's charter.Chain of the tree on this box, the record's leader while it
+    holds no charter (a remote member before its first pull)."""
+    return charter.chain(tree, record["leader"])
+
+
 def _whoami(args, run):
     """vcharon whoami [C] [--all] [--json]. With C, one object: {"channel", "name", "project",
-    "role", "leader", "founder", "leads", "mode", "server", "folder", "tree", "kind", "box",
-    "box_source", "members"}: "kind" is "work" or "lobby"; a lobby's "leader" is null and
-    "founder" the member whose folder holds its CHANNEL.md, who "leads" nothing; a work
+    "role", "leader", "term", "founder", "leads", "mode", "server", "folder", "tree", "kind",
+    "box", "box_source", "members"}: "kind" is "work" or "lobby"; a work channel's "leader" is
+    the member that leads it by the charters' terms in the tree on this box, "term" its term
+    (both null when none or two lead at the top term); a lobby's "leader" and "term" are null
+    and "founder" the member whose folder holds its CHANNEL.md, who "leads" nothing; a work
     channel's "founder" is null;
     "mode" is "local" or "remote", "server" the alias (null for a local member), "folder" your own
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
@@ -603,7 +624,7 @@ def _whoami(args, run):
                          "leave out --all")
         doc = _member_doc(cfg, record)
         seen = _watched(record, doc["tree"])
-        members, unread = _members_of(doc["tree"], None if lobby else record["leader"], seen,
+        members, unread = _members_of(doc["tree"], None if lobby else doc["leader"], seen,
                                       _whoami_skip(record))
         now = time.time()
         if lobby and members is not None:
@@ -800,8 +821,10 @@ def _whoami_lines(doc):
     if doc["kind"] == kinds.LOBBY.name:
         _say("  channel  %s (a lobby, founded by %s)" % (doc["channel"], doc["founder"]))
     else:
-        _say("  channel  %s, led by %s%s" % (doc["channel"], doc["leader"],
-                                              " (you)" if doc["leads"] else ""))
+        _say("  channel  %s, led by %s%s%s" % (
+            doc["channel"], doc["leader"] or "no one (two at the top term: ask your user)",
+            " (you)" if doc["leads"] else "",
+            ", term %d" % doc["term"] if doc["term"] and doc["term"] > 1 else ""))
     _say("  name     %s  (--project %s%s)" % (doc["name"], doc["project"] or "?",
                                               " --role %s" % doc["role"] if doc["role"] else ""))
     _say("  mode     %s" % ("local, on this machine" if doc["mode"] == "local"
@@ -860,13 +883,15 @@ def _post(args, run):
     limits = channel_cmd.channel_limits(record)
     name = record["name"]
     steps = len(parts) == 1 and parts[0].casefold() == post_mod.STEPS_FILE.casefold()
-    if steps and record["leader"] != name:
-        # --steps, or --file STEPS.md at the top of the own folder
+    tree, synced = _tree(cfg, record)
+    leader = _chain(record, tree).leader if steps else None
+    if steps and leader != name:
+        # --steps, or --file STEPS.md at the top of the own folder: the leader's by the
+        # charters' terms, so a former leader's plan stays as it was
         raise channel_cmd.channels.refused(
-            "%s is the leader's (%s): its plan" % (post_mod.STEPS_FILE, record["leader"]),
+            "%s is the leader's (%s): its plan" % (post_mod.STEPS_FILE, leader),
             "leave out %s: your entries go into %s"
             % ("--steps" if args.steps else "--file %s" % file, post_mod.RESULTS_FILE))
-    tree, synced = _tree(cfg, record)
     own = os.path.join(tree, name)
     _check_tree(record, tree, synced, own)
     post_mod.check_own(own, tree if synced else None)
@@ -1133,13 +1158,17 @@ def _read(args, run):
     skip = None if synced else _over_limit(limits, record["name"])
     # a remote member: the members its last pull left out, whose copy here is as it was
     notes = charter.left_out_notes(_section(record)) if synced else []
-    mine = (record["name"], record["leader"], kinds.of(record)) if args.to_me else None
+    lobby = kinds.of(record) is kinds.LOBBY
+    chain = _chain(record, tree)
+    mine = (record["name"], chain, kinds.of(record)) if args.to_me else None
     # only the reading is in the try: a closed stdout is _guarded's to handle
     try:
         if args.json:
             doc = read_mod.view_json(tree, args.channel, synced=synced, full=args.full,
                                      last=args.last, skip=skip, notes=notes, ids=ids,
-                                     mine=mine, seen=_watched(record, tree))
+                                     mine=mine, seen=_watched(record, tree),
+                                     lead=(None, None) if lobby
+                                     else (chain.leader, chain.term_of(chain.leader)))
             missing = doc["missing"]
         else:
             last = ["--last", str(args.last)] if args.last else []
@@ -1300,6 +1329,10 @@ def _watch_member(args, run, say, out):
         watch_mod.say("%s %s" % (watch_mod.stamp(time.time()), pathrules.printable(note)))
     if tree is not None:
         channel_cmd.refresh_version(os.path.join(tree, record["name"]), record["name"])
+        if kinds.of(record) is kinds.WORK:
+            # MEMBER.md's leader: follows a handoff the same way, by the charters' terms
+            channel_cmd.refresh_leader(os.path.join(tree, record["name"]), record["name"],
+                                       _chain(record, tree).leader)
     dog = run.watch_code(say)
     channel_limits = channel_cmd.channel_limits(record)
     limits = {"fresh": args.fresh, "until_change": args.until_change,
@@ -1473,7 +1506,7 @@ COMMANDS = {
     "doctor": _doctor,
     "ping": lambda args, run: _ping(args, run),
     "list": channel_cmd.main, "create": channel_cmd.main, "join": channel_cmd.main,
-    "leave": channel_cmd.main, "close": channel_cmd.main,
+    "leave": channel_cmd.main, "close": channel_cmd.main, "lead": channel_cmd.main,
     "whoami": _whoami, "post": _post, "read": _read, "watch": _watch, "sync": _sync,
     "guide": lambda args, run: _guide(args), "skill": lambda args, run: _skill(args),
 }
