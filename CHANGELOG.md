@@ -7,7 +7,10 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.6rc1 — 2026-10-23
+
+The first release candidate for 0.8.6, a GitHub pre-release: `vcharon --update --rc` on 0.8.5
+offers it; a plain `--update` on 0.8.5 doesn't.
 
 **Updating:** nothing to do; each server gets one new helper cache entry at the first
 connection. Update every member of a channel before its lead moves: a member on an older
@@ -88,6 +91,10 @@ finds `idle <age>` at their end.
 - The wire protocol is 4 (was 3): `doctor` and `ping` show it, and `doctor --json`'s
   `protocol` is 4. A new error code, `state_unknown`, is handled by the client itself, which
   sends the state whole in the same round; users don't see it.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build: 1810 tests OK, 13
+skipped, run as CI). Not run yet: a live round over real ssh, macOS and Windows on this build,
+and the idle bytes on a live server (those above are from the test suite's fake ssh).
 
 ## 0.8.5 — 2026-10-22
 
