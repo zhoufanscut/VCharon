@@ -54,6 +54,7 @@ class IdleTest(unittest.TestCase):
                 os.utime(os.path.join(dirpath, n), (t, t))
             os.utime(dirpath, (t, t))
 
+    @unittest.skipIf(os.name == "nt", "a Windows root counts mtimes: its members are local")
     def test_a_writers_mtimes_dont_count(self):
         # a sync copies each file's mtime from the writer's machine: years back or ahead,
         # the folder's idle time is the server's change times'
