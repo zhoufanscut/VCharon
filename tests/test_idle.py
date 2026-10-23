@@ -50,7 +50,8 @@ class IdleTest(unittest.TestCase):
         """Every entry's mtime in the folder, the folder too, to t (folders last)."""
         for dirpath, dirnames, filenames in os.walk(self.folder, topdown=False):
             for n in filenames + dirnames:
-                os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+                # Windows can't set a link's own time; this tree has none
+                os.utime(os.path.join(dirpath, n), (t, t))
             os.utime(dirpath, (t, t))
 
     def test_a_writers_mtimes_dont_count(self):
@@ -91,7 +92,7 @@ class IdleTest(unittest.TestCase):
             shutil.rmtree(os.path.dirname(stage))
             os.utime(self.folder, (old, old))
             self.assertEqual(self.idle(now)[0], 10 * DAY)
-            if not CAN_SYMLINK:
+            if not CAN_SYMLINK or os.utime not in os.supports_follow_symlinks:
                 return
             # a link to a fresh folder elsewhere: its own time counts, never its target's
             fresh = os.path.join(self.tmp, "fresh")

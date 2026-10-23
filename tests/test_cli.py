@@ -1972,9 +1972,10 @@ class QuietRoundsTest(FakeSshCase):
         idle = [("state_ref", "state_ref")]
         self.assertEqual(keys, [("state", "state")] + idle + changed + idle + changed + idle
                          + changed + idle)
-        self.assertEqual(json.loads(files[-1])["source"]["sent"],
-                         {"c.txt": [1, 1790000200, False], "d": "d",
-                          "d/b.txt": [2, 1790000300, False]})
+        # sizes only: a file's time and exec bit are stored per OS (a float, None on Windows)
+        sent = json.loads(files[-1])["source"]["sent"]
+        self.assertEqual({k: v if isinstance(v, str) else v[0] for k, v in sent.items()},
+                         {"c.txt": 1, "d": "d", "d/b.txt": 2})
         whole, keys = self.whole_states(True)
         self.assertEqual(keys, [("state", "state")] * 8)
         self.assertEqual(whole, files)
