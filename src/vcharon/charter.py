@@ -420,6 +420,15 @@ def save_seen(section, seen, now):
     return True
 
 
+def seen_due(section, now):
+    """Whether save_seen would write the copy now, given times that moved: none kept, or its
+    file is SEEN_SAVE_EVERY old by its mtime."""
+    try:
+        return now - os.stat(seen_path(section)).st_mtime >= SEEN_SAVE_EVERY
+    except OSError:
+        return True
+
+
 def _load_seen_doc(path):
     """{name: [time, pace]} of the cache file path, or None: none, or one that can't be read
     or has another shape."""

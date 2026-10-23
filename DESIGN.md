@@ -162,6 +162,12 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
   seconds. The exceptions are a watcher's last-watched stamp at the server and the client's
   copy of the ages, each at most one small write every 30 s, not fsynced: without them nothing
   shows that a watcher still runs ([The watcher in a channel](#the-watcher-in-a-channel)).
+- Quiet on the wire: a round with nothing new sends its down state by reference and gets it
+  back the same way, and the members' ages only on a change or about every 30 s
+  ([Calls](#calls)): its down's `source.plan` carries a few hundred bytes each way, whatever the
+  channel's size, where the whole channel's listing went both ways before. Key order counts in
+  "changed": a state the source gives back reordered (a member folder over the limits has its
+  entries moved to the end) is written once, so later rounds go by reference again.
 - `run_timeout` counts per round. Refused with `--full`, `--dry-run` or `--reset`.
 
 ## Files
@@ -413,7 +419,7 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 ### hello
 
 ```json
-{"t": "hello", "protocol": 3, "version": "0.1.0", "python": "3.13.5", "os": "linux",
+{"t": "hello", "protocol": 4, "version": "0.1.0", "python": "3.13.5", "os": "linux",
  "distro": "Debian GNU/Linux 13 (trixie)", "distro_id": "debian", "distro_version": "13",
  "machine": "<32 hex>", "user": "me", "home": "/home/me", "utc_offset": 3600,
  "time": 1790000000.25}
@@ -439,7 +445,7 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 |---|---|---|---|
 | `echo` | – | `{}` | upload one file (at most 16 MiB), then the same bytes back |
 | `plugin.doctor` | `plugin`, `role`, `options` | `{"checks": [[level, message, hint], …]}` | – |
-| `source.plan` | `plugin`, `options`, `state`, `full`, optional `watch` | a plan; a channel's down also `seen` or `seen_error` | – |
+| `source.plan` | `plugin`, `options`, `state` or `state_ref`, `full`, optional `watch`, optional `want_seen` | a plan, with `state_ref` in place of an unchanged `state`; a channel's down also `seen` or `seen_error` | – |
 | `source.send` | `indexes` | `{}` | download of those file puts |
 | `source.state_after` | `written`, `deleted` | `{"state": …}`, or `{"state": null}` | – |
 | `sink.check` | `plugin`, `options`, `plan` | `{"root", "notes", "deletes", "have"}` | – |
@@ -461,12 +467,33 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   syncs](#full-syncs)); the controller refuses a `have` naming anything else.
 - `state` in `source.plan` is the job's saved state, or `{}`. The plan `sink.check` gets has no
   state: the sink never reads it, and it can be large.
+- States by reference: the helper keeps, for its session, the last 4 states `source.plan` got
+  or gave back, each by its `state_ref`, the sha256 of the state as a call's JSON encodes it
+  (key order counts). The client counts them the same way, and sends `state_ref` in place of
+  `state` only for a state its helper holds: never at the session's first plan of it, so not
+  after a reconnect (a new session) or a `--reset`, and never with `--full`. A plan whose state
+  came back unchanged gives `state_ref` in place of `state`, and the client keeps the state it
+  sent, so the state file is byte for byte what the whole state would give; a changed one comes
+  back whole. A reference the helper doesn't hold is `state_unknown`, which keeps the session:
+  the client sends the state whole in a second `source.plan` of the same round. Never a guess.
+  Why: a streaming watcher's idle round sent the whole channel's listing and got it back, every
+  round, a cost that grew with the channel: ~2.6 KB/s up, ~2.9 KB/s down per watcher at 32
+  members (measured on 0.8.4 with `ss` byte counters; that the state and the ages made it is
+  from the source, not a capture). A `--no-stream` watcher opens a session each round, so its
+  state still goes whole.
 - `deletes_done` lists the deletes a commit got through; `source.state_after` uses it after a
   commit that failed partway.
 - `watch` in `source.plan` is a watcher's pace: the helper stamps the member's last-watched time
   after the plan. A down of a channel in the root (`mailbox_me` set) gets `seen`, `{member:
   [age seconds, pace]}`, beside the plan's fields, or `seen_error` with why not; the client takes
   both out before reading the plan ([The watcher in a channel](#the-watcher-in-a-channel)).
+  `seen` comes at the session's first plan of the channel, when a member or a pace changed since
+  the last one the session sent, and when the call has `want_seen`; else only the ages could
+  have moved, and it is left out. The client sends `want_seen` at its first plan of the channel
+  in the session, then once 30 s have passed both since the last `seen` came and since its copy
+  was written (the copy's own limit), so the ages still reach it about every 30 s. Why: the
+  ages of every member, in every round, were the reply's other cost that grew with the
+  channel.
 - The `channel.*` calls work on the channel root: the fixed `~/.local/state/vcharon/channels`,
   or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only). Never an argument: every
   member must reach the same folder. Each call checks the names again, works only directly below
@@ -520,6 +547,7 @@ Every error the user sees has one of these codes; the last column is the exit co
 | `io` | an OS error with no code of its own | 1 |
 | `too_big` | a message would pass the 64 MiB limit of a J frame; a post over the channel's entry or folder limits; an up whose own folder is over the folder limits ([Limits](#limits)) | 1 |
 | `internal` | a bug; `detail` has the traceback | 1 |
+| `state_unknown` | `source.plan` named a state by a reference its helper doesn't hold (the two ends counted the states differently, as after a call that failed once the helper had taken the state); the client sends the state whole in the same round, so users don't see it | 1 |
 | `update` | `vcharon --update` failed or was refused; `--json`'s `error` says why ([Self-update](#self-update)) | 1 |
 
 ## Plans
@@ -1853,7 +1881,9 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     its down plan, the helper stamping after the plan opened the channel folder. The watcher
     marks its sync child (streaming or not) with the private `VCHARON_WATCHER=<pace>`, and the
     sync then adds `watch` to `source.plan`. A sync by hand, or a join's pull, stamps nothing:
-    it would make a member look watched. Every channel down still gets the ages back.
+    it would make a member look watched. A channel down gets the ages back at the session's
+    first plan of the channel, when a member or a pace changed, and when it asks for them
+    ([Calls](#calls)).
   - Where: beside the root, never in it: a name at a channel's top is synced to every member,
     logged by every down and makes close refuse; one at the root's top shows in `list`. The
     helper and a local member both find it through the channel root, so they agree; a down of
@@ -1872,9 +1902,10 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
     `leave` and `close` with the membership's other files.
   - How late is dead: a live watcher's stamp is at most 30 s plus one of its rounds old at the
     channel's machine (and the sync's own time), and a remote reader's copy lags by up to another
-    30 s plus its own round while its own watcher runs; else by up to 30 s more than the time
-    since its last pull. The guide's rule: late past 2 × `--every` + 120 s. `--until-change`
-    restarts and foreground runs make gaps normal.
+    30 s plus its own round while its own watcher runs (30 s more when the ages it last asked
+    for hadn't moved, so the copy wasn't written: it asks again 30 s later, [Calls](#calls));
+    else by up to 30 s more than the time since its last pull. The guide's rule: late past 2 ×
+    `--every` + 120 s. `--until-change` restarts and foreground runs make gaps normal.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
   own folder (in any case, on macOS and Windows), never stage files. It prints, each line
   starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
@@ -2244,7 +2275,8 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
 - Last-watched stamps: a member on 0.2.3 or older never stamps; `whoami C` shows it as `watched
   ?` with its version, not as never watched. An older version's close (or a failed create's
   undo) doesn't sweep `seen/`; the next claim or close on that machine does. The `watch` arg
-  and the `seen` reply pass only between a client and its own helper.
+  and the `seen` reply pass only between a client and its own helper, as do states by
+  reference ([Calls](#calls)).
 - The record and the section hold everything a later command needs, so a membership made by one
   version is used by the next. A record in another shape (an older layout, or a hand edit) is
   refused, with the fix: the user removes it, then the member rejoins with `--rejoin`. It has
@@ -3151,12 +3183,7 @@ Later:
   server's log wasn't read). `MaxSessions 10` caps them only when `ssh_config` shares
   connections (ControlMaster, never on Windows); not measured. A later run (0.8.4, 30 watchers
   in one channel, started in bursts of 5, 5, 10 and 10) measured 16 to 19 MB of the server's
-  available memory per watcher and one reset in a burst of 10. Idle traffic: each round sends
-  the down state (the whole channel's listing) and gets it back in the plan, with every member's
-  seen ages, every `--every` seconds even when nothing changed: ~2.6 KB/s up, ~2.9 KB/s down per
-  watcher at 32 members (measured with `ss` byte counters; the cause is from the source and the
-  state files' sizes, not a capture), so a channel's total grows with the square of its
-  members. Later: send the state only when it changed.
+  available memory per watcher and one reset in a burst of 10.
 - Handing the leader role to another member: today the leader closes and the new one creates a
   new channel.
 - Closing a lobby, and removing the folders of members that never come back: today the user

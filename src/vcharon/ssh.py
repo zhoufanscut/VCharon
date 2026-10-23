@@ -432,6 +432,11 @@ class Session:
         # time.time() when the hello was read, and the server's clock minus it
         self.hello_received = None
         self.clock_gap = None
+        # what this session's helper holds for the source.plan calls (DESIGN, "Calls"): the
+        # states it was sent or gave back (remote.RemoteSource), and per channel section the
+        # time.monotonic() its last seen came; a new session starts with none of it
+        self.state_refs = proto.StateRefs()
+        self.seen_at = {}
         self._nonce = os.urandom(16).hex()
         self._proc = None
         self._queue = _FrameQueue(QUEUE_BYTES)

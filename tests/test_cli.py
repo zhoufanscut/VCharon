@@ -27,6 +27,7 @@ from vcharon import (
     install,
     pathrules,
     platform,
+    proto,
     ssh,
     stage,
     state,
@@ -133,7 +134,7 @@ class CliTest(FakeSshCase):
         lines = out.splitlines()
         self.assertEqual(lines[0], "vcharon: ping fake-dest")
         self.assertRegex(lines[1], r"\A  helper   vcharon " + re.escape(VERSION)
-                         + r", protocol 3, Python 3\.")
+                         + r", protocol 4, Python 3\.")
         self.assertRegex(lines[2], r"\A  server   .+, user .*, home " + re.escape(self.home)
                          + r"\Z")
         # hashed, as doctor shows the server's own: never the raw id, nor in the -v log
@@ -1863,6 +1864,131 @@ MEMBER = (b"# MEMBER\n\n## 2026-10-01 10:00 \xe2\x80\x94 windows#1 \xe2\x80\x94 
 
 
 REAL_CHECK_PLAN = pathrules.check_plan
+
+
+# a helper that gives every plan's state back whole, as before states went by reference
+WHOLE_STATES = """
+real_plan = _real.HANDLERS["source.plan"]
+
+def source_plan(h, call_id, args):
+    ok = h.ok
+
+    def whole(cid, result):
+        if "state_ref" in result:
+            del result["state_ref"]
+            result["state"] = h.plan.state
+        ok(cid, result)
+
+    h.ok = whole
+    try:
+        return real_plan(h, call_id, args)
+    finally:
+        h.ok = ok
+
+_real.HANDLERS["source.plan"] = source_plan
+"""
+
+
+class QuietRoundsTest(FakeSshCase):
+    """A pull's --repeat rounds send its state by reference and get an unchanged one back as
+    one (DESIGN, "Calls"), and save the same state file, byte for byte, as rounds that carry
+    every state whole."""
+
+    def setUp(self):
+        FakeSshCase.setUp(self)
+        util.use_test_jobs(self)
+        self.local = os.path.join(self.tmp, "local")
+        self.write_config(PULLED.format(local=self.local, path="src") + "from.prune = yes\n")
+        self.src = os.path.join(self.home, "src")
+        for patcher in (mock.patch.object(cli, "_watch_stdin", lambda ended: None),
+                        # the saved stamp, which would differ between the two runs
+                        mock.patch.object(state, "now", lambda: "2026-10-23T00:00:00Z")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def put(self, rel, data, mtime):
+        write_tree(self.src, {rel: data})
+        os.utime(os.path.join(self.src, *rel.split("/")), (mtime, mtime))
+
+    def rounds(self, repeat=True):
+        """The rounds of p from the same start through the same changes, with --repeat or as
+        a sync each: (the state file's bytes after each round, for each source.plan call the
+        key of its state and of the state in its reply)."""
+        shutil.rmtree(self.src, True)
+        shutil.rmtree(self.local, True)
+        if os.path.exists(state.path("p")):
+            os.remove(state.path("p"))
+        os.makedirs(os.path.join(self.local, "p"))
+        self.put("a.txt", b"a", 1790000000)
+        self.put("d/b.txt", b"b", 1790000100)
+        files = []
+
+        def step(change):
+            def run():
+                with open(state.path("p"), "rb") as f:
+                    files.append(f.read())
+                change()
+            return run
+
+        changes = [lambda: None, lambda: self.put("c.txt", b"c", 1790000200), lambda: None,
+                   lambda: os.remove(os.path.join(self.src, "a.txt")), lambda: None,
+                   lambda: self.put("d/b.txt", b"bb", 1790000300), lambda: None]
+        keys = []
+        real = ssh.Session.call
+
+        def call(session, fn, args=None, **kw):
+            result = real(session, fn, args, **kw)
+            if fn == "source.plan":
+                keys.append(tuple("state_ref" if "state_ref" in d else "state"
+                                  for d in (args, result)))
+            return result
+
+        with mock.patch.object(ssh.Session, "call", call):
+            if repeat:
+                with mock.patch.object(cli, "_wait_or_end", Between(*map(step, changes))):
+                    code, out, err = self.run_jobs("p", "--repeat", "1")
+                self.assertEqual((code, out.splitlines(), err), (0, ["ROUND 0"] * 8, ""))
+            else:
+                for change in [lambda: None] + [step(c) for c in changes]:
+                    change()
+                    code, out, err = self.run_jobs("p")
+                    self.assertEqual((code, err), (0, ""), out)
+        with open(state.path("p"), "rb") as f:
+            files.append(f.read())
+        return files, keys
+
+    def whole_states(self, repeat):
+        """rounds() as a client that never sends a reference to a helper that never gives
+        one back."""
+        with mock.patch.object(proto.StateRefs, "__contains__", lambda refs, ref: False), \
+                with_helper(WHOLE_STATES):
+            return self.rounds(repeat)
+
+    def test_the_same_state_files_as_whole_states(self):
+        files, keys = self.rounds()
+        # the first round sends the saved state whole, each later one its reference; a
+        # changed one comes back whole
+        changed = [("state_ref", "state")]
+        idle = [("state_ref", "state_ref")]
+        self.assertEqual(keys, [("state", "state")] + idle + changed + idle + changed + idle
+                         + changed + idle)
+        self.assertEqual(json.loads(files[-1])["source"]["sent"],
+                         {"c.txt": [1, 1790000200, False], "d": "d",
+                          "d/b.txt": [2, 1790000300, False]})
+        whole, keys = self.whole_states(True)
+        self.assertEqual(keys, [("state", "state")] * 8)
+        self.assertEqual(whole, files)
+
+    def test_a_sync_each_saves_the_same_state_files(self):
+        # a new session each time: the state goes whole, and an unchanged one comes back as
+        # its reference, which a sync saves all the same
+        files, keys = self.rounds(repeat=False)
+        changed = [("state", "state")]
+        idle = [("state", "state_ref")]
+        self.assertEqual(keys, changed + idle + changed + idle + changed + idle + changed + idle)
+        whole, keys = self.whole_states(False)
+        self.assertEqual(keys, [("state", "state")] * 8)
+        self.assertEqual(whole, files)
 
 
 def write_channel_section(case, text, section="mb.windows"):

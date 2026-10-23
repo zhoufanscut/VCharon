@@ -32,14 +32,42 @@ class RemoteSource:
         self.reply = {}
 
     def plan(self, state, full=False):
-        args = {"plugin": self.name, "options": self.options, "state": state,
-                "full": bool(full)}
+        """The source's plan. A state the helper holds from an earlier call of this session
+        goes by its reference, and a state that came back unchanged comes back as one: an
+        idle watcher's round then carries neither (DESIGN, "Calls")."""
+        args = {"plugin": self.name, "options": self.options, "full": bool(full)}
         args.update(self.plan_args)
-        result = self.session.call("source.plan", args)
+        refs = self.session.state_refs
+        ref = proto.state_ref(state)[0] if isinstance(state, dict) else None
+        result = None
+        if ref is not None and ref in refs and not full:
+            try:
+                result = self.session.call("source.plan", dict(args, state_ref=ref))
+            except VCharonError as e:
+                if e.code != "state_unknown":
+                    raise
+                # the two ends counted the states differently: the state itself, this round
+                self.log.info("the helper holds no state %s; sending it whole" % ref[:12])
+                refs.drop(ref)
+        if result is None:
+            result = self.session.call("source.plan", dict(args, state=state))
+        if ref is not None:
+            # the helper took it, as this end now counts it
+            refs.add(ref)
         # taken out first: plan.from_json refuses keys it doesn't know
+        same = None
         if isinstance(result, dict):
             self.reply = {k: result.pop(k) for k in PLAN_EXTRA if k in result}
-        return planmod.from_json(result)
+            same = result.pop("state_ref", None)
+        p = planmod.from_json(result)
+        if same is not None:
+            if same != ref or "state" in result:
+                raise VCharonError("protocol", "source.plan gave back the state %s, not the "
+                                   "one sent" % proto.quote(same))
+            p.state = state
+        elif ref is not None and isinstance(p.state, dict):
+            refs.add(proto.state_ref(p.state)[0])
+        return p
 
     def send(self, indexes, stage_file):
         """Downloads the file puts at indexes, in that order; stage_file(index, reader) takes

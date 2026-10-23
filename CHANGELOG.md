@@ -7,6 +7,32 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+**Updating:** nothing to do; each server gets one new helper cache entry at the first
+connection.
+
+- A remote member's streaming watcher is quiet while nothing is posted: a round sends its down
+  state by reference once the helper holds it, an unchanged state comes back the same way, and
+  the members' last-watched ages come only when a member or a pace changed, or about every 30 s.
+  Before, every round sent the whole channel's file list and got it back with every member's
+  ages: ~2.6 KB/s up and ~2.9 KB/s down per watcher at 32 members (measured on 0.8.4). From a
+  throwaway run on the test suite's fake ssh (a synthetic channel of 32 members, two files
+  each, a 3.9 KB state; not a live measurement), an idle round's `source.plan` went from 4,151
+  bytes up and 4,996 down to 305 up and 277 down, and 322 up and 1,150 down in a round that
+  brings the ages. The saved state files are byte for byte as before, but for one more write
+  under `sync --repeat` when a state comes back in another key order (a member folder going over
+  the channel's limits moves its entries to the end): after it, those rounds go by reference
+  again. The copy of the ages a remote member's
+  `whoami` reads is still written about every 30 s; when the ages it asked for hadn't moved, the
+  next ask is 30 s later, so it can lag up to 30 s more than before. A new member or a changed
+  pace shows at the next round, also after a round that failed. A `--no-stream` watcher
+  connects each round, so its state still goes up whole and it gets the ages each round, but
+  an unchanged state comes back as a reference.
+- The wire protocol is 4 (was 3): `doctor` and `ping` show it, and `doctor --json`'s
+  `protocol` is 4. A new error code, `state_unknown`, is handled by the client itself, which
+  sends the state whole in the same round; users don't see it.
+
 ## 0.8.5 — 2026-10-22
 
 0.8.5rc1's code, with `--update` taking `--project` and `--role`. Next to 0.8.4, the latest final

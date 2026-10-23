@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import collections
+import hashlib
 import json
 import struct
 import traceback
@@ -12,7 +14,7 @@ EXIT = {"config": 3, "bad_options": 3, "missing_capability": 3, "state_mismatch"
         "unsafe_path": 1, "unsafe_dir": 1, "collision": 1, "kind_change": 1,
         "too_many_deletes": 1, "empty_source": 1, "vanished": 1, "in_use": 1,
         "permission": 1, "no_space": 1, "aborted": 1, "io": 1, "too_big": 1, "internal": 1,
-        "channel": 1, "refused": 1, "update": 1}
+        "channel": 1, "refused": 1, "update": 1, "state_unknown": 1}
 
 
 class VCharonError(Exception):
@@ -124,6 +126,49 @@ def encode_json(obj):
     return data
 
 
+# How many states one session's source.plan calls keep by reference (DESIGN, "Calls"): a
+# watcher's round needs only its down's last one (up's source is local, never the helper's);
+# the rest cover the states got and given back by other pulls sharing the connection (a sync
+# of several jobs).
+STATE_REFS = 4
+
+
+def state_ref(state):
+    """(a source's state's reference, its encoding): the sha256 in hex of encode_json(state),
+    the bytes a call carrying it holds. Key order counts, so a state the source gave back in
+    another order is a new one and the client saves it as given, as it always did."""
+    data = encode_json(state)
+    return hashlib.sha256(data).hexdigest(), data
+
+
+class StateRefs:
+    """The states a session's source.plan calls sent or got back, by reference, at most
+    STATE_REFS, the least recently used going first. The helper keeps each one's encoding;
+    the client only the reference (None), with the same steps in the same order, so it sends a
+    reference only for a state the helper still holds. When the two differ (a call that failed
+    after the helper took the state, an expected case), the helper refuses the reference with
+    state_unknown and the client sends the state itself."""
+
+    def __init__(self):
+        self._held = collections.OrderedDict()
+
+    def add(self, ref, data=None):
+        """Keeps ref, or marks it used just now."""
+        self._held[ref] = data
+        self._held.move_to_end(ref)
+        while len(self._held) > STATE_REFS:
+            self._held.popitem(last=False)
+
+    def __contains__(self, ref):
+        return ref in self._held
+
+    def get(self, ref):
+        return self._held.get(ref)
+
+    def drop(self, ref):
+        self._held.pop(ref, None)
+
+
 def frame(kind, payload):
     return HEADER.pack(kind, len(payload)) + payload
 
@@ -179,6 +224,11 @@ def decode_json(payload):
     if not isinstance(obj, dict) or not isinstance(obj.get("t"), str):
         raise VCharonError("protocol", "a J frame isn't a message: %s" % quote(obj))
     return obj
+
+
+def decode_state(data):
+    """The state StateRefs kept as encoded."""
+    return _loads(data, "a kept state")
 
 
 def decode_error(payload):

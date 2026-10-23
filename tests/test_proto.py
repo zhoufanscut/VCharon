@@ -436,5 +436,43 @@ class StreamTest(unittest.TestCase):
         self.assertEqual(fin.read(), b"")
 
 
+class StateRefsTest(unittest.TestCase):
+    """source.plan's states by reference: the reference of a state, and the few one session
+    keeps."""
+
+    def test_state_ref(self):
+        ref, data = proto.state_ref({"sent": {"a": "d", "a/f": [1, 2.5, False]}})
+        self.assertEqual(data, b'{"sent":{"a":"d","a/f":[1,2.5,false]}}')
+        self.assertRegex(ref, r"\A[0-9a-f]{64}\Z")
+        # what the client saves and reads back has the same reference
+        self.assertEqual(proto.state_ref(json.loads(data))[0], ref)
+        # a tuple is a list on the wire
+        self.assertEqual(proto.state_ref({"sent": {"a/f": (1, 2.5, False)}})[0],
+                         proto.state_ref({"sent": {"a/f": [1, 2.5, False]}})[0])
+        # key order counts: the client saves a state as given
+        self.assertNotEqual(proto.state_ref({"sent": {"a": "d", "b": "d"}})[0],
+                            proto.state_ref({"sent": {"b": "d", "a": "d"}})[0])
+        self.assertEqual(proto.decode_state(data), json.loads(data))
+
+    def test_at_most_four_least_recently_used_first(self):
+        refs = proto.StateRefs()
+        for ref in "abcd":
+            refs.add(ref, ref.encode())
+        # a use keeps a from going next
+        refs.add("a", b"a")
+        refs.add("e", b"e")
+        self.assertEqual([r for r in "abcde" if r in refs], ["a", "c", "d", "e"])
+        self.assertIsNone(refs.get("b"))
+        self.assertEqual(refs.get("a"), b"a")
+        refs.drop("a")
+        refs.drop("nope")
+        self.assertNotIn("a", refs)
+        self.assertEqual(proto.STATE_REFS, 4)
+
+    def test_state_unknown_is_a_code(self):
+        err = VCharonError.from_json({"code": "state_unknown", "message": "m", "hint": "h"})
+        self.assertEqual((err.code, err.exit_code), ("state_unknown", 1))
+
+
 if __name__ == "__main__":
     unittest.main()

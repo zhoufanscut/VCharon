@@ -131,6 +131,11 @@ class Helper:
         self.source = self.plan = self.sink = None
         # the calls that come at most once, once they have
         self.called = set()
+        # what source.plan calls carried in this session, which job.reset keeps: the states
+        # sent or given back, and each channel folder's {member: pace} last sent as seen
+        # (DESIGN, "Calls")
+        self.state_refs = proto.StateRefs()
+        self.seen_sent = {}
 
     def _plugin_log(self, msg):
         # Logging never fails a run.
@@ -278,18 +283,62 @@ def _is_pace(value):
 
 
 def source_plan(h, call_id, args):
-    checks = {"plugin": _is_str, "options": _is_options, "state": _is_state, "full": _is_bool}
+    checks = {"plugin": _is_str, "options": _is_options, "full": _is_bool}
+    if "state_ref" in args:
+        # in place of the state: one this session's calls carried, by its reference
+        checks["state_ref"] = plan.good_sha256
+    else:
+        checks["state"] = _is_state
     if "watch" in args:
         # a watcher's pull: its pace, which the member's last-watched stamp keeps
         checks["watch"] = _is_pace
+    if "want_seen" in args:
+        # the client's copy of the ages is due to be written
+        checks["want_seen"] = _is_bool
     _check_args("source.plan", args, checks)
+    # before _once: after state_unknown the client sends the state itself, in a second call
+    state, kept = _state_in(h, args)
     _once(h, "source.plan")
     # Set before planning, so its handles close at exit even if planning fails.
     h.source = plugin.make("remote", args["plugin"], "source", args["options"], h.ctx)
-    h.plan = h.source.plan(args["state"], full=args["full"])
+    h.plan = h.source.plan(state, full=args["full"])
     reply = plan.to_json(h.plan)
+    if kept is not None and h.plan.state is not None:
+        ref, data = proto.state_ref(h.plan.state)
+        if data == kept:
+            # unchanged: the client keeps the state it sent, so only its reference comes back
+            del reply["state"]
+            reply["state_ref"] = ref
+        else:
+            h.state_refs.add(ref, data)
     reply.update(_seen(h, args))
     h.ok(call_id, reply)
+
+
+# the client answers state_unknown by sending the state whole, so no user sees it; every
+# error has a fix line all the same
+STATE_UNKNOWN_HINT = "sync again: the state then goes whole"
+
+
+def _state_in(h, args):
+    """(the state source.plan plans from, its encoding or None): sent whole, or by a
+    reference to one this session's calls carried. A reference it doesn't hold is
+    state_unknown, never a guess; the session goes on."""
+    if "state_ref" not in args:
+        state = args["state"]
+        if state is None:
+            return None, None
+        ref, data = proto.state_ref(state)
+        h.state_refs.add(ref, data)
+        return state, data
+    ref = args["state_ref"]
+    data = h.state_refs.get(ref)
+    if data is None:
+        raise VCharonError("state_unknown", "the helper holds no state %s" % ref[:12],
+                           STATE_UNKNOWN_HINT)
+    h.state_refs.add(ref, data)
+    # a new copy: the source may change the one it gets
+    return proto.decode_state(data), data
 
 
 def _seen(h, args):
@@ -317,9 +366,16 @@ def _seen(h, args):
         except Exception as e:  # noqa: BLE001
             out["seen_error"] = "stamping %s: %s" % (me, _why(e))
     try:
-        out["seen"] = channels.list_seen(root, channel)
+        seen = channels.list_seen(root, channel)
     except Exception as e:  # noqa: BLE001
         out["seen_error"] = "listing the stamps: %s" % _why(e)
+        return out
+    # With the members and paces of the last seen this session sent, only the ages can have
+    # moved: those go when the client asks, its copy being due (DESIGN, "Calls").
+    paces = {name: value[1] for name, value in seen.items()}
+    if args.get("want_seen") or h.seen_sent.get(folder) != paces:
+        h.seen_sent[folder] = paces
+        out["seen"] = seen
     return out
 
 

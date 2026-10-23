@@ -2665,8 +2665,9 @@ def _run_one(args, jr, conn, stack):
         _summary(say, p, checked, args.dry_run, job=True, full=args.full)
 
     down = job.mailbox is not None and name == job.mailbox.section + ".down"
+    section = job.mailbox.section if down else None
     eng = engine.Engine(session, job.source, job.sink, log, after_check=after_check,
-                        after_plan=after_plan, plan_args=_watch_args(down))
+                        after_plan=after_plan, plan_args=_down_args(down, session, section))
     # a first run, or a source that saved nothing: {}
     source_state = saved.source if saved is not None and saved.source is not None else {}
     try:
@@ -2677,6 +2678,11 @@ def _run_one(args, jr, conn, stack):
         jr.errors.done_line = _done_line(eng)
         if bound and isinstance(eng.state_after, dict):
             _save_after_failure(name, fingerprint, eng, bound[0], log)
+        if down:
+            # A failed round keeps no ages, but the helper counts a seen it sent as had: the
+            # next round asks for them, so a new member or pace isn't held back until the copy
+            # is due.
+            session.seen_at.pop(section, None)
         raise
     new = (state.State(fingerprint, eng.plan.identity, bound[0], eng.plan.state, state.now())
            if done is not None else None)
@@ -2689,6 +2695,9 @@ def _run_one(args, jr, conn, stack):
             state.save(name, new)
         except (OSError, VCharonError) as e:
             err = fsops.error(e, state.path(name)) if isinstance(e, OSError) else e
+            if down:
+                # as after a failed run: this round's ages are dropped, so the next one asks
+                session.seen_at.pop(section, None)
             raise VCharonError(err.code, "couldn't save the state of %s: %s"
                                % (name, err.message), SAVE_HINT)
         log.info("saved the state of %s" % name)
@@ -2704,7 +2713,9 @@ def _run_one(args, jr, conn, stack):
         except OSError as e:
             log.warn("couldn't save the members left out: %s" % e)
     if down:
-        _save_seen(job.mailbox.section, eng.plan_reply, log)
+        if "seen" in eng.plan_reply:
+            session.seen_at[section] = time.monotonic()
+        _save_seen(section, eng.plan_reply, log)
     return eng, done
 
 
@@ -2717,6 +2728,22 @@ def _watch_args(down):
     if pace is None or channels.parse_pace(pace) is None:
         return None
     return {"watch": pace}
+
+
+def _down_args(down, session, section):
+    """A channel down's more source.plan args: _watch_args', and want_seen when the copy of
+    the members' ages is due to be written: the helper sends them otherwise only when a member
+    or a pace changed (DESIGN, "Calls"). Due at this session's first plan of the section, then
+    once SEEN_SAVE_EVERY has passed both since the last ones came and by the copy's mtime, so a
+    copy that save_seen didn't write (no time moved) is asked for again, never every round.
+    None when there are none."""
+    args = dict(_watch_args(down) or {})
+    if down:
+        got = session.seen_at.get(section)
+        if (got is None or (time.monotonic() - got >= charter.SEEN_SAVE_EVERY
+                            and charter.seen_due(section, time.time()))):
+            args["want_seen"] = True
+    return args or None
 
 
 def _save_seen(section, reply, log):
@@ -2736,12 +2763,16 @@ def _save_seen(section, reply, log):
 
 def _same_state(saved, new):
     """Whether new holds what saved does, its saved stamp aside. Compared as JSON, as the
-    file holds them: a tuple in a plan's state and the list it's read back as are the same."""
+    file holds them: a tuple in a plan's state and the list it's read back as are the same.
+    Key order counts, as in a state's reference (proto.state_ref): a state the source gave
+    back in another order (a member folder over the limits has its entries moved to the end)
+    is written once, so the next round sends it by reference and gets it back as one; else
+    every round would carry it whole."""
     if saved is None:
         return False
 
     def text(st):
-        return json.dumps([st.fingerprint, st.identity, st.sink, st.source], sort_keys=True,
+        return json.dumps([st.fingerprint, st.identity, st.sink, st.source],
                           ensure_ascii=False)
 
     return text(saved) == text(new)

@@ -526,6 +526,11 @@ class RunTest(FakeSshCase):
             ("a missing full", [], ("source.plan", {"plugin": "path", "options": {"path": "src"},
                                                     "state": None})),
             ("a full that isn't a bool", [], ("source.plan", dict(good, full=1))),
+            ("a state and a state_ref", [], ("source.plan", dict(good, state_ref="0" * 64))),
+            ("a state_ref that isn't a sha256", [],
+             ("source.plan", {"plugin": "path", "options": {"path": "src"}, "full": False,
+                              "state_ref": "0" * 63})),
+            ("a want_seen that isn't a bool", [], ("source.plan", dict(good, want_seen=1))),
             ("source.state_after before source.plan", [],
              ("source.state_after", {"written": [], "deleted": []})),
             ("a written that isn't a list", plan_first,
@@ -1113,6 +1118,138 @@ class RunTest(FakeSshCase):
                 with self.assertRaises(VCharonError) as cm:
                     run.Engine(s, Side(ends[0], "path", {}), Side(ends[1], "dir", {}), self.log)
                 self.assertEqual(cm.exception.code, "internal")
+
+
+class StateRefTest(FakeSshCase):
+    """A pull's state by reference on one session (DESIGN, "Calls"): sent whole the first
+    time, then by its reference; one that came back unchanged comes back as its reference."""
+
+    def setUp(self):
+        FakeSshCase.setUp(self)
+        self.src = os.path.join(self.home, "src")
+        write_tree(self.src, {"a.txt": b"a", "d/b.txt": b"b"})
+        self.dst = os.path.join(self.tmp, "dst")
+        os.mkdir(self.dst)
+
+    def open(self):
+        """An opened session; self.plans then gets, for each source.plan call on it, (the
+        state arg's key, the reply's, or the error code)."""
+        s = self.session()
+        s.open()
+        self.plans = []
+        real = s.call
+
+        def call(fn, args=None, **kw):
+            if fn != "source.plan":
+                return real(fn, args, **kw)
+            key = "state_ref" if "state_ref" in args else "state"
+            try:
+                result = real(fn, args, **kw)
+            except VCharonError as e:
+                self.plans.append((key, e.code))
+                raise
+            self.plans.append((key, "state_ref" if "state_ref" in result else "state"))
+            return result
+
+        s.call = call
+        return s
+
+    def round(self, s, state, full=False, prune="yes"):
+        """One pull of src with state, then job.reset, as a sync's job on a shared connection;
+        the engine."""
+        eng = Engine(s, Side("remote", "path", {"path": "src", "prune": prune}),
+                     Side("local", "dir", {"path": self.dst}), self.log)
+        eng.run(state=state, full=full)
+        remote.reset(s)
+        return eng
+
+    def saved(self, eng):
+        # as the state file gives it back
+        return json.loads(json.dumps(eng.plan.state))
+
+    def test_by_reference_on_one_session(self):
+        s = self.open()
+        first = self.saved(self.round(s, {}))
+        # nothing changed: the reference both ways, and the state kept is the one sent
+        eng = self.round(s, first)
+        self.assertIs(eng.plan.state, first)
+        self.assertEqual(eng.plan.entries, [])
+        # a change: the reference goes, the new state comes back whole
+        write_tree(self.src, {"c.txt": b"c"})
+        second = self.saved(self.round(s, first))
+        self.assertIn("c.txt", second["sent"])
+        # which the helper then holds too
+        self.assertIs(self.round(s, second).plan.state, second)
+        self.assertEqual(self.plans, [("state", "state"), ("state_ref", "state_ref"),
+                                      ("state_ref", "state"), ("state_ref", "state_ref")])
+        # the same states as a session that carries them whole each time
+        other = self.open()
+        self.assertEqual(json.dumps(self.saved(self.round(other, first))), json.dumps(second))
+        self.assertEqual(self.plans, [("state", "state")])
+
+    def test_a_reference_the_helper_lacks_sends_the_state_in_the_same_round(self):
+        state = self.saved(self.round(self.open(), {}))
+        # a new connection whose client counts it as held: the helper refuses the reference,
+        # and the same round sends the state whole, on the same session
+        s = self.open()
+        s.state_refs.add(proto.state_ref(state)[0])
+        eng = self.round(s, state)
+        self.assertEqual((eng.plan.entries, eng.plan.state), ([], state))
+        self.assertEqual(self.plans, [("state_ref", "state_unknown"), ("state", "state_ref")])
+        self.assertTrue(s.usable)
+        self.assertIn("the helper holds no state %s; sending it whole"
+                      % proto.state_ref(state)[0][:12], self.log_text())
+        # then it holds it
+        self.round(s, state)
+        self.assertEqual(self.plans[2:], [("state_ref", "state_ref")])
+
+    def test_full_and_a_new_session_send_the_state(self):
+        s = self.open()
+        state = self.saved(self.round(s, {}))
+        self.round(s, state, full=True)
+        self.assertEqual(self.plans[1], ("state", "state_ref"))
+        # a reconnect: a new session knows nothing the last one's helper held
+        s = self.open()
+        self.round(s, state)
+        self.assertEqual(self.plans, [("state", "state_ref")])
+
+    def test_the_helper_keeps_four(self):
+        s = self.open()
+        state = self.saved(self.round(s, {}))
+        self.round(s, state)
+        # two plans of states it never sent: each keeps the state got and the one given back
+        # (without prune, which keeps the gone path, so that one is new too)
+        for i in range(2):
+            self.round(s, {"sent": {"gone%d" % i: "d"}}, prune="no")
+        self.assertEqual(self.plans[2:], [("state", "state")] * 2)
+        s.state_refs.add(proto.state_ref(state)[0])
+        self.round(s, state)
+        self.assertEqual(self.plans[-2:], [("state_ref", "state_unknown"),
+                                           ("state", "state_ref")])
+        # an unknown reference never stops the session, and the plan may come after it
+        with self.assertRaises(VCharonError) as cm:
+            s.call("source.plan", {"plugin": "path", "options": {"path": "src"},
+                                   "state_ref": "0" * 64, "full": False})
+        self.assertEqual(cm.exception.code, "state_unknown")
+        self.assertTrue(cm.exception.hint)
+        self.assertEqual(self.round(s, state).plan.state, state)
+
+    def test_an_echo_of_another_reference_is_refused(self):
+        s = self.open()
+        state = self.saved(self.round(s, {}))
+        real = s.call
+
+        def other(fn, args=None, **kw):
+            result = real(fn, args, **kw)
+            if fn == "source.plan":
+                result["state_ref"] = "1" * 64
+            return result
+
+        s.call = other
+        with self.assertRaises(VCharonError) as cm:
+            self.round(s, state)
+        self.assertEqual(cm.exception.code, "protocol")
+        self.assertIn("source.plan gave back the state", cm.exception.message)
 
 
 if __name__ == "__main__":

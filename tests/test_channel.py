@@ -31,7 +31,9 @@ from vcharon import (
     plan,
     platform,
     remote,
+    run,
     skill,
+    ssh,
     state,
 )
 from vcharon.mailbox import post as post_mod
@@ -39,7 +41,7 @@ from vcharon.mailbox import watch
 from vcharon.proto import VCharonError, shown_hint
 
 from tests import util
-from tests.test_cli import VCHARON_DIR
+from tests.test_cli import VCHARON_DIR, Between
 from tests.test_lock import hold_in_child, show_pid, stop_child, take_in_child
 from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
 
@@ -4212,6 +4214,58 @@ class SeenTest(ChannelCase):
                                    "state": {}, "full": False, "watch": "fast"})
         self.assertEqual(cm.exception.code, "protocol")
 
+    def test_seen_only_when_it_changed_or_was_asked(self):
+        write_tree(self.root, {"game/a/MEMBER.md": b"m", "game/b/MEMBER.md": b"m"})
+        s = self.session()
+        s.open()
+        game = os.path.join(self.root, "game")
+        # the session's first plan of the channel brings them
+        self.assertEqual(self.plan(s, game, watch="stream 2")["seen"], {"a": [0, "stream 2"]})
+        # the same members and paces: only the ages could have moved, so none
+        got = self.plan(s, game, watch="stream 2")
+        self.assertNotIn("seen", got)
+        self.assertIn("entries", got)
+        # asked for, as the client does when its copy is due
+        self.assertEqual(self.plan(s, game, watch="stream 2", want_seen=True)["seen"],
+                         {"a": [0, "stream 2"]})
+        self.assertNotIn("seen", self.plan(s, game, want_seen=False))
+        # a new member's stamp
+        channels.stamp_seen(self.root, "game", "b", "local 10")
+        self.assertEqual(sorted(self.plan(s, game, watch="stream 2")["seen"]), ["a", "b"])
+        self.assertNotIn("seen", self.plan(s, game, watch="stream 2"))
+        # a pace changed
+        self.assertEqual(self.plan(s, game, watch="run 30")["seen"]["a"], [0, "run 30"])
+        # a stamp gone
+        channels.drop_seen(self.root, "game", "b")
+        self.assertEqual(self.plan(s, game, watch="run 30")["seen"], {"a": [0, "run 30"]})
+        self.assertNotIn("seen", self.plan(s, game, watch="run 30"))
+        # a new session's first plan
+        other = self.session()
+        other.open()
+        self.assertEqual(self.plan(other, game, watch="run 30")["seen"], {"a": [0, "run 30"]})
+
+    def test_the_client_asks_for_seen_when_its_copy_is_due(self):
+        section = "game.mac-web"
+        session = mock.Mock(seen_at={})
+        # the session's first plan of the section
+        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
+        self.assertIsNone(cli._down_args(False, session, None))
+        now = time.monotonic()
+        session.seen_at[section] = now
+        self.assertIsNone(cli._down_args(True, session, section))
+        # SEEN_SAVE_EVERY since they came, and no copy: asked
+        session.seen_at[section] = now - charter.SEEN_SAVE_EVERY
+        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
+        # a copy written since then (by another sync): not yet
+        charter.save_seen(section, {"a": [0, "stream 2"]}, time.time())
+        self.assertIsNone(cli._down_args(True, session, section))
+        with mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
+            self.assertEqual(cli._down_args(True, session, section), {"watch": "stream 2"})
+        # once it is as old
+        old = time.time() - charter.SEEN_SAVE_EVERY
+        os.utime(charter.seen_path(section), (old, old))
+        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
+
     def test_a_watchers_sync_and_whoami(self):
         self.lead()
         self.ok("join", "game", "--server", "fake-dest")
@@ -4263,6 +4317,111 @@ class SeenTest(ChannelCase):
                   encoding="utf-8") as f:
             self.assertRegex(f.read(), r"  warn  the server couldn't give the members' "
                                        r"last-watched times: stamping mac-web: ")
+
+
+class QuietRoundsTest(ChannelCase):
+    """A remote member's sync --repeat rounds in this process: when the down asks for the
+    members' ages, what a failed round does to them, and a member folder over the limits
+    (DESIGN, "Calls")."""
+
+    def rounds(self, *between, fail=None):
+        """sync game --repeat 1 as a watcher's child, with the actions between its rounds:
+        (its stdout's words, for each source.plan (want_seen sent, seen back, state_ref
+        back)). The actions get the session as an argument. fail: a list; a round whose
+        plan comes while it holds an item takes one and fails after the plan."""
+        plans = []
+        sessions = []
+        real = ssh.Session.call
+
+        def call(session, fn, args=None, **kw):
+            sessions[:] = [session]
+            result = real(session, fn, args, **kw)
+            if fn == "source.plan":
+                plans.append(("want_seen" in args, "seen" in result, "state_ref" in result))
+            return result
+
+        real_log_plan = run.Engine._log_plan
+
+        def log_plan(eng, p):
+            if fail and eng.source_side.end == "remote":
+                fail.pop()
+                raise VCharonError("vanished", "a file went between the plan and the send")
+            return real_log_plan(eng, p)
+
+        actions = [lambda f=f: f(sessions[0]) for f in between]
+        with mock.patch.object(ssh.Session, "call", call), \
+                mock.patch.object(run.Engine, "_log_plan", log_plan), \
+                mock.patch.object(cli, "_watch_stdin", lambda ended: None), \
+                mock.patch.object(cli, "_wait_or_end", Between(*actions)), \
+                mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
+            code, out, err = self.run_cli("sync", "game", "--repeat", "1")
+        self.assertEqual(code, 0, out + err)
+        return out.split(), plans
+
+    def copy(self):
+        """The members in this box's copy of the ages."""
+        with open(charter.seen_path("game.mac-web"), encoding="utf-8") as f:
+            return sorted(json.load(f)["members"])
+
+    def test_when_the_down_asks_for_the_ages(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+
+        def due(session):
+            # SEEN_SAVE_EVERY since the ages came, and the copy as old
+            session.seen_at["game.mac-web"] -= charter.SEEN_SAVE_EVERY
+            old = time.time() - charter.SEEN_SAVE_EVERY
+            os.utime(charter.seen_path("game.mac-web"), (old, old))
+
+        _, plans = self.rounds(lambda session: None, due)
+        # asked at the session's first plan; not while the copy is fresh; again once due
+        self.assertEqual([p[:2] for p in plans], [(True, True), (False, False), (True, True)])
+
+    def test_a_failed_round_doesnt_hold_back_a_new_member(self):
+        self.lead()
+        self.ok("join", "game", "--server", "fake-dest")
+        fail = []
+        copies = []
+
+        def stamp(session):
+            copies.append(self.copy())
+            channels.stamp_seen(self.root, "game", "laptop-ui", "stream 2")
+            fail.append(1)
+
+        words, plans = self.rounds(stamp, lambda session: copies.append(self.copy()),
+                                   fail=fail)
+        self.assertIn("vanished:", words)
+        # the failed round got the new member's stamp and kept none of it; the next one asks
+        self.assertEqual([p[:2] for p in plans], [(True, True), (False, True), (True, True)])
+        self.assertEqual(copies, [["mac-web"], ["mac-web"]])
+        self.assertEqual(self.copy(), ["laptop-ui", "mac-web"])
+
+    def test_a_folder_over_the_limits_settles_by_reference(self):
+        self.use_box("laptop")
+        self.ok("create", "game", "--server", "fake-dest", "--project", "ui", "--max-files", "10")
+        self.use_box("win")
+        self.ok("join", "game", "--server", "fake-dest", "--project", "api")
+        self.use_box("mac")
+        self.ok("join", "game", "--server", "fake-dest")
+        orders = []
+
+        def order():
+            with open(state.path("game.mac-web.down"), "rb") as f:
+                orders.append(list(json.loads(f.read())["source"]["sent"]))
+
+        def over(session):
+            order()
+            write_tree(self.root, {"game/laptop-ui/n%d.md" % i: b"x" for i in range(12)})
+
+        _, plans = self.rounds(over, lambda session: order(), lambda session: order())
+        order()
+        # its entries kept, moved to the end: written once, then by reference again
+        laptop = [p for p in orders[0] if p.startswith("laptop-ui")]
+        self.assertEqual(orders[1], [p for p in orders[0] if p not in laptop] + laptop)
+        self.assertEqual(orders[1:], [orders[1]] * 3)
+        # the state came back by reference, then whole in the round that left it out, then
+        # by reference again
+        self.assertEqual([p[2] for p in plans], [True, False, True, True])
 
 
 class SeenRoundsTest(ChannelCase):
