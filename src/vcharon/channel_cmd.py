@@ -1328,7 +1328,7 @@ def _remove_idle(args, cfg, log, say):
                 # every group's removals run; the first failure is raised at the end
                 got = _prune_idle(one, plan, items, days)
                 failed = failed or got
-            groups.append((one, plan, whole))
+            groups.append((one, plan, whole, listing))
     if args.json:
         doc = {"server": server.ssh, "days": days, "yes": bool(args.yes),
                "members": groups[0][1], "idle_channels": groups[0][2], "shared": None}
@@ -1339,9 +1339,10 @@ def _remove_idle(args, cfg, log, say):
         print(json.dumps(doc, ensure_ascii=False))
         sys.stdout.flush()
     else:
-        for i, (one, plan, whole) in enumerate(groups):
-            # the shared root's group only when it has something to say
-            if i == 0 or plan or whole:
+        for i, (one, plan, whole, listing) in enumerate(groups):
+            # the shared root's group whenever list shows it (_list), so its "none" says
+            # that root was checked too
+            if i == 0 or listing["channels"] or listing["others"]:
                 _say_idle(one, plan, whole, days, say)
         if problem is not None:
             say(_shared_note(server, problem))

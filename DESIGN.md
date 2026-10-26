@@ -1611,8 +1611,9 @@ does a session that ends without one. It acts on no membership, as `list` does.
   `shared`: the shared root's `{"members", "idle_channels"}` the same way, or null.
 - **Both roots**: on a Linux server (or machine, with `--local`) it covers the shared root's
   channels too, as `list` shows them: the lines above for each root, each after its own first
-  line (the shared one's `(<server>'s shared root)`, printed only when it has a member or a
-  note), then one `to remove them` line; a channel named must be in either. A shared folder
+  line (the shared one's `(<server>'s shared root)`, printed whenever `list` shows that
+  root's group: it holds a channel or another name; its `none` says it was checked), then one
+  `to remove them` line; a channel named must be in either. A shared folder
   that fails its checks is a note line and `shared`: `{"error"}`, as in `list` ([The shared
   root](#the-shared-root)). Why: any member's
   user cleans up a shared channel ([The shared root](#the-shared-root)), and the root comes

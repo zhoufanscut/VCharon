@@ -7,6 +7,13 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `vcharon list --remove-idle` prints the shared root's group whenever that root holds a
+  channel or another name, as `list` does, with `  none` when nothing there is idle; before,
+  the group was left out then, so the output didn't show the shared root had been checked.
+  `--json` is unchanged.
+
 ## 0.9.0rc1 — 2026-10-26
 
 The first release candidate for 0.9.0, a GitHub pre-release: `vcharon --update --rc` on 0.8.6

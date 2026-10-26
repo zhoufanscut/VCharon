@@ -199,6 +199,34 @@ class SharedRootTest(SharedCase):
         self.assertEqual(sorted(os.listdir(os.path.join(self.shared, "game"))),
                          ["laptop-ui", "mac-web"])
 
+    def test_remove_idle_names_a_shared_root_with_nothing_idle(self):
+        # a shared root that holds anything gets its group and its "none", as list shows it:
+        # without it, a reader can't tell that root was checked
+        self.ok("create", "home", "--local")
+        lines = self.ok("list", "--remove-idle", "--local").splitlines()
+        self.assertEqual(lines, [
+            "vcharon: list --remove-idle  (this machine)  members idle over 14 days",
+            "  none"])
+        # a leftover name alone counts too, as in list
+        leftover = os.path.join(self.shared, ".vcharon-closed-x")
+        os.makedirs(leftover)
+        for folder in (self.top, self.shared):
+            os.chmod(folder, 0o777)
+        lines = self.ok("list", "--remove-idle", "--local").splitlines()
+        self.assertEqual(lines[2:], [
+            "vcharon: list --remove-idle  (this machine's shared root)  members idle over 14 "
+            "days",
+            "  none"])
+        os.rmdir(leftover)
+        self.lead(where=("--local", "--shared"))
+        lines = self.ok("list", "--remove-idle", "--local").splitlines()
+        self.assertEqual(lines, [
+            "vcharon: list --remove-idle  (this machine)  members idle over 14 days",
+            "  none",
+            "vcharon: list --remove-idle  (this machine's shared root)  members idle over 14 "
+            "days",
+            "  none"])
+
 
 @unittest.skipUnless(fsops.LINUX, "the shared root is Linux only")
 class SharedMoreTest(SharedCase):
