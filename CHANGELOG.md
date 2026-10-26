@@ -7,7 +7,10 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.9.0rc1 — 2026-10-26
+
+The first release candidate for 0.9.0, a GitHub pre-release: `vcharon --update --rc` on 0.8.6
+offers it; a plain `--update` on 0.8.6 doesn't.
 
 - A shared root for people on separate accounts of one Linux server: `vcharon create C
   --shared` and `vcharon join C --shared` (with `--server ALIAS`, or `--local` on a Linux
@@ -30,6 +33,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   `shared` (null on a server that isn't Linux, an error object when its folder fails the
   checks); `whoami C --json` gets `shared` (true or
   false), and its text's `mode` line ends with `, its shared root` for one.
+
+Checked: the unit suite on Linux (measured, Python 3.13: 1826 tests OK, 13 skipped, run as
+CI, before the last wording change to the live-session refusal; the changed modules OK after
+it). A live round with two real accounts on one Debian 13 server (measured): remote members of
+both accounts over ssh (create, join, posts, lead handoff both ways, `--gone`, close by the
+account that didn't create the channel) and local members under umasks 077, 022 and 002 (every
+entry 777/666, `list --remove-idle --yes` by the other account, the `list` note for a 755
+shared folder). Not run on this build: macOS and Windows clients.
 
 ## 0.8.6 — 2026-10-26
 
