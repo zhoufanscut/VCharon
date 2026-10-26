@@ -450,10 +450,10 @@ the shared root's channels as a group of their own, after the home's (`--json`: 
   root stops with an error and changes nothing: whoever owns it fixes or removes it. `vcharon
   list` still lists the home's channels, with a note naming the problem.
 - Linux only: `--shared` is refused on macOS and Windows.
-- Some distributions enable a systemd-tmpfiles rule that ages out `/var/tmp`
-  (`q /var/tmp 1777 root root 30d`; Fedora and Arch, from memory, not checked): there, old files
-  of a long-running channel may be deleted. On Debian 13 that rule is commented out in
-  `/usr/lib/tmpfiles.d/tmp.conf`, so `/var/tmp` isn't aged (checked on one Debian 13 machine).
+- Many systems age out `/var/tmp` with a systemd-tmpfiles rule (`q /var/tmp 1777 root root
+  30d`): there, files of a channel older than 30 days may be deleted. Check a server with
+  `systemd-tmpfiles --cat-config | grep /var/tmp`. Even Debian 13 differs: the rule is active
+  with its systemd 257.13 and commented out with 257.9 (checked on one machine each).
 
 Each remote member's watcher holds one ssh connection to the server, and one helper process there of
 about 25 MB: 50 watchers on one server took about 1.2 GB (measured on a 4-CPU, 3.7 GB Debian 13

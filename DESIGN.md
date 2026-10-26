@@ -1135,10 +1135,10 @@ server.
   machine's claimer is `another machine holds <name> in C`; two OS users of one machine share a
   claimer, and the second has no record there, so `the name <name> is taken in C` ([The
   claimer](#the-claimer)).
-- **Aging**: a distribution that enables tmpfiles' `q /var/tmp 1777 root root 30d` may delete
-  a long-running channel's old files; vcharon doesn't guard against it, the README warns. On
-  Debian 13 that rule is commented out (`/usr/lib/tmpfiles.d/tmp.conf`, checked on one
-  machine).
+- **Aging**: a system that enables tmpfiles' `q /var/tmp 1777 root root 30d` may delete a
+  long-running channel's old files; vcharon doesn't guard against it, the README warns. Debian
+  13 differs by point release: active with systemd 257.13, commented out with 257.9
+  (`/usr/lib/tmpfiles.d/tmp.conf`, one machine each).
 
 ### Member names
 
