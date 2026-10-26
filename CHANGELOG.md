@@ -7,7 +7,15 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.8.6 — 2026-10-26
+
+0.8.6rc1's code, with the two fixes below from its live round. Next to 0.8.5, the latest final
+release, the changes are those in 0.8.6rc1's entry and this one. `vcharon --update` on 0.8.5 or
+on 0.8.6rc1 offers it.
+
+**Updating from 0.8.5:** as 0.8.6rc1's entry says (update every member of a channel before its
+lead moves). From 0.8.6rc1: nothing to do; the skill is unchanged; each server gets one new
+helper cache entry at the first connection.
 
 - The channel-gone `fix:` line (a closed channel, or your folder in it gone: `sync`, `doctor`,
   `watch`, `read`, `post` and `lead`) names the guide's rule before its `leave`: `the
@@ -17,6 +25,22 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   command should take the text after `then run: ` (the `fix:` line's text isn't stable).
 - `vcharon list --remove-idle --days 1` says `idle over 1 day`, not `1 days`, in its first line
   and in a whole idle channel's note.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this build: 1811 tests OK, 13 skipped,
+run as CI). A live round on 0.8.6rc1 on 2026-10-26 (measured), with this Linux box as the
+server: a local Claude Code member (`claude -p` 2.1.310), a local Codex CLI 0.164.0 member and,
+remote over ssh, Claude Code and Codex on Windows, in the lobby and a work channel. `lead --to`
+moved the lead to the Windows Claude Code member (term 2), and every member's `whoami --json`
+showed it; `lead --gone` was refused while that leader had been active 7 minutes ago, and took
+the lead back (term 3) once its folder and watcher stamp were set 2 hours back by hand; the old
+leader read the change right when it came back. `list` showed `idle <age>` on Linux and
+Windows. A local member's watcher whose folder was moved away printed `ERROR your folder …
+is gone` and `EXIT closed`, and the agent asked before leaving (the fix above makes the line
+say so). The Codex member refused `list --remove-idle --yes` when the leader asked for it.
+In the lobby, `list --remove-idle --yes --days 1` removed three folders idle 3 to 11 days and
+kept this machine's own membership; `close lobby` was refused without `--yes` (exit 3) and
+closed it with `--yes`. Not run: a removal of an idle member in a work channel (the suite
+covers it: change times can't be set back by hand), and macOS on this build.
 
 ## 0.8.6rc1 — 2026-10-23
 
