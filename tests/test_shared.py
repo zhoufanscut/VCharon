@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, channels, fsops, platform
+from vcharon import channel_cmd, channels, fsops, helper, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
@@ -349,3 +349,27 @@ class NotLinuxTest(SharedCase):
             self.assertIsNone(json.loads(self.ok("list", "--local", "--json"))["shared"])
         self.assertFalse(os.path.exists(self.top))
         self.assertEqual(platform.os_name() == "linux", fsops.LINUX)
+
+    def test_the_helper_says_whether_it_can_hold_one(self):
+        # the gate list asks: the helper's own test, the one that refuses --shared
+        self.assertIs(helper.hello()["shared_root"], fsops.LINUX)
+        with mock.patch.object(fsops, "LINUX", False):
+            self.assertIs(helper.hello()["shared_root"], False)
+
+    def test_a_server_that_cant_hold_one(self):
+        # a server whose helper can't hold a shared root, whatever its hello's os says (a BSD
+        # says linux): list asks it nothing and shows no shared group, as off Linux
+        init = channel_cmd._Remote.__init__
+
+        def no_shared(remote, session, alias, hello, log, shared=False):
+            init(remote, session, alias, dict(hello, shared_root=False), log, shared)
+
+        with mock.patch.object(channel_cmd._Remote, "__init__", no_shared):
+            self.assertEqual(self.ok("list", "--server", "fake-dest").splitlines(),
+                             ["vcharon: list  (fake-dest)", "  no channels"])
+            self.assertIsNone(json.loads(self.ok("list", "--server", "fake-dest",
+                                                 "--json"))["shared"])
+            doc = json.loads(self.ok("list", "--server", "fake-dest", "--remove-idle",
+                                     "--json"))
+            self.assertIsNone(doc["shared"])
+        self.assertFalse(os.path.exists(self.top))

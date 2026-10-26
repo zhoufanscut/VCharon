@@ -422,8 +422,8 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 ```json
 {"t": "hello", "protocol": 4, "version": "0.1.0", "python": "3.13.5", "os": "linux",
  "distro": "Debian GNU/Linux 13 (trixie)", "distro_id": "debian", "distro_version": "13",
- "machine": "<32 hex>", "user": "me", "home": "/home/me", "utc_offset": 3600,
- "time": 1790000000.25}
+ "machine": "<32 hex>", "user": "me", "home": "/home/me", "shared_root": true,
+ "utc_offset": 3600, "time": 1790000000.25}
 ```
 
 - The controller requires `protocol` and `version` to equal its own: both ends run the same
@@ -433,6 +433,10 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   record to the actual server. A server with none can't take remote members. Stored and
   compared as it is; shown only hashed ([Rules for the code](#rules-for-the-code)).
 - `os` must be `linux` for a remote member: a Mac or Windows root takes local members only.
+- `shared_root`: whether the helper can hold a shared root ([The shared root](#the-shared-root)),
+  by its own test, the one that refuses `--shared`. `list` asks for the shared group only when
+  it is true. Why: `os` says `linux` for any OS that isn't macOS or Windows, so a gate on it
+  could ask a helper that refuses.
 - `distro`, `distro_id`, `distro_version`: `PRETTY_NAME`, `ID` and `VERSION_ID` from
   `/etc/os-release`. `ID=debian` with `VERSION_ID` 13 or later is the supported server
   (`doctor --json`'s `"tested"`); anything else gets a warning from `doctor` and `ping`, never a
@@ -1119,12 +1123,14 @@ server.
   a path wouldn't recognize, so what vcharon made there would silently keep the umask's modes.
 - **Linux only**: `--shared` is refused on macOS and Windows (`config`, exit 3: `the shared
   root (--shared) is on Linux only`), with `--local` too; a remote member's server is Linux
-  already ([Scope](#scope)).
+  already ([Scope](#scope)). The machine that holds the root decides: with `--server`, its
+  helper.
 - **`list`** shows the shared root's channels with no flag, as a group of its own after the
   home root's: a second `vcharon: list  (<server>'s shared root)` line and its channels, only
   when it holds any (or a note); `--json`'s `shared` holds its `{"channels", "others"}` (null on
-  a server that isn't Linux). A shared folder that fails the checks above doesn't stop `list`
-  (nor `list --remove-idle`): the root in the home is listed as usual, then `  note:
+  a server that isn't Linux, as the hello's `shared_root` says: [hello](#hello)). A shared
+  folder that fails the checks above doesn't stop `list` (nor `list --remove-idle`): the root
+  in the home is listed as usual, then `  note:
   <server>'s shared root isn't listed: <the error's message>; fix: <its fix>`, and `--json`'s
   `shared` is `{"error": {"code", "message", "fix"}}`; the exit status is a clean list's. Why:
   a user who never uses `--shared` must still list, and the folder is another account's to

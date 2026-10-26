@@ -179,7 +179,9 @@ def hello():
     VCHARON_TEST_MACHINE_ID does for the id: tests on a Mac or Windows run their helper there, and
     the client takes only a Linux one. VCHARON_TEST_CLOCK_SHIFT (seconds) moves the clock, and
     VCHARON_TEST_UTC_OFFSET (seconds east of UTC) replaces the zone, for doctor's tests.
-    VCHARON_TEST_OS_RELEASE names the file read in place of /etc/os-release (tests)."""
+    VCHARON_TEST_OS_RELEASE names the file read in place of /etc/os-release (tests).
+    "shared_root" is whether this helper can hold a shared root (channels.shared_root): the
+    client asks it, never the OS's name, so the two never disagree (VCHARON_TEST_OS leaves it)."""
     offset = os.environ.get("VCHARON_TEST_UTC_OFFSET")
     test_release = os.environ.get("VCHARON_TEST_OS_RELEASE")
     release = platform.os_release((test_release,) if test_release else platform.OS_RELEASE)
@@ -189,7 +191,7 @@ def hello():
            "os": os.environ.get("VCHARON_TEST_OS") or platform.os_name(),
            "distro": release.get("PRETTY_NAME"), "distro_id": release.get("ID"),
            "distro_version": release.get("VERSION_ID"), "machine": platform.machine_id(),
-           "user": platform.user(), "home": platform.home(),
+           "user": platform.user(), "home": platform.home(), "shared_root": fsops.LINUX,
            "utc_offset": int(offset) if offset else time.localtime().tm_gmtoff}
     # last, so the gap leaves out the time the other fields took
     msg["time"] = time.time() + float(os.environ.get("VCHARON_TEST_CLOCK_SHIFT") or 0)

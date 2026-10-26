@@ -732,13 +732,15 @@ class _Remote:
         self.ssh = alias
         self.machine = hello.get("machine")
         self.os = hello.get("os")
+        self.can_share = hello.get("shared_root") is True
         self.log = log
         self.shared = shared
         self.where = "%s's shared root" % alias if shared else alias
 
     def has_shared(self):
-        """Whether the server can have a shared root: a Linux one."""
-        return self.os == "linux"
+        """Whether the server can have a shared root, as its helper's hello says: the helper
+        is what refuses one (channels.shared_root), so the client never asks one that can't."""
+        return self.can_share
 
     def shared_root(self):
         """The same server's shared root, over the same connection."""
@@ -988,10 +990,10 @@ def _list(args, cfg, log, say):
 
 def _shared_listing(server):
     """(server's shared root, its listing, None); (None, None, None) on a server that can't
-    have one (not Linux); (None, None, the error) when the shared folder fails its checks
-    (channels.shared_root): list and list --remove-idle show the root in the home as usual and
-    name the problem, since a user who never uses --shared must still list (DESIGN, "The shared
-    root"). Any other error stops the command."""
+    have one (not Linux, as its helper says); (None, None, the error) when the shared folder
+    fails its checks (channels.shared_root): list and list --remove-idle show the root in the
+    home as usual and name the problem, since a user who never uses --shared must still list
+    (DESIGN, "The shared root"). Any other error stops the command."""
     if not server.has_shared():
         return None, None, None
     try:

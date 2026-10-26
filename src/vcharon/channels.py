@@ -157,8 +157,8 @@ def root_path(shared=False):
 # watchers' stamps and the term markers (the helper's cache/ stays in each account's home)
 SHARED_CHANNELS = "channels"
 SHARED_NOT_LINUX = "the shared root (--shared) is on Linux only"
-SHARED_NOT_LINUX_FIX = ("leave out --shared on this machine; a channel shared by people on "
-                        "separate accounts is on a Linux server")
+SHARED_NOT_LINUX_FIX = ("leave out --shared for this machine or server; a channel shared by "
+                        "people on separate accounts is on a Linux server")
 SHARED_MODE_FIX = ("ask your user: whoever owns it runs chmod 777 %s (the first create "
                    "--shared, or a lobby's first join --shared, makes it so; a mode found "
                    "there is never changed), or removes it while no channel is in it")
