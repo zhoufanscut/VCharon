@@ -352,11 +352,12 @@ def _seen(h, args):
     if args["plugin"] != "path" or not me or "path" not in options:
         return {}
     try:
-        root = channels.root_path()
         folder = os.path.normpath(h.ctx.resolve(options["path"], "from.path"))
+        # the root in the home, or the shared root
+        root = channels.root_of(folder)
     except Exception as e:  # noqa: BLE001
         return {"seen_error": "finding the channel root: %s" % _why(e)}
-    if os.path.dirname(folder) != root:
+    if root is None:
         return {}
     channel = os.path.basename(folder)
     out = {}
@@ -470,12 +471,25 @@ def job_reset(h, call_id, args):
 
 
 # The channel root's calls. The root is never an argument: the helper uses the
-# fixed root, or VCHARON_CHANNELS_ROOT in its environment (tests). Each function checks the names
-# again and works only directly below the root.
+# fixed root, or VCHARON_CHANNELS_ROOT in its environment (tests); with "shared": true, the
+# fixed shared root (VCHARON_SHARED_ROOT in tests). Each function checks the names again and
+# works only directly below the root.
+
+def _root(args, checks):
+    """The root of a channel call: the shared root when args has "shared" (true), which is
+    then one more of the checks."""
+    if "shared" in args:
+        checks["shared"] = _is_bool
+    return checks
+
+
+def _root_of(args):
+    return channels.root_path(args.get("shared", False))
+
 
 def channel_list(h, call_id, args):
-    _check_args("channel.list", args, {})
-    h.ok(call_id, channels.list_channels(channels.root_path(), h.tick))
+    _check_args("channel.list", args, _root(args, {}))
+    h.ok(call_id, channels.list_channels(_root_of(args), h.tick))
 
 
 def channel_claim(h, call_id, args):
@@ -486,8 +500,8 @@ def channel_claim(h, call_id, args):
         checks["lobby"] = _is_bool
     if "claimer" in args:
         checks["claimer"] = _is_str
-    _check_args("channel.claim", args, checks)
-    h.ok(call_id, channels.claim(channels.root_path(), args["channel"], args["name"],
+    _check_args("channel.claim", args, _root(args, checks))
+    h.ok(call_id, channels.claim(_root_of(args), args["channel"], args["name"],
                                  args["create"], h.tick, lobby=args.get("lobby", False),
                                  claimer=args.get("claimer")))
 
@@ -497,8 +511,8 @@ def channel_release(h, call_id, args):
     checks = {"channel": _is_str, "name": _is_str}
     if "keep_charter" in args:
         checks["keep_charter"] = _is_bool
-    _check_args("channel.release", args, checks)
-    h.ok(call_id, channels.release(channels.root_path(), args["channel"], args["name"], h.tick,
+    _check_args("channel.release", args, _root(args, checks))
+    h.ok(call_id, channels.release(_root_of(args), args["channel"], args["name"], h.tick,
                                    keep_charter=args.get("keep_charter", False)))
 
 
@@ -507,8 +521,8 @@ def channel_remove(h, call_id, args):
     checks = {"channel": _is_str, "name": _is_str}
     if "lobby" in args:
         checks["lobby"] = _is_bool
-    _check_args("channel.remove", args, checks)
-    h.ok(call_id, channels.remove(channels.root_path(), args["channel"], args["name"], h.tick,
+    _check_args("channel.remove", args, _root(args, checks))
+    h.ok(call_id, channels.remove(_root_of(args), args["channel"], args["name"], h.tick,
                                   lobby=args.get("lobby", False)))
 
 
@@ -517,16 +531,17 @@ def _is_int(value):
 
 
 def channel_prune(h, call_id, args):
-    _check_args("channel.prune", args, {"channel": _is_str, "name": _is_str, "days": _is_int,
-                                        "budget": _is_int})
-    h.ok(call_id, channels.prune(channels.root_path(), args["channel"], args["name"],
+    _check_args("channel.prune", args, _root(args, {"channel": _is_str, "name": _is_str,
+                                                    "days": _is_int, "budget": _is_int}))
+    h.ok(call_id, channels.prune(_root_of(args), args["channel"], args["name"],
                                  args["days"], args["budget"], h.tick))
 
 
 def channel_lead(h, call_id, args):
-    _check_args("channel.lead", args, {"channel": _is_str, "name": _is_str, "number": _is_int,
-                                       "mode": _is_str, "time": _is_str})
-    h.ok(call_id, channels.lead(channels.root_path(), args["channel"], args["name"],
+    _check_args("channel.lead", args, _root(args, {"channel": _is_str, "name": _is_str,
+                                                   "number": _is_int, "mode": _is_str,
+                                                   "time": _is_str}))
+    h.ok(call_id, channels.lead(_root_of(args), args["channel"], args["name"],
                                 args["number"], args["mode"], args["time"], h.tick))
 
 

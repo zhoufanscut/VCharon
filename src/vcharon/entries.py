@@ -398,7 +398,10 @@ def append(path, text):
 
 def _swap(path, folder, data, mode):
     """data as path's whole new content: a stage-named temp file in folder, then one replace;
-    mode is the file's."""
+    mode is the file's, with read and write for all in the shared root (DESIGN, "The shared
+    root")."""
+    if fsops.in_shared(os.path.abspath(folder)):
+        mode |= fsops.SHARED_FILE_MODE
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=pathrules.STAGE_PREFIX + "post-",
                                suffix=".tmp")
     try:

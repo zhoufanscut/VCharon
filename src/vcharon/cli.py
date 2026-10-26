@@ -166,6 +166,12 @@ def _parser():
     def as_json(one):
         one.add_argument("--json", action="store_true", help="print one JSON object instead")
 
+    def shared(one):
+        one.add_argument("--shared", action="store_true", help="the server's shared root "
+                         "(/var/tmp/vcharon, Linux only), for people on separate accounts: any "
+                         "account there can read, change or delete its channels; later "
+                         "commands take it from the join record")
+
     one = verb("setup", "write the config; without --box, print what this machine uses",
                "vcharon setup --box laptop")
     one.add_argument("--box", metavar="NAME", help="this machine's part of every member name, "
@@ -211,6 +217,7 @@ def _parser():
     one = verb("create", "create a channel; you lead it", "vcharon create myapp --server devbox")
     channel(one)
     where(one)
+    shared(one)
     ident(one)
     agent(one)
     for flag, key, what, default in (
@@ -226,6 +233,7 @@ def _parser():
     one = verb("join", "join a channel as a member", "vcharon join myapp --server devbox")
     channel(one)
     where(one)
+    shared(one)
     ident(one)
     agent(one)
     one.add_argument("--rejoin", action="store_true", help="take an existing folder of your "
@@ -595,6 +603,7 @@ def _member_doc(cfg, record):
             "founder": record["leader"] if lobby else None,
             "leads": not lobby and chain.leader == name,
             "mode": "local" if record["ssh"] is None else "remote", "server": record["ssh"],
+            "shared": channel_cmd._is_shared(record),
             "folder": os.path.join(tree, name), "tree": tree, "kind": kind_.name}
 
 
@@ -612,7 +621,8 @@ def _whoami(args, run):
     (both null when none or two lead at the top term); a lobby's "leader" and "term" are null
     and "founder" the member whose folder holds its CHANNEL.md, who "leads" nothing; a work
     channel's "founder" is null;
-    "mode" is "local" or "remote", "server" the alias (null for a local member), "folder" your own
+    "mode" is "local" or "remote", "server" the alias (null for a local member), "shared" whether
+    the channel is in the server's shared root (true) or the root in its home, "folder" your own
     folder on this box and "tree" the channel's (a remote member's copy); "role" is null
     without one. "box" is this machine's box now (a membership keeps the name it joined
     with), "box_source" "config" ([vcharon] box) or "os" (the default: mac, win, linux).
@@ -840,8 +850,9 @@ def _whoami_lines(doc):
             ", term %d" % doc["term"] if doc["term"] and doc["term"] > 1 else ""))
     _say("  name     %s  (--project %s%s)" % (doc["name"], doc["project"] or "?",
                                               " --role %s" % doc["role"] if doc["role"] else ""))
-    _say("  mode     %s" % ("local, on this machine" if doc["mode"] == "local"
-                            else "remote, server %s" % doc["server"]))
+    _say("  mode     %s%s" % ("local, on this machine" if doc["mode"] == "local"
+                              else "remote, server %s" % doc["server"],
+                              ", its shared root" if doc["shared"] else ""))
     # the home as ~ in the line, as agents quote it; --json's folder stays whole
     _say("  folder   %s" % platform.tilde(doc["folder"]))
 

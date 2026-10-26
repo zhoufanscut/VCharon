@@ -20,8 +20,8 @@ every such name is a heading here.
 - [How a sync works](#how-a-sync-works), [Files](#files)
 - [Session](#session), [Wire protocol](#wire-protocol), [Plans](#plans), [Plugins](#plugins)
 - [Applying a plan](#applying-a-plan), [State and locks](#state-and-locks), [Config](#config)
-- [Channels](#channels): names, the claimer, records, which membership, the lobby, entries,
-  formats, limits, the watcher, reading, clocks
+- [Channels](#channels): the shared root, names, the claimer, records, which membership, the
+  lobby, entries, formats, limits, the watcher, reading, clocks
 - [Command line](#command-line), [Stable](#stable)
 - [Tests](#tests), [Rules for the code](#rules-for-the-code),
   [Not in this version](#not-in-this-version)
@@ -454,12 +454,12 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 | `sink.commit` | – | `{"written", "deleted", "deletes_done", "notes"}`; an `err` also carries `"done"` | – |
 | `sink.abort` | – | `{}` | – |
 | `job.reset` | – | `{}` | – |
-| `channel.list` | – | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "idle", "items", "format", "limits"}], "others": [{"name", "why"}]}` | – |
-| `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
-| `channel.release` | `channel`, `name` | `{"removed"}` | – |
-| `channel.remove` | `channel`, `name`, optional `lobby` | `{"closed", "deleted"}` | – |
-| `channel.prune` | `channel`, `name`, `days`, `budget` | `{"kept", "idle", "items", "removed", "deleted"}` | – |
-| `channel.lead` | `channel`, `name`, `number`, `mode` (`offer` or `gone`), `time` | `{"term", "after", "from", "charter", "steps", "steps_cut"}` | – |
+| `channel.list` | optional `shared` | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "idle", "items", "format", "limits"}], "others": [{"name", "why"}]}` | – |
+| `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer`, optional `shared` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
+| `channel.release` | `channel`, `name`, optional `shared` | `{"removed"}` | – |
+| `channel.remove` | `channel`, `name`, optional `lobby`, optional `shared` | `{"closed", "deleted"}` | – |
+| `channel.prune` | `channel`, `name`, `days`, `budget`, optional `shared` | `{"kept", "idle", "items", "removed", "deleted"}` | – |
+| `channel.lead` | `channel`, `name`, `number`, `mode` (`offer` or `gone`), `time`, optional `shared` | `{"term", "after", "from", "charter", "steps", "steps_cut"}` | – |
 | `bye` | – | `{}` | – |
 
 - The helper holds at most one source and one sink per job. `job.reset` drops them (a sink
@@ -487,9 +487,10 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 - `deletes_done` lists the deletes a commit got through; `source.state_after` uses it after a
   commit that failed partway.
 - `watch` in `source.plan` is a watcher's pace: the helper stamps the member's last-watched time
-  after the plan. A down of a channel in the root (`mailbox_me` set) gets `seen`, `{member:
-  [age seconds, pace]}`, beside the plan's fields, or `seen_error` with why not; the client takes
-  both out before reading the plan ([The watcher in a channel](#the-watcher-in-a-channel)).
+  after the plan. A down of a channel in the root or the shared root (`mailbox_me` set) gets
+  `seen`, `{member: [age seconds, pace]}`, beside the plan's fields, or `seen_error` with why
+  not; the client takes both out before reading the plan ([The watcher in a
+  channel](#the-watcher-in-a-channel)).
   `seen` comes at the session's first plan of the channel, when a member or a pace changed since
   the last one the session sent, and when the call has `want_seen`; else only the ages could
   have moved, and it is left out. The client sends `want_seen` at its first plan of the channel
@@ -498,9 +499,12 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   ages of every member, in every round, were the reply's other cost that grew with the
   channel.
 - The `channel.*` calls work on the channel root: the fixed `~/.local/state/vcharon/channels`,
-  or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only). Never an argument: every
-  member must reach the same folder. Each call checks the names again, works only directly below
-  the root, and never follows a symlink. `--local` calls the same functions in-process.
+  or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only); with `"shared": true`,
+  the fixed shared root `/var/tmp/vcharon/channels`, after its checks ([The shared
+  root](#the-shared-root)). Never an argument: every member must reach the same folder, so the
+  call says only which of the two fixed roots, yes or no. Each call checks the names again,
+  works only directly below the root, and never follows a symlink. `--local` calls the same
+  functions in-process.
   `claim`, `release` (undoing a failed claim), `remove` and `prune` also sweep `seen/` beside
   the root: each
   `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed (and
@@ -516,7 +520,8 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   by claimer, not dropped by every claim: another machine's join, refused after the claim, must
   not blank a live member. Why there: those calls end or reuse channels, and the stamps of a
   channel that is gone are nobody's.
-- `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`);
+- `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`, the
+  shared root's absolute);
   `claimer` is the `claimer:` of an existing folder's `MEMBER.md`, or null; `format` and
   `limits` are the channel's, read from its leader's `CHANNEL.md`. No reply carries a host name.
 - `channel.list`'s `leader` is the folder holding the top term's charter (null for none, or a
@@ -739,7 +744,8 @@ Every receiver:
   through a commit;
 - on POSIX, the root and every folder on the way are owned by you and not writable by others
   (`unsafe_dir`), except group write for your private group and a sticky folder such as `/tmp`:
-  else another user could swap a folder for a symlink between check and commit;
+  else another user could swap a folder for a symlink between check and commit. Not in the
+  shared root, whose folders are every account's ([The shared root](#the-shared-root));
 - the root itself is never deleted or replaced.
 
 Windows receiver, per part: none of `< > : " | ? * \` or control characters; no trailing `.` or
@@ -794,7 +800,9 @@ default. Linux receiver: no folding.
 File bytes, unchanged (no line-ending or encoding conversion), and the mtime. A new file gets
 `0o666` less the umask, plus execute bits where it has read bits when `exec` is true. A replaced
 file keeps its bits, except that `exec` sets or clears its execute bits. New folders get `0o777`
-less the umask. Not copied: owner, ACLs, extended attributes, resource forks, folder mtimes.
+less the umask. In the shared root every new folder gets `0o777` and every file `0o666` or more
+(a replaced one too), whatever the umask ([The shared root](#the-shared-root)). Not copied:
+owner, ACLs, extended attributes, resource forks, folder mtimes.
 
 ### Full syncs
 
@@ -824,13 +832,16 @@ less the umask. Not copied: owner, ACLs, extended attributes, resource forks, fo
 | channel root | `~/.local/state/vcharon/channels/` (under `%USERPROFILE%`) | `~/.local/state/vcharon/channels/` | `~/.local/state/vcharon/channels/` |
 | last-watched stamps (`seen`) | beside the channel root | the same | the same |
 | a server's copies of the helper's bundle (`cache`) | beside the channel root | the same | the same |
+| the shared root (`--shared`), with `seen` and `lead` beside it | – | – | `/var/tmp/vcharon/channels/` |
 
 Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 
 - `VCHARON_HOME=<dir>` puts config, state, logs and `joined` under one folder (tests, the
   release smoke test). The channel root doesn't follow it: the server never sees a client's
   setting, and a machine's local and remote members must share one root.
-  `VCHARON_CHANNELS_ROOT` moves the root, for tests only.
+  `VCHARON_CHANNELS_ROOT` moves the root, for tests only, and `VCHARON_SHARED_ROOT` the shared
+  root's folder (`/var/tmp/vcharon`), for tests only: the suite's sandbox points it into its
+  temp folder.
 - `VCHARON_HOME` must be absolute after `~` is expanded, else every command that reads it
   fails with `config`: a relative folder would follow the current directory, putting records
   in whatever checkout a command ran from, and a channel section's `mailbox.local` is refused
@@ -1020,6 +1031,8 @@ server or this machine: ~/.local/state/vcharon/channels/      the channel root
 server or this machine, beside the root: ~/.local/state/vcharon/
   seen/myapp/mac-web                         a member's last-watched stamp
   lead/myapp/2/mac-web                       the term 2 marker of a takeover, named after its taker
+a Linux server or machine, the shared root (--shared): /var/tmp/vcharon/
+  channels/  seen/  lead/                    the same, for every account
 a remote member's machine:
   <joined>/myapp.mac-web/                    its local tree: mac-web/, linux-api/, …
   <config dir>/channels.d/myapp.mac-web.ini  its channel section
@@ -1035,8 +1048,8 @@ a remote member's machine:
 ### Trust and access
 
 - Anyone who can log in to the server as the channel root's user can read and write every
-  channel on it. VCharon adds no login or encryption of its own; it relies on ssh. Separate
-  accounts per person are not supported.
+  channel on it; in the shared root, any account on the server ([The shared
+  root](#the-shared-root)). VCharon adds no login or encryption of its own; it relies on ssh.
 - A member's folder is written only by that member: on a remote member's machine the other
   folders are copies, and a copy is never sent back.
 - Entries are input, not orders: `join` and `create` print one line pointing at `vcharon guide
@@ -1051,6 +1064,81 @@ a remote member's machine:
   their own, only on their user's word. The code can't tell an agent from its user, so the
   guard is `--yes` and the guide, with no refusal by environment. Nothing about a removal is
   posted into a channel: the members see their folder, or the lobby, gone (`EXIT closed`).
+
+### The shared root
+
+For people on separate accounts of one Linux server. The default is unchanged: the root in the
+login user's home, so one person needs nothing new. Trust stays whoever can log in to the
+server.
+
+- **One fixed folder**, `/var/tmp/vcharon/`, holding `channels/` (the shared root), `seen/` and
+  `lead/`, as `~/.local/state/vcharon/` holds them for the home's root. Not configurable: every
+  member, of every account, must reach the same folder. `/var/tmp` because every Linux server
+  has it, writable by every account, and keeps it across reboots (FHS). The helper's `cache/`
+  stays in each account's home: a copy of the bundle is only the sending account's to trust.
+- **Chosen by `--shared`** on `create` and `join` (`--server` or `--local`). The join record
+  keeps it (`"shared": true`, [Join records](#join-records)), so every later command (`post`,
+  `read`, `watch`, `sync`, `lead`, `leave`, `close`, `whoami`) and a rejoin find it there,
+  with no flag. A remote member's section names the shared channel folder in `mailbox.remote`
+  (`/var/tmp/vcharon/channels/C`), so its syncs need nothing else. Over ssh each `channel.*`
+  call gets `"shared": true`, never a path ([Calls](#calls)). A join or create of a name whose
+  record is of the other root is refused, `you are in C in that server's shared root` (or
+  `channel root in its home`), fix `pass --role R …`: a record, a section and a local tree are
+  one per (C, name), so a membership never moves between the roots.
+- **Modes**: everything vcharon makes there gets mode 0777 (a folder: the shared folder and the
+  three in it, channel and member folders, stage dirs, `seen/` and `lead/` folders) or 0666 (a
+  file: entries, a sync's staged files and their lock, a stamp, a marker; a file a sync
+  replaces gets 0666 added to the bits it keeps), whatever the umask. Set right after the
+  create, through an fd opened without following a link, so a folder swapped for a link never
+  passes 0777 on to its target. Why: a close or `list --remove-idle` by any member deletes what
+  other accounts made, and every member's down reads every file. No sticky bit: with it only an
+  entry's owner could remove it. The umask itself is never changed: it is the whole process's,
+  and the same process writes its records and logs, which stay private. Only what vcharon
+  makes gets these modes: a folder a member's agent makes by hand in its own folder (a local
+  member's) keeps the umask's, and another account's close or `list --remove-idle` can then
+  fail inside it (removing a file needs only its folder's write bit); a file made under a tight
+  umask can't be read by the other members' syncs. Its owner removes it or runs `chmod`.
+- **No owner rule there**: the receiver's rule that the root and every folder on the way be
+  yours and not writable by others ([Path rules](#path-rules)) can't hold where every folder is
+  0777 and another account's. Its other rules stay (no link followed, no other file system):
+  an account that can swap a folder for a link can delete the channel anyway.
+- **Found folders are checked, never repaired**: the first `create --shared` (or a lobby's first
+  join) makes `/var/tmp/vcharon/` and `channels/`, one `mkdir` each; `seen/` and `lead/` come
+  at their first use. Each `channel.*` call on the shared root (over ssh, or in-process with
+  `--local`) and each watcher's stamp there first checks the shared folder and each of
+  `channels/`, `seen/` and `lead/` that exists: a real folder (not a link) of mode exactly
+  0777, else `unsafe_dir`: `<path>, in the shared root, has mode 0755, not 0777`, fix `ask
+  your user: whoever owns it runs chmod 777 <path> (…), or removes it while no channel is in
+  it`; or `<path>, in the shared root, isn't a folder (a link, or a file)`, fix `ask your user
+  to remove it by hand …`. Never repaired: a mode found there is another account's choice, and
+  only its owner can change it. A first use that races another account's can see the folder
+  before its chmod and be refused once; the next run passes. A watcher's stamp, best effort,
+  is then skipped. The shared folder must also be reached with no link above it: a link there
+  is `unsafe_dir`, `<path>, the shared root's folder, is reached through a link (<folder> is
+  <its real path>)`. Why: handles are opened at the real path, which the shared-root test of
+  a path wouldn't recognize, so what vcharon made there would silently keep the umask's modes.
+- **Linux only**: `--shared` is refused on macOS and Windows (`config`, exit 3: `the shared
+  root (--shared) is on Linux only`), with `--local` too; a remote member's server is Linux
+  already ([Scope](#scope)).
+- **`list`** shows the shared root's channels with no flag, as a group of its own after the
+  home root's: a second `vcharon: list  (<server>'s shared root)` line and its channels, only
+  when it holds any (or a note); `--json`'s `shared` holds its `{"channels", "others"}` (null on
+  a server that isn't Linux). A shared folder that fails the checks above doesn't stop `list`
+  (nor `list --remove-idle`): the root in the home is listed as usual, then `  note:
+  <server>'s shared root isn't listed: <the error's message>; fix: <its fix>`, and `--json`'s
+  `shared` is `{"error": {"code", "message", "fix"}}`; the exit status is a clean list's. Why:
+  a user who never uses `--shared` must still list, and the folder is another account's to
+  fix. Every command that uses the shared root still refuses with the error. Only that check's
+  refusal (`unsafe_dir`) is a note; any other error stops `list` as before. `whoami` adds
+  `, its shared root` to its `mode` line (`--json`: `shared`).
+- **One name from two accounts**: the claim's checks refuse it as on any root: another
+  machine's claimer is `another machine holds <name> in C`; two OS users of one machine share a
+  claimer, and the second has no record there, so `the name <name> is taken in C` ([The
+  claimer](#the-claimer)).
+- **Aging**: a distribution that enables tmpfiles' `q /var/tmp 1777 root root 30d` may delete
+  a long-running channel's old files; vcharon doesn't guard against it, the README warns. On
+  Debian 13 that rule is commented out (`/usr/lib/tmpfiles.d/tmp.conf`, checked on one
+  machine).
 
 ### Member names
 
@@ -1181,6 +1269,8 @@ so a record can't share a name with a job's state file:
   absolute path (local member). `machine`: the server's (or this machine's) id from the claim.
 - `project` and `role` rebuild the name for `fix:` lines.
 - `format` and `limits` are the channel's, stored at `join`/`create` ([Formats](#formats)).
+- `"shared": true` only for a membership in the server's shared root ([The shared
+  root](#the-shared-root)); a record without it is in the root in the home, as before.
 - Written through a temp file and `os.replace`; a write the file system refuses is its error
   (`permission`, `no_space`, …) with its fix line, as any other write's. A record that can't be
   read is an error, never a guess: VCharon never guesses which server a membership is on.
@@ -1512,6 +1602,15 @@ does a session that ends without one. It acts on no membership, as `list` does.
   (`charter`, `own`, `items`, `budget`, `active`, `gone`, `not_member`), a failure's
   `<code>: <message>`, or null; `deleted` the count deleted, else null. `idle_channels` names
   the whole idle work channels. With a failure the object is printed, then the error (exit 1).
+  `shared`: the shared root's `{"members", "idle_channels"}` the same way, or null.
+- **Both roots**: on a Linux server (or machine, with `--local`) it covers the shared root's
+  channels too, as `list` shows them: the lines above for each root, each after its own first
+  line (the shared one's `(<server>'s shared root)`, printed only when it has a member or a
+  note), then one `to remove them` line; a channel named must be in either. A shared folder
+  that fails its checks is a note line and `shared`: `{"error"}`, as in `list` ([The shared
+  root](#the-shared-root)). Why: any member's
+  user cleans up a shared channel ([The shared root](#the-shared-root)), and the root comes
+  from the listing, as for `list`, not from a flag.
 - `--days`, `--yes` or a channel name without `--remove-idle` is a usage error (exit 3).
 - Why a flag of `list` and not a verb: it decides from the listing and acts on no membership,
   as `list` does. Why the user's only: it deletes other members' folders ([Trust and
@@ -2559,9 +2658,9 @@ Set up (once per machine)
 Channels
   vcharon list   (--server ALIAS | --local) [--json] [--project P] [--role R]
                  [--remove-idle [C ...] [--days N] [--yes]]
-  vcharon create C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
+  vcharon create C (--server ALIAS | --local) [--shared] [--project P] [--role R] [--agent A]
                  [--max-mb N] [--max-files N] [--max-entry-kb N]
-  vcharon join   C (--server ALIAS | --local) [--project P] [--role R] [--agent A]
+  vcharon join   C (--server ALIAS | --local) [--shared] [--project P] [--role R] [--agent A]
                  [--rejoin] [--takeover]
   vcharon leave  C [--project P] [--role R]
   vcharon close  C [--yes] [--project P] [--role R]
@@ -3226,16 +3325,22 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     The text after an `ERROR` line's colon is the OS's message and may be translated: match on
     the prefix.
 - **`--json` fields**:
-  - `list`: `{"server", "channels", "others"}`; each channel `{"name", "kind", "leader",
-    "term", "leaders", "founder", "members", "member_info", "newest", "created", "bytes",
+  - `list`: `{"server", "channels", "others", "shared"}` (`shared`: the shared root's
+    `{"channels", "others"}`, null on a server that isn't Linux, `{"error": {"code",
+    "message", "fix"}}` when its folder fails the checks); each channel `{"name",
+    "kind", "leader", "term", "leaders", "founder", "members", "member_info", "newest",
+    "created", "bytes",
     "strays", "format", "limits"}` (`leader` and `term` by the charters' terms, null for none
     or a tie; `leaders` every folder holding a `CHANNEL.md`, a former leader's too), `member_info` each `{"name", "box", "os", "agent", "project", "idle_seconds"}`,
     `limits` `{"max_mb", "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
-  - `list --remove-idle`: `{"server", "days", "yes", "members", "idle_channels"}`, each member
+  - `list --remove-idle`: `{"server", "days", "yes", "members", "idle_channels", "shared"}`
+    (`shared`: the shared root's `{"members", "idle_channels"}`, null, or `{"error"}` as in
+    `list`), each member
     `{"channel", "name", "idle_seconds", "action", "why", "deleted"}` ([Removing idle
     members](#removing-idle-members)).
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "term", "founder", "leads",
-    "mode", "server", "folder", "tree", "box", "box_source", "members", "kind"}` (`leader`,
+    "mode", "server", "shared", "folder", "tree", "box", "box_source", "members", "kind"}`
+    (`shared` true for a channel in the server's shared root; `leader`,
     `term` and `leads` by the charters' terms in the tree on this box), each member
     `{"name", "agent", "box", "os", "leader", "newest", "watched", "watch_every", "left"}`,
     plus `"presence"` in a lobby. `founder` is in `list`'s channels too: in a lobby the
@@ -3276,7 +3381,10 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
 
 Not stable: other human-facing lines (a sync's summary, `doctor`'s text, `list`'s layout), the
 log format, the state, snapshot and record files, and the wire protocol (both ends always run
-one version).
+one version). A record change still gets a CHANGELOG line on how to adapt: a shared root's
+join record has `"shared": true`, which 0.8.6 and older stop on (`the record … has another
+shape`); records of the root in the home are unchanged, so update every box that joins a
+shared channel.
 
 Versioning is semver. Before 1.0, a minor version may break one of these, and the CHANGELOG says
 which and how to adapt. A channel format change is always a minor version at least.
@@ -3451,9 +3559,9 @@ which and how to adapt. A channel format change is always a minor version at lea
 
 Later:
 
-- Separate server accounts per person: today one account holds the root, and anyone who can log
-  in as it reads and writes every channel. Later: a root shared through a Unix group, with the
-  permissions set by `create` and checked by `doctor`.
+- A shared root closed to some accounts (a Unix group's) or on a server that isn't Linux: the
+  shared root is one folder per Linux server, open to every account on it ([The shared
+  root](#the-shared-root)). `doctor` doesn't check it.
 - Many streaming watchers on one server: each holds an ssh connection and a helper of about
   25 MB. Measured: 10, 20, 30 and 50 watchers started at once had 0, 3, 7 and at least 16
   connections reset at start, each retried and was streaming within about 4 s, and 50 helpers

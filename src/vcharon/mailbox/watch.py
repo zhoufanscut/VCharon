@@ -1864,12 +1864,12 @@ def _need_snapshot(state, root, me, channel, flags):
 
 def stamp_local(root, me, every):
     """A local member's round read its channel folder root: the member's last-watched stamp,
-    when root is a channel in this machine's channel root (channels.root_path, as the helper
-    finds it); else, and on any failure, nothing: a stamp never stops or delays a watch, nor
-    prints a line (DESIGN, "The watcher in a channel")."""
+    when root is a channel in this machine's channel root or its shared root (channels.root_of,
+    as the helper finds it); else, and on any failure, nothing: a stamp never stops or delays a
+    watch, nor prints a line (DESIGN, "The watcher in a channel")."""
     try:
-        top = channels.root_path()
-        if os.path.dirname(os.path.normpath(root)) != top:
+        top = channels.root_of(root)
+        if top is None:
             return
         channels.stamp_seen(top, os.path.basename(os.path.normpath(root)), me,
                             "local %d" % every)

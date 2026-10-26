@@ -62,19 +62,22 @@ reach the real ones: they may hold live channels.
 
 - **The suite** is sandboxed by `tests/__init__.py`: HOME and the OS's config and state folders
   point into a temp folder for the whole run, the shell's `VCHARON_HOME` and
-  `VCHARON_CHANNELS_ROOT` (a hand run's, below) are dropped, and the functions that name
-  VCharon's folders fail on a path under the real home. So **never call
+  `VCHARON_CHANNELS_ROOT` (a hand run's, below) are dropped, `VCHARON_SHARED_ROOT` points into
+  the temp folder too, and the functions that name VCharon's folders fail on a path under the
+  real home or in the real shared root (`/var/tmp/vcharon`). So **never call
   `mock.patch.stopall()`** in a test: it would also stop the test helpers' own environment
   patches. Stop only your own patcher.
 - **A hand run**, any process outside the suite that imports vcharon (a `python -` snippet
   too), goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
   `joined` folders, and `VCHARON_CHANNELS_ROOT` the channel root (which doesn't follow
   `VCHARON_HOME`), and with it `seen/` and the helper's `cache/` beside it; both work on every
-  OS:
+  OS. On Linux, `VCHARON_SHARED_ROOT` moves the shared root's folder (`/var/tmp/vcharon`, used
+  by `--shared`, and by `list`, which reads it every time):
 
   ```sh
   mkdir -p /tmp/vc/web/.git && cd /tmp/vc/web
   export VCHARON_HOME=/tmp/vc/home VCHARON_CHANNELS_ROOT=/tmp/vc/channels
+  export VCHARON_SHARED_ROOT=/tmp/vc/shared
   <repo>/.venv/bin/python -m vcharon create t --local
   ```
 

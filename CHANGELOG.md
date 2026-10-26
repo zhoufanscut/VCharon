@@ -7,6 +7,30 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- A shared root for people on separate accounts of one Linux server: `vcharon create C
+  --shared` and `vcharon join C --shared` (with `--server ALIAS`, or `--local` on a Linux
+  machine) use `/var/tmp/vcharon/channels/`, one fixed folder for every account, in place of
+  the root in the login user's home. Later commands take it from the join record, with no
+  flag. Everything vcharon makes there is mode 777 (folders) or 666 (files), whatever the
+  umask, so any member's account can close a channel or remove an idle member's folder: any
+  account on the server can read, change or delete a shared channel. A shared folder found
+  with another mode, or as a link, or reached through a link, stops a command that uses the
+  shared root with `unsafe_dir`, and is never repaired; `vcharon list` then lists the home's
+  channels as usual, with a note line naming the problem (`--json`: `shared` is `{"error":
+  {"code", "message", "fix"}}`). Refused on macOS and Windows. The default root is unchanged.
+  Only what vcharon makes gets those modes: a folder a local member's agent makes by hand keeps
+  the umask's, and another account's close can then fail inside it.
+- **How to adapt:** a shared channel's join record has a new key, `"shared": true`; vcharon
+  0.8.6 and older stop on such a record (`the record … has another shape`). Records of the
+  root in the home are unchanged. Update every box that joins a shared channel.
+- `vcharon list` also shows a Linux server's shared-root channels, as a group of their own
+  after the others; `list --remove-idle` covers them too. `--json` of both gets a new field,
+  `shared` (null on a server that isn't Linux, an error object when its folder fails the
+  checks); `whoami C --json` gets `shared` (true or
+  false), and its text's `mode` line ends with `, its shared root` for one.
+
 ## 0.8.6 — 2026-10-26
 
 0.8.6rc1's code, with the two fixes below from its live round. Next to 0.8.5, the latest final

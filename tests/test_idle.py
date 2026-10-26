@@ -333,10 +333,16 @@ class RemoveIdleTest(ChannelCase):
         self.assertIn("linux-web", os.listdir(os.path.join(self.root, "game")))
 
     def test_json(self):
+        # a shared root of this test's own: the suite's may hold another test's channels
+        os.environ["VCHARON_SHARED_ROOT"] = os.path.realpath(os.path.join(self.tmp, "shared"))
         doc = json.loads("\n".join(self.lines("--local", "--json", "--days", "19")))
-        self.assertEqual(sorted(doc), ["days", "idle_channels", "members", "server", "yes"])
+        self.assertEqual(sorted(doc), ["days", "idle_channels", "members", "server", "shared",
+                                       "yes"])
         self.assertEqual((doc["server"], doc["days"], doc["yes"], doc["idle_channels"]),
                          (None, 19, False, []))
+        # this machine's shared root, with nothing in it (on Linux; none elsewhere)
+        self.assertEqual(doc["shared"], {"members": [], "idle_channels": []} if fsops.LINUX
+                         else None)
         for one in doc["members"]:
             self.assertTrue(SHIFT - 60 <= one.pop("idle_seconds") <= SHIFT, one)
         self.assertEqual(doc["members"], [

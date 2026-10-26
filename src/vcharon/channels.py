@@ -139,13 +139,75 @@ def root_text():
     return os.environ.get(ROOT_ENV) or DEFAULT_ROOT
 
 
-def root_path():
-    """The root on this machine, absolute. A relative value is relative to the home, as every
-    remote path is (DESIGN, "Rules for the code"), never to the current directory."""
+def root_path(shared=False):
+    """The root on this machine, absolute: the one in the home, or with shared the shared
+    root (shared_root). A relative value is relative to the home, as every remote path is
+    (DESIGN, "Rules for the code"), never to the current directory."""
+    if shared:
+        return shared_root()
     path = os.path.expanduser(root_text())
     if not os.path.isabs(path):
         path = os.path.join(platform.home(), path)
     return os.path.normpath(path)
+
+
+# --- the shared root (DESIGN, "The shared root") ---
+
+# what the shared root's folder holds, as the home root's folder does: the channel root, the
+# watchers' stamps and the term markers (the helper's cache/ stays in each account's home)
+SHARED_CHANNELS = "channels"
+SHARED_NOT_LINUX = "the shared root (--shared) is on Linux only"
+SHARED_NOT_LINUX_FIX = ("leave out --shared on this machine; a channel shared by people on "
+                        "separate accounts is on a Linux server")
+SHARED_MODE_FIX = ("ask your user: whoever owns it runs chmod 777 %s (the first create "
+                   "--shared, or a lobby's first join --shared, makes it so; a mode found "
+                   "there is never changed), or removes it while no channel is in it")
+SHARED_KIND_FIX = ("ask your user to remove it by hand while no channel is in it; the next "
+                   "create --shared (or a lobby's first join --shared) makes it again, or the "
+                   "next use of seen/ or lead/")
+SHARED_LINK_FIX = ("leave out --shared on this server: the shared root's folder must be "
+                   "reached with no link on the way, and only its admin can change that")
+
+
+def shared_root():
+    """The shared root, <fsops.shared_top()>/channels, absolute, after checking the shared
+    folder and channels/, seen/ and lead/ in it (each that exists): a real folder, never a
+    link, of mode 777, else refused (unsafe_dir), never repaired. Refused on macOS and
+    Windows."""
+    if not fsops.LINUX:
+        raise VCharonError("config", SHARED_NOT_LINUX, SHARED_NOT_LINUX_FIX)
+    top = fsops.shared_top()
+    # a link above it: every handle would be opened at the real path, which fsops.in_shared
+    # doesn't recognize, and what vcharon makes there would keep the umask's modes
+    up = os.path.dirname(top)
+    if os.path.realpath(up) != up:
+        raise VCharonError("unsafe_dir", "%s, the shared root's folder, is reached through a "
+                           "link (%s is %s)" % (top, up, os.path.realpath(up)), SHARED_LINK_FIX)
+    for path in [top] + [os.path.join(top, n) for n in (SHARED_CHANNELS, SEEN, LEAD)]:
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            raise fsops.error(e, path) from None
+        if fsops.kind(st) != fsops.DIR:
+            raise VCharonError("unsafe_dir", "%s, in the shared root, isn't a folder (a link, "
+                               "or a file)" % path, SHARED_KIND_FIX)
+        if stat.S_IMODE(st.st_mode) != fsops.SHARED_DIR_MODE:
+            raise VCharonError("unsafe_dir", "%s, in the shared root, has mode %04o, not 0777"
+                               % (path, stat.S_IMODE(st.st_mode)), SHARED_MODE_FIX % path)
+    return os.path.join(top, SHARED_CHANNELS)
+
+
+def root_of(folder):
+    """The channel root that holds the channel folder folder directly: root_path(), or the
+    shared root; None for neither. A stamp goes beside the root the folder is in."""
+    parent = os.path.dirname(os.path.normpath(folder))
+    if parent == root_path():
+        return parent
+    if fsops.in_shared(folder) and parent == shared_root():
+        return parent
+    return None
 
 
 def _check_names(channel, name):
@@ -214,13 +276,13 @@ def list_channels(root, tick=_no_tick):
     only) and limits: from that CHANNEL.md (charter.parse), unchecked; idle: for each member,
     member_idle's seconds (None when unknown), and items its folder's count of files and
     folders. A missing root holds no channel."""
-    now = server_now()
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
         return {"channels": [], "others": []}
     except OSError as e:
         raise fsops.error(e, root)
+    now = server_now()
     channels, others = [], []
     for name in names:
         tick()
@@ -411,7 +473,14 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
     _check_names(channel, name)
     if create:
         try:
-            os.makedirs(root, exist_ok=True)
+            if fsops.in_shared(root):
+                # one mkdir each, mode 777 (_mkdir), then checked again: one another account
+                # made meanwhile, or found there, is never repaired
+                for path in (os.path.dirname(root), root):
+                    _mkdir(path)
+                shared_root()
+            else:
+                os.makedirs(root, exist_ok=True)
         except OSError as e:
             raise fsops.error(e, root)
     top = _open_root(root)
@@ -460,8 +529,8 @@ def claim(root, channel, name, create, tick=_no_tick, lobby=False, claimer=None)
         # state dir's own is from a watcher the join's lock keeps stopped
         drop_seen(root, channel, name)
     sweep_seen(root)
-    reply = {"existed": existed, "machine": platform.machine_id(), "root": root_text(),
-             "claimer": owner}
+    reply = {"existed": existed, "machine": platform.machine_id(),
+             "root": root if fsops.in_shared(root) else root_text(), "claimer": owner}
     if made:
         reply["charter"] = made
     # a new work channel's CHANNEL.md isn't written yet: create writes it after the claim
@@ -825,12 +894,20 @@ def _is_real_dir(path):
 
 
 def _mkdir(path):
-    """mkdir path; whether it made it (False: there already)."""
+    """mkdir path; whether it made it (False: there already). In the shared root it gets
+    mode 777 (fsops.shared_dir)."""
     try:
-        os.mkdir(path)
+        _make_dir(path)
     except FileExistsError:
         return False
     return True
+
+
+def _make_dir(path):
+    """os.mkdir path, with mode 777 in the shared root."""
+    os.mkdir(path)
+    if fsops.in_shared(path):
+        fsops.shared_dir(path)
 
 
 def _read_pace(path):
@@ -896,6 +973,8 @@ def stamp_seen(root, channel, name, pace, now=None):
     if st is None or _read_pace(path) != pace:
         fd, tmp = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")
         try:
+            if fsops.in_shared(folder):
+                os.fchmod(fd, fsops.SHARED_FILE_MODE)
             with open(fd, "wb") as f:
                 f.write(pace.encode("ascii") + b"\n")
             os.utime(tmp, (t, t))
@@ -1112,7 +1191,7 @@ def _take_marker(root, channel, term, name, chain):
             raise refused("%s isn't a folder (a link, or a file)" % path, "remove it by hand")
     marker = os.path.join(folder, str(term))
     try:
-        os.mkdir(marker)
+        _make_dir(marker)
     except FileExistsError:
         who = []
         # the winner names itself in it a moment after its mkdir
@@ -1131,8 +1210,9 @@ def _take_marker(root, channel, term, name, chain):
                                                         channel),
                       "check the channel's leader: vcharon whoami %s" % channel) from None
     try:
-        with open(os.path.join(marker, name), "xb"):
-            pass
+        with open(os.path.join(marker, name), "xb") as f:
+            if fsops.in_shared(marker):
+                os.fchmod(f.fileno(), fsops.SHARED_FILE_MODE)
     except OSError as e:
         _drop_marker(marker)
         raise fsops.error(e, marker) from None

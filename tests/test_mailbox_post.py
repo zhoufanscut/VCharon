@@ -479,7 +479,8 @@ class PostTest(PostCase):
             return real(src, dst)
 
         with mock.patch.object(entries, "REPLACE_PAUSE", 0), \
-                mock.patch.object(entries, "fsops", types.SimpleNamespace(WINDOWS=True)), \
+                mock.patch.object(entries, "fsops", types.SimpleNamespace(
+                    WINDOWS=True, in_shared=lambda path: False)), \
                 mock.patch.object(entries.os, "replace", replace):
             code, _out, err = self.post("--title", "second", body="c")
         self.assertEqual(code, 0, err)

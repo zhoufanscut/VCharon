@@ -10,6 +10,7 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 
 from . import pathrules
@@ -17,6 +18,19 @@ from .lock import Lock
 from .proto import VCharonError
 
 WINDOWS = os.name == "nt"
+LINUX = sys.platform.startswith("linux")
+
+# The shared root's folder (DESIGN, "The shared root"): one fixed path, Linux only, for people on
+# separate accounts of one server. VCHARON_SHARED_ROOT moves it (tests only, as
+# VCHARON_CHANNELS_ROOT moves the channel root in the home). Never configurable: every member
+# must reach the same folder.
+SHARED_TOP = "/var/tmp/vcharon"
+SHARED_ENV = "VCHARON_SHARED_ROOT"
+# What vcharon makes below it gets these modes, whatever the umask: any member's account can
+# then remove what another's made (a close, list --remove-idle). No sticky bit, for the same
+# reason.
+SHARED_DIR_MODE = 0o777
+SHARED_FILE_MODE = 0o666
 
 if not WINDOWS:
     import fcntl
@@ -234,6 +248,32 @@ def dir_problem(st, root_dev, owner_rule=True):
     return None
 
 
+def shared_top():
+    """The shared root's folder, normalized (SHARED_TOP, or SHARED_ENV's)."""
+    return os.path.normpath(os.environ.get(SHARED_ENV) or SHARED_TOP)
+
+
+def in_shared(path):
+    """Whether the absolute path is the shared root's folder or below it; never on macOS or
+    Windows, which have no shared root."""
+    if not LINUX:
+        return False
+    top = shared_top()
+    path = os.path.normpath(path)
+    return path == top or path.startswith(top.rstrip("/") + "/")
+
+
+def shared_dir(name, dir_fd=None):
+    """Gives the folder name, just made below the shared root, SHARED_DIR_MODE: through an fd
+    opened without following a link, so a folder swapped for a link never passes the mode on to
+    what it points at."""
+    fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    try:
+        os.fchmod(fd, SHARED_DIR_MODE)
+    finally:
+        os.close(fd)
+
+
 def unsafe_dir(what, problem, abs_path):
     """The unsafe_dir error for a dir_problem() answer; what: how the message names the dir."""
     if problem == "is on another file system":
@@ -345,7 +385,11 @@ def _open_to_touch(path, rel, dir_fd=None):
 class _Dir:
     """What both handle types share. rel: the plan parts from the root; st: its own stat;
     root_dev: the root's device, or None for no device rule; root_name: the root as messages
-    show it."""
+    show it. shared: the root is in the shared root (in_shared), set by open_root and passed on
+    by enter: no owner rule, and what mkdir, create_file and open_lock make gets the shared
+    modes."""
+
+    shared = False
 
     def __init__(self, rel, st, root_dev, root_name):
         self.rel = rel
@@ -361,8 +405,10 @@ class _Dir:
         return self.root_name.rstrip(sep) + sep + sep.join(rel)
 
     def _checked(self, rel, st, owner_rule):
-        """Raises unless st, of the directory at rel, passes dir_problem()."""
-        problem = dir_problem(st, self.root_dev, owner_rule)
+        """Raises unless st, of the directory at rel, passes dir_problem(); in the shared root
+        with no owner rule: its folders are every member's, mode 777 (DESIGN, "The shared
+        root")."""
+        problem = dir_problem(st, self.root_dev, owner_rule and not self.shared)
         if problem:
             raise unsafe_dir(_rel_text(rel), problem, self.abs_text(rel))
 
@@ -410,7 +456,9 @@ class FdDir(_Dir):
         except BaseException:
             os.close(fd)
             raise
-        return cls(fd, (), st, st.st_dev if same_device else None, path)
+        root = cls(fd, (), st, st.st_dev if same_device else None, path)
+        root.shared = in_shared(path)
+        return root
 
     def lstat(self, name):
         try:
@@ -438,7 +486,9 @@ class FdDir(_Dir):
         except BaseException:
             os.close(fd)
             raise
-        return FdDir(fd, rel, st, self.root_dev, self.root_name)
+        sub = FdDir(fd, rel, st, self.root_dev, self.root_name)
+        sub.shared = self.shared
+        return sub
 
     def listdir(self):
         return os.listdir(self.fd)
@@ -454,6 +504,8 @@ class FdDir(_Dir):
 
     def mkdir(self, name, mode=0o777):
         os.mkdir(name, mode, dir_fd=self.fd)
+        if self.shared:
+            shared_dir(name, self.fd)
 
     def unlink(self, name):
         os.unlink(name, dir_fd=self.fd)
@@ -483,10 +535,13 @@ class FdDir(_Dir):
         os.chown(name, -1, gid, dir_fd=self.fd, follow_symlinks=False)
 
     def create_file(self, name):
-        return os.open(name, _NEW_FILE_FLAGS, 0o666, dir_fd=self.fd)
+        return _shared_file(self, os.open(name, _NEW_FILE_FLAGS, 0o666, dir_fd=self.fd))
 
     def open_lock(self, create, exclusive):
-        return Lock.open("lock", dir_fd=self.fd, create=create, exclusive=exclusive)
+        lock = Lock.open("lock", dir_fd=self.fd, create=create, exclusive=exclusive)
+        if create:
+            _shared_file(self, lock.fd)
+        return lock
 
     def close(self):
         fd, self.fd = self.fd, None
@@ -515,7 +570,9 @@ class PathDir(_Dir):
         if kind(st) != DIR:
             raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
         name = pathrules.win_display(path) if WINDOWS else path
-        return cls(path, (), st, st.st_dev if same_device else None, name, [])
+        root = cls(path, (), st, st.st_dev if same_device else None, name, [])
+        root.shared = in_shared(path)
+        return root
 
     def join(self, name):
         if WINDOWS:
@@ -538,8 +595,9 @@ class PathDir(_Dir):
         if k != DIR:
             raise _not_dir_error(_rel_text(rel))
         self._checked(rel, st, owner_rule)
-        return PathDir(path, rel, st, self.root_dev, self.root_name,
-                       self.chain + [(path, rel)])
+        sub = PathDir(path, rel, st, self.root_dev, self.root_name, self.chain + [(path, rel)])
+        sub.shared = self.shared
+        return sub
 
     def recheck(self):
         for path, rel in self.chain:
@@ -572,6 +630,8 @@ class PathDir(_Dir):
     def mkdir(self, name, mode=0o777):
         self.recheck()
         os.mkdir(self.join(name), mode)
+        if self.shared:
+            shared_dir(self.join(name))
 
     def _clear_read_only(self, path):
         # SVN's needs-lock sets it, and Windows won't delete or replace a read-only file.
@@ -648,14 +708,29 @@ class PathDir(_Dir):
 
     def create_file(self, name):
         self.recheck()
-        return os.open(self.join(name), _NEW_FILE_FLAGS, 0o666)
+        return _shared_file(self, os.open(self.join(name), _NEW_FILE_FLAGS, 0o666))
 
     def open_lock(self, create, exclusive):
         self.recheck()
-        return Lock.open(self.join("lock"), create=create, exclusive=exclusive)
+        lock = Lock.open(self.join("lock"), create=create, exclusive=exclusive)
+        if create:
+            _shared_file(self, lock.fd)
+        return lock
 
     def close(self):
         pass
+
+
+def _shared_file(d, fd):
+    """fd, of a file d just made: given SHARED_FILE_MODE when d is in the shared root; closed
+    if that fails."""
+    if d.shared:
+        try:
+            os.fchmod(fd, SHARED_FILE_MODE)
+        except BaseException:
+            os.close(fd)
+            raise
+    return fd
 
 
 def remove_entry(d, name, st):

@@ -126,6 +126,13 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 `vcharon join myapp --local`. When your user names no place, try that first; if it says
 `there is no channel myapp on this machine`, ask your user where. Never guess a server.
 
+A channel for people on separate accounts of one Linux server is in its **shared root**: add
+`--shared` to `join` or `create` (`vcharon join myapp --server devbox --shared`), only when your
+user says the channel is shared. `vcharon list` shows those channels in a group of their own,
+after the line `vcharon: list  (devbox's shared root)`. Every later command takes the root from
+your join record: no `--shared` after the join. Any account on that server can read, change or
+delete a shared channel.
+
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote
   member's first join (`…` cuts a line; some rarer notes are left out):
@@ -225,9 +232,10 @@ myapp`.
     `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
     after.
   - You can't tell which: ask your user.
-  - The line ends `(this machine's record: a membership on another server)`: you are in a
-    channel of that name on another server under this name; follow its `fix:` line (`--role
-    R`), or check the alias with your user.
+  - The line ends `(this machine's record: a membership on another server)`, or `in that
+    server's shared root` / `channel root in its home`: you are in a channel of that name
+    elsewhere under this name; follow its `fix:` line (`--role R`), or check the alias with
+    your user.
 - `note: this project also holds myapp on this machine as linux-api (--project api, no
   --role): another session's, or yours with other flags` (before join's first line): this
   project has another membership of the channel here, maybe another agent's. It comes at every
@@ -1704,7 +1712,7 @@ refused and the same command works in the foreground: `vcharon guide watch`, "Th
 | it says | what to do |
 |---|---|
 | `the name <name> is taken in <C>` | another member has your name: join again with `--role R`. `--rejoin` only if your user says the folder is yours |
-| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags; then `(PID <n>)` when the holder wrote it; none when it and you don't share process IDs, as with a sandbox that gives each command its own) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher (the `fix:` line's `vcharon watch … --stop` stops it), never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)`: join with `--role R`, or check the alias with your user |
+| `a live session holds <name> in <C>` (and, when this machine has a record of it, whose: the leader's membership or a member, with its flags; then `(PID <n>)` when the holder wrote it; none when it and you don't share process IDs, as with a sandbox that gives each command its own) | if you are that member (a leader re-running join gets `the leader's membership`), it is yours: do what `vcharon guide start`, "A new session", says for your own earlier watcher (the `fix:` line's `vcharon watch … --stop` stops it), never with a new `--role`; only when your user says another agent works in this folder: join with `--role R`; can't tell: ask your user. `(… a membership on another server)` (or `in that server's shared root`, `… channel root in its home`): join with `--role R`, or check the alias with your user |
 | `you are in <C> on another server` | your join record names another server: pass `--role R`, or check the alias with your user |
 | `there is no channel <C> on <server>: check its name` | run the `fix:` line's `list`; ask the leader or your user for the name, or, when you tried `--local` because your user named no place, where the channel is |
 | `<C> has no leader …` or `<C> has 2 leaders at term <n> …` | ask your user; don't join |

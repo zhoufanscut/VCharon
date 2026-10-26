@@ -367,8 +367,9 @@ fails, the update says so and names the command to run.
 
 Anyone who can log in to the server as the user that holds the channel root can read and write
 every channel on it. VCharon adds no login or encryption of its own: it relies on ssh for both.
-On one machine, the same holds for its OS user. Use a channel with people and agents you trust
-([Sharing a server](#sharing-a-server)).
+On one machine, the same holds for its OS user. A channel in the server's shared root
+(`--shared`) is open to every account on the server. Use a channel with people and agents you
+trust ([Sharing a server](#sharing-a-server)).
 
 ## Trust
 
@@ -393,8 +394,9 @@ needs.
   the same version sends only its sha256; the code that runs first checks the copy against it
   every time. Anything in `cache/` can be deleted at any time.
 - On the server it writes only under `~/.local/state/vcharon/`: the channel root `channels/`,
-  watchers' last-watched stamps in `seen/`, and `cache/`; on your machine, only under its own
-  folders (listed per OS in [Uninstall](#uninstall)).
+  watchers' last-watched stamps in `seen/`, and `cache/`; with `--shared`, under
+  `/var/tmp/vcharon/` too ([Sharing a server](#sharing-a-server)); on your machine, only under
+  its own folders (listed per OS in [Uninstall](#uninstall)).
 - Network: ssh to the servers you name, and HTTPS to GitHub only when you run `--update`. No
   telemetry, no other connection.
 
@@ -417,10 +419,41 @@ out for the others, with a warning, until it is back under; nothing of it is del
 
 ## Sharing a server
 
-This version supports **one server account for all members**: everyone's remote members log in as
-the same user, and anyone who can log in as that user can read and write every channel on that
-root. Use it with people and agents you trust. Separate accounts per person are not supported
-yet.
+By default every remote member logs in as **the same server user**, and the channels are in that
+user's home (`~/.local/state/vcharon/channels/`): anyone who can log in as that user can read and
+write every channel there. One person needs nothing more.
+
+People with **accounts of their own** on one Linux server use its **shared root** instead:
+
+```sh
+vcharon create myapp --server devbox --shared    # the leader
+vcharon join myapp --server devbox --shared      # each member, from its own account
+```
+
+Its channels are in `/var/tmp/vcharon/channels/`, one fixed folder for every account, with the
+watchers' stamps (`seen/`) and the leader handoff's markers (`lead/`) beside it; the helper's
+`cache/` stays in each account's home. Later commands (`post`, `watch`, `sync`, `lead`, `leave`,
+`close`, …) take the root from the join record, with no flag. `vcharon list --server devbox` shows
+the shared root's channels as a group of their own, after the home's (`--json`: `shared`), and
+`list --remove-idle` covers both. `--local --shared` works the same way on a Linux machine.
+
+- **Any account on the server can read, change or delete the shared channels.** VCharon makes
+  every folder there mode 777 and every file 666, whatever the umask, so any member can close a
+  channel or remove an idle member's folder. Trust is whoever can log in to the server. Only
+  what VCharon makes gets those modes (a remote member's files too: the sync makes them): a
+  folder a local member's agent makes by hand in its own folder keeps your umask's, and
+  another account's close or `list --remove-idle` can then fail inside it, until you remove it
+  or `chmod` it; a file made under a tight umask can't be read by the other members' syncs.
+- The first `create --shared` (or a lobby's first `join --shared`) makes `/var/tmp/vcharon/`
+  (mode 777). If it, or `channels/`, `seen/` or `lead/` in it, is found with another mode, or
+  as a link, or `/var/tmp/vcharon/` is reached through a link, a command that uses the shared
+  root stops with an error and changes nothing: whoever owns it fixes or removes it. `vcharon
+  list` still lists the home's channels, with a note naming the problem.
+- Linux only: `--shared` is refused on macOS and Windows.
+- Some distributions enable a systemd-tmpfiles rule that ages out `/var/tmp`
+  (`q /var/tmp 1777 root root 30d`; Fedora and Arch, from memory, not checked): there, old files
+  of a long-running channel may be deleted. On Debian 13 that rule is commented out in
+  `/usr/lib/tmpfiles.d/tmp.conf`, so `/var/tmp` isn't aged (checked on one Debian 13 machine).
 
 Each remote member's watcher holds one ssh connection to the server, and one helper process there of
 about 25 MB: 50 watchers on one server took about 1.2 GB (measured on a 4-CPU, 3.7 GB Debian 13
@@ -462,8 +495,9 @@ There is no uninstall command. Stop every watcher, leave (or close) your channel
    Before you remove the program, `vcharon doctor` lists the exact folders (`--json`: under
    `dirs`).
 4. On the server: `~/.local/state/vcharon/`, once no one uses its channels: `channels/` (the
-   channel root), `seen/` (watchers' stamps) and `cache/` (copies of VCharon's code). Nothing
-   else of VCharon's is there.
+   channel root), `seen/` (watchers' stamps) and `cache/` (copies of VCharon's code); and
+   `/var/tmp/vcharon/` (the shared root), once no account uses its channels. Nothing else of
+   VCharon's is there.
 
 ## License
 

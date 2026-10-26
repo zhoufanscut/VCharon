@@ -6,6 +6,7 @@ own calls are in channels.py."""
 from __future__ import annotations
 
 import contextlib
+import copy
 import datetime
 import functools
 import json
@@ -35,7 +36,7 @@ from . import kind as kinds
 from . import run as engine
 from .lock import Lock
 from .log import Log
-from .proto import VCharonError
+from .proto import VCharonError, shown_hint
 
 RECORD_VERSION = 1
 # project and role: the parts that rebuild the name, and find the membership again (DESIGN,
@@ -45,6 +46,9 @@ RECORD_KEYS = ("version", "channel", "name", "leader", "ssh", "remote", "machine
                "role", "format", "limits")
 # a lobby member's record has this one too ("lobby"); a record without it is a work channel's
 RECORD_KIND = "kind"
+# a membership in the server's shared root has this one too (true); a record without it is in
+# the root in the home (DESIGN, "The shared root")
+RECORD_SHARED = "shared"
 # a member's name: <box>-<project>[-<role>], at most 10 + 1 + 14 + 1 + 6 = 32
 PROJECT_MAX = 14
 _ROLE = re.compile(r"\A[a-z0-9]{1,6}\Z")
@@ -457,8 +461,9 @@ def read_record(channel, name):
     except (OSError, ValueError) as e:
         raise VCharonError("config", "the record %s can't be read: %s" % (path, e), hint=hint)
     if (not isinstance(doc, dict)
-            or sorted(set(doc) - {RECORD_KIND}) != sorted(RECORD_KEYS)
+            or sorted(set(doc) - {RECORD_KIND, RECORD_SHARED}) != sorted(RECORD_KEYS)
             or doc.get(RECORD_KIND, charter.LOBBY_KIND) != charter.LOBBY_KIND
+            or doc.get(RECORD_SHARED, True) is not True
             or not isinstance(doc["project"], str)
             or not isinstance(doc["role"], (str, type(None)))
             or not isinstance(doc["format"], int) or isinstance(doc["format"], bool)
@@ -511,7 +516,7 @@ def _write_atomic(path, data, temp):
 
 def write_record(doc):
     path = record_path(doc["channel"], doc["name"])
-    keys = RECORD_KEYS + ((RECORD_KIND,) if RECORD_KIND in doc else ())
+    keys = RECORD_KEYS + tuple(k for k in (RECORD_KIND, RECORD_SHARED) if k in doc)
     data = json.dumps({k: doc[k] for k in keys},
                       ensure_ascii=False,
                       indent=1).encode("utf-8") + b"\n"
@@ -719,18 +724,35 @@ def _check_locks(record, section, channel):
 # --- the server: over ssh, or this machine ---
 
 class _Remote:
-    """The channel root of the server at alias, over one connection."""
+    """The channel root of the server at alias, over one connection; shared: its shared root
+    (each call says "shared": true)."""
 
-    def __init__(self, session, alias, hello, log):
+    def __init__(self, session, alias, hello, log, shared=False):
         self.session = session
         self.ssh = alias
         self.machine = hello.get("machine")
         self.os = hello.get("os")
         self.log = log
-        self.where = alias
+        self.shared = shared
+        self.where = "%s's shared root" % alias if shared else alias
+
+    def has_shared(self):
+        """Whether the server can have a shared root: a Linux one."""
+        return self.os == "linux"
+
+    def shared_root(self):
+        """The same server's shared root, over the same connection."""
+        twin = copy.copy(self)
+        twin.shared, twin.where = True, "%s's shared root" % self.ssh
+        return twin
+
+    def _call(self, fn, args):
+        if self.shared:
+            args["shared"] = True
+        return self.session.call(fn, args)
 
     def list(self):
-        return _listing(self.session.call("channel.list", {}))
+        return _listing(self._call("channel.list", {}))
 
     def claim(self, channel, name, create, lobby=False, claimer=None):
         args = {"channel": channel, "name": name, "create": create}
@@ -738,40 +760,47 @@ class _Remote:
             args["lobby"] = True
         if claimer is not None:
             args["claimer"] = claimer
-        return self.session.call("channel.claim", args)
+        return self._call("channel.claim", args)
 
     def release(self, channel, name, keep_charter=False):
         args = {"channel": channel, "name": name}
         if keep_charter:
             args["keep_charter"] = True
-        return self.session.call("channel.release", args)
+        return self._call("channel.release", args)
 
     def remove(self, channel, name, lobby=False):
         args = {"channel": channel, "name": name}
         if lobby:
             args["lobby"] = True
-        return self.session.call("channel.remove", args)
+        return self._call("channel.remove", args)
 
     def prune(self, channel, name, days, budget):
-        return self.session.call("channel.prune", {"channel": channel, "name": name,
-                                                   "days": days, "budget": budget})
+        return self._call("channel.prune", {"channel": channel, "name": name, "days": days,
+                                            "budget": budget})
 
     def lead(self, channel, name, number, mode, when):
-        return self.session.call("channel.lead", {"channel": channel, "name": name,
-                                                  "number": number, "mode": mode,
-                                                  "time": when})
+        return self._call("channel.lead", {"channel": channel, "name": name, "number": number,
+                                           "mode": mode, "time": when})
 
 
 class _Local:
-    """This machine's channel root, for a server member: the same functions, in-process."""
+    """This machine's channel root, for a server member: the same functions, in-process;
+    shared: its shared root."""
 
     ssh = None
-    where = "this machine"
 
-    def __init__(self, log):
+    def __init__(self, log, shared=False):
         self.machine = platform.machine_id()
-        self.root = channels.root_path()
+        self.shared = shared
+        self.where = "this machine's shared root" if shared else "this machine"
+        self.root = channels.root_path(shared)
         self.log = log
+
+    def has_shared(self):
+        return fsops.LINUX
+
+    def shared_root(self):
+        return _Local(self.log, shared=True)
 
     def list(self):
         return _listing(channels.list_channels(self.root))
@@ -814,16 +843,19 @@ def _find(listing, channel, where):
     return None
 
 
-def _server(args, cfg, log, stack):
+def _server(args, cfg, log, stack, shared=False):
     if args.local:
-        return _Local(log)
+        return _Local(log, shared)
     ssh.check_dest(args.server)
     session = stack.enter_context(ssh.Session(cfg.settings, args.server, log))
-    return _Remote(session, args.server, session.open(), log)
+    return _Remote(session, args.server, session.open(), log, shared)
 
 
-def _where_flag(server):
-    return "--local" if server.ssh is None else "--server %s" % server.ssh
+def _where_flag(server, join=False):
+    """--local or --server ALIAS; for a join's command, --shared after it for a shared root
+    (list takes no --shared: it shows both roots)."""
+    flag = "--local" if server.ssh is None else "--server %s" % server.ssh
+    return flag + " --shared" if join and server.shared else flag
 
 
 def _need_machine(server):
@@ -904,9 +936,10 @@ def main(args, run):
             if args.channel == kinds.LOBBY_NAME:
                 # one fixed name: "join the lobby in devbox" is then a whole instruction
                 raise VCharonError("config", "the lobby is made by its first join",
-                                   hint="join it: vcharon join %s %s %s"
+                                   hint="join it: vcharon join %s %s%s %s"
                                    % (kinds.LOBBY_NAME, "--local" if args.local
                                       else "--server %s" % args.server,
+                                      " --shared" if args.shared else "",
                                       flags(project, args.role)))
             return _create(args, cfg, name, log, say)
         return _join(args, cfg, name, log, say)
@@ -928,8 +961,15 @@ def _list(args, cfg, log, say):
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
         listing = server.list()
+        # the shared root's channels too, on a Linux server, with no flag: a separate group
+        twin, shared, problem = _shared_listing(server)
     if args.json:
-        print(json.dumps(list_json(server, listing), ensure_ascii=False))
+        doc = list_json(server, listing)
+        doc["shared"] = None if shared is None else {
+            k: v for k, v in list_json(server, shared).items() if k != "server"}
+        if problem is not None:
+            doc["shared"] = {"error": _error_json(problem)}
+        print(json.dumps(doc, ensure_ascii=False))
         sys.stdout.flush()
         return 0
     # the ages are of headings' times, which are local with no zone
@@ -937,6 +977,53 @@ def _list(args, cfg, log, say):
     say("vcharon: list  (%s)" % server.where)
     if not listing["channels"] and not listing["others"]:
         say("  no channels")
+    _say_listing(listing, say, now)
+    if shared is not None and (shared["channels"] or shared["others"]):
+        say("vcharon: list  (%s)" % twin.where)
+        _say_listing(shared, say, now)
+    if problem is not None:
+        say(_shared_note(server, problem))
+    return 0
+
+
+def _shared_listing(server):
+    """(server's shared root, its listing, None); (None, None, None) on a server that can't
+    have one (not Linux); (None, None, the error) when the shared folder fails its checks
+    (channels.shared_root): list and list --remove-idle show the root in the home as usual and
+    name the problem, since a user who never uses --shared must still list (DESIGN, "The shared
+    root"). Any other error stops the command."""
+    if not server.has_shared():
+        return None, None, None
+    try:
+        twin = server.shared_root()
+        return twin, twin.list(), None
+    except VCharonError as e:
+        if e.code != SHARED_CHECK_CODE:
+            raise
+        return None, None, e
+
+
+# the code of channels.shared_root's refusal of a folder it found
+SHARED_CHECK_CODE = "unsafe_dir"
+
+
+def _shared_note(server, e):
+    """list's note line for a shared root that failed its checks: its error and fix."""
+    where = "this machine's" if server.ssh is None else "%s's" % server.ssh
+    line = "  note: %s shared root isn't listed: %s" % (where, e.message)
+    if e.hint is not None:
+        line += "; fix: %s" % shown_hint(e.hint)
+    return line
+
+
+def _error_json(e):
+    """An error as --json carries one in place of a result: {"code", "message", "fix"}."""
+    return {"code": e.code, "message": e.message,
+            "fix": None if e.hint is None else shown_hint(e.hint)}
+
+
+def _say_listing(listing, say, now):
+    """list's lines of one root's channels, after its head line."""
     for ch in listing["channels"]:
         leaders = ch["leaders"]
         leader, term = _leader_of(ch)
@@ -968,7 +1055,6 @@ def _list(args, cfg, log, say):
                 say("    note: %s" % platform.runnable(note))
     for other in listing["others"]:
         say("  note: %s: %s" % (pathrules.show(other["name"]), other["why"]))
-    return 0
 
 
 def _leader_of(ch):
@@ -1087,7 +1173,9 @@ def list_json(server, listing):
     "bytes" the total size of the files in its
     folder, "format" the channel's format from its leader's CHANNEL.md (null when it has none)
     and "limits" its {"max_mb", "max_files", "max_entry_kb"} (null each when missing); each of
-    "others" is {"name", "why"}, a name at the root that isn't a usable channel."""
+    "others" is {"name", "why"}, a name at the root that isn't a usable channel. _list adds
+    "shared": the server's shared root's {"channels", "others"}, the same way, or null on a
+    server that can't have one (not Linux)."""
     out = []
     for ch in listing["channels"]:
         holders = list(ch["leaders"])
@@ -1151,7 +1239,8 @@ def _own_record(server, channel, name):
         return True
     if record is None:
         return True
-    if server.machine is not None and record["machine"] != server.machine:
+    if ((server.machine is not None and record["machine"] != server.machine)
+            or _is_shared(record) != server.shared):
         return None
     return record
 
@@ -1217,60 +1306,93 @@ def _remove_idle(args, cfg, log, say):
     """vcharon list --remove-idle [--yes]: the members idle over --days, each to remove or
     kept with why; with --yes each removal is channel.prune's, which checks again at the
     server. Without --yes nothing changes. A removal that fails doesn't stop the others; the
-    first failure is raised at the end (exit 1), after the lines or the --json object."""
+    first failure is raised at the end (exit 1), after the lines or the --json object. On a
+    Linux server the shared root's members too, as a group of their own, as list shows them
+    (--json's "shared": {"members", "idle_channels"}, or null; a shared folder that fails its
+    checks is a note, and "shared": {"error"}, as in list: _shared_listing)."""
     days = args.days if args.days is not None else channels.IDLE_DAYS
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
-        listing = server.list()
+        twin, shared, problem = _shared_listing(server)
+        listings = [(server, server.list())] + ([(twin, shared)] if twin is not None else [])
         for channel in args.channels:
-            if _find(listing, channel, server.where) is None:
+            if all(_find(listing, channel, one.where) is None for one, listing in listings):
                 raise channels.no_channel(channel)
-        plan, whole, items = _idle_plan(server, listing, set(args.channels), days)
         failed = None
-        # per channel, what this run's removals leave of a member down's deletes; the server
-        # decides by it (a member kept since the listing frees its share for the next)
-        budgets = {}
-        if args.yes:
-            for one in plan:
-                if one["action"] == "keep" and one["why"] != channels.KEPT_BUDGET:
-                    one["action"] = "kept"
-                    continue
-                key = (one["channel"], one["name"])
-                budget = budgets.setdefault(one["channel"], channels.PRUNE_MAX_ITEMS)
-                try:
-                    got = server.prune(one["channel"], one["name"], days, budget)
-                except VCharonError as e:
-                    one["action"], one["why"] = "failed", "%s: %s" % (e.code, e.message)
-                    failed = failed or e
-                    # it may be renamed already, so its copies go with the members' next downs
-                    budgets[one["channel"]] = max(0, budget - items[key])
-                    continue
-                if not isinstance(got, dict):
-                    raise VCharonError("protocol", "a malformed channel.prune result")
-                if isinstance(got.get("idle"), int) and not isinstance(got.get("idle"), bool):
-                    one["idle_seconds"] = got["idle"]
-                if got.get("kept"):
-                    one["action"], one["why"] = "kept", str(got["kept"])
-                else:
-                    one["action"], one["why"] = "removed", None
-                    n = got.get("items")
-                    n = n if isinstance(n, int) and not isinstance(n, bool) else items[key]
-                    budgets[one["channel"]] = max(0, budget - n)
-                    deleted = got.get("deleted")
-                    one["deleted"] = (deleted if isinstance(deleted, int)
-                                      and not isinstance(deleted, bool) else None)
+        groups = []
+        for one, listing in listings:
+            plan, whole, items = _idle_plan(one, listing, set(args.channels), days)
+            if args.yes:
+                # every group's removals run; the first failure is raised at the end
+                got = _prune_idle(one, plan, items, days)
+                failed = failed or got
+            groups.append((one, plan, whole))
     if args.json:
-        print(json.dumps({"server": server.ssh, "days": days, "yes": bool(args.yes),
-                          "members": plan, "idle_channels": whole}, ensure_ascii=False))
+        doc = {"server": server.ssh, "days": days, "yes": bool(args.yes),
+               "members": groups[0][1], "idle_channels": groups[0][2], "shared": None}
+        if len(groups) > 1:
+            doc["shared"] = {"members": groups[1][1], "idle_channels": groups[1][2]}
+        if problem is not None:
+            doc["shared"] = {"error": _error_json(problem)}
+        print(json.dumps(doc, ensure_ascii=False))
         sys.stdout.flush()
     else:
-        _say_idle(args, server, plan, whole, days, say)
+        for i, (one, plan, whole) in enumerate(groups):
+            # the shared root's group only when it has something to say
+            if i == 0 or plan or whole:
+                _say_idle(one, plan, whole, days, say)
+        if problem is not None:
+            say(_shared_note(server, problem))
+        if not args.yes and any(m["action"] == "remove" for g in groups for m in g[1]):
+            flags_ = [_where_flag(server)]
+            if args.days is not None:
+                flags_.append("--days %d" % days)
+            flags_ += args.channels
+            say(platform.runnable(REMOVE_NEXT % " ".join(flags_)))
     if failed is not None:
         raise failed
     return 0
 
 
-def _say_idle(args, server, plan, whole, days, say):
+def _prune_idle(server, plan, items, days):
+    """--yes: each member of plan to remove goes through channel.prune on server, its entry
+    updated; the first failure, or None."""
+    failed = None
+    # per channel, what this run's removals leave of a member down's deletes; the server
+    # decides by it (a member kept since the listing frees its share for the next)
+    budgets = {}
+    for one in plan:
+        if one["action"] == "keep" and one["why"] != channels.KEPT_BUDGET:
+            one["action"] = "kept"
+            continue
+        key = (one["channel"], one["name"])
+        budget = budgets.setdefault(one["channel"], channels.PRUNE_MAX_ITEMS)
+        try:
+            got = server.prune(one["channel"], one["name"], days, budget)
+        except VCharonError as e:
+            one["action"], one["why"] = "failed", "%s: %s" % (e.code, e.message)
+            failed = failed or e
+            # it may be renamed already, so its copies go with the members' next downs
+            budgets[one["channel"]] = max(0, budget - items[key])
+            continue
+        if not isinstance(got, dict):
+            raise VCharonError("protocol", "a malformed channel.prune result")
+        if isinstance(got.get("idle"), int) and not isinstance(got.get("idle"), bool):
+            one["idle_seconds"] = got["idle"]
+        if got.get("kept"):
+            one["action"], one["why"] = "kept", str(got["kept"])
+        else:
+            one["action"], one["why"] = "removed", None
+            n = got.get("items")
+            n = n if isinstance(n, int) and not isinstance(n, bool) else items[key]
+            budgets[one["channel"]] = max(0, budget - n)
+            deleted = got.get("deleted")
+            one["deleted"] = (deleted if isinstance(deleted, int)
+                              and not isinstance(deleted, bool) else None)
+    return failed
+
+
+def _say_idle(server, plan, whole, days, say):
     say(IDLE_HEAD % (server.where, days_text(days)))
     if not plan and not whole:
         say("  none")
@@ -1287,18 +1409,22 @@ def _say_idle(args, server, plan, whole, days, say):
         say(line)
     for name in whole:
         say(IDLE_CHANNEL_NOTE % (name, days_text(days)))
-    if not args.yes and any(one["action"] == "remove" for one in plan):
-        flags_ = [_where_flag(server)]
-        if args.days is not None:
-            flags_.append("--days %d" % days)
-        flags_ += args.channels
-        say(platform.runnable(REMOVE_NEXT % " ".join(flags_)))
 
 
 def _another_server(record, server, channel):
     if record is not None and (record["machine"] != server.machine or record["ssh"] != server.ssh):
         raise channels.refused("you are in %s on another server" % channel,
                                "pass --role R to join from here as another member")
+    if record is not None and _is_shared(record) != server.shared:
+        # a record of the other root: a join's --shared never moves a membership
+        raise channels.refused("you are in %s in that server's %s" % (
+            channel, "shared root" if _is_shared(record) else "channel root in its home"),
+            "pass --role R to join from here as another member")
+
+
+def _is_shared(record):
+    """Whether record's membership is in the server's shared root."""
+    return bool(record.get(RECORD_SHARED))
 
 
 def _stale(found, name, record):
@@ -1350,7 +1476,8 @@ def _create_held(args, cfg, name, log, say, take):
     info = {"format": charter.WORK_FORMAT, "limits": create_limits(args)}
     record = read_record(channel, name)
     with contextlib.ExitStack() as stack:
-        server = _server(args, cfg, log, stack)
+        server = _server(args, cfg, log, stack,
+                         args.shared or (record is not None and _is_shared(record)))
         _need_machine(server)
         # before any claim: a client-id file that can't be read or made stops here
         args.fields["claimer"] = platform.claimer(args.channel)
@@ -1449,6 +1576,8 @@ def _write_member(cfg, server, channel, name, leader, section, made, got, ident,
            "format": info["format"], "limits": dict(limits)}
     if kind_ is kinds.LOBBY:
         doc[RECORD_KIND] = charter.LOBBY_KIND
+    if server.shared:
+        doc[RECORD_SHARED] = True
     doc.update(ident)
     fields = member_header(name, ident, fields, cfg)
     if not rejoin or read_record(channel, name) is None:
@@ -1567,7 +1696,9 @@ def _join_held(args, cfg, name, log, say, take):
     section = "%s.%s" % (channel, name)
     record = read_record(channel, name)
     with contextlib.ExitStack() as stack:
-        server = _server(args, cfg, log, stack)
+        # a membership keeps the root it joined: a rejoin needs no --shared
+        server = _server(args, cfg, log, stack,
+                         args.shared or (record is not None and _is_shared(record)))
         _need_machine(server)
         # before any claim: a client-id file that can't be read or made stops here
         args.fields["claimer"] = platform.claimer(args.channel)
@@ -1692,7 +1823,8 @@ def _join_held(args, cfg, name, log, say, take):
             was = (_update_fields(own, name, args.fields, say) or {}).get("agent")
             if not args.rejoin and was and was != args.fields["agent"]:
                 say(platform.runnable(OTHER_AGENT_NOTE % (
-                    channel, name, was, args.fields["agent"], channel, _where_flag(server),
+                    channel, name, was, args.fields["agent"], channel,
+                    _where_flag(server, join=True),
                     args.ident["project"])))
     # before the sync, which then sends it with MEMBER.md: the leader sees the JOIN when the
     # folder appears, not at this member's next sync
@@ -1836,11 +1968,18 @@ def _live_session(name, channel, record, server, snapshot):
     held_by = " (PID %d)" % pid if pid else ""
     text = "a live session holds %s in %s" % (name, channel)
     if record is not None and (record["machine"] != server.machine
-                               or record["ssh"] != server.ssh):
-        # a membership of this name on another server: never one this join can take
-        return channels.refused(text + " (this machine's record: a membership on another "
-                                "server)" + held_by, "pass --role R to join from here as another "
-                                "member")
+                               or record["ssh"] != server.ssh
+                               or _is_shared(record) != server.shared):
+        # a membership of this name on another server (or root): never one this join can
+        # take
+        if record["machine"] != server.machine or record["ssh"] != server.ssh:
+            where = "on another server"
+        elif _is_shared(record):
+            where = "in that server's shared root"
+        else:
+            where = "in that server's channel root in its home"
+        return channels.refused(text + " (this machine's record: a membership %s)" % where
+                                + held_by, "pass --role R to join from here as another member")
     if record is not None:
         # a lobby's founder leads nothing: a member, joined here
         leads = record["leader"] == name and kinds.of(record).can_close
@@ -1957,7 +2096,7 @@ def _claimed_elsewhere(args, server, got, name, record):
         return True
     channel = args.channel
     again = "vcharon join %s %s --rejoin --takeover %s" % (
-        channel, _where_flag(server), flags(args.ident["project"], args.ident["role"]))
+        channel, _where_flag(server, join=True), flags(args.ident["project"], args.ident["role"]))
     if record is None:
         raise channels.refused(
             "another machine holds %s in %s" % (name, channel),
@@ -2275,11 +2414,11 @@ def _leave_held(args, cfg, record, log, say, close, take, taken):
     settings = job[0].settings if job else cfg.settings
     with contextlib.ExitStack() as stack:
         if record["ssh"] is None:
-            server = _Local(log)
+            server = _Local(log, _is_shared(record))
         else:
             ssh.check_dest(record["ssh"])
             session = stack.enter_context(ssh.Session(settings, record["ssh"], log))
-            server = _Remote(session, record["ssh"], session.open(), log)
+            server = _Remote(session, record["ssh"], session.open(), log, _is_shared(record))
         say("vcharon: %s %s  as %s on %s" % ("close" if close else "leave", channel, name,
                                              server.where))
         # the record's server, compared before any call: leave too, or another server's
@@ -2521,13 +2660,13 @@ def _record_server(cfg, record, log, stack):
     leave and close check it."""
     section = "%s.%s" % (record["channel"], record["name"])
     if record["ssh"] is None:
-        server = _Local(log)
+        server = _Local(log, _is_shared(record))
     else:
         job = cfg.named(section)
         settings = job[0].settings if job else cfg.settings
         ssh.check_dest(record["ssh"])
         session = stack.enter_context(ssh.Session(settings, record["ssh"], log))
-        server = _Remote(session, record["ssh"], session.open(), log)
+        server = _Remote(session, record["ssh"], session.open(), log, _is_shared(record))
     _need_machine(server)
     if server.machine != record["machine"]:
         raise channels.refused("%s isn't the server %s is on (its machine id is %s, the "

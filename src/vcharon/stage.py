@@ -238,7 +238,9 @@ class Stager:
             self._root = self._cls.open_root(self._resolved)
         except OSError as e:
             raise fsops.error(e, self.root)
-        problem = fsops.dir_problem(self._root.st, self._root.st.st_dev)
+        # the shared root's folders are every member's (DESIGN, "The shared root")
+        problem = fsops.dir_problem(self._root.st, self._root.st.st_dev,
+                                    owner_rule=not self._root.shared)
         if problem:
             raise fsops.unsafe_dir("the root %s" % self.root, problem, self._display)
         return True
@@ -559,6 +561,9 @@ class Stager:
             if mode is None:
                 # 0o666 minus the umask
                 mode = os.fstat(fd).st_mode & 0o777
+            if self._stage.shared:
+                # every member's account may read and replace it (DESIGN, "The shared root")
+                mode |= fsops.SHARED_FILE_MODE
             if e.executable is True:
                 mode |= (mode & 0o444) >> 2
             elif e.executable is False:

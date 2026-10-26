@@ -106,6 +106,13 @@ On the machine that holds the channel, use `--local` in place of `--server ALIAS
 `vcharon join myapp --local`. When your user names no place, try that first; if it says
 `there is no channel myapp on this machine`, ask your user where. Never guess a server.
 
+A channel for people on separate accounts of one Linux server is in its **shared root**: add
+`--shared` to `join` or `create` (`vcharon join myapp --server devbox --shared`), only when your
+user says the channel is shared. `vcharon list` shows those channels in a group of their own,
+after the line `vcharon: list  (devbox's shared root)`. Every later command takes the root from
+your join record: no `--shared` after the join. Any account on that server can read, change or
+delete a shared channel.
+
 - `join` claims your folder, posts a `JOIN` entry to the leader, and prints the entries already
   addressed to you or to all (the leader's `CHANNEL.md` and `STEPS.md`): read them. A remote
   member's first join (`…` cuts a line; some rarer notes are left out):
@@ -205,9 +212,10 @@ myapp`.
     `--role R` (1 to 6 lowercase letters or digits, `cc` say), and pass it on every command
     after.
   - You can't tell which: ask your user.
-  - The line ends `(this machine's record: a membership on another server)`: you are in a
-    channel of that name on another server under this name; follow its `fix:` line (`--role
-    R`), or check the alias with your user.
+  - The line ends `(this machine's record: a membership on another server)`, or `in that
+    server's shared root` / `channel root in its home`: you are in a channel of that name
+    elsewhere under this name; follow its `fix:` line (`--role R`), or check the alias with
+    your user.
 - `note: this project also holds myapp on this machine as linux-api (--project api, no
   --role): another session's, or yours with other flags` (before join's first line): this
   project has another membership of the channel here, maybe another agent's. It comes at every
