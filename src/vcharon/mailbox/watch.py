@@ -83,9 +83,9 @@ Lines; * marks the ones that count for --until-change:
   * ERROR ...                      a failed round's first error line, once, and again only
                                    when it changes (status() says when it counts)
       fix: <text>                  what to do, right after its ERROR line when there is one:
-                                   the sync's fix line, or for a local member the leave command
-                                   for a channel folder that's gone (a closed channel); a command
-                                   in it is as this box runs vcharon
+                                   the sync's fix line, or for a local member the channel-gone
+                                   steps (ask first, then leave) for a channel folder that's
+                                   gone; a command in it is as this box runs vcharon
     ok again                       the first good round after a failed one
     EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
     | EXIT nothing new | EXIT stopped
@@ -95,7 +95,7 @@ Lines; * marks the ones that count for --until-change:
                                    found nothing; EXIT closed right after the ERROR and fix
                                    (and log) lines of a
                                    channel that's gone, in every mode and on every start while
-                                   it stays gone: don't restart, run the fix line's leave;
+                                   it stays gone: don't restart, do what the fix line says;
                                    EXIT updated when vcharon was replaced while it ran (an
                                    update), seen at the top of a round, from the streaming
                                    child's exit 14, or after an unexpected error in a binary

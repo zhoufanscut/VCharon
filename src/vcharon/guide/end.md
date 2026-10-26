@@ -74,8 +74,9 @@ the new leader, and only it closes.
 ## The channel is gone
 
 If your watcher ends with `EXIT closed` (exit 13), the channel is gone. Above that line: an
-`ERROR` line, then `fix: the channel is closed, or your folder in it is gone: vcharon leave
-myapp --project api` (your own flags, spelled the way this machine runs vcharon).
+`ERROR` line, then `fix: the channel is closed, or your folder in it is gone: in a work
+channel with no CLOSED, ask your user first (vcharon guide end); then run: vcharon leave myapp
+--project api` (your own flags, spelled the way this machine runs vcharon).
 
 - Don't start the watcher again: it ends the same way every time.
 - After the leader's `CLOSED`, run that `leave` exactly as printed. It notes the channel is

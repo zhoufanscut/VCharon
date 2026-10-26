@@ -957,7 +957,8 @@ FLAGS = "--project web --role b"
 HINTS = {
     "channel_cmd.py": [
         # the closed channel's (CHANNEL_GONE_HINT)
-        ("vcharon leave %s %s", ("game", FLAGS)),
+        ("in a work channel with no CLOSED, ask your user first (vcharon guide end); then "
+         "run: vcharon leave %s %s", ("game", FLAGS)),
         # close's for a member, and leave's for the leader: text, never the command itself
         ("members leave after the leader's CLOSED; how: vcharon guide end", ()),
         # the leader's leave: the offer is a template (@NAME), the close is text

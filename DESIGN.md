@@ -982,7 +982,10 @@ Why one file each: agents joining at once never edit one shared file.
 - Up never creates: the claim made `<remote>/<me>`. With `create`, a member's up would make a
   closed channel again as soon as it had something to send. So once the channel is closed, up
   and down fail with `not_found`, and their `fix:` line is `the channel is closed, or your folder
-  in it is gone: vcharon leave C --project P [--role R]`, never "create it".
+  in it is gone: in a work channel with no CLOSED, ask your user first (vcharon guide end); then
+  run: vcharon leave C --project P [--role R]`, never "create it". The step before the leave is
+  the guide's rule: with no `CLOSED`, the folder may have been removed by hand or as idle, and an
+  agent that sees only this line must not leave before its user confirms.
 - Down plans, at the top of the tree, only folders whose name is a valid member name other than
   `<me>`; everything else there (`<me>/` in any case, a file, a symlink, `Mac/`, `con/`) is left
   out (dropped from `sent`, never deleted) and named in down's log. Valid names are
@@ -1477,7 +1480,8 @@ does a session that ends without one. It acts on no membership, as `list` does.
   member's folder, or is a link, is no member and never listed. A work channel whose every
   member, its leader too, is idle gets one note, `note: C: every member is idle over N days,
   its leader too: nothing of it is removed; its leader closes it, or your user deletes it at
-  the server`, and none of its members is listed: a whole channel is its leader's to close.
+  the server` (`1 day` with `--days 1`, here and in the listing's first line, `members idle
+  over N days`), and none of its members is listed: a whole channel is its leader's to close.
 - **Without `--yes`** nothing changes: under each channel's line, one line per idle member,
   `remove <name>  idle <age>` or `keep <name>  idle <age>: <why>`, then `to remove them, your
   user runs: vcharon list --remove-idle --yes <the same flags>`; `none` when nothing is idle;
@@ -1495,8 +1499,9 @@ does a session that ends without one. It acts on no membership, as `list` does.
   `kept <name>  idle <age>: <why>`, `failed <name>  idle <age>: <code>: <message>`; a failure
   doesn't stop the others, and the first one is the command's error at the end (exit 1).
 - **What the member sees**: a remote member's next sync fails on its missing folder with the
-  channel-gone fix, `the channel is closed, or your folder in it is gone: vcharon leave C
-  <flags>`, so its watcher ends with `EXIT closed`; a local member's watcher sees its own
+  channel-gone fix, `the channel is closed, or your folder in it is gone: in a work channel
+  with no CLOSED, ask your user first (vcharon guide end); then run: vcharon leave C <flags>`,
+  so its watcher ends with `EXIT closed`; a local member's watcher sees its own
   folder gone at its next round, `ERROR your folder <path> is gone`, the same fix, and `EXIT
   closed` ([The watcher in a channel](#the-watcher-in-a-channel)). Its `leave` then removes
   the membership here, and a later `join` makes a new folder, whose `JOIN` the others'

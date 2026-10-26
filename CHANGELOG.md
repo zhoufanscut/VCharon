@@ -7,6 +7,17 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The channel-gone `fix:` line (a closed channel, or your folder in it gone: `sync`, `doctor`,
+  `watch`, `read`, `post` and `lead`) names the guide's rule before its `leave`: `the
+  channel is closed, or your folder in it is gone: in a work channel with no CLOSED, ask your
+  user first (vcharon guide end); then run: vcharon leave C <flags>`. Its start is unchanged,
+  and the `leave` stays its last command; a script that took everything after `gone: ` as the
+  command should take the text after `then run: ` (the `fix:` line's text isn't stable).
+- `vcharon list --remove-idle --days 1` says `idle over 1 day`, not `1 days`, in its first line
+  and in a whole idle channel's note.
+
 ## 0.8.6rc1 — 2026-10-23
 
 The first release candidate for 0.8.6, a GitHub pre-release: `vcharon --update --rc` on 0.8.5

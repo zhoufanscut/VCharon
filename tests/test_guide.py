@@ -506,6 +506,8 @@ L3_TRIGGERS = {
     ("channel_cmd.py", "_leave_held", "end"): "a member's close refused: a refusal's fix line",
     ("channel_cmd.py", "LEADER_LEAVE_FIX", "end"): "a leader's leave refused: a refusal's fix "
                                                    "line",
+    ("channel_cmd.py", "GONE_STEPS", "end"): "the channel-gone fix line: the channel closed, or "
+                                             "the own folder removed",
     ("cli.py", "_parser", "start"): "the skill verb's help says what the skill points at",
     ("mailbox/watch.py", "STOP_FIX", "watch"): "watch --stop's refusal when the watcher didn't "
                                                "stop: each CLI's own way to stop it",

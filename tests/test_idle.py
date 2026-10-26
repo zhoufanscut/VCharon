@@ -365,6 +365,18 @@ class RemoveIdleTest(ChannelCase):
                     "ERROR config: --days, --yes and channel names go with --remove-idle",
                     platform.runnable("vcharon list --help")))
 
+    def test_one_day_is_singular(self):
+        self.assertEqual(self.lines("--local", "--days", "1")[0],
+                         "vcharon: list --remove-idle  (this machine)  members idle over 1 day")
+        self.assertEqual(self.lines("--local", "--days", "2")[0],
+                         "vcharon: list --remove-idle  (this machine)  members idle over 2 days")
+        # the whole idle channel's note too
+        os.remove(os.path.join(channels.seen_root(self.root), "game", "laptop-ui"))
+        self.assertEqual(self.lines("--local", "--days", "1")[1],
+                         "  note: game: every member is idle over 1 day, its leader too: "
+                         "nothing of it is removed; its leader closes it, or your user deletes "
+                         "it at the server")
+
     def test_named_channels_only_and_one_unknown(self):
         self.lead("docs", where=("--local",), box="win", project="d")
         self.use_box("linux")
@@ -395,7 +407,7 @@ class RemoveIdleTest(ChannelCase):
         # every member idle, the leader too: one note, no member
         os.remove(os.path.join(channels.seen_root(self.root), "game", "linux-web"))
         lines = self.lines("--local", "--yes")
-        self.assertEqual(lines[1:], [channel_cmd.IDLE_CHANNEL_NOTE % ("game", 14)])
+        self.assertEqual(lines[1:], [channel_cmd.IDLE_CHANNEL_NOTE % ("game", "14 days")])
         self.assertEqual(len(os.listdir(os.path.join(self.root, "game"))), 3)
         doc = json.loads(self.ok("list", "--remove-idle", "--local", "--json"))
         self.assertEqual((doc["members"], doc["idle_channels"]), ([], ["game"]))
@@ -517,8 +529,9 @@ class RemoveIdleRemoteTest(ChannelCase):
         self.assertEqual(os.listdir(os.path.join(self.root, "game")), [leader])
         del os.environ["VCHARON_TEST_CLOCK_SHIFT"]
         # the member: its sync gives the channel-gone fix, its watcher ends with EXIT closed
-        gone = platform.runnable("the channel is closed, or your folder in it is gone: vcharon "
-                                 "leave game --project web")
+        gone = platform.runnable("the channel is closed, or your folder in it is gone: in a "
+                                 "work channel with no CLOSED, ask your user first (vcharon "
+                                 "guide end); then run: vcharon leave game --project web")
         self.use_box("linux")
         self.assertEqual(self.refusal("sync", "game")[1], gone)
         code, lines = self.watch_remote("linux", "linux-web")

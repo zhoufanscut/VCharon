@@ -2250,7 +2250,8 @@ class LeaveCloseTest(ChannelCase):
         fixes = [l for l in err.splitlines() if l.startswith("  fix: ")]
         # the leave command as this box runs vcharon
         self.assertEqual(fixes, ["  fix: " + platform.runnable(
-            "the channel is closed, or your folder in it is gone: vcharon leave game "
+            "the channel is closed, or your folder in it is gone: in a work channel with no "
+            "CLOSED, ask your user first (vcharon guide end); then run: vcharon leave game "
             "--project web")] * 2)
         self.assertNotIn("create it", err)
         # its sign to leave

@@ -3447,8 +3447,9 @@ class ClosedTest(WatchCase):
     line."""
 
     # the fix as the watcher prints it: the leave command as this box runs vcharon
-    GONE = platform.runnable("the channel is closed, or your folder in it is gone: vcharon leave "
-                             "mb --project web --role b")
+    GONE = platform.runnable("the channel is closed, or your folder in it is gone: in a work "
+                             "channel with no CLOSED, ask your user first (vcharon guide end); "
+                             "then run: vcharon leave mb --project web --role b")
 
     def record(self):
         channel_cmd.write_record({"version": 1, "channel": "mb", "name": "debian",
@@ -3485,8 +3486,9 @@ class ClosedTest(WatchCase):
 
         # a member with no record: its fix has a placeholder for the flags
         nameless = platform.runnable("the channel is closed, or your folder in it is gone: "
-                                     "vcharon leave mb <the --project and --role that make "
-                                     "debian>")
+                                     "in a work channel with no CLOSED, ask your user first "
+                                     "(vcharon guide end); then run: vcharon leave mb <the "
+                                     "--project and --role that make debian>")
         for record, until_change in ((False, False), (True, True), (True, False)):
             with self.subTest(record=record, until_change=until_change):
                 if record:
@@ -4965,6 +4967,11 @@ class RemovedFolderTest(WatchCase):
                 self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_CLOSED, [
                     "ERROR your folder %s is gone" % own, "  fix: " + self.GONE,
                     "EXIT closed (exit 13)"]))
+                # with no CLOSED, the fix names the guide's rule before its leave
+                fix = self.said(lines)[2]
+                self.assertIn(": in a work channel with no CLOSED, ask your user first (", fix)
+                self.assertIn(" guide end); then run: ", fix)
+                self.assertLess(fix.index("ask your user first"), fix.index(" leave mb "))
         # a start while it is gone: refused, as before, with the same fix
         code, _out, err = self.cli("--role", "b", project="web")
         self.assertEqual((code, err.splitlines()), (1, [

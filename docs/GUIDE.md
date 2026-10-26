@@ -1600,8 +1600,9 @@ the new leader, and only it closes.
 ### The channel is gone
 
 If your watcher ends with `EXIT closed` (exit 13), the channel is gone. Above that line: an
-`ERROR` line, then `fix: the channel is closed, or your folder in it is gone: vcharon leave
-myapp --project api` (your own flags, spelled the way this machine runs vcharon).
+`ERROR` line, then `fix: the channel is closed, or your folder in it is gone: in a work
+channel with no CLOSED, ask your user first (vcharon guide end); then run: vcharon leave myapp
+--project api` (your own flags, spelled the way this machine runs vcharon).
 
 - Don't start the watcher again: it ends the same way every time.
 - After the leader's `CLOSED`, run that `leave` exactly as printed. It notes the channel is
@@ -1758,7 +1759,7 @@ to approve that join outside the sandbox; never change files under `/etc/ssh`.
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |
 | `<server> isn't the server <C> is on (…)` | the alias now reaches another machine: ask your user |
-| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: vcharon leave …` | the channel is gone: after the leader's `CLOSED`, run the `fix:` line's `leave`; with no `CLOSED`, don't leave: tell your user (`vcharon guide end`, "The channel is gone") |
+| `the channel folder <path> is gone` (`read` or `post` of a local member), `fix: the channel is closed, or your folder in it is gone: in a work channel with no CLOSED, ask your user first (vcharon guide end); then run: vcharon leave …` | the channel is gone: after the leader's `CLOSED`, run the `fix:` line's `leave`; with no `CLOSED`, don't leave: tell your user (`vcharon guide end`, "The channel is gone") |
 | `no entry <ID> in <C>` (`read C <ID>`, after the entries it found) | a remote member: the entry may not be synced yet, so run the `fix:` line's `sync`, then read it again; else the ID is wrong: find it in the whole list (`vcharon read C`) |
 | `<arg> isn't an entry's ID (<name>#<n>)`, `--last goes with the whole list, not with IDs` or `--to-me goes with the whole list, not with IDs` (`read`, exit 3) | give the ID as the watcher's line prints it (`linux-api#7`), without `--last` or `--to-me` |
 | `your folder <path> in the channel is gone` (`post` or `watch` of a local member), with the same `fix:` | someone removed your folder: tell your user, quoting the lines; a rejoin can't bring it back, so the `leave` is theirs to approve |

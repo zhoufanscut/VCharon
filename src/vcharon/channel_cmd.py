@@ -172,13 +172,17 @@ REMOVE_FAILED = ("note: couldn't delete %s (older than %d days): %s; your folder
                  "its limit until it is deleted")
 # A channel section's up never creates: a missing root is a closed channel, or the own
 # folder gone at the server. Never stage.ROOT_HINT's "create it": an agent following it would
-# make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint) and a
-# local member's watch print it, with the channel and name_flags. Its start is a
+# make the closed channel again by hand. vcharon sync and doctor (cli.channel_gone_hint), read,
+# post, lead and a local member's watch print it, with the channel and name_flags. Its start is a
 # constant of its own: the watcher tells a gone channel by it (EXIT closed), and the
-# leave command after it is printed as the box runs vcharon (platform.runnable), not as written.
+# commands after it are printed as the box runs vcharon (platform.runnable), not as written.
+# The steps name the guide's rule before the leave: in a work channel with no CLOSED, the folder
+# may have gone by hand or as idle, and the agent asks its user before it leaves (vcharon guide
+# end, "The channel is gone"); a lobby has no CLOSED, and its members just leave.
 CHANNEL_GONE_PREFIX = "the channel is closed, or your folder in it is gone: "
-LEAVE_COMMAND = "vcharon leave %s %s"
-CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + LEAVE_COMMAND
+GONE_STEPS = ("in a work channel with no CLOSED, ask your user first (vcharon guide end); then "
+              "run: vcharon leave %s %s")
+CHANNEL_GONE_HINT = CHANNEL_GONE_PREFIX + GONE_STEPS
 # join's and create's note when the watcher's snapshot (watch.first_look) couldn't be saved:
 # the command is done all the same, but the first start then takes a baseline, which takes what
 # came since as seen without printing it; read --to-me is what shows those entries
@@ -1124,10 +1128,16 @@ KEPT_TEXT = {
     channels.KEPT_BUDGET: "over %d deletes for the members' syncs in one run: run again once "
                           "their watchers have synced" % channels.PRUNE_MAX_ITEMS}
 OWN_TEXT = "this machine's own membership; to end it: vcharon leave %s %s"
-IDLE_HEAD = "vcharon: list --remove-idle  (%s)  members idle over %d days"
+# "idle over" here and in IDLE_CHANNEL_NOTE takes days_text: "1 day", not "1 days"
+IDLE_HEAD = "vcharon: list --remove-idle  (%s)  members idle over %s"
 REMOVE_NEXT = "  to remove them, your user runs: vcharon list --remove-idle --yes %s"
-IDLE_CHANNEL_NOTE = ("  note: %s: every member is idle over %d days, its leader too: nothing of "
+IDLE_CHANNEL_NOTE = ("  note: %s: every member is idle over %s, its leader too: nothing of "
                      "it is removed; its leader closes it, or your user deletes it at the server")
+
+
+def days_text(days):
+    """--days as the idle lines say it: "1 day", "14 days"."""
+    return "1 day" if days == 1 else "%d days" % days
 
 
 def _own_record(server, channel, name):
@@ -1261,7 +1271,7 @@ def _remove_idle(args, cfg, log, say):
 
 
 def _say_idle(args, server, plan, whole, days, say):
-    say(IDLE_HEAD % (server.where, days))
+    say(IDLE_HEAD % (server.where, days_text(days)))
     if not plan and not whole:
         say("  none")
     channel = None
@@ -1276,7 +1286,7 @@ def _say_idle(args, server, plan, whole, days, say):
             line += ": %d files and folders deleted" % one["deleted"]
         say(line)
     for name in whole:
-        say(IDLE_CHANNEL_NOTE % (name, days))
+        say(IDLE_CHANNEL_NOTE % (name, days_text(days)))
     if not args.yes and any(one["action"] == "remove" for one in plan):
         flags_ = [_where_flag(server)]
         if args.days is not None:
