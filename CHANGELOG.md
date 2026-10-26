@@ -7,12 +7,36 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.9.0 — 2026-10-26
+
+0.9.0rc1's code, with the one change below from its live round. Next to 0.8.6, the latest final
+release, the changes are those in 0.9.0rc1's entry and this one. `vcharon --update` on 0.8.6 or
+on 0.9.0rc1 offers it.
+
+**Updating from 0.8.6:** as 0.9.0rc1's entry says (every box that joins a shared channel needs
+0.9.0). From 0.9.0rc1: nothing to do; the skill and the guide are unchanged; each server gets one
+new helper cache entry at the first connection.
 
 - `vcharon list --remove-idle` prints the shared root's group whenever that root holds a
   channel or another name, as `list` does, with `  none` when nothing there is idle; before,
   the group was left out then, so the output didn't show the shared root had been checked.
   `--json` is unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13, this change: 1829 tests OK, 13 skipped,
+run as CI). A live round on 0.9.0rc1 on 2026-10-26 (measured), with a Debian 13 server and two
+of its accounts: two Claude Code members (2.1.310, one under `claude -p`) remote over ssh as one
+account from a Linux box, and a local Claude Code member (version not recorded) on the other
+account. The lobby, made by the first remote join, and two work channels, all in the
+shared root: every folder vcharon made there was mode 777 and every file 666, whichever account
+made it; `whoami --json` gave `"shared": true` and the text mode line ended `its shared root`
+for the remote and the local member; `list` showed the channels only under the shared-root
+group; `lead --to` moved the lead to the other account and back (terms 2 and 3); a close by
+one account deleted the other account's folders, both ways (the second seen only in the server's
+folder listing: that member's close output was not reported). A Codex CLI 0.164.0 member joined
+the lobby and passed its one-minute check, then stopped on its model provider's capacity error
+before the work channels. `list --remove-idle` without `--yes` led to the change above. Not run
+on this build: macOS and Windows clients, and `list --remove-idle --yes` across accounts
+(0.9.0rc1's round ran it).
 
 ## 0.9.0rc1 — 2026-10-26
 
