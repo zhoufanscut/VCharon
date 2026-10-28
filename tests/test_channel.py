@@ -85,6 +85,16 @@ def release(child):
         stop_child(child)
 
 
+def no_checkout_above(case, folder):
+    """Fails case at once when a folder above folder (the test's temp folder) holds a .git, .svn
+    or .hg: a stray one (an empty /tmp/.git) is then the checkout of every folder the test
+    makes, and the names it checks come out as that folder's, which reads like a regression."""
+    above, mark = channel_cmd.project_source(os.path.dirname(os.path.abspath(folder)))
+    if mark is not None:
+        case.fail("%s holds a stray %s, the checkout of every test folder below it: remove it, "
+                  "or point TMPDIR at a folder outside it, and run again" % (above, mark))
+
+
 class ChannelCase(FakeSshCase):
     """One fake server (its root under the fake home) and boxes, each a VCHARON_HOME of its own
     with [vcharon] box set. The current directory is a git checkout named Web."""
@@ -213,6 +223,7 @@ class NamesTest(unittest.TestCase):
         return config.Config("/x/vcharon.ini", True, config.Settings(), box=box)
 
     def test_project_from_git(self):
+        no_checkout_above(self, self.tmp)
         repo = os.path.join(self.tmp, "My Repo.v2")
         deep = os.path.join(repo, "src", "a")
         os.makedirs(deep)
@@ -231,6 +242,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(channel_cmd.project_of(plain), "Here")
 
     def test_project_from_svn_or_hg(self):
+        no_checkout_above(self, self.tmp)
         # an SVN (1.7 and later) or Mercurial checkout's root, from any folder below it: a
         # member that changes folders keeps its name
         for mark in (".svn", ".hg"):
@@ -258,6 +270,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(channel_cmd.project_of(os.path.join(inner, "src")), "inner")
 
     def test_project_source(self):
+        no_checkout_above(self, self.tmp)
         # the folder and the mark that made it the project, for join's and create's note
         for mark in (".git", ".svn", ".hg"):
             with self.subTest(mark=mark):
@@ -279,6 +292,7 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(channel_cmd.project_source(plain), (plain, None))
 
     def test_project_note(self):
+        no_checkout_above(self, self.tmp)
         root = os.path.join(self.tmp, "src")
         deep = os.path.join(root, "a")
         os.makedirs(deep)
@@ -874,6 +888,7 @@ class CreateJoinTest(ChannelCase):
         self.assertIn("  claimed game/mac-web; the leader is laptop-ui", out.splitlines())
 
     def test_a_new_name_never_comes_from_the_home_folder(self):
+        no_checkout_above(self, self.tmp)
         self.lead()
         home = os.path.join(self.tmp, "home", "alice")
         deep = os.path.join(home, "notes", "x")
@@ -1640,6 +1655,7 @@ class ProjectNoteTest(ChannelCase):
                                      "create it" if verb == "create" else "join"))
 
     def test_a_workspace_of_checkouts(self):
+        no_checkout_above(self, self.tmp)
         # a folder that isn't a checkout, holding checkouts: the name depends on where the
         # agent starts, so each start says which it was
         ws = os.path.join(self.tmp, "ws")
