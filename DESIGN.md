@@ -3600,9 +3600,8 @@ which and how to adapt. A channel format change is always a minor version at lea
 
 Later:
 
-- A shared root closed to some accounts (a Unix group's) or on a server that isn't Linux: the
-  shared root is one folder per Linux server, open to every account on it ([The shared
-  root](#the-shared-root)).
+- A shared root closed to some accounts (a Unix group's): the shared root is one folder per
+  Linux machine, open to every account on it ([The shared root](#the-shared-root)).
 - Many streaming watchers on one server: each holds an ssh connection and a helper of about
   25 MB. Measured: 10, 20, 30 and 50 watchers started at once had 0, 3, 7 and at least 16
   connections reset at start, each retried and was streaming within about 4 s, and 50 helpers
@@ -3614,6 +3613,6 @@ Later:
 
 Not planned: Intel Mac and Linux arm64 binaries, a Homebrew tap or a winget package (pipx or
 uv covers them); support for server distros other than Debian (doctor warns and goes on);
-two-way merge; the server connecting back; a background service; VCharon's own ssh code; a
+a shared root on macOS or Windows (a server is Linux already: [Scope](#scope)); two-way merge; the server connecting back; a background service; VCharon's own ssh code; a
 `command=`-restricted key, which can't restrict anything here ([Keys without
 prompts](#keys-without-prompts)).
