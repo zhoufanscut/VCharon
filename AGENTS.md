@@ -70,9 +70,10 @@ reach the real ones: they may hold live channels.
 - **A hand run**, any process outside the suite that imports vcharon (a `python -` snippet
   too), goes in a scratch folder. `VCHARON_HOME` moves the config, state, logs and
   `joined` folders, and `VCHARON_CHANNELS_ROOT` the channel root (which doesn't follow
-  `VCHARON_HOME`), and with it `seen/` and the helper's `cache/` beside it; both work on every
-  OS. On Linux, `VCHARON_SHARED_ROOT` moves the shared root's folder (`/var/tmp/vcharon`, used
-  by `--shared`, and by `list`, which reads it every time):
+  `VCHARON_HOME`), and with it `seen/`, `lead/` (the term markers of takeovers) and the
+  helper's `cache/` beside it; both work on every OS. On Linux, `VCHARON_SHARED_ROOT` moves
+  the shared root's folder (`/var/tmp/vcharon`, used by `--shared`, and by `list`, which reads
+  it every time):
 
   ```sh
   mkdir -p /tmp/vc/web/.git && cd /tmp/vc/web

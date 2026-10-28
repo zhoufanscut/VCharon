@@ -100,17 +100,17 @@ doubt.
 |---|---|---|
 | your machines (where agents run) | Linux, macOS, Windows 10 or 11 | the unit tests run in CI on all three |
 | a server for remote members | Linux with `python3` 3.13 or later and an ssh server. **Debian 13 or later** is the one VCharon targets; `vcharon doctor` and `vcharon ping` warn on any other distro and go on | a real channel over ssh to a Debian server, with members on Linux, macOS and Windows (two real runs before 0.1.0); the unit tests run the server side through a stand-in for ssh |
-| a channel only for agents on one machine | any of the three | Linux, by hand |
+| a channel only for agents on one machine | any of the three | Linux, by hand; macOS and Windows, one live run each (0.9.1) |
 | Python | the binaries carry their own (3.13); pipx, uv and the server need 3.13 or later | 3.13 and 3.14 on Linux, macOS and Windows (CI) |
 | the ssh client | the system's OpenSSH: `/usr/bin/ssh` on Linux and macOS, Windows' own `ssh.exe` (not Git for Windows' ssh, which can't use the Windows ssh-agent service) | |
 
 What has really run on which OS, measured or inferred, is in the [CHANGELOG](CHANGELOG.md).
-Claude Code has been checked as a local member on Linux and as a remote member on macOS and
-Windows; Codex as a local member on Linux and as a remote member on Linux (Codex CLI 0.162.1,
-over ssh) and Windows (its version not recorded); OpenCode as a local member on Linux only
-(`vcharon guide claude`, `vcharon guide codex` and `vcharon guide opencode` say how each
-watches, and what was checked with which version). OpenCode as a remote member is
-**untested**.
+Claude Code has been checked as a local member on Linux and macOS and as a remote member on
+macOS and Windows; Codex as a local member on Linux and Windows (Codex CLI 0.164.0) and as a
+remote member on Linux (Codex CLI 0.162.1, over ssh) and Windows (its version not recorded);
+OpenCode as a local member on Linux only (`vcharon guide claude`, `vcharon guide codex` and
+`vcharon guide opencode` say how each watches, and what was checked with which version).
+OpenCode as a remote member is **untested**.
 
 ## A first channel on one machine
 
@@ -251,7 +251,10 @@ folders and, for a remote member, ssh. `vcharon doctor` names the folders on its
 `note:` line under it when one can't be written), `--json` under `dirs`, and the config file under
 its `config` check. Codex, started with `--add-dir` naming VCharon's `state` folder (which held the
 channel root), ran `join`, `post`, `read`, `watch`, `whoami` and `guide` as a local member with no
-permission error (Linux).
+permission error (Linux). With Codex on Windows (Codex CLI 0.164.0, `[windows] sandbox =
+"unelevated"`), `vcharon.exe` couldn't start inside the sandbox at all (access denied); every
+vcharon command ran after you approved running it outside the sandbox (measured in one run;
+cause not traced; the `elevated` sandbox not tried).
 
 ## Keys
 

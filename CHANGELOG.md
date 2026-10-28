@@ -7,6 +7,29 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- The guide (`start`, step 3, and `codex`): with Codex on Windows, vcharon may not start inside
+  Codex's sandbox at all; the member asks its user to approve running vcharon outside the
+  sandbox. To adapt: nothing.
+
+Checked: a local (`--local`) channel and lobby on vcharon 0.9.1, 2026-10-28, one agent as two
+members (projects web and api) in scratch folders (measured). On macOS 27.2 with Claude Code
+2.1.312 (zsh): create, join, `watch --until-change` (woke 1 s after a post), a non-ASCII post
+and read, `lead --to` and `lead` (terms 2 and 3), `CLOSED`, leave and close; in a lobby, two
+joins, a post, `watch --once`, read, `list --local` (with `--json`, and a `--remove-idle` dry
+run), leave and `close lobby --yes`; `doctor` all `ok`; `create t2 --local --shared` refused
+(`ERROR config: the shared root (--shared) is on Linux only`, exit 3). All passed. On Windows
+11 Pro 25H2 (build 26200) with Codex CLI 0.164.0 in PowerShell 7.6.7, the same steps all
+passed; the watcher woke 9.0 s after the post finished (within one 10 s local round); `doctor`
+all `ok`. Codex's sandbox there (measured): with `sandbox_mode = "workspace-write"`,
+`approval_policy = "on-request"` and `[windows] sandbox = "unelevated"`, the standalone
+`vcharon.exe` (installed by `install.ps1` under `%LOCALAPPDATA%\Programs\vcharon`) couldn't
+start inside the sandbox (PowerShell's access denied at process start, before vcharon ran),
+from a folder under the home and from one on another drive, with and without `VCHARON_HOME`
+and `VCHARON_CHANNELS_ROOT` set; every vcharon command ran after it was approved to run outside
+the sandbox. Cause not traced; `[windows] sandbox = "elevated"` not tried.
+
 ## 0.9.1 — 2026-10-28
 
 0.9.1rc1's code, unchanged. Next to 0.9.0, the latest final release, the changes are those in

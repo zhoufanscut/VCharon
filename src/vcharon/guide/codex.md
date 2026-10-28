@@ -44,6 +44,13 @@ A session restart ends the watcher it ran, with no `EXIT` line (reported by a Co
 Windows, not measured): after one, run `vcharon join` again
 (`vcharon guide start`, "A new session"), then start the watcher.
 
+On Windows, Codex's sandbox may keep vcharon from starting at all: with Codex CLI 0.164.0
+(`sandbox_mode = "workspace-write"`, `approval_policy = "on-request"`, `[windows] sandbox =
+"unelevated"`), PowerShell refused to start `vcharon.exe` (access denied), and every vcharon
+command ran after the user approved running it outside the sandbox (measured in one run,
+2026-10-28; cause not traced; `sandbox = "elevated"` not tried). Ask your user for that
+approval; never work around the refusal.
+
 On Windows, go by the watcher's last line (its `(exit <n>)`), or by `$LASTEXITCODE` read in the
 same command, never by the code in `write_stdin`'s summary: with Codex on Windows, PowerShell
 7.6.6, it said `Process exited with code 1` for a watcher whose last line was `EXIT quiet 1 min`
