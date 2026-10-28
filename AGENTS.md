@@ -56,6 +56,43 @@ them on your own machine.
   ```
 
 - Tests are `unittest`, standard library only; no pytest.
+- A push that changes only docs (top-level `*.md`, `docs/`, `LICENSE`, the issue templates)
+  skips CI; `docs.yml` runs only the guards that read those files. The same check by hand:
+
+  ```sh
+  .venv/bin/python -m unittest tests.test_guide tests.test_old_name -v
+  ```
+
+## How the code fits together
+
+DESIGN.md's "Files" maps each module and marks it client, server or both; its "How a sync
+works" gives the steps. What takes several files to see:
+
+- **Two ends, one codebase.** The `vcharon` process on the client (the controller) starts the
+  system ssh and sends VCharon's own code over its stdin: `bundle.py` builds the loader and a
+  bundle of the modules `bundle.SERVER` names, `helper.py` runs them on the server and answers
+  calls, `proto.py` frames both directions. So a "both" or "server" module must run without
+  the client's code: no `__file__`, plugins listed statically in `plugins/__init__.py`
+  (DESIGN, "Rules for the code").
+- **The sync engine knows nothing about channels.** A job is a source plus a sink:
+  `plugins/path.py` builds the plan, `plugins/dir.py` applies it, and every write inside a
+  sink's root goes through `stage.Stager`. `run.py` is steps 5 to 8 for either direction; one
+  side is a local object, the other a `remote.py` proxy, and push and pull differ only in
+  which. `cli.py` holds the runner behind `vcharon sync` and `--repeat`.
+- **Channels are built on top.** A remote member's membership is a record plus a channel
+  section, `channels.d/<C>.<name>.ini`, whose two jobs are `<C>.<name>.up` and `.down`.
+  `channel_cmd.py` does list, create, join, leave and close, and works out which membership a
+  command means (DESIGN, "Which membership"); `channels.py` does the channel root's own calls,
+  in-process for `--local` and through the helper's `channel.*` calls for a remote member.
+  `charter.py` reads a channel's format and limits from `CHANNEL.md`, `entries.py` writes and
+  parses entries, `kind.py` keeps work channel and lobby apart.
+- **The mailbox verbs** (`mailbox/post.py`, `read.py`, `watch.py`) sit on the channels. A
+  remote member's watcher runs one long-lived `vcharon sync C --repeat S` child and reads its
+  rounds from stdout (DESIGN, "The watcher in a channel").
+- **Tests run the real helper without ssh**: they replace the ssh command with
+  `tests/fake_ssh.py`, which runs the bootstrap in a local Python, and set the
+  `VCHARON_TEST_*` seams (machine id, OS, clock). `VCHARON_TEST_SSH=<dest>` points the session
+  tests at a real server instead (DESIGN, "Tests").
 
 ## Never touch the user's real folders
 
