@@ -435,7 +435,8 @@ watchers' stamps (`seen/`) and the leader handoff's markers (`lead/`) beside it;
 `cache/` stays in each account's home. Later commands (`post`, `watch`, `sync`, `lead`, `leave`,
 `close`, …) take the root from the join record, with no flag. `vcharon list --server devbox` shows
 the shared root's channels as a group of their own, after the home's (`--json`: `shared`), and
-`list --remove-idle` covers both. `--local --shared` works the same way on a Linux machine.
+`list --remove-idle` covers both (`--home` or `--shared` for one). `--local --shared` works the
+same way on a Linux machine.
 
 - **Any account on the server can read, change or delete the shared channels.** VCharon makes
   every folder there mode 777 and every file 666, whatever the umask, so any member can close a

@@ -120,7 +120,8 @@ vcharon create myapp --server devbox          # make it; you lead it
 ```
 
 For your user, not you: `vcharon list --remove-idle --server devbox` lists the folders of
-members idle over 14 days, and adding `--yes` removes them (never a leader's).
+members idle over 14 days, and adding `--yes` removes them (never a leader's); `--home` or
+`--shared` limits it to one root.
 
 On the machine that holds the channel, use `--local` in place of `--server ALIAS`:
 `vcharon join myapp --local`. When your user names no place, try that first; if it says
@@ -1762,7 +1763,7 @@ to approve that join outside the sandbox; never change files under `/etc/ssh`.
 | `closing the lobby deletes every member's folder: your user's decision only` (`close`, exit 3) | only your user closes a lobby: to stop being in it, run the `fix:` line's `leave`; never add `--yes` yourself |
 | `a lobby isn't closed` (`close`, an older vcharon, exit 3) | to stop being in it, run the `fix:` line's `leave` |
 | `your folder <path> is gone` (a local member's watcher, then `EXIT closed`) | your folder was removed while the channel stays (as idle, by your user, or by hand): don't start the watcher again; tell your user (`vcharon guide end`, "The channel is gone") |
-| `--days, --yes and channel names go with --remove-idle` (`list`, exit 3) | those flags are for your user's cleanup; plain `list` takes none |
+| `--days, --yes, --home, --shared and channel names go with --remove-idle` (`list`, exit 3) | those flags are for your user's cleanup; plain `list` takes none |
 | `--all goes with a lobby's name` or `--all is for a lobby; <C> is a work channel` (`whoami`, exit 3) | `--all` lists a lobby's members not seen in 24 h: give the lobby's name, or leave `--all` out |
 | `your own folder <path> has no MEMBER.md on this machine` (`leave`) | this machine lost your folder: run the `fix:` line's `join` (a rejoin brings it back), then `leave` again |
 | `<C> holds <names> at its top, not a member's folder` | ask your user; `close` deletes nothing until it is gone |

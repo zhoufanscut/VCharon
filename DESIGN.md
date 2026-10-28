@@ -1129,8 +1129,8 @@ server.
   home root's: a second `vcharon: list  (<server>'s shared root)` line and its channels, only
   when it holds any (or a note); `--json`'s `shared` holds its `{"channels", "others"}` (null on
   a server that isn't Linux, as the hello's `shared_root` says: [hello](#hello)). A shared
-  folder that fails the checks above doesn't stop `list` (nor `list --remove-idle`): the root
-  in the home is listed as usual, then `  note:
+  folder that fails the checks above doesn't stop `list` (nor `list --remove-idle` with
+  neither `--home` nor `--shared`): the root in the home is listed as usual, then `  note:
   <server>'s shared root isn't listed: <the error's message>; fix: <its fix>`, and `--json`'s
   `shared` is `{"error": {"code", "message", "fix"}}`; the exit status is a clean list's. Why:
   a user who never uses `--shared` must still list, and the folder is another account's to
@@ -1539,10 +1539,11 @@ agent in a folder another agent shares saw nothing of the other one's.
 
 ### Removing idle members
 
-`vcharon list --remove-idle (--server ALIAS | --local) [C …] [--days N] [--yes] [--json]` is
-the user's way to remove the folders of members that don't come back: `leave` keeps a
-member's folder (its history, [Create, join, leave, close](#create-join-leave-close)), and so
-does a session that ends without one. It acts on no membership, as `list` does.
+`vcharon list --remove-idle (--server ALIAS | --local) [C …] [--days N] [--yes] [--home |
+--shared] [--json]` is the user's way to remove the folders of members that don't come back:
+`leave` keeps a member's folder (its history, [Create, join, leave,
+close](#create-join-leave-close)), and so does a session that ends without one. It acts on
+no membership, as `list` does.
 
 - **Idle**: the server's time now less the newest of the member's last-watched stamp (when it
   holds a pace: [The watcher in a channel](#the-watcher-in-a-channel)) and the change time
@@ -1580,8 +1581,8 @@ does a session that ends without one. It acts on no membership, as `list` does.
   over N days`), and none of its members is listed: a whole channel is its leader's to close.
 - **Without `--yes`** nothing changes: under each channel's line, one line per idle member,
   `remove <name>  idle <age>` or `keep <name>  idle <age>: <why>`, then `to remove them, your
-  user runs: vcharon list --remove-idle --yes <the same flags>`; `none` when nothing is idle;
-  exit 0, never a prompt.
+  user runs: vcharon list --remove-idle --yes <the same flags>` (`--home` or `--shared` too);
+  `none` when nothing is idle; exit 0, never a prompt.
 - **With `--yes`** each candidate is one `channel.prune`, which checks again at the server, by
   its clock at the call: still a real folder with no `CHANNEL.md`, still idle over the days (a
   member back since the listing is `kept`, `active again`), and the 450 rules, the run's
@@ -1602,13 +1603,17 @@ does a session that ends without one. It acts on no membership, as `list` does.
   closed` ([The watcher in a channel](#the-watcher-in-a-channel)). Its `leave` then removes
   the membership here, and a later `join` makes a new folder, whose `JOIN` the others'
   watchers print as new.
-- **`--json`**: `{"server", "days", "yes", "members", "idle_channels"}`; each member
+- **`--json`**: `{"server", "days", "yes", "root", "members", "idle_channels", "shared"}`;
+  each member
   `{"channel", "name", "idle_seconds", "action", "why", "deleted"}`: `action` `remove` or
   `keep` without `--yes`, `removed`, `kept` or `failed` with it; `why` the reason's key
   (`charter`, `own`, `items`, `budget`, `active`, `gone`, `not_member`), a failure's
   `<code>: <message>`, or null; `deleted` the count deleted, else null. `idle_channels` names
   the whole idle work channels. With a failure the object is printed, then the error (exit 1).
-  `shared`: the shared root's `{"members", "idle_channels"}` the same way, or null.
+  `shared`: the shared root's `{"members", "idle_channels"}` the same way, or null. `root`:
+  `home` or `shared` for that flag, `both` for neither (the shared root too where there is
+  one; `shared` is null where there is none); with `--shared`, `members` and
+  `idle_channels` are null; with `--home`, `shared` is.
 - **Both roots**: on a Linux server (or machine, with `--local`) it covers the shared root's
   channels too, as `list` shows them: the lines above for each root, each after its own first
   line (the shared one's `(<server>'s shared root)`, printed whenever `list` shows that
@@ -1616,9 +1621,18 @@ does a session that ends without one. It acts on no membership, as `list` does.
   `to remove them` line; a channel named must be in either. A shared folder
   that fails its checks is a note line and `shared`: `{"error"}`, as in `list` ([The shared
   root](#the-shared-root)). Why: any member's
-  user cleans up a shared channel ([The shared root](#the-shared-root)), and the root comes
-  from the listing, as for `list`, not from a flag.
-- `--days`, `--yes` or a channel name without `--remove-idle` is a usage error (exit 3).
+  user cleans up a shared channel ([The shared root](#the-shared-root)), and with neither
+  `--home` nor `--shared` the roots come from the listing, as for `list`.
+- **One root**: `--home` covers the root in the home alone, and the shared root isn't read at
+  all (no note either); `--shared` the shared root alone, its group always printed (`none`
+  when nothing is idle, even with no channel there). A channel named is looked up in that root
+  only. With `--shared`, a server (or machine) that can't hold a shared root is refused as
+  `create --shared` is there (`config`, exit 3, `the shared root (--shared) is on Linux
+  only`), and a shared folder that fails its checks is the command's error, not a note: the
+  user asked for that root. Why: a name can be in both roots (a lobby in each), so without
+  them the shared one can't be cleaned alone.
+- `--days`, `--yes`, `--home`, `--shared` or a channel name without `--remove-idle` is a usage
+  error (exit 3); `--home` and `--shared` together are one too.
 - Why a flag of `list` and not a verb: it decides from the listing and acts on no membership,
   as `list` does. Why the user's only: it deletes other members' folders ([Trust and
   access](#trust-and-access)).
@@ -2664,7 +2678,7 @@ Set up (once per machine)
 
 Channels
   vcharon list   (--server ALIAS | --local) [--json] [--project P] [--role R]
-                 [--remove-idle [C ...] [--days N] [--yes]]
+                 [--remove-idle [C ...] [--days N] [--yes] [--home | --shared]]
   vcharon create C (--server ALIAS | --local) [--shared] [--project P] [--role R] [--agent A]
                  [--max-mb N] [--max-files N] [--max-entry-kb N]
   vcharon join   C (--server ALIAS | --local) [--shared] [--project P] [--role R] [--agent A]
@@ -3340,9 +3354,10 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     "strays", "format", "limits"}` (`leader` and `term` by the charters' terms, null for none
     or a tie; `leaders` every folder holding a `CHANNEL.md`, a former leader's too), `member_info` each `{"name", "box", "os", "agent", "project", "idle_seconds"}`,
     `limits` `{"max_mb", "max_files", "max_entry_kb"}`; each of `others` `{"name", "why"}`.
-  - `list --remove-idle`: `{"server", "days", "yes", "members", "idle_channels", "shared"}`
-    (`shared`: the shared root's `{"members", "idle_channels"}`, null, or `{"error"}` as in
-    `list`), each member
+  - `list --remove-idle`: `{"server", "days", "yes", "root", "members", "idle_channels",
+    "shared"}` (`root`: `home` or `shared` for that flag, `both` for neither; `shared`: the shared root's `{"members",
+    "idle_channels"}`, null, or `{"error"}` as in `list`; with `--shared`, `members` and
+    `idle_channels` are null, with `--home`, `shared` is), each member
     `{"channel", "name", "idle_seconds", "action", "why", "deleted"}` ([Removing idle
     members](#removing-idle-members)).
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "term", "founder", "leads",

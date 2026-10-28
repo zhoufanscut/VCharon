@@ -7,6 +7,16 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `vcharon list --remove-idle` takes `--home` or `--shared` to cover one root only: a name in
+  both (the lobby) can be cleaned in one. `--shared` is refused where there can be no shared
+  root, and a shared folder that fails its checks is then the command's error. The `to remove
+  them` line repeats the flag; `--json` gets `root` (`both`, `home` or `shared`). Plain `list`
+  refuses both flags, as it does `--days`. To adapt: nothing; without the new flags the output
+  is unchanged but for `--json`'s new `root` key; `members` and `idle_channels` are null only
+  with `--shared`, and `shared` with `--home` (or as before).
+
 ## 0.9.0 — 2026-10-26
 
 0.9.0rc1's code, with the one change below from its live round. Next to 0.8.6, the latest final

@@ -208,6 +208,11 @@ def _parser():
                      % (channels.IDLE_DAYS, channels.IDLE_DAYS_MAX))
     one.add_argument("--yes", action="store_true", help="with --remove-idle: remove them; "
                      "without it nothing changes")
+    root = one.add_mutually_exclusive_group()
+    root.add_argument("--home", action="store_true", help="with --remove-idle: only the "
+                      "channel root in the home folder (default: both roots)")
+    root.add_argument("--shared", action="store_true", help="with --remove-idle: only the "
+                      "server's shared root (/var/tmp/vcharon, Linux only)")
     ignored(one)
     def agent(one):
         one.add_argument("--agent", choices=platform.AGENTS, help="the agent you are, for "

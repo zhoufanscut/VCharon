@@ -159,6 +159,10 @@ class SharedRootTest(SharedCase):
             self.assertEqual(lines[1:], ["  none", note])
             doc = json.loads(self.ok("list", "--remove-idle", *where, "--json"))
             self.assertEqual(doc["shared"]["error"]["message"], problem)
+            self.assertEqual(self.ok("list", "--remove-idle", *where, "--home").splitlines()[1:],
+                             ["  none"])
+            self.assertEqual(self.refusal("list", "--remove-idle", *where, "--shared"), (
+                "ERROR unsafe_dir: " + problem, channels.SHARED_MODE_FIX % self.top))
         os.chmod(self.top, 0o777)
         os.mkdir(os.path.join(self.top, "seen"), 0o700)
         os.chmod(os.path.join(self.top, "seen"), 0o700)
@@ -297,6 +301,79 @@ class SharedMoreTest(SharedCase):
                          [("linux-web", "removed")])
         self.assertEqual(sorted(os.listdir(os.path.join(self.shared, "game"))), ["laptop-ui"])
 
+    def lobbies(self):
+        """A lobby in each root, every member idle 20 days by the server's clock: laptop-ui
+        founds the home's, linux-web joins it; laptop-ui-b and linux-web-b in the shared one
+        (a name's record is of one root)."""
+        for where, role in ((("--local",), ()), (("--local", "--shared"), ("--role", "b"))):
+            self.use_box("laptop")
+            self.ok("join", "lobby", *where, "--project", "ui", *role)
+            self.use_box("linux")
+            self.ok("join", "lobby", *where, *role)
+        self.use_box("mac")
+        self.idle_setup()
+
+    def test_remove_idle_of_one_root(self):
+        # the lobby is in both roots: --home or --shared lists and removes in that root alone
+        self.lobbies()
+        charter = channel_cmd.KEPT_TEXT[channels.KEPT_CHARTER]
+        group = ["  lobby", "    keep  laptop-ui%s  idle 20 d: " + charter,
+                 "    remove  linux-web%s  idle 20 d"]
+        home = [line.replace("%s", "") for line in group]
+        shared = [line.replace("%s", "-b") for line in group]
+        self.assertEqual(self.ok("list", "--remove-idle", "--local", "--home").splitlines(), [
+            "vcharon: list --remove-idle  (this machine)  members idle over 14 days", *home,
+            platform.runnable("  to remove them, your user runs: vcharon list --remove-idle "
+                              "--yes --local --home")])
+        self.assertEqual(self.ok("list", "--remove-idle", "--local", "--shared", "--days", "3",
+                                 "lobby").splitlines(), [
+            "vcharon: list --remove-idle  (this machine's shared root)  members idle over 3 "
+            "days", *shared,
+            platform.runnable("  to remove them, your user runs: vcharon list --remove-idle "
+                              "--yes --local --shared --days 3 lobby")])
+        # a channel named is looked up in that root only
+        self.ok("create", "home", "--local")
+        self.assertEqual(self.refused("list", "--remove-idle", "--local", "--shared", "home"),
+                         "ERROR not_found: there is no channel home")
+        self.ok("list", "--remove-idle", "--local", "--home", "home")
+        lines = self.ok("list", "--remove-idle", "--local", "--home", "--yes").splitlines()
+        self.assertEqual(lines[0], "vcharon: list --remove-idle  (this machine)  members idle "
+                                   "over 14 days")
+        self.assertRegex(lines[3], r"\A    removed  linux-web  idle 20 d: ")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "lobby"))), ["laptop-ui"])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.shared, "lobby"))),
+                         ["laptop-ui-b", "linux-web-b"])
+        self.ok("list", "--remove-idle", "--local", "--shared", "--yes")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.shared, "lobby"))),
+                         ["laptop-ui-b"])
+
+    def test_remove_idle_of_one_root_json(self):
+        self.lobbies()
+        doc = json.loads(self.ok("list", "--remove-idle", "--local", "--json"))
+        self.assertEqual(doc["root"], "both")
+        self.assertEqual([m["name"] for m in doc["members"]], ["laptop-ui", "linux-web"])
+        self.assertEqual([m["name"] for m in doc["shared"]["members"]],
+                         ["laptop-ui-b", "linux-web-b"])
+        doc = json.loads(self.ok("list", "--remove-idle", "--local", "--home", "--json"))
+        self.assertEqual((doc["root"], doc["shared"]), ("home", None))
+        self.assertEqual([m["name"] for m in doc["members"]], ["laptop-ui", "linux-web"])
+        doc = json.loads(self.ok("list", "--remove-idle", "--local", "--shared", "--yes",
+                                 "--json"))
+        self.assertEqual((doc["root"], doc["members"], doc["idle_channels"]),
+                         ("shared", None, None))
+        self.assertEqual([(m["name"], m["action"]) for m in doc["shared"]["members"]],
+                         [("laptop-ui-b", "kept"), ("linux-web-b", "removed")])
+        self.assertEqual(doc["shared"]["idle_channels"], [])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "lobby"))),
+                         ["laptop-ui", "linux-web"])
+
+    def test_remove_idle_shared_with_nothing_there(self):
+        # --shared prints its group even when the shared root holds no channel
+        self.ok("create", "home", "--local")
+        self.assertEqual(self.ok("list", "--remove-idle", "--local", "--shared").splitlines(), [
+            "vcharon: list --remove-idle  (this machine's shared root)  members idle over 14 "
+            "days", "  none"])
+
     def test_a_record_of_the_other_root_isnt_this_machines_own(self):
         # mac-web holds a record of game in the home's root; game in the shared root has a
         # mac-web of another box: that one is no membership of this machine's
@@ -375,6 +452,11 @@ class NotLinuxTest(SharedCase):
             self.assertEqual(self.ok("list", "--local").splitlines(),
                              ["vcharon: list  (this machine)", "  no channels"])
             self.assertIsNone(json.loads(self.ok("list", "--local", "--json"))["shared"])
+            # list --remove-idle --shared is refused as create --shared is
+            self.assertEqual(self.refusal("list", "--remove-idle", "--local", "--shared",
+                                          code=3),
+                             ("ERROR config: " + channels.SHARED_NOT_LINUX,
+                              channels.SHARED_NOT_LINUX_FIX))
         self.assertFalse(os.path.exists(self.top))
         self.assertEqual(platform.os_name() == "linux", fsops.LINUX)
 
@@ -400,4 +482,8 @@ class NotLinuxTest(SharedCase):
             doc = json.loads(self.ok("list", "--server", "fake-dest", "--remove-idle",
                                      "--json"))
             self.assertIsNone(doc["shared"])
+            self.assertEqual(self.refusal("list", "--server", "fake-dest", "--remove-idle",
+                                          "--shared", code=3),
+                             ("ERROR config: " + channels.SHARED_NOT_LINUX,
+                              channels.SHARED_NOT_LINUX_FIX))
         self.assertFalse(os.path.exists(self.top))

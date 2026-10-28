@@ -336,10 +336,10 @@ class RemoveIdleTest(ChannelCase):
         # a shared root of this test's own: the suite's may hold another test's channels
         os.environ["VCHARON_SHARED_ROOT"] = os.path.realpath(os.path.join(self.tmp, "shared"))
         doc = json.loads("\n".join(self.lines("--local", "--json", "--days", "19")))
-        self.assertEqual(sorted(doc), ["days", "idle_channels", "members", "server", "shared",
-                                       "yes"])
-        self.assertEqual((doc["server"], doc["days"], doc["yes"], doc["idle_channels"]),
-                         (None, 19, False, []))
+        self.assertEqual(sorted(doc), ["days", "idle_channels", "members", "root", "server",
+                                       "shared", "yes"])
+        self.assertEqual((doc["server"], doc["days"], doc["yes"], doc["root"],
+                          doc["idle_channels"]), (None, 19, False, "both", []))
         # this machine's shared root, with nothing in it (on Linux; none elsewhere)
         self.assertEqual(doc["shared"], {"members": [], "idle_channels": []} if fsops.LINUX
                          else None)
@@ -365,11 +365,16 @@ class RemoveIdleTest(ChannelCase):
                 line = self.refused("list", "--remove-idle", "--local", "--days", days, code=3)
                 self.assertIn("--days: must be a whole number of days, 1 to 3650", line)
         # their flags without --remove-idle
-        for extra in (("--days", "3"), ("--yes",), ("game",)):
+        for extra in (("--days", "3"), ("--yes",), ("game",), ("--home",), ("--shared",)):
             with self.subTest(extra=extra):
                 self.assertEqual(self.refusal("list", "--local", *extra, code=3), (
-                    "ERROR config: --days, --yes and channel names go with --remove-idle",
-                    platform.runnable("vcharon list --help")))
+                    "ERROR config: --days, --yes, --home, --shared and channel names go with "
+                    "--remove-idle", platform.runnable("vcharon list --help")))
+        # one root or the other, not both
+        self.assertEqual(self.refusal("list", "--remove-idle", "--local", "--home", "--shared",
+                                      code=3),
+                         ("ERROR config: argument --shared: not allowed with argument --home",
+                          platform.runnable("vcharon list --help")))
 
     def test_one_day_is_singular(self):
         self.assertEqual(self.lines("--local", "--days", "1")[0],

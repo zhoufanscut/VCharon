@@ -855,7 +855,7 @@ def _server(args, cfg, log, stack, shared=False):
 
 def _where_flag(server, join=False):
     """--local or --server ALIAS; for a join's command, --shared after it for a shared root
-    (list takes no --shared: it shows both roots)."""
+    (list's --shared, only with --remove-idle, is that command's to add)."""
     flag = "--local" if server.ssh is None else "--server %s" % server.ssh
     return flag + " --shared" if join and server.shared else flag
 
@@ -953,9 +953,10 @@ def main(args, run):
 
 def _list(args, cfg, log, say):
     """vcharon list; with --json one object (list_json). With --remove-idle, _remove_idle."""
-    if not args.remove_idle and (args.days is not None or args.yes or args.channels):
-        raise VCharonError("config", "--days, --yes and channel names go with --remove-idle",
-                           hint="vcharon list --help")
+    if not args.remove_idle and (args.days is not None or args.yes or args.channels
+                                 or args.home or args.shared):
+        raise VCharonError("config", "--days, --yes, --home, --shared and channel names go "
+                           "with --remove-idle", hint="vcharon list --help")
     if args.remove_idle:
         for channel in args.channels:
             check_channel(channel)
@@ -991,9 +992,10 @@ def _list(args, cfg, log, say):
 def _shared_listing(server):
     """(server's shared root, its listing, None); (None, None, None) on a server that can't
     have one (not Linux, as its helper says); (None, None, the error) when the shared folder
-    fails its checks (channels.shared_root): list and list --remove-idle show the root in the
-    home as usual and name the problem, since a user who never uses --shared must still list
-    (DESIGN, "The shared root"). Any other error stops the command."""
+    fails its checks (channels.shared_root): list and list --remove-idle (with neither --home
+    nor --shared) show the root in the home as usual and name the problem, since a user who
+    never uses --shared must still list (DESIGN, "The shared root"). Any other error stops the
+    command."""
     if not server.has_shared():
         return None, None, None
     try:
@@ -1311,12 +1313,25 @@ def _remove_idle(args, cfg, log, say):
     first failure is raised at the end (exit 1), after the lines or the --json object. On a
     Linux server the shared root's members too, as a group of their own, as list shows them
     (--json's "shared": {"members", "idle_channels"}, or null; a shared folder that fails its
-    checks is a note, and "shared": {"error"}, as in list: _shared_listing)."""
+    checks is a note, and "shared": {"error"}, as in list: _shared_listing). --home: the
+    root in the home alone, the shared root never read; --shared: the shared root alone, its
+    group always printed, refused where there can be none, and a shared folder that fails its
+    checks is the command's error: the user asked for that root."""
     days = args.days if args.days is not None else channels.IDLE_DAYS
     with contextlib.ExitStack() as stack:
         server = _server(args, cfg, log, stack)
-        twin, shared, problem = _shared_listing(server)
-        listings = [(server, server.list())] + ([(twin, shared)] if twin is not None else [])
+        twin = shared = problem = None
+        if args.shared:
+            if not server.has_shared():
+                raise VCharonError("config", channels.SHARED_NOT_LINUX,
+                                   channels.SHARED_NOT_LINUX_FIX)
+            twin = server.shared_root()
+            listings = [(twin, twin.list())]
+        else:
+            if not args.home:
+                twin, shared, problem = _shared_listing(server)
+            listings = ([(server, server.list())]
+                        + ([(twin, shared)] if twin is not None else []))
         for channel in args.channels:
             if all(_find(listing, channel, one.where) is None for one, listing in listings):
                 raise channels.no_channel(channel)
@@ -1331,8 +1346,12 @@ def _remove_idle(args, cfg, log, say):
             groups.append((one, plan, whole, listing))
     if args.json:
         doc = {"server": server.ssh, "days": days, "yes": bool(args.yes),
+               "root": "shared" if args.shared else "home" if args.home else "both",
                "members": groups[0][1], "idle_channels": groups[0][2], "shared": None}
-        if len(groups) > 1:
+        if args.shared:
+            doc["members"] = doc["idle_channels"] = None
+            doc["shared"] = {"members": groups[0][1], "idle_channels": groups[0][2]}
+        elif len(groups) > 1:
             doc["shared"] = {"members": groups[1][1], "idle_channels": groups[1][2]}
         if problem is not None:
             doc["shared"] = {"error": _error_json(problem)}
@@ -1341,13 +1360,15 @@ def _remove_idle(args, cfg, log, say):
     else:
         for i, (one, plan, whole, listing) in enumerate(groups):
             # the shared root's group whenever list shows it (_list), so its "none" says
-            # that root was checked too
+            # that root was checked too; with --shared it is the only group
             if i == 0 or listing["channels"] or listing["others"]:
                 _say_idle(one, plan, whole, days, say)
         if problem is not None:
             say(_shared_note(server, problem))
         if not args.yes and any(m["action"] == "remove" for g in groups for m in g[1]):
             flags_ = [_where_flag(server)]
+            if args.home or args.shared:
+                flags_.append("--home" if args.home else "--shared")
             if args.days is not None:
                 flags_.append("--days %d" % days)
             flags_ += args.channels
