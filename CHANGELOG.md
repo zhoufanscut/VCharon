@@ -7,6 +7,24 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## 0.9.1 — 2026-10-28
+
+0.9.1rc1's code, unchanged. Next to 0.9.0, the latest final release, the changes are those in
+0.9.1rc1's entry. `vcharon --update` on 0.9.0 or on 0.9.1rc1 offers it. Nothing to do when
+updating.
+
+Checked: the unit suite on Linux (measured, Python 3.13, on 0.9.1rc1's code: 1837 tests OK, 13
+skipped, run as CI). A live round on 0.9.1rc1 on 2026-10-28 (measured), with a Debian 13 server
+and two of its accounts: the leader remote over ssh as one account from a Linux box, two local
+headless Claude Code 2.1.312 members (`claude -p`) on the other account, all in the shared
+root. `doctor` from the Linux box with `--server` gave `ok shared … 1 channel` (in `--json`
+too), and the members' local `doctor` gave `ok shared … 2 channels`; `list --remove-idle` with
+`--home`, `--shared` and neither showed the groups for each (dry runs only: nothing in the
+shared root was idle); after `lead --to` moved the lead to one member, the other posted its two
+unanswered reports again to the new leader within 11 s, each with `--re` the original; the lead
+came back (term 3), both members left within 10 s of `CLOSED`, and the close exit 0 left the
+shared root with the lobby only. Not run on this build: macOS and Windows clients.
+
 ## 0.9.1rc1 — 2026-10-28
 
 The first release candidate for 0.9.1, a GitHub pre-release: `vcharon --update --rc` on 0.9.0

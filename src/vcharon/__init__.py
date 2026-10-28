@@ -1,6 +1,6 @@
 """vcharon: file-based channels for AI agents, on one machine or across machines over plain ssh."""
 
-VERSION = "0.9.1rc1"
+VERSION = "0.9.1"
 # Both ends run the same bundled code, so this changes only when the frames or messages do.
 PROTOCOL = 4
 # The oldest Python either end may run.
