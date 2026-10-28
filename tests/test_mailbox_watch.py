@@ -4173,7 +4173,41 @@ class OnceRemoteTest(WatchCase):
         self.assertEqual(ran, [(60, True, watch.TERM_WAIT, "run 30")])
         self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_ERROR, [
             "ERROR vcharon sync of mb.windows didn't finish within 60 s",
-            "  fix: " + platform.runnable(watch.SYNC_TIMEOUT_FIX), "EXIT error (exit 11)"]))
+            "  fix: " + self.once_fix(watch.ONCE_TIMEOUT_FIX), "EXIT error (exit 11)"]))
+
+    def once_fix(self, fix):
+        return platform.runnable(fix % (self.sync_args[0], " ".join(self.sync_args[1:])))
+
+    def test_no_retry_comes_after_a_check(self):
+        # one round and the end: its fix line asks for the next check, never a round to come
+        self.assertEqual(self.sync_args[0], "mb")
+        for fails, error, fix in (
+                ({"return_value": fsops.Ran(None, b"", b"")},
+                 "ERROR vcharon sync of mb.windows didn't finish within 60 s",
+                 "the check ended it (on POSIX its whole process group); nothing tries again "
+                 "by itself: run /opt/vc/bin/vcharon watch mb --once %s again after your next "
+                 "step. If it happens again, run /opt/vc/bin/vcharon doctor (it checks the "
+                 "servers of your channels)"),
+                ({"side_effect": FileNotFoundError(2, "No such file or directory")},
+                 "ERROR couldn't start vcharon: No such file or directory",
+                 "nothing tries again by itself (a start can fail while the system is short "
+                 "of processes, open files or memory): run /opt/vc/bin/vcharon watch mb --once "
+                 "%s again after your next step. If it keeps failing, run /opt/vc/bin/vcharon "
+                 "doctor (it runs this same install): if that can't start either, the install "
+                 "was moved or removed; ask your user to install it again")):
+            with self.subTest(error=error):
+                self.baseline()
+                lines = []
+                with mock.patch.object(watch.fsops, "run", **fails), \
+                        mock.patch.object(platform, "self_command",
+                                          return_value="/opt/vc/bin/vcharon"):
+                    code = watch.watch_job("mb.windows", self.sync_args, 30, out=lines.append,
+                                           sleep=never, once=True, spawn=self.no_spawn)
+                # the next case starts with a baseline of its own
+                os.remove(self.state("windows", "mb.windows"))
+                self.assertEqual((code, self.said(lines)[1:]), (watch.EXIT_ERROR, [
+                    error, "  fix: " + fix % " ".join(self.sync_args[1:]),
+                    "EXIT error (exit 11)"]))
 
 
 class FirstLookTest(WatchCase):

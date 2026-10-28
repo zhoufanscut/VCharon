@@ -983,6 +983,10 @@ HINTS = {
          "then a close; how: vcharon guide end", ("game",)),
         # vcharon lead's: an offer's checks, the taker's last line
         ("check its name: vcharon list %s", ("--server dev",)),
+        # the server's fix lines that point at list (LIST_FIXES), as the client words them
+        ("check the name: vcharon list %s", ("--server dev",)),
+        ("delete it by hand; until then it shows in: vcharon list %s", ("--local",)),
+        ("check it: vcharon list %s ; then run the close again", ("--server dev",)),
         ("check the name: vcharon whoami %s %s", ("game", FLAGS)),
         ("  next: tell your user you lead %s now (term %d); then start your watcher again "
          "(vcharon guide lead): vcharon watch %s --until-change %s", ("game", 2, "game", FLAGS)),
@@ -1156,6 +1160,15 @@ HINTS = {
          "short of processes, open files or memory). If it keeps failing, run vcharon doctor "
          "(it runs this same install): if that can't start either, the install was moved or "
          "removed; ask your user to install it again", ()),
+        # the same two of a --once check, which tries again only when the agent checks again
+        ("the check ended it (on POSIX its whole process group); nothing tries again by "
+         "itself: run vcharon watch %s --once %s again after your next step. If it happens "
+         "again, run vcharon doctor (it checks the servers of your channels)", ("game", FLAGS)),
+        ("nothing tries again by itself (a start can fail while the system is short of "
+         "processes, open files or memory): run vcharon watch %s --once %s again after your "
+         "next step. If it keeps failing, run vcharon doctor (it runs this same install): if "
+         "that can't start either, the install was moved or removed; ask your user to install "
+         "it again", ("game", FLAGS)),
         ("%s isn't there: your folder in the channel holds it, once vcharon join --local has "
          "written it", None),
         # a --once check's: a busy sync

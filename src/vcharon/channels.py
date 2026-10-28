@@ -252,9 +252,17 @@ def _is_file(handle, name):
     return st is not None and fsops.kind(st) == fsops.FILE
 
 
+# fix lines that point at list's output: the helper never knows the alias it was reached
+# by, so it can't name list's flags; the client puts the command in their place
+# (channel_cmd.LIST_FIXES), and these texts are left only for a direct caller of these
+# functions
+NO_CHANNEL_FIX = "check the name against vcharon list's output"
+DELETE_LEFT_FIX = "delete it by hand; vcharon list's output notes it"
+VANISHED_FIX = "check it in vcharon list's output, then close again"
+
+
 def no_channel(channel):
-    return VCharonError("not_found", "there is no channel %s" % channel,
-                        "check the name against vcharon list's output")
+    return VCharonError("not_found", "there is no channel %s" % channel, NO_CHANNEL_FIX)
 
 
 def _close_all(*handles):
@@ -704,8 +712,7 @@ def remove(root, channel, name, tick=_no_tick, lobby=False):
         except (OSError, VCharonError) as e:
             err = _not_gone(e, os.path.join(root, closed))
             raise VCharonError(err.code, "%s is closed, but deleting %s failed: %s"
-                               % (channel, closed, err.message),
-                               "delete it by hand; vcharon list's output notes it")
+                               % (channel, closed, err.message), DELETE_LEFT_FIX)
     except OSError as e:
         raise _not_gone(e, os.path.join(root, channel))
     finally:
@@ -756,7 +763,7 @@ def _not_gone(e, path):
     err = fsops.error(e, path) if isinstance(e, OSError) else e
     if err.code == "not_found":
         return VCharonError("vanished", "%s went away while the channel was checked or closed"
-                            % path, "check it in vcharon list's output, then close again")
+                            % path, VANISHED_FIX)
     return err
 
 
@@ -844,7 +851,7 @@ def prune(root, channel, name, days, budget=PRUNE_MAX_ITEMS, tick=_no_tick, now=
             err = fsops.error(e, os.path.join(root, removed)) if isinstance(e, OSError) else e
             raise VCharonError(err.code, "%s/%s is removed, but deleting %s failed: %s"
                                % (channel, name, removed, err.message),
-                               "delete it by hand; vcharon list's output notes it") from None
+                               DELETE_LEFT_FIX) from None
     except OSError as e:
         raise fsops.error(e, os.path.join(path, name)) from None
     finally:

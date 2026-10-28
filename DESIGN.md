@@ -2526,13 +2526,17 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 - **A sync that didn't finish, or couldn't start.** Past its timeout (900 s, a `--once`
   check's 60 s; a streaming child with no round for 900 s plus `--every`) the watcher ends the
   sync itself (its process group on POSIX) and says `ERROR vcharon sync of <C>.<name> didn't
-  finish within <n> s`, with a `fix:` saying so, that the next round or check syncs again, and
-  to run `vcharon doctor` (it checks the servers of the channels) if it happens again. A child
-  that can't be started gives `ERROR couldn't start vcharon: <the OS's message>`, its `fix:`
-  saying that the next round or check tries again by itself (a start can fail while the system
-  is short of processes, open files or memory), and, if it keeps failing, to run `vcharon
+  finish within <n> s`, with a `fix:` saying so, that the next round (or one-minute check) syncs
+  again, and to run `vcharon doctor` (it checks the servers of the channels) if it happens
+  again. A child that can't be started gives `ERROR couldn't start vcharon: <the OS's
+  message>`, its `fix:` saying that the next round (or one-minute check) tries again by itself
+  (a start can fail while the system is short of processes, open files or memory), and, if it
+  keeps failing, to run `vcharon
   doctor`, which runs this same install: if that can't start either, the install was moved or
-  removed. Both fixes are spelled as this install runs vcharon. Neither
+  removed. A `--once` check runs one round and exits, so nothing tries again by itself: its
+  two fixes say so and name `vcharon watch C --once <flags> again after your next step` in
+  place of the next round, the `doctor` part as above. Both fixes are spelled as this install
+  runs vcharon. Neither
   line has an error code: the watcher's own lines about its child have none, `error_key` counts
   both as the connection's by their text, and an agent matches an `ERROR` line on its start
   ([Stable](#stable)).
@@ -2972,6 +2976,14 @@ line of text>` for the agent or its user.
   sandbox refuses with these on a folder that is fine (Codex CLI 0.160.0 on Linux: `Read-only
   file system`; macOS's sandbox is expected to give `Operation not permitted`, not checked),
   allowing the folders is the user's step, and the fix points at the list they need.
+- A server's fix line that points at `list` (no such channel, a closed or removed folder left
+  undeleted, a folder gone during a close) is the client's to word: the helper never knows the
+  alias it was reached by, so it sends a plain text (`channels.NO_CHANNEL_FIX` and the two
+  beside it), and the client, at each server call (`_Remote._call`, `_Local._call`) and in
+  `list --remove-idle`'s own unknown-channel check, puts the command in its place, `vcharon
+  list --server ALIAS` or `vcharon list --local` (`channel_cmd.LIST_FIXES`). Why:
+  `vcharon list` alone doesn't run, and `list's output` is never rewritten into this install's
+  spelling.
 - The tests parse every command-form fix line back with the command line's own parser.
 
 ### Running watchers

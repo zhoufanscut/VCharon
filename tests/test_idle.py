@@ -17,7 +17,7 @@ from vcharon import channel_cmd, channels, cli, fsops, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
-from tests.test_channel import ChannelCase
+from tests.test_channel import NO_READ_ONLY, SPELLED, ChannelCase, read_only
 from tests.test_lead import charter_text
 from tests.test_mailbox_watch import member_md
 from tests.util import CAN_SYMLINK, read_tree, write_tree
@@ -402,10 +402,11 @@ class RemoveIdleTest(ChannelCase):
         self.assertNotIn("  game", only)
         self.assertTrue(only[-1].endswith("--remove-idle --yes --local docs"), only)
         before = read_tree(self.root)
-        self.assertEqual(self.refusal("list", "--remove-idle", "--local", "--yes", "docs",
-                                      "nope"),
-                         ("ERROR not_found: there is no channel nope",
-                          "check the name against vcharon list's output"))
+        with mock.patch.object(platform, "self_command", lambda *a, **kw: SPELLED):
+            self.assertEqual(self.refusal("list", "--remove-idle", "--local", "--yes", "docs",
+                                          "nope"),
+                             ("ERROR not_found: there is no channel nope",
+                              "check the name: %s list --local" % SPELLED))
         self.assertEqual(read_tree(self.root), before)
 
     def test_a_charter_holder_and_a_whole_idle_channel(self):
@@ -498,6 +499,14 @@ class RemoveIdleTest(ChannelCase):
         self.assertIn("ERROR permission: game/linux-web is removed, but deleting ", err)
         notes = [l for l in self.ok("list", "--local").splitlines() if "removed as idle" in l]
         self.assertEqual(len(notes), 1, notes)
+
+    def test_a_failed_removal_names_list_s_command(self):
+        with mock.patch.object(fsops, "remove_tree",
+                               side_effect=OSError(13, "Permission denied")), \
+                mock.patch.object(platform, "self_command", lambda *a, **kw: SPELLED):
+            fix = self.refusal("list", "--remove-idle", "--local", "--yes")[1]
+        self.assertEqual(fix, "delete it by hand; until then it shows in: %s list --local"
+                         % SPELLED)
 
 
 class RemoveIdleRemoteTest(ChannelCase):
@@ -600,6 +609,19 @@ class RemoveIdleRemoteTest(ChannelCase):
         os.environ["VCHARON_TEST_CLOCK_SHIFT"] = str(SHIFT)
         lines = self.ok("list", "--remove-idle", "--server", "fake-dest", "--yes").splitlines()
         self.assertRegex(lines[2], r"\A    removed  win-web  idle 20 d: ")
+
+    @unittest.skipIf(NO_READ_ONLY, "a read-only folder: POSIX, not as root")
+    def test_a_failed_removal_names_list_s_command(self):
+        leader = self.remote_members("linux")
+        read_only(self, os.path.join(self.root, "game", "linux-web"))
+        os.environ["VCHARON_TEST_CLOCK_SHIFT"] = str(SHIFT)
+        channels.stamp_seen(self.root, "game", leader, "run 30", now=time.time() + SHIFT)
+        with mock.patch.object(platform, "self_command", lambda *a, **kw: SPELLED):
+            error, fix = self.refusal("list", "--remove-idle", "--server", "fake-dest", "--yes")
+        self.assertTrue(error.startswith("ERROR permission: game/linux-web is removed, but "),
+                        error)
+        self.assertEqual(fix, "delete it by hand; until then it shows in: %s list --server "
+                         "fake-dest" % SPELLED)
 
     def test_the_server_checks_the_days_again(self):
         # listed 40 days idle (an old listing), 20 days by the server's clock at the call: with

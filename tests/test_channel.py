@@ -2302,6 +2302,106 @@ class LeaveCloseTest(ChannelCase):
         self.assertEqual(lines[2], platform.runnable(channel_cmd.CLOSE_UNTOLD_NOTE % "docs"))
 
 
+# a spelling of vcharon that runnable() has to write, so a fix line that it skips shows
+SPELLED = "/opt/vc/bin/vcharon"
+
+
+def read_only(test, folder):
+    """folder/sub/f with sub read-only, so a delete of folder fails at f; writable again at
+    the cleanup, for the test's own removal."""
+    sub = os.path.join(folder, "sub")
+    write_tree(sub, {"f": b"x"})
+    os.chmod(sub, 0o555)
+
+    def writable():
+        for dirpath, dirnames, _ in os.walk(test.root):
+            for n in dirnames:
+                os.chmod(os.path.join(dirpath, n), 0o755)
+
+    test.addCleanup(writable)
+
+
+NO_READ_ONLY = os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0)
+
+
+class ListFixTest(ChannelCase):
+    """The server's fix lines that point at list's output name list's command for that root,
+    as the client knows it: --server ALIAS, or --local."""
+
+    def setUp(self):
+        ChannelCase.setUp(self)
+        patcher = mock.patch.object(platform, "self_command", lambda *a, **kw: SPELLED)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fix(self, *argv):
+        got, out, err = self.channel(*argv)
+        self.assertEqual(got, 1, out + err)
+        return [l[len("  fix: "):] for l in err.splitlines() if l.startswith("  fix: ")]
+
+    def test_a_failed_delete_at_close(self):
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.use_box("linux")
+        with mock.patch.object(channels.fsops, "remove_tree",
+                               side_effect=OSError(13, "Permission denied")):
+            fixes = self.fix("close", "docs", "--project", "d")
+        self.assertEqual(fixes, ["delete it by hand; until then it shows in: %s list --local"
+                                 % SPELLED])
+
+    @unittest.skipIf(NO_READ_ONLY, "a read-only folder: POSIX, not as root")
+    def test_a_failed_delete_at_close_over_ssh(self):
+        self.lead()
+        read_only(self, os.path.join(self.root, "game", "laptop-ui"))
+        self.use_box("laptop")
+        fixes = self.fix("close", "game", "--project", "ui")
+        self.assertEqual(fixes, ["delete it by hand; until then it shows in: %s list --server "
+                                 "fake-dest" % SPELLED])
+
+    def test_a_folder_gone_during_the_close(self):
+        self.lead("docs", where=("--local",), box="linux", project="d")
+        self.use_box("linux")
+        with mock.patch.object(channels, "_check_leader",
+                               side_effect=FileNotFoundError(errno.ENOENT, "gone")):
+            fixes = self.fix("close", "docs", "--project", "d")
+        self.assertEqual(fixes, ["check it: %s list --local ; then run the close again"
+                                 % SPELLED])
+
+    def test_each_server_call_names_the_root(self):
+        # the helper's errors, as Session.call raises them, and this machine's own
+        texts = {channels.NO_CHANNEL_FIX: "check the name: vcharon list %s",
+                 channels.DELETE_LEFT_FIX: "delete it by hand; until then it shows in: "
+                                           "vcharon list %s",
+                 channels.VANISHED_FIX: "check it: vcharon list %s ; then run the close again",
+                 "ask the user": "ask the user"}
+        for sent, want in texts.items():
+            def call(fn, args, sent=sent):
+                raise VCharonError("not_found", "x", sent)
+
+            session = mock.Mock(call=call)
+            remote = channel_cmd._Remote(session, "devbox", {"machine": "m"}, None)
+            for server in (remote, remote.shared_root()):
+                with self.subTest(sent=sent, shared=server.shared), \
+                        self.assertRaises(VCharonError) as cm:
+                    server.prune("game", "linux-web", 14, 450)
+                self.assertEqual(cm.exception.hint, want.replace("%s", "--server devbox"))
+            with self.subTest(sent=sent, local=True), self.assertRaises(VCharonError) as cm, \
+                    mock.patch.object(channels, "prune", lambda *a: call(None, None)):
+                channel_cmd._Local(None).prune("game", "linux-web", 14, 450)
+            self.assertEqual(cm.exception.hint, want.replace("%s", "--local"))
+
+    def test_no_channel_at_this_machine(self):
+        with self.assertRaises(VCharonError) as cm:
+            channel_cmd._Local(None).claim("nope", "mac-web", False)
+        self.assertEqual((cm.exception.code, cm.exception.hint),
+                         ("not_found", "check the name: vcharon list --local"))
+
+    def test_the_unknown_channel_of_remove_idle(self):
+        self.lead()
+        self.assertEqual(self.refusal("list", "--remove-idle", "--server", "fake-dest", "nope"),
+                         ("ERROR not_found: there is no channel nope",
+                          "check the name: %s list --server fake-dest" % SPELLED))
+
+
 class LeaderOnlyTest(ChannelCase):
     """leave and close with only the leader made: LeaveCloseTest's members aren't needed."""
 
@@ -4794,7 +4894,7 @@ class OnceProcessTest(ChannelCase):
         # the fix as the child's own install spells vcharon, which this process can't tell
         self.assertEqual(lines[-3::2], ["ERROR vcharon sync of game.mac-web didn't finish within "
                                         "3 s", "EXIT error (exit 11)"])
-        self.assertTrue(lines[-2].startswith("  fix: the watcher ended it"), lines)
+        self.assertTrue(lines[-2].startswith("  fix: the check ended it"), lines)
         self.assertLess(took, 20)
         # the next check, with the ssh well again, reports the recovery, not a change
         code, lines, err, _took = self.once()

@@ -751,7 +751,11 @@ class _Remote:
     def _call(self, fn, args):
         if self.shared:
             args["shared"] = True
-        return self.session.call(fn, args)
+        try:
+            return self.session.call(fn, args)
+        except VCharonError as e:
+            _list_fixed(self, e)
+            raise
 
     def list(self):
         return _listing(self._call("channel.list", {}))
@@ -804,23 +808,47 @@ class _Local:
     def shared_root(self):
         return _Local(self.log, shared=True)
 
+    def _call(self, fn, *args, **kwargs):
+        try:
+            return fn(self.root, *args, **kwargs)
+        except VCharonError as e:
+            _list_fixed(self, e)
+            raise
+
     def list(self):
-        return _listing(channels.list_channels(self.root))
+        return _listing(self._call(channels.list_channels))
 
     def claim(self, channel, name, create, lobby=False, claimer=None):
-        return channels.claim(self.root, channel, name, create, lobby=lobby, claimer=claimer)
+        return self._call(channels.claim, channel, name, create, lobby=lobby, claimer=claimer)
 
     def release(self, channel, name, keep_charter=False):
-        return channels.release(self.root, channel, name, keep_charter=keep_charter)
+        return self._call(channels.release, channel, name, keep_charter=keep_charter)
 
     def remove(self, channel, name, lobby=False):
-        return channels.remove(self.root, channel, name, lobby=lobby)
+        return self._call(channels.remove, channel, name, lobby=lobby)
 
     def prune(self, channel, name, days, budget):
-        return channels.prune(self.root, channel, name, days, budget)
+        return self._call(channels.prune, channel, name, days, budget)
 
     def lead(self, channel, name, number, mode, when):
-        return channels.lead(self.root, channel, name, number, mode, when)
+        return self._call(channels.lead, channel, name, number, mode, when)
+
+
+# channels' fix lines that point at list's output, as runnable commands: %s is the server's
+# --server ALIAS or --local (_where_flag), which only the client knows
+LIST_FIXES = {
+    channels.NO_CHANNEL_FIX: "check the name: vcharon list %s",
+    channels.DELETE_LEFT_FIX: "delete it by hand; until then it shows in: vcharon list %s",
+    channels.VANISHED_FIX: "check it: vcharon list %s ; then run the close again",
+}
+
+
+def _list_fixed(server, e):
+    """e, its fix line put as LIST_FIXES' command for server's root when it is one of those."""
+    fix = LIST_FIXES.get(e.hint) if isinstance(e.hint, str) else None
+    if fix is not None:
+        e.hint = fix % _where_flag(server)
+    return e
 
 
 def _listing(result):
@@ -1336,7 +1364,7 @@ def _remove_idle(args, cfg, log, say):
                         + ([(twin, shared)] if twin is not None else []))
         for channel in args.channels:
             if all(_find(listing, channel, one.where) is None for one, listing in listings):
-                raise channels.no_channel(channel)
+                raise _list_fixed(server, channels.no_channel(channel))
         failed = None
         groups = []
         for one, listing in listings:

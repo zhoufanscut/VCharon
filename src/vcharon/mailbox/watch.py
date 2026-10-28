@@ -284,6 +284,17 @@ START_FIX = ("the next round or check tries again by itself (a start can fail wh
              "is short of processes, open files or memory). If it keeps failing, run vcharon "
              "doctor (it runs this same install): if that can't start either, the install was "
              "moved or removed; ask your user to install it again")
+# The same two for a --once check (%s: the channel, then its flags): it runs one round and
+# exits, so nothing tries again by itself; the agent checks again, as after a busy one
+ONCE_TIMEOUT_FIX = ("the check ended it (on POSIX its whole process group); nothing tries "
+                    "again by itself: run vcharon watch %s --once %s again after your next "
+                    "step. If it happens again, run vcharon doctor (it checks the servers of "
+                    "your channels)")
+ONCE_START_FIX = ("nothing tries again by itself (a start can fail while the system is short "
+                  "of processes, open files or memory): run vcharon watch %s --once %s again "
+                  "after your next step. If it keeps failing, run vcharon doctor (it runs this "
+                  "same install): if that can't start either, the install was moved or removed; "
+                  "ask your user to install it again")
 # A --once check needs a saved snapshot: without one its round would be a baseline, which takes
 # what is there as seen and prints none of it, so an entry to the member would be lost for good.
 # Join and create save one (first_look), so a missing one means a join or create by an older
@@ -1928,7 +1939,7 @@ def silent_fix(job):
                     [job + suffix + ".log" for suffix in config.MAILBOX_JOBS] + ["vcharon.log"]))
 
 
-def run_sync(job, sync_args, pace=None, timeout=None):
+def run_sync(job, sync_args, pace=None, once=False):
     """(exit code, its error line, that line's fix) of one sync of the section job, from its
     stderr (parse_failure). All but the code are None on success. Through fsops.run, in a
     session of its own: past RUN_TIMEOUT, or on Ctrl-C, its whole process group is ended on
@@ -1937,9 +1948,10 @@ def run_sync(job, sync_args, pace=None, timeout=None):
     first, up to TERM_WAIT before the SIGKILL, so the bootloader removes its unpack folder.
     Windows kills the bootloader alone; a binary's Python process then ends itself
     (install.exit_with_parent) (DESIGN, "Running watchers"). pace: the watcher's, for
-    WATCH_ENV. timeout: a --once check's ONCE_TIMEOUT; None, RUN_TIMEOUT as it is at the call."""
-    if timeout is None:
-        timeout = RUN_TIMEOUT
+    WATCH_ENV. once: a --once check's, capped at ONCE_TIMEOUT, its fixes ONCE_*_FIX; else
+    RUN_TIMEOUT as it is at the call."""
+    timeout = ONCE_TIMEOUT if once else RUN_TIMEOUT
+    again = (sync_args[0], " ".join(sync_args[1:]))
     env = platform.child_env()
     if pace is not None:
         env[WATCH_ENV] = pace
@@ -1948,10 +1960,10 @@ def run_sync(job, sync_args, pace=None, timeout=None):
                         term_wait=TERM_WAIT)
     except OSError as e:
         return (1, "ERROR couldn't start vcharon: %s" % (e.strerror or e),
-                platform.runnable(START_FIX))
+                platform.runnable(ONCE_START_FIX % again if once else START_FIX))
     if ran.rc is None:
         return (1, "ERROR vcharon sync of %s didn't finish within %d s" % (job, timeout),
-                platform.runnable(SYNC_TIMEOUT_FIX))
+                platform.runnable(ONCE_TIMEOUT_FIX % again if once else SYNC_TIMEOUT_FIX))
     return parse_failure(ran.rc, ran.err.decode("utf-8", "replace").splitlines(), job)
 
 
@@ -2398,8 +2410,7 @@ def watch_job(job, sync_args, every, out=say, sleep=None, run=None, rounds=None,
     stream = stream and not once
     if run is None:
         def run(job, sync_args):
-            return run_sync(job, sync_args, pace="run %d" % every,
-                            timeout=ONCE_TIMEOUT if once else None)
+            return run_sync(job, sync_args, pace="run %d" % every, once=once)
     local, me, leader, channel = mailbox_of(job)
     state = snapshot_path(local, me, job)
     flags = " ".join(sync_args[1:])

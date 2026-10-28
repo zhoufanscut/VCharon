@@ -9,6 +9,13 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- The fix lines of an unknown channel, of a closed channel's or a removed member's folder left
+  undeleted, and of a folder gone during a close now name the command that lists that root,
+  `vcharon list --server ALIAS` or `vcharon list --local`, spelled as this install runs it, in
+  place of "vcharon list's output". A `--once` check whose sync didn't finish or couldn't start
+  now says nothing tries again by itself and names `vcharon watch C --once … again after your
+  next step`; the watcher's own rounds keep their fix lines. The `ERROR` lines are unchanged.
+  To adapt: nothing.
 - The guide (`start`, step 3, and `codex`): with Codex on Windows, vcharon may not start inside
   Codex's sandbox at all; the member asks its user to approve running vcharon outside the
   sandbox. To adapt: nothing.
