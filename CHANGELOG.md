@@ -7,7 +7,10 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.9.1rc1 — 2026-10-28
+
+The first release candidate for 0.9.1, a GitHub pre-release: `vcharon --update --rc` on 0.9.0
+offers it; a plain `--update` on 0.9.0 doesn't. Nothing to do when updating.
 
 - `vcharon doctor` has a `shared` row for this machine on Linux and for each server it checks
   that can have a shared root: `ok` with the channel count, `ok` with `not made yet; the first
@@ -31,6 +34,13 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
   refuses both flags, as it does `--days`. To adapt: nothing; without the new flags the output
   is unchanged but for `--json`'s new `root` key; `members` and `idle_channels` are null only
   with `--shared`, and `shared` with `--home` (or as before).
+
+Checked: the unit suite on Linux (measured, Python 3.13: 1837 tests OK, 13 skipped, run as
+CI). Hand runs on Linux with `--local` in scratch folders (measured): `list --remove-idle` with
+`--home`, `--shared` and neither (dry runs, `--yes`, `--json`, the refusals, a 755 shared
+folder); `doctor`'s shared row missing, with 1 and 2 channels, and at mode 755 (nothing made
+or changed); the join note; the guide's new lines. Not run on this build: a remote server,
+macOS and Windows clients.
 
 ## 0.9.0 — 2026-10-26
 
