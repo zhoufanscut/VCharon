@@ -125,7 +125,7 @@ servers `devbox`, `server.example.com`; projects `myapp`, `api`, `web`.
 
 | what | where | published |
 |---|---|---|
-| how it works now: the rules, each with a one-line reason | `DESIGN.md`, edited in place when something changes; no dates, no milestone names, no "as built" notes | yes |
+| how it works now: the rules, each with a one-line reason | `DESIGN.md`, edited in place when something changes; no dates, no milestone names, no "as built" notes; not the wording of messages (the code and tests hold it; the lines DESIGN.md lists under "Stable" are the exception), not measurements or where a fact came from (CHANGELOG) | yes |
 | a piece of work being planned: steps, open questions, review notes | a local plan file (listed in `.git/info/exclude`), deleted when the work ships; **never committed** | no |
 | what shipped in each version, and what was checked on which OS, marked measured or inferred | `CHANGELOG.md` | yes |
 | why one change was made | its commit message | yes |
@@ -145,6 +145,8 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
   A change to anything DESIGN.md lists under "Stable" says how to adapt.
 
 ## Releases
+
+Push to `main` only on the maintainer's word: the repo is public, and every push starts its CI.
 
 `.github/workflows/release.yml` builds, checks and publishes on a tag `v<version>` (DESIGN,
 "Releases"). The steps:
