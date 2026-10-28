@@ -173,7 +173,9 @@ a line look like another.
   myapp --stop --project api), then run: vcharon lead myapp --project api ; then tell your
   user`: right after the leader's `HANDOFF` to you; `  next: <name> leads myapp now: send
   reports, DONE and requests to @<name>`: right after the new leader's `LEADER` (a former
-  leader's line adds that it is a member now). How to take an offer: `vcharon guide lead`,
+  leader's line adds that it is a member now). Then post again to the new leader each report
+  or `DONE` of yours the former leader hadn't answered, with `--re` and the original's ID: it
+  went to the former leader, not to the new one. How to take an offer: `vcharon guide lead`,
   "Taking the lead".
 - `presence: <id> — JOIN  (<folder>/<file>)` (or `REJOIN`, `LEAVE`): only with `--presence`,
   in the lobby: another member came or went (`vcharon guide lobby`, "Who is here"). A work

@@ -67,6 +67,8 @@ NO_AGENT_FIX = (keys.ADMIN_HINT if platform.os_name() == "windows"
 WRITABLE = ("a directory (write access isn't checked on Windows)" if os.name == "nt"
             else "a directory you can write")
 LAST_OK = r"\AOK  nothing failed  \(\d+\.\d s\)\Z"
+# the shared root's row: only a Linux machine can have one, and the fake server is this machine
+SHARED = ["shared"] if fsops.LINUX else []
 # a test job's state_mismatch hint (a channel section's names its sync commands)
 RESET = "check the target; then reset the job's state, and sync it with --full"
 
@@ -94,6 +96,9 @@ class DoctorCase(FakeSshCase):
         os.makedirs(self.dst)
         write_tree(self.home, {"inbox/": None, "outbox/x.log": b"x"})
         self.config = self.write_config(CONFIG.format(src=self.src, dst=self.dst))
+        # the test's own shared folder, not made: the shared rows read it, and the fake
+        # server's helper inherits it
+        os.environ["VCHARON_SHARED_ROOT"] = os.path.realpath(os.path.join(self.tmp, "shared"))
         for name in ("SSH_AUTH_SOCK", "SSH_CONNECTION"):
             os.environ.pop(name, None)
         os.environ.update(FAKE_SSH_ADD_L_RC="0", FAKE_SSH_ADD_LIST="256 SHA256:x me (ED25519)",
@@ -204,7 +209,8 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines[0], "vcharon: doctor")
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
                                                 "box", "ssh", "ssh-agent", "dirs", "machine",
-                                                "claimer", "fake-dest", "push", "pull"])
+                                                "claimer"] + SHARED + ["fake-dest", "push",
+                                                                       "pull"])
         self.assertTrue(all(level == "ok" for level, s, t in self.checks(lines)), lines)
         # the version and how this box runs vcharon (the fix lines' spelling) come first
         self.assertEqual(lines.pop(1), "  ok    vcharon    %s, protocol 4, reads channel "
@@ -234,6 +240,11 @@ class DoctorTest(DoctorCase):
         self.assertEqual(lines.pop(7), "  ok    claimer    " + USED % (
             os.path.join(self.vcharon_home, "state", "client-id"),
             "made at the first join, from the machine id"))
+        if fsops.LINUX:
+            # the shared root, not made yet: doctor never makes it
+            self.assertEqual(lines.pop(7), "  ok    shared     this machine's shared root (%s): "
+                             % os.path.join(fsops.shared_top(), "channels")
+                             + doctor.SHARED_NOT_MADE)
         self.assertEqual(lines[7], "  ok    fake-dest  logs in")
         self.assertRegex(lines[8], r"\A  ok    fake-dest  Python \d+\.\d+\.\d+ on .+, user .*; "
                          r"handshake \d+\.\d\d s, bundle sent\Z")
@@ -242,6 +253,9 @@ class DoctorTest(DoctorCase):
                          r"machine\Z")
         self.assertRegex(lines[10], r"\A  ok    fake-dest  echo 4 MiB byte-identical in "
                          r"\d+\.\d\d s\Z")
+        if fsops.LINUX:
+            self.assertEqual(lines.pop(11), "  ok    shared     fake-dest's shared root: "
+                             + doctor.SHARED_NOT_MADE)
         # from.path is shown made absolute, not resolved; the dir sink's to.path as its check
         # resolved it (on macOS the temp dir is under /private)
         self.assertEqual(lines[11:17], [
@@ -745,7 +759,7 @@ class DoctorTest(DoctorCase):
         lines = self.doctor("--server", "fake-dest", code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
                                                 "box", "ssh", "ssh-agent", "dirs", "machine",
-                                                "claimer", "fake-dest"])
+                                                "claimer"] + SHARED + ["fake-dest"])
 
     def test_bad_destination(self):
         got, out, err = self.run_cli("doctor", "--server=-x")
@@ -758,7 +772,7 @@ class DoctorTest(DoctorCase):
         lines = self.doctor(code=0)
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
                                                 "box", "ssh", "ssh-agent", "dirs", "machine",
-                                                "claimer"])
+                                                "claimer"] + SHARED)
 
     def test_broken_config(self):
         self.write_config("[vcharon]\ncompress = maybe\n")
@@ -766,7 +780,8 @@ class DoctorTest(DoctorCase):
         self.assertEqual(self.of(lines, "config"),
                          [("FAIL", "vcharon.ini [vcharon] compress: must be yes or no")])
         self.assertEqual(self.subjects(lines), ["vcharon", "install", "bundle", "python", "config",
-                                                "ssh", "ssh-agent", "dirs", "machine", "claimer"])
+                                                "ssh", "ssh-agent", "dirs", "machine",
+                                                "claimer"] + SHARED)
         lines = self.doctor("--server", "fake-dest", code=1)
         self.assertEqual([level for level, text in self.of(lines, "fake-dest")],
                          ["ok", "ok", "ok", "ok"])
@@ -1027,6 +1042,84 @@ class SkillTest(DoctorCase):
         # the fix, run: this version's again
         self.assertEqual(self.run_cli("skill", "install", "--codex")[0], 0)
         self.assertEqual([r[0] for r in self.rows()], ["ok"])
+
+
+NOT_LINUX = """
+from vcharon import fsops as _fsops
+
+_fsops.LINUX = False
+"""
+
+
+@unittest.skipUnless(fsops.LINUX, "only Linux has a shared root")
+class SharedTest(DoctorCase):
+    """The shared row of this machine and of the server (DESIGN, "The shared root"): the fake
+    server is this machine, so both read the suite's shared folder."""
+
+    def setUp(self):
+        DoctorCase.setUp(self)
+        self.write_config("[vcharon]\n")
+        self.top = fsops.shared_top()
+        self.local = "this machine's shared root (%s)" % os.path.join(self.top, "channels")
+
+    def rows(self, code=0):
+        got, out, err = self.run_cli("doctor", "--server", "fake-dest", "--json")
+        self.assertEqual((got, err), (code, ""))
+        return [(c["level"], c["text"], c["fix"]) for c in json.loads(out)["checks"]
+                if c["subject"] == "shared"]
+
+    def make(self, mode=0o777):
+        for path in (self.top, os.path.join(self.top, "channels")):
+            os.mkdir(path)
+            os.chmod(path, mode)
+
+    def test_missing_is_ok_and_stays_missing(self):
+        self.assertFalse(os.path.lexists(self.top))
+        self.assertEqual(self.rows(), [
+            ("ok", "%s: %s" % (self.local, doctor.SHARED_NOT_MADE), None),
+            ("ok", "fake-dest's shared root: " + doctor.SHARED_NOT_MADE, None)])
+        lines = self.doctor("--server", "fake-dest", code=0)
+        self.assertEqual(self.of(lines, "shared")[0],
+                         ("ok", "%s: %s" % (self.local, doctor.SHARED_NOT_MADE)))
+        # read-only: nothing made, neither here nor by the server's helper
+        self.assertFalse(os.path.lexists(self.top))
+
+    def test_a_good_folder_counts_its_channels(self):
+        self.make()
+        for name in ("one", "two"):
+            os.mkdir(os.path.join(self.top, "channels", name))
+        modes = {p: os.lstat(p).st_mode for p in (self.top, os.path.join(self.top, "channels"))}
+        self.assertEqual(self.rows(), [("ok", self.local + ": 2 channels", None),
+                                       ("ok", "fake-dest's shared root: 2 channels", None)])
+        # nothing chmodded, nothing added
+        self.assertEqual({p: os.lstat(p).st_mode for p in modes}, modes)
+        self.assertEqual(sorted(os.listdir(self.top)), ["channels"])
+
+    def test_an_empty_folder_has_no_channels(self):
+        self.make()
+        self.assertEqual([t for _, t, _ in self.rows()],
+                         [self.local + ": 0 channels", "fake-dest's shared root: 0 channels"])
+
+    def test_a_bad_mode_warns_with_the_fix(self):
+        self.make(0o755)
+        why = "%s, in the shared root, has mode 0755, not 0777" % self.top
+        fix = platform.runnable(channels.SHARED_MODE_FIX % self.top)
+        self.assertEqual(self.rows(), [
+            ("warn", "this machine's shared root: " + why, fix),
+            ("warn", "fake-dest's shared root: " + why, fix)])
+        # a warning: doctor exits 0, and the mode stays the owner's to change
+        self.assertRegex(self.doctor("--server", "fake-dest", code=0)[-1],
+                         r"\AOK  nothing failed, 2 warnings  ")
+        self.assertEqual(os.stat(self.top).st_mode & 0o777, 0o755)
+
+    def test_a_host_that_cant_have_one_has_no_row(self):
+        # the server's helper says it can't (its hello's shared_root)
+        with with_helper(NOT_LINUX):
+            self.assertEqual(self.rows(), [
+                ("ok", "%s: %s" % (self.local, doctor.SHARED_NOT_MADE), None)])
+        # nor this machine, off Linux
+        with mock.patch.object(fsops, "LINUX", False), with_helper(NOT_LINUX):
+            self.assertEqual(self.rows(), [])
 
 
 class ClockTest(DoctorCase):

@@ -275,11 +275,12 @@ def list_channels(root, tick=_no_tick):
     the channel folder's mtime, which list shows when created is None; format, kind (a lobby's
     only) and limits: from that CHANNEL.md (charter.parse), unchecked; idle: for each member,
     member_idle's seconds (None when unknown), and items its folder's count of files and
-    folders. A missing root holds no channel."""
+    folders. A missing root holds no channel. And "missing": true when the root's folder
+    doesn't exist (doctor's shared row tells a shared root not made yet from an empty one)."""
     try:
         names = sorted(os.listdir(root))
     except FileNotFoundError:
-        return {"channels": [], "others": []}
+        return {"channels": [], "others": [], "missing": True}
     except OSError as e:
         raise fsops.error(e, root)
     now = server_now()
@@ -308,7 +309,7 @@ def list_channels(root, tick=_no_tick):
                                           now))
         except OSError as e:
             others.append({"name": name, "why": "can't be read: %s" % (e.strerror or e)})
-    return {"channels": channels, "others": others}
+    return {"channels": channels, "others": others, "missing": False}
 
 
 def newest_file(path, tick=_no_tick, stages=False):

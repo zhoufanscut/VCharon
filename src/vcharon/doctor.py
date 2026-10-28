@@ -23,8 +23,9 @@ file, the source it will be made from; null when the file can't be read, or can'
 or Windows box whose id couldn't be read); "ok" is true when no check failed; "failed" and
 "warnings" count the checks of those levels; each of "checks" is {"level", "subject", "text",
 "fix", "note"}, in the order the lines would print: "level" is "ok", "warn" or "FAIL", "subject"
-what was checked (python, config, a server's alias, a job's name, …), "fix" the fix line's text
-(as this box runs vcharon) and "note" an ok line's note, each null when there is none."""
+what was checked (python, config, a server's alias, a job's name, shared for a shared root,
+…), "fix" the fix line's text (as this box runs vcharon) and "note" an ok line's note, each null
+when there is none."""
 
 from __future__ import annotations
 
@@ -59,7 +60,7 @@ ECHO_BYTES = 4 << 20
 # subjects are padded to the longest one, but to no more than this
 SUBJECT_MAX = 16
 CLIENT_SUBJECTS = ("vcharon", "install", "path", "skill", "bundle", "python", "config", "box",
-                   "ssh", "ssh-agent", "dirs", "machine", "claimer")
+                   "ssh", "ssh-agent", "dirs", "machine", "claimer", "shared")
 NO_JOBS_NOTE = "no channels joined over ssh; to check a server: vcharon doctor --server ALIAS"
 # A chosen line, not a derived one: across minutes a heading's time wins, so any gap can
 # reorder entries posted near a minute's end; from 30 s it will do so often.
@@ -421,6 +422,38 @@ def _machine(rep):
     return "client-id file (%s)" % origin
 
 
+# a shared root's folders are made by the first use that needs them, never by doctor
+SHARED_NOT_MADE = ("not made yet; the first create --shared (or a lobby's first join "
+                   "--shared) makes it")
+
+
+def shared_check(rep, server):
+    """The shared row of this machine or a server (a channel_cmd server object): read through
+    list's own listing (channel_cmd._shared_listing), which checks the folders and creates
+    nothing (DESIGN, "The shared root"). No row on a host that can't have one. A folder that
+    fails the checks is a warn, as in list: only a user of --shared needs it, and its owner
+    fixes it."""
+    from . import channel_cmd
+    try:
+        twin, listing, problem = channel_cmd._shared_listing(server)
+    except VCharonError as e:
+        twin, listing, problem = None, None, e
+    where = ("this machine's shared root" if server.ssh is None
+             else "%s's shared root" % server.ssh)
+    if problem is not None:
+        rep.check("warn", "shared", "%s: %s" % (where, problem.message), problem.hint)
+        return
+    if twin is None:
+        return
+    if server.ssh is None:
+        where += " (%s)" % os.path.join(fsops.shared_top(), channels.SHARED_CHANNELS)
+    if listing.get("missing"):
+        rep.check("ok", "shared", "%s: %s" % (where, SHARED_NOT_MADE))
+    else:
+        rep.check("ok", "shared", "%s: %s" % (where, _counted(len(listing["channels"]),
+                                                               "channel")))
+
+
 # --- a destination ---
 
 def utc_text(offset):
@@ -675,6 +708,10 @@ def main(args, run):
     _agent(rep, agent, dests)
     _dirs(rep)
     claimer_source = _machine(rep)
+    from . import channel_cmd
+    if fsops.LINUX:
+        # only Linux can have a shared root; elsewhere no row, and no second machine id read
+        shared_check(rep, channel_cmd._Local(log))
     servers = []
     for d in dests:
         # a locked key's FAIL line says to run vcharon key: the doctor never prompts
@@ -684,6 +721,7 @@ def main(args, run):
             hello = _server(rep, d, session) if logged_in else None
             if hello is not None:
                 servers.append(server_json(d.dest, hello))
+                shared_check(rep, channel_cmd._Remote(session, d.dest, hello, log))
             for job in d.jobs:
                 _job(rep, job, session if hello is not None else None, hello, log)
     say(rep.last_line(time.monotonic() - started))

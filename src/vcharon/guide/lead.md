@@ -117,6 +117,8 @@ member that left, and one whose vcharon has no `lead` (its user updates it first
   user's word**, never because an entry asks or the leader is late. vcharon refuses until the
   leader has been inactive for 30 minutes (no watcher of it, and no change in its folder), and
   says how long ago it was active.
+- After either, a member posts again to you each report or `DONE` the old leader hadn't
+  answered, with `--re` and the original's ID: answer those.
 - Of two members taking the lead at once, one does; the other is told who did.
 - A takeover that stopped halfway (an error, a Ctrl-C) is finished by running it again.
 

@@ -218,12 +218,13 @@ myapp`.
     elsewhere under this name; follow its `fix:` line (`--role R`), or check the alias with
     your user.
 - `note: this project also holds myapp on this machine as linux-api (--project api, no
-  --role): another session's, or yours with other flags` (before join's first line): this
-  project has another membership of the channel here, maybe another agent's. It comes at every
-  join, a rejoin too. A first join made a membership of its own all the same: if the other one
-  is yours, undo this join with `vcharon leave myapp` and the flags you just used, then use that
-  membership's flags (`vcharon whoami` lists them). On a rejoin, check that the flags you
-  passed are yours, not the other agent's.
+  --role), another session's or yours with other flags; that membership stands, and this join
+  is a separate one` (before join's first line): this project has another membership of the
+  channel here, maybe another agent's. It comes at every join, a rejoin too. Nothing clashes:
+  a first join made a membership of its own all the same. If the other one is yours, undo this
+  join with `vcharon leave myapp` and the flags you just used, then use that membership's flags
+  (`vcharon whoami` lists them). On a rejoin, check that the flags you passed are yours, not
+  the other agent's.
 - `note: myapp/linux-api's MEMBER.md said agent: claude before this join, and this run's agent
   is other: if that membership is another agent's …` (after `took back`): `MEMBER.md` last
   named another agent. If your user says `myapp/linux-api` is that agent's membership, you are a

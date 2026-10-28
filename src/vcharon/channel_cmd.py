@@ -909,11 +909,13 @@ def main(args, run):
         # join, a rejoin too, since a session that joins again with other flags than the
         # other agent's is told only here. The other membership may be another agent's
         # session in this folder (the leader's, say), so the note names it, never calls it
-        # the reader's
+        # the reader's; and it says both memberships stand, so it doesn't read as a clash
+        # with this join
         for other in records(args.channel):
             if other["project"] == project and (other["role"] or None) != args.role:
-                say("note: this project also holds %s on this machine as %s (%s): another "
-                    "session's, or yours with other flags"
+                say("note: this project also holds %s on this machine as %s (%s), another "
+                    "session's or yours with other flags; that membership stands, and this "
+                    "join is a separate one"
                     % (args.channel, other["name"], record_flags(other)))
         # stored in the record, so a hint can print the flags that find the membership
         args.ident = {"project": project, "role": args.role}

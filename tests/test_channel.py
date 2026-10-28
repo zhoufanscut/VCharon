@@ -717,8 +717,9 @@ class CreateJoinTest(ChannelCase):
         # membership without calling it the reader's
         out = self.ok("join", "game", "--local", "--role", "cc")
         self.assertEqual(out.splitlines()[0], "note: this project also holds game on this "
-                         "machine as mac-web (--project web, no --role): another session's, or "
-                         "yours with other flags")
+                         "machine as mac-web (--project web, no --role), another session's or "
+                         "yours with other flags; that membership stands, and this join is a "
+                         "separate one")
         # a member's own name held: the record says it is a member, with its flags
         hold(self, channel_cmd.watcher_snapshot(None, "game.mac-web-cc", "mac-web-cc",
                                                 os.path.join(self.root, "game")) + ".lock")
@@ -1720,7 +1721,8 @@ class ProjectNoteTest(ChannelCase):
         lines, here = self.run_in(self.project, "join", "game", "--local")
         self.assertEqual(lines[:3], [
             "note: this project also holds game on this machine as mac-web-b (--project web "
-            "--role b): another session's, or yours with other flags",
+            "--role b), another session's or yours with other flags; that membership stands, "
+            "and this join is a separate one",
             "vcharon: join game  as mac-web on this machine",
             "  note: project web is the checkout %s (.git); " % here
             + self.undo("join", "--project web")])
@@ -1794,7 +1796,8 @@ class ServerCallsTest(ChannelCase):
     def test_over_the_wire(self):
         s = self.session()
         s.open()
-        self.assertEqual(s.call("channel.list", {}), {"channels": [], "others": []})
+        self.assertEqual(s.call("channel.list", {}), {"channels": [], "others": [],
+                                                      "missing": True})
         got = s.call("channel.claim", {"channel": "game", "name": "a", "create": True})
         # no host name in the reply: its values go into the channel's files
         # a new channel has no CHANNEL.md yet: no format

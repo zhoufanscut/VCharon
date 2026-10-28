@@ -3,7 +3,9 @@
 ## A member
 
 1. When you have done everything you have read, post `DONE` to the leader, and **keep
-   watching**: the leader may answer with more work.
+   watching**: the leader may answer with more work. If the lead changes before it answers
+   (your watcher's `next: <name> leads myapp now` line), post the `DONE` again to the new
+   leader, with `--re` and the original's ID.
 
    ```
    vcharon post myapp --to @mac-myapp --title 'DONE' <<'EOF'

@@ -94,8 +94,9 @@ class IdentityTest(ChannelCase):
         self.assertNotIn("also holds", out)
         # named by its member name and flags, never called the reader's: it may be another
         # session's in this folder (the leader's, say)
-        also = ("note: this project also holds game on this machine as %s: another session's, "
-                "or yours with other flags")
+        also = ("note: this project also holds game on this machine as %s, another session's "
+                "or yours with other flags; that membership stands, and this join is a "
+                "separate one")
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertEqual(out.splitlines()[0], also % "mac-web-b (--project web --role b)")
         self.assertEqual(out.splitlines()[1], "vcharon: join game  as mac-web on fake-dest")

@@ -458,7 +458,7 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
 | `sink.commit` | – | `{"written", "deleted", "deletes_done", "notes"}`; an `err` also carries `"done"` | – |
 | `sink.abort` | – | `{}` | – |
 | `job.reset` | – | `{}` | – |
-| `channel.list` | optional `shared` | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "idle", "items", "format", "limits"}], "others": [{"name", "why"}]}` | – |
+| `channel.list` | optional `shared` | `{"channels": [{"name", "members", "fields", "leaders", "leader", "term", "tied", "strays", "newest", "idle", "items", "format", "limits"}], "others": [{"name", "why"}], "missing"}` | – |
 | `channel.claim` | `channel`, `name`, `create`, optional `lobby`, optional `claimer`, optional `shared` | `{"existed", "machine", "root", "claimer", "format", "limits"}` | – |
 | `channel.release` | `channel`, `name`, optional `shared` | `{"removed"}` | – |
 | `channel.remove` | `channel`, `name`, optional `lobby`, optional `shared` | `{"closed", "deleted"}` | – |
@@ -536,6 +536,9 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   unknown), `items` how many files and folders its folder holds; `channel.prune` removes one
   member's idle folder: [Removing idle members](#removing-idle-members). `channel.remove`'s
   `lobby`, sent only by `close lobby --yes`: [The lobby](#the-lobby).
+- `channel.list`'s `missing` is true when the root's folder doesn't exist (it then lists
+  nothing), so `doctor` tells a shared root not made yet from an empty one ([The shared
+  root](#the-shared-root)).
 
 ### Error codes
 
@@ -1137,6 +1140,16 @@ server.
   fix. Every command that uses the shared root still refuses with the error. Only that check's
   refusal (`unsafe_dir`) is a note; any other error stops `list` as before. `whoami` adds
   `, its shared root` to its `mode` line (`--json`: `shared`).
+- **`doctor`** has a `shared` row for this machine on Linux (`fsops.LINUX`) and for each
+  server whose session opened and echoed, when its hello's `shared_root` is true; a host that
+  can't have one gets no row. It reads through `list`'s listing, so it never makes or chmods
+  anything: `ok  shared  this machine's shared root (/var/tmp/vcharon/channels): 2 channels`
+  (a server's: `devbox's shared root: 2 channels`, with no path, which is the server's); a
+  folder not there yet is ok, `not made yet; the first create --shared (or a lobby's first
+  join --shared) makes it`; one that fails the checks above is a `warn` with that error's
+  message after `<where>: ` and its fix, as `list`'s note (any other error of the listing is a
+  `warn` too). Why a warn, not a FAIL: only a user of `--shared` needs it, and the folder is
+  another account's to fix.
 - **One name from two accounts**: the claim's checks refuse it as on any root: another
   machine's claimer is `another machine holds <name> in C`; two OS users of one machine share a
   claimer, and the second has no record there, so `the name <name> is taken in C` ([The
@@ -1303,12 +1316,14 @@ In order:
 `join` and `create` run step 1 only, before they build a new name: a `join C` after a `setup
 --box` rejoins under the name it had, not a second membership under the new box. Steps 2 and 3
 would block a legitimate role-less join, so instead `join` and `create` print `note: this
-project also holds C on this machine as <name> (--project P --role R): another session's, or
-yours with other flags` (`--project P, no --role` for one without a role) for each other
-membership of C the project has, at every join, a rejoin of a found record too: a session that
-joins again with the other agent's flags is told nowhere else. It names the membership and
-never calls it the reader's: two agents can work in one folder (a leader and a member, say),
-and the other membership may be the other agent's. Two records for one (C, project, role) are
+project also holds C on this machine as <name> (--project P --role R), another session's or
+yours with other flags; that membership stands, and this join is a separate one` (`--project
+P, no --role` for one without a role) for each other membership of C the project has, at every
+join, a rejoin of a found record too: a session that joins again with the other agent's flags
+is told nowhere else. It names the membership and never calls it the reader's: two agents can
+work in one folder (a leader and a member, say), and the other membership may be the other
+agent's. It says both stand: a note that only named the other one read to an agent as a clash
+with its own join. Two records for one (C, project, role) are
 refused: ask the user.
 
 A join that takes back a folder with no `--rejoin` (step 1's record, or a lobby's folder after a
@@ -1716,7 +1731,10 @@ that is gone, on its user's word. A member writes only its own folder, so the ol
   (busy) or 3 (usage: `--to` with `--gone`, `--to` naming itself, a lobby's `a lobby has no
   leader`); no `--json`: `whoami C --json` shows `leader` and `term`.
 - **What the others see**: the watcher's `next:` lines after the leader's `HANDOFF` to the
-  member and after its `LEADER` ([The watcher in a channel](#the-watcher-in-a-channel)); a
+  member and after its `LEADER` ([The watcher in a channel](#the-watcher-in-a-channel)). After
+  that line the guide has a member post again to the new leader each report or `DONE` the
+  former leader hadn't answered, with `--re` the original's ID: an entry stays addressed to
+  whom it was posted to, and only the member knows which went unanswered. A
   watcher's start sets the own `MEMBER.md`'s `leader:` to the chain's, as it sets `vcharon:`
   ([Member names](#member-names)), silently. `join` takes the listed leader into the record and
   the section, and sends `JOIN` to it; `leave` posts `LEAVE` to the listed leader, a former
@@ -2719,8 +2737,9 @@ Every verb also takes `-v` (log lines to stderr too).
   `--help` shows one example.
 - `setup` writes the config, or prints what this machine uses; `doctor` checks this machine
   (how VCharon was installed, other vcharon installs on PATH, Python, config, box, ssh client,
-  ssh-agent keys, folders, machine id), each server of the channels joined or the one named (login
-  through the `-v` probe, Python, distro, clock, an echo of 4 MiB), and each channel section's
+  ssh-agent keys, folders, machine id, shared root), each server of the channels joined or the
+  one named (login through the `-v` probe, Python, distro, clock, an echo of 4 MiB, shared
+  root: [The shared root](#the-shared-root)), and each channel section's
   jobs; it only reads, apart from a temp file in the state and log dirs. `ping` connects,
   echoes all 256 byte values plus 1 MiB of random bytes, and prints the round trip. Both show a
   machine id hashed, `id <12 hex> (hashed)`: doctor's own line on the server and ping's line
@@ -3583,7 +3602,7 @@ Later:
 
 - A shared root closed to some accounts (a Unix group's) or on a server that isn't Linux: the
   shared root is one folder per Linux server, open to every account on it ([The shared
-  root](#the-shared-root)). `doctor` doesn't check it.
+  root](#the-shared-root)).
 - Many streaming watchers on one server: each holds an ssh connection and a helper of about
   25 MB. Measured: 10, 20, 30 and 50 watchers started at once had 0, 3, 7 and at least 16
   connections reset at start, each retried and was streaming within about 4 s, and 50 helpers

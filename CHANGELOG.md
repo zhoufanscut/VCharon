@@ -9,6 +9,21 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon doctor` has a `shared` row for this machine on Linux and for each server it checks
+  that can have a shared root: `ok` with the channel count, `ok` with `not made yet; the first
+  create --shared (or a lobby's first join --shared) makes it` when the folder isn't there, or
+  `warn` with the error and fix `list` gives for a folder that fails its checks. It only reads
+  (it never makes or chmods the folder); a host that can't have one gets no row. The helper's
+  `channel.list` reply gets `missing` (true for a root folder that doesn't exist). To adapt:
+  nothing; `--json` gets the new rows in `checks`, its shape is unchanged.
+- The guide (`member`, `watch`, `lead`, `end`): after a lead change, a member posts again to
+  the new leader each report or `DONE` the former leader hadn't answered, with `--re` the
+  original's ID.
+- `join`'s and `create`'s note about another membership of the channel in the same project now
+  reads `note: this project also holds C on this machine as <name> (<flags>), another
+  session's or yours with other flags; that membership stands, and this join is a separate
+  one` (it was `…(<flags>): another session's, or yours with other flags`), so it no longer
+  reads as a clash. To adapt: a match on `also holds` still works.
 - `vcharon list --remove-idle` takes `--home` or `--shared` to cover one root only: a name in
   both (the lobby) can be cleaned in one. `--shared` is refused where there can be no shared
   root, and a shared folder that fails its checks is then the command's error. The `to remove
