@@ -18,7 +18,7 @@ From the repo root:
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once: the package, editable, and ruff
 
-.venv/bin/python -m unittest discover -s tests -t .          # the whole suite (about 5 minutes)
+.venv/bin/python -m unittest discover -s tests -t .          # the whole suite (about 8 minutes)
 CI=1 PATH=$PWD/.venv/bin:$PATH .venv/bin/python -m unittest discover -s tests -t .  # as CI (below)
 .venv/bin/python -m unittest tests.test_channel -v           # one module
 .venv/bin/python -m unittest tests.test_channel.CreateJoinTest -v  # one class
@@ -45,7 +45,9 @@ them on your own machine.
   again.
 - **Another copy of the code** (a mutant, an old release from `git archive`): run the venv's
   `python -m unittest` in the copy with `PYTHONPATH=<copy>/src`, which wins over the editable
-  install; check `vcharon.__file__`.
+  install; check `vcharon.__file__`. Copy the whole checkout (`git archive HEAD`), not only
+  `src` and `tests`: `tests.test_guide` reads the top-level docs and `tests.test_old_name`
+  expects `pyproject.toml` and `.github/`, so a partial copy fails them for that alone.
 - Lines are at most 100 characters. ruff doesn't check that (E501 is off in its defaults), so
   check it yourself, counting characters, not bytes:
 
@@ -102,6 +104,9 @@ missed:
   this install runs.
 - No host name, path, user name or raw machine id in any file written to a channel.
 - Comments say why the code does what it does; never which task, plan step or review it came from.
+- A new watcher exit code goes into every list of them: DESIGN.md's "Exit codes" and "Stable",
+  `cli.EXIT_CODES`, `mailbox/watch.py`'s docstring, and the guide's `watch.md` table and
+  `errors.md`. Tests pin only `EXIT_CODES` and the codes, not the prose lists.
 - Line endings: new files LF; an in-place edit keeps the file's own (DESIGN.md, "Line endings").
   Match each file's existing style.
 

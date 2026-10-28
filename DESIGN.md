@@ -815,6 +815,8 @@ owner, ACLs, extended attributes, resource forks, folder mtimes.
   the file it hashed (device, inode, size, mtime, one link), else `vanished`.
 - So a member whose copy differs from the server's gets back in step moving only the files that
   differ. It reads every file on both ends.
+- `OK <n> written` (and join's `synced:` counts) include the `have` files, which the commit
+  touches: only the `put` line's `, <n> already there` tells them from files sent.
 
 ## State and locks
 
@@ -2800,6 +2802,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   and whose `isatty` returns False: Python 3.14's argparse calls `os.isatty(stream.fileno())`.
 - A check that no path is shown from the home looks for `~` and a separator at a path's start,
   never for any `~`. Why: a Windows temp path can hold an 8.3 short name such as `RUNNER~1`.
+- The sandbox's `VCHARON_SHARED_ROOT` is one folder for the whole run: a test that reads the
+  shared root's state points it at a temp folder of its own (`SharedCase`, `DoctorCase`).
+- A test that expects a path the code builds from the current folder takes `os.getcwd()` after
+  its `chdir`, never the path it changed to. Why: macOS's getcwd gives `/private/var/…` for a
+  temp folder made as `/var/…`.
 - Guards on the repo itself: the guide's commands and flags parse with the command line's own
   parser; `docs/GUIDE.md` matches what `guide/*.md` makes; no milestone or review tag in the
   code, tests, README or DESIGN; the old tool's name nowhere but the CHANGELOG line that says
