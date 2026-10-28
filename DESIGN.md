@@ -61,7 +61,7 @@ for remote members, a GUI.
 | Flat verbs, the channel first: `vcharon post C …` | Channels are the only thing VCharon has; an explicit channel name is easy for an agent to get right and to read back in a log |
 | The tool works out who you are: no `--me`, `--job`, `--dir` or `--config` | An agent can't pass the wrong name if it never passes one |
 | Member names come from the machine and the checkout, never from the agent's choice | A new session in the same checkout gets the same name back with no memory ([Member names](#member-names)) |
-| No host name, path, user name or raw machine id in any file VCharon writes to a channel; no raw machine id in what it prints or logs either (log lines older versions wrote are not rewritten) | A channel's files are shared; a host name can name an employer or a network. machine-id(5) asks that the id be kept private, and agents paste VCharon's lines into entries |
+| No host name, path, user name or raw machine id in any file VCharon writes to a channel; no raw machine id in what it prints or logs either | A channel's files are shared; a host name can name an employer or a network. machine-id(5) asks that the id be kept private, and agents paste VCharon's lines into entries |
 | Never prompt, except `vcharon key` (it runs `ssh-add` on your terminal) | Agents and background commands have no terminal; a prompt would hang them |
 | One binary per platform, plus pipx and uvx from GitHub | Nothing to set up on a client; the guide inside the binary always matches the binary |
 
@@ -165,10 +165,10 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
   shows that a watcher still runs ([The watcher in a channel](#the-watcher-in-a-channel)).
 - Quiet on the wire: a round with nothing new sends its down state by reference and gets it
   back the same way, and the members' ages only on a change or about every 30 s
-  ([Calls](#calls)): its down's `source.plan` carries a few hundred bytes each way, whatever the
-  channel's size, where the whole channel's listing went both ways before. Key order counts in
-  "changed": a state the source gives back reordered (a member folder over the limits has its
-  entries moved to the end) is written once, so later rounds go by reference again.
+  ([Calls](#calls)), so its down's `source.plan` carries a few hundred bytes each way, whatever
+  the channel's size. Key order counts in "changed": a state the source gives back reordered (a
+  member folder over the limits has its entries moved to the end) is written once, so later
+  rounds go by reference again.
 - `run_timeout` counts per round. Refused with `--full`, `--dry-run` or `--reset`.
 
 ## Files
@@ -483,11 +483,9 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   sent, so the state file is byte for byte what the whole state would give; a changed one comes
   back whole. A reference the helper doesn't hold is `state_unknown`, which keeps the session:
   the client sends the state whole in a second `source.plan` of the same round. Never a guess.
-  Why: a streaming watcher's idle round sent the whole channel's listing and got it back, every
-  round, a cost that grew with the channel: ~2.6 KB/s up, ~2.9 KB/s down per watcher at 32
-  members (measured on 0.8.4 with `ss` byte counters; that the state and the ages made it is
-  from the source, not a capture). A `--no-stream` watcher opens a session each round, so its
-  state still goes whole.
+  Why: a streaming watcher's idle round otherwise sent the whole channel's listing both ways
+  every round, a cost that grew with the channel. A `--no-stream` watcher opens a session each
+  round, so its state still goes whole.
 - `deletes_done` lists the deletes a commit got through; `source.state_after` uses it after a
   commit that failed partway.
 - `watch` in `source.plan` is a watcher's pace: the helper stamps the member's last-watched time
@@ -496,12 +494,11 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   not; the client takes both out before reading the plan ([The watcher in a
   channel](#the-watcher-in-a-channel)).
   `seen` comes at the session's first plan of the channel, when a member or a pace changed since
-  the last one the session sent, and when the call has `want_seen`; else only the ages could
-  have moved, and it is left out. The client sends `want_seen` at its first plan of the channel
-  in the session, then once 30 s have passed both since the last `seen` came and since its copy
-  was written (the copy's own limit), so the ages still reach it about every 30 s. Why: the
-  ages of every member, in every round, were the reply's other cost that grew with the
-  channel.
+  the last one the session sent, and when the call has `want_seen`, which the client sends at
+  its first plan of the channel in the session, then once 30 s have passed both since the last
+  `seen` came and since its copy was written, so the ages still reach it about every 30 s.
+  Why: the ages of every member, in every round, were the reply's other cost that grew with
+  the channel.
 - The `channel.*` calls work on the channel root: the fixed `~/.local/state/vcharon/channels`,
   or `VCHARON_CHANNELS_ROOT` in the helper's environment (tests only); with `"shared": true`,
   the fixed shared root `/var/tmp/vcharon/channels`, after its checks ([The shared
@@ -510,20 +507,14 @@ helper → controller   {"t": "ok",   "id": 7, "result": {...}}
   works only directly below the root, and never follows a symlink. `--local` calls the same
   functions in-process.
   `claim`, `release` (undoing a failed claim), `remove` and `prune` also sweep `seen/` beside
-  the root: each
-  `seen/<X>/` whose channel folder is gone, holding only small stamp files, is removed (and
-  `lead/<X>/`, holding only term markers: [Leader handoff](#leader-handoff)), and a
-  new member's claim drops an earlier member's stamp of its name. A join's claim sends the
-  joining machine's `claimer`, and an existing folder whose `MEMBER.md` names it loses its stamp
-  too: the join holds its state dir's watcher lock, so the stamp is from a watcher that isn't
-  running. Another state dir on the same machine (another `VCHARON_HOME` or OS user) has the
-  same claimer: a watcher of the folder there stamps again at its next round, and a `sync
-  --repeat` child a stopped watcher left can stamp once more in the round it finishes. Every
-  join of this machine's own folder drops it, in a work channel too (a `--takeover` keeps the
-  earlier machine's stamp): `whoami` shows `watched -` until the watcher's first round. Matched
-  by claimer, not dropped by every claim: another machine's join, refused after the claim, must
-  not blank a live member. Why there: those calls end or reuse channels, and the stamps of a
-  channel that is gone are nobody's.
+  the root: each `seen/<X>/` (and `lead/<X>/`: [Leader handoff](#leader-handoff)) whose channel
+  folder is gone is removed. A new member's claim drops an earlier member's stamp of its name,
+  and a join's claim, which sends the joining machine's `claimer`, drops the stamp of an
+  existing folder whose `MEMBER.md` names that claimer: the join holds the watcher lock, so the
+  stamp is from a watcher that isn't running (`whoami` shows `watched -` until the next round).
+  Matched by claimer, not dropped by every claim: another machine's join, refused after the
+  claim, must not blank a live member. Why there: those calls end or reuse channels, and the
+  stamps of a channel that is gone are nobody's.
 - `channel.claim`'s `root` is the root as a section's `mailbox.remote` spells it (`~/…`, the
   shared root's absolute);
   `claimer` is the `claimer:` of an existing folder's `MEMBER.md`, or null; `format` and
@@ -889,36 +880,16 @@ Defaults: `$XDG_CONFIG_HOME` is `~/.config`, `$XDG_STATE_HOME` `~/.local/state`.
 - `vcharon sync C --reset` takes the same lock.
 - The same lock kind guards the post lock, the watcher's snapshot, and stage dirs.
 - The watcher's snapshot lock names its holder: whoever takes it (a watcher; `create`, `join`,
-  `leave` and `close`) writes its PID into the file from byte 1 on, and cuts the file to its first
-  byte before it lets go; a watcher refused it reads that and ends its exit-12 line with ` (PID
-  <n>)`; so does the refusal of `leave` and `close`
-  ([Create, join, leave, close](#create-join-leave-close)). Why: the user (or agent) can find the
-  process that holds the lock. On Linux outside the initial PID namespace the file holds
-  `<pid>\n<ns>\n`, `<ns>` being the holder's `/proc/self/ns/pid` text (e.g. `pid:[4026532561]`),
-  read once per process; from the initial namespace (`pid:[4026531836]`, `PROC_PID_INIT_INO`), and
-  on macOS and Windows, `<pid>\n`. A reader shows the PID only when the file holds one of these
-  forms and nothing more, and on Linux only when its own `/proc/self/ns/pid` reads the same `<ns>`,
-  a bare `<pid>\n` counting as the initial namespace's: a PID names the same process only inside
-  one PID namespace, and in a sandbox with its own (Codex's Linux sandbox runs each command so) it
-  can name another process to a reader outside. So WSL2 distros (each has its own PID namespace,
-  per Microsoft's WSL docs; not run) and containers get their PID; a sandboxed Codex command gets
-  none for another command's watcher, and a sandboxed reader gets none for a holder outside it.
-  The bare form from the initial namespace: vcharon from 0.6.0rc2 to 0.7.0 shows a PID only for
-  `<pid>\n` and wrote one only from there, so such a reader still sees the PID of a holder there,
-  and none from another namespace (its line ends as before). 0.6.0rc1 wrote a bare PID from any
-  namespace: a holder of that version in another one is read as in the initial one. A holder
-  whose link can't be read writes none, and cuts the file to its first byte instead, so a PID left
-  before it isn't read as its own; a reader whose link can't be read shows none. From byte 1:
-  `msvcrt` locks byte 0, which no other process can read on Windows while it is held. The lock is
-  on the file, not its contents, so `take_lock`'s same-file check and `leave`'s and `close`'s
-  delete of the held file don't change. No PID shown (an older vcharon in a PID namespace of its
-  own holds it, a holder in another namespace than the reader, or the holder hasn't written it
-  yet): the line ends as before. The PID can be stale: a holder killed before it lets go leaves
-  its PID, which an older vcharon taking the lock next doesn't replace, and a new holder replaces
-  with its own, or clears, only a moment after it takes the lock; the PID may also belong to
-  another process by then, and a namespace's number can be reused once that namespace is gone,
-  so a stale PID can match the reader's namespace. So the guide says to check it is a `vcharon
-  watch` before stopping it.
+  `leave` and `close`) writes `<pid>\n` into the file from byte 1 on (`msvcrt` locks byte 0,
+  which no other process can read on Windows while it is held), plus `<ns>\n`, its
+  `/proc/self/ns/pid` text, on Linux outside the initial PID namespace; it cuts the file to its
+  first byte before it lets go, and writes nothing but that cut when its namespace link can't be
+  read. A refused watcher, `leave` or `close` ends its line with ` (PID <n>)` only when the file
+  holds exactly one of these forms and, on Linux, the reader's own namespace is the same (a bare
+  `<pid>\n` counting as the initial one's). Why: the user (or agent) can find the process that
+  holds the lock, while a PID from another namespace (a Codex sandbox, a container) names
+  another process. The PID can be stale (a holder killed before it lets go, a number reused), so
+  the guide says to check it is a `vcharon watch` before stopping it.
 
 ## Config
 
@@ -999,11 +970,10 @@ Why one file each: agents joining at once never edit one shared file.
 
 - Up never creates: the claim made `<remote>/<me>`. With `create`, a member's up would make a
   closed channel again as soon as it had something to send. So once the channel is closed, up
-  and down fail with `not_found`, and their `fix:` line is `the channel is closed, or your folder
-  in it is gone: in a work channel with no CLOSED, ask your user first (vcharon guide end); then
-  run: vcharon leave C --project P [--role R]`, never "create it". The step before the leave is
-  the guide's rule: with no `CLOSED`, the folder may have been removed by hand or as idle, and an
-  agent that sees only this line must not leave before its user confirms.
+  and down fail with `not_found`, and their `fix:` line is the channel-gone fix: `the channel is
+  closed, or your folder in it is gone: …`, asking the user first in a work channel with no
+  `CLOSED` (the folder may have been removed by hand or as idle), then `vcharon leave C …`;
+  never "create it".
 - Down plans, at the top of the tree, only folders whose name is a valid member name other than
   `<me>`; everything else there (`<me>/` in any case, a file, a symlink, `Mac/`, `con/`) is left
   out (dropped from `sent`, never deleted) and named in down's log. Valid names are
@@ -1075,8 +1045,7 @@ a remote member's machine:
 ### The shared root
 
 For people on separate accounts of one Linux server. The default is unchanged: the root in the
-login user's home, so one person needs nothing new. Trust stays whoever can log in to the
-server.
+login user's home. Trust stays whoever can log in to the server.
 
 - **One fixed folder**, `/var/tmp/vcharon/`, holding `channels/` (the shared root), `seen/` and
   `lead/`, as `~/.local/state/vcharon/` holds them for the home's root. Not configurable: every
@@ -1084,80 +1053,51 @@ server.
   has it, writable by every account, and keeps it across reboots (FHS). The helper's `cache/`
   stays in each account's home: a copy of the bundle is only the sending account's to trust.
 - **Chosen by `--shared`** on `create` and `join` (`--server` or `--local`). The join record
-  keeps it (`"shared": true`, [Join records](#join-records)), so every later command (`post`,
-  `read`, `watch`, `sync`, `lead`, `leave`, `close`, `whoami`) and a rejoin find it there,
-  with no flag. A remote member's section names the shared channel folder in `mailbox.remote`
-  (`/var/tmp/vcharon/channels/C`), so its syncs need nothing else. Over ssh each `channel.*`
-  call gets `"shared": true`, never a path ([Calls](#calls)). A join or create of a name whose
-  record is of the other root is refused, `you are in C in that server's shared root` (or
-  `channel root in its home`), fix `pass --role R …`: a record, a section and a local tree are
-  one per (C, name), so a membership never moves between the roots.
-- **Modes**: everything vcharon makes there gets mode 0777 (a folder: the shared folder and the
-  three in it, channel and member folders, stage dirs, `seen/` and `lead/` folders) or 0666 (a
-  file: entries, a sync's staged files and their lock, a stamp, a marker; a file a sync
-  replaces gets 0666 added to the bits it keeps), whatever the umask. Set right after the
-  create, through an fd opened without following a link, so a folder swapped for a link never
-  passes 0777 on to its target. Why: a close or `list --remove-idle` by any member deletes what
-  other accounts made, and every member's down reads every file. No sticky bit: with it only an
-  entry's owner could remove it. The umask itself is never changed: it is the whole process's,
-  and the same process writes its records and logs, which stay private. Only what vcharon
-  makes gets these modes: a folder a member's agent makes by hand in its own folder (a local
-  member's) keeps the umask's, and another account's close or `list --remove-idle` can then
-  fail inside it (removing a file needs only its folder's write bit); a file made under a tight
-  umask can't be read by the other members' syncs. Its owner removes it or runs `chmod`.
-- **No owner rule there**: the receiver's rule that the root and every folder on the way be
-  yours and not writable by others ([Path rules](#path-rules)) can't hold where every folder is
-  0777 and another account's. Its other rules stay (no link followed, no other file system):
-  an account that can swap a folder for a link can delete the channel anyway.
+  keeps it (`"shared": true`, [Join records](#join-records)), so every later command and a
+  rejoin find it there, with no flag. A remote member's section names the shared channel
+  folder in `mailbox.remote`; over ssh each `channel.*` call gets `"shared": true`, never a
+  path ([Calls](#calls)). A join or create of a name whose record is of the other root is
+  refused: a record, a section and a local tree are one per (C, name), so a membership never
+  moves between the roots.
+- **Modes**: everything vcharon makes there gets mode 0777 (folders) or 0666 (files; a file a
+  sync replaces gets 0666 added to the bits it keeps), whatever the umask, set right after the
+  create through an fd opened without following a link, so a folder swapped for a link never
+  passes 0777 on. Why: a close or `list --remove-idle` by any member deletes what other
+  accounts made, and every member's down reads every file. No sticky bit: with it only an
+  entry's owner could remove it. The umask itself is never changed: the same process writes
+  records and logs, which stay private. A folder or file a member's agent makes by hand keeps
+  the umask's modes; its owner fixes it.
+- **No owner rule there**: the receiver's rule that every folder on the way be yours and not
+  writable by others ([Path rules](#path-rules)) can't hold where every folder is 0777 and
+  another account's. Its other rules stay (no link followed, no other file system).
 - **Found folders are checked, never repaired**: the first `create --shared` (or a lobby's first
-  join) makes `/var/tmp/vcharon/` and `channels/`, one `mkdir` each; `seen/` and `lead/` come
-  at their first use. Each `channel.*` call on the shared root (over ssh, or in-process with
-  `--local`) and each watcher's stamp there first checks the shared folder and each of
-  `channels/`, `seen/` and `lead/` that exists: a real folder (not a link) of mode exactly
-  0777, else `unsafe_dir`: `<path>, in the shared root, has mode 0755, not 0777`, fix `ask
-  your user: whoever owns it runs chmod 777 <path> (…), or removes it while no channel is in
-  it`; or `<path>, in the shared root, isn't a folder (a link, or a file)`, fix `ask your user
-  to remove it by hand …`. Never repaired: a mode found there is another account's choice, and
-  only its owner can change it. A first use that races another account's can see the folder
-  before its chmod and be refused once; the next run passes. A watcher's stamp, best effort,
-  is then skipped. The shared folder must also be reached with no link above it: a link there
-  is `unsafe_dir`, `<path>, the shared root's folder, is reached through a link (<folder> is
-  <its real path>)`. Why: handles are opened at the real path, which the shared-root test of
-  a path wouldn't recognize, so what vcharon made there would silently keep the umask's modes.
-- **Linux only**: `--shared` is refused on macOS and Windows (`config`, exit 3: `the shared
-  root (--shared) is on Linux only`), with `--local` too; a remote member's server is Linux
-  already ([Scope](#scope)). The machine that holds the root decides: with `--server`, its
-  helper.
-- **`list`** shows the shared root's channels with no flag, as a group of its own after the
-  home root's: a second `vcharon: list  (<server>'s shared root)` line and its channels, only
-  when it holds any (or a note); `--json`'s `shared` holds its `{"channels", "others"}` (null on
-  a server that isn't Linux, as the hello's `shared_root` says: [hello](#hello)). A shared
-  folder that fails the checks above doesn't stop `list` (nor `list --remove-idle` with
-  neither `--home` nor `--shared`): the root in the home is listed as usual, then `  note:
-  <server>'s shared root isn't listed: <the error's message>; fix: <its fix>`, and `--json`'s
-  `shared` is `{"error": {"code", "message", "fix"}}`; the exit status is a clean list's. Why:
-  a user who never uses `--shared` must still list, and the folder is another account's to
-  fix. Every command that uses the shared root still refuses with the error. Only that check's
-  refusal (`unsafe_dir`) is a note; any other error stops `list` as before. `whoami` adds
-  `, its shared root` to its `mode` line (`--json`: `shared`).
-- **`doctor`** has a `shared` row for this machine on Linux (`fsops.LINUX`) and for each
-  server whose session opened and echoed, when its hello's `shared_root` is true; a host that
-  can't have one gets no row. It reads through `list`'s listing, so it never makes or chmods
-  anything: `ok  shared  this machine's shared root (/var/tmp/vcharon/channels): 2 channels`
-  (a server's: `devbox's shared root: 2 channels`, with no path, which is the server's); a
-  folder not there yet is ok, `not made yet; the first create --shared (or a lobby's first
-  join --shared) makes it`; one that fails the checks above is a `warn` with that error's
-  message after `<where>: ` and its fix, as `list`'s note (any other error of the listing is a
-  `warn` too). Why a warn, not a FAIL: only a user of `--shared` needs it, and the folder is
-  another account's to fix.
-- **One name from two accounts**: the claim's checks refuse it as on any root: another
-  machine's claimer is `another machine holds <name> in C`; two OS users of one machine share a
-  claimer, and the second has no record there, so `the name <name> is taken in C` ([The
+  join) makes `/var/tmp/vcharon/` and `channels/`; `seen/` and `lead/` come at their first use.
+  Each `channel.*` call on the shared root and each watcher's stamp there first checks the
+  shared folder and each of its three folders that exists: a real folder (not a link) of mode
+  exactly 0777, reached with no link above it, else `unsafe_dir`, with a fix that asks the
+  user to have its owner fix or remove it. Why never repaired: a mode found there is another
+  account's choice, and only its owner can change it. Why no link above: handles open at the
+  real path, which the shared-root test of a path wouldn't recognize, so new files would keep
+  the umask's modes. A first use racing another account's can be refused once; a watcher's
+  stamp is then skipped.
+- **Linux only**: `--shared` is refused on macOS and Windows (`config`, exit 3), with `--local`
+  too. With `--server`, the helper decides.
+- **`list`** shows the shared root's channels with no flag, as a group of its own after the home
+  root's, only when it holds any; `--json`'s `shared` holds them (null on a server that isn't
+  Linux, by the hello's `shared_root`: [hello](#hello)). A shared folder that fails the checks
+  doesn't stop `list`: the home root is listed, then a `note:` with the error and its fix, and
+  `--json`'s `shared` is `{"error": …}`. Why: a user who never uses `--shared` must still
+  list, and the folder is another account's to fix. Only that check's `unsafe_dir` is a note;
+  every command that uses the shared root still refuses. `whoami` says when a membership is in
+  the shared root.
+- **`doctor`** has a `shared` row for this machine on Linux and for each server whose hello says
+  `shared_root`. It reads through `list`'s listing, so it never makes or chmods anything: ok
+  with a count, ok `not made yet`, or a `warn` with the check's error. A warn, not a FAIL: only
+  a user of `--shared` needs it, and the folder is another account's to fix.
+- **One name from two accounts**: the claim's checks refuse it as on any root ([The
   claimer](#the-claimer)).
-- **Aging**: a system that enables tmpfiles' `q /var/tmp 1777 root root 30d` may delete a
-  long-running channel's old files; vcharon doesn't guard against it, the README warns. Debian
-  13 differs by point release: active with systemd 257.13, commented out with 257.9
-  (`/usr/lib/tmpfiles.d/tmp.conf`, one machine each).
+- **Aging**: a system whose tmpfiles config ages `/var/tmp` may delete a long-running channel's
+  old files; vcharon doesn't guard against it, and the README warns.
 
 ### Member names
 
@@ -1173,31 +1113,19 @@ member's folder name.
   Python, not by running `git`, `svn` or `hg`; else the current folder's own name. Lowercased,
   each run of characters other than `a-z0-9_` made one `-`, `-` stripped at both ends, cut to
   14, `-` stripped again. `--project P` overrides it. Why `.svn` and `.hg` too: a member must
-  keep its name in any folder of its checkout, whatever the version control. SVN 1.7 and later
-  keep one `.svn`, at the working copy's root; an older working copy (a `.svn` in every folder)
-  names the current folder, so pass `--project` there. Without `--project`, `join` and
-  `create` refuse a new name whose project folder is the home folder (the home itself, or any
-  folder in a home kept in git for its dotfiles), exit 3, `give --project`: the home folder's
-  name is the OS user name, which would land in the member's name, its folder and every ID. A
-  membership with a record here keeps its name. Without `--project`, `join` and `create` print
-  where it came from, right after their `vcharon: join|create …` line: `  note: project <p> is
-  the checkout <path> (<mark>); <undo>`, or `  note: project <p> is this folder's name (no
-  .git, .svn or .hg here or above); <undo>`, the path escaped as `read` escapes text. `<undo>`
-  is `if that is the wrong project: vcharon leave C --project <p> [--role R] (then join again
-  with --project P)`, for `create` `vcharon close C …` and `create it again`, spelled as this
-  machine runs vcharon, with flags built from the project and `--role` (the record isn't
-  written yet). The note names the undo, never just `--project P`: by then the name is taken,
-  and a second join with `--project` makes a second membership; a second create is refused.
-  Only a new name gets the undo: a join whose record is found, and one that takes back a
-  folder already in the channel (a lobby's after a `leave`, or `--rejoin`), keep just where
-  the name came from: a member that joins again at each session, or comes back to the lobby,
-  isn't offered a leave each time. A join with no record here learns that from its claim, so
-  its note comes once the claim is made (still right after the `vcharon: join` line, which is
-  all a join prints before it); a join refused before that prints none, so no undo is offered
-  for a membership that was never made.
-  Why: in a folder of checkouts the name changes with the folder the agent starts in,
-  silently. On this box's stdout only, which already names its folders (the `OK` line's): no
-  channel file holds it.
+  keep its name in any folder of its checkout, whatever the version control (an SVN working
+  copy older than 1.7, with a `.svn` in every folder, needs `--project`).
+  - Without `--project`, `join` and `create` refuse a new name whose project folder is the home
+    folder (exit 3, `give --project`): its name is the OS user name, which would land in the
+    member's name and every ID. A membership with a record here keeps its name.
+  - Without `--project`, `join` and `create` print a `note:` saying where the project came from
+    (the checkout's path and mark, or "this folder's name"). For a new name the note also gives
+    the undo, a `leave` (for `create`, a `close`) and then the command again with `--project P`:
+    by then the name is taken, so a second join with `--project` alone would make a second
+    membership. A join that finds its record or takes back its folder gets no undo, and a join
+    refused before its claim prints no note. Why: in a folder of checkouts the name changes
+    with the folder the agent starts in, silently. Only on stdout: no channel file holds the
+    path.
 - `-<role>`: only with `--role R`, 1 to 6 of `a-z0-9`.
 - The whole name: lowercase `a-z0-9-_`, starting with a letter or digit, at most 32 (10 + 1 +
   14 + 1 + 6), not a name Windows reserves: a Windows client must be able to hold the folder,
@@ -1225,28 +1153,20 @@ rules](#launch-rules)) on purpose: the name says where the agent works.
   (`CLAUDECODE`, `CODEX_THREAD_ID`, `OPENCODE`), else `other`; more than one found gives
   `other`. A rejoin updates it only when one was found or given: a rejoin from a plain terminal
   leaves it.
-- `vcharon:` is written at `join` and `create`, and set in place to the running version when
-  it says another (or none: a `MEMBER.md` from before the line gets it added at its header's
-  end) by every rejoin, which prints `  vcharon: <new> (your MEMBER.md said <old>; join updated
-  it, so there is nothing for you to do)`, or `(your MEMBER.md had none; join added it, so
-  there is nothing for you to do)` (`agent:`
-  the same way, without the part after `;`; it names the file because an agent that ran no
-  update can't tell what a bare "was" means, and says it is done, and by whom, because members
-  asked what to do about the line, and read a bare "nothing to do" after "updated it" as a
-  contradiction; a stale skill copy has a note of its own, the stale-skill note below), and
-  by every start of the member's watcher (a restart after `EXIT updated` too), which prints
-  nothing, its lines being a contract. Why the watcher: an update needs no rejoin (a leader never
-  rejoins), but every agent restarts its watcher. The watcher's start does it before its first
-  round and before the watchdog's start mark (nothing it reads is an import after the start), and
-  tries the post lock once: a post holding it, or any failure, leaves the line and the watch
-  starts at once. No watcher wakes or warns: the member's own watcher skips the own folder;
-  another member's leaves `.md` files out of its `new`/`changed`/`gone` lines, and its edit check
-  hashes only an entry's heading, which stays (a check of header lines there would wake every
-  member at each such start). A remote member's up sends it. So the line can lag until the
+- `vcharon:` is written at `join` and `create`, and set in place to the running version (added
+  at the header's end when missing) by every rejoin, which prints a line saying it updated the
+  file and that nothing is left to do, and by every start of the member's watcher, silently.
+  Why the watcher: an update needs no rejoin (a leader never rejoins), but every agent restarts
+  its watcher. The watcher does it before its first round, trying the post lock once (held, or
+  any failure: the line stays and the watch starts). No other watcher wakes: they leave `.md`
+  files out of their file lines and hash only an entry's heading. So the line can lag until the
   member's next watcher start that gets the lock.
 - A reader takes the fields it knows and leaves every other header line alone, so a newer
-  vcharon may add one. 0.1.0's readers do the same: they look up `leader:`, `agent:`,
-  `claimer:` and the four list fields by key, and skip the rest.
+  vcharon may add one. A `MEMBER.md` over 64 KiB isn't read at all and counts as missing for
+  the claimer (so `--takeover` too), the fields `list`, `read` and `whoami` show, and `lead`:
+  vcharon's is a few hundred bytes, so a bigger one isn't its, and the read stays bounded. A
+  rejoin's and a watcher start's `agent:`/`vcharon:` update, and the watcher start's `leader:`
+  refresh, read it whole.
 
 ### The claimer
 
@@ -1289,7 +1209,7 @@ so a record can't share a name with a job's state file:
 - `project` and `role` rebuild the name for `fix:` lines.
 - `format` and `limits` are the channel's, stored at `join`/`create` ([Formats](#formats)).
 - `"shared": true` only for a membership in the server's shared root ([The shared
-  root](#the-shared-root)); a record without it is in the root in the home, as before.
+  root](#the-shared-root)); a record without it is in the root in the home.
 - Written through a temp file and `os.replace`; a write the file system refuses is its error
   (`permission`, `no_space`, …) with its fix line, as any other write's. A record that can't be
   read is an error, never a guess: VCharon never guesses which server a membership is on.
@@ -1313,171 +1233,106 @@ In order:
 3. Nothing: refused, `you aren't in C as --project P (no join record on this box)`, with a
    `fix:` that names the flags of the memberships this box has, or `vcharon join C …`.
 
+Two records for one (C, project, role) are refused: ask the user.
+
 `join` and `create` run step 1 only, before they build a new name: a `join C` after a `setup
 --box` rejoins under the name it had, not a second membership under the new box. Steps 2 and 3
-would block a legitimate role-less join, so instead `join` and `create` print `note: this
-project also holds C on this machine as <name> (--project P --role R), another session's or
-yours with other flags; that membership stands, and this join is a separate one` (`--project
-P, no --role` for one without a role) for each other membership of C the project has, at every
-join, a rejoin of a found record too: a session that joins again with the other agent's flags
-is told nowhere else. It names the membership and never calls it the reader's: two agents can
-work in one folder (a leader and a member, say), and the other membership may be the other
-agent's. It says both stand: a note that only named the other one read to an agent as a clash
-with its own join. Two records for one (C, project, role) are
-refused: ask the user.
+would block a legitimate role-less join, so instead, at every join, `join` and `create` print a
+`note:` naming each other membership of C this project holds on this machine, with its flags,
+and saying both stand. It never calls the other one the reader's: two agents can work in one
+folder (a leader and a member), and the other membership may be the other agent's. `whoami C`
+lists the same, as `also` lines.
 
-A join that takes back a folder with no `--rejoin` (step 1's record, or a lobby's folder after a
-`leave`, [The lobby](#the-lobby)) whose `MEMBER.md` said another `agent:` than this run's
-(`--agent`, else the environment, else `other`) prints, after its `agent:` and `vcharon:`
-lines, `  note: C/<name>'s MEMBER.md said agent: <old> before this join, and this run's agent is
-<new>: if that membership is another agent's (one that works in this checkout too), join as a
-member of your own: vcharon join C <--local or --server S> --project P --role R, and pass --role R
-on every command after (vcharon guide start, "A new session")`. None when the two agree (a new
-session of the same agent is the normal case), with `--rejoin` (the user's word that the folder is
-this one's), or for a `MEMBER.md` with no `agent:`; an old agent `other` still gets it. The note
-changes nothing: the rejoin updates `agent:` as [Member names](#member-names) says. So after a
-second agent's take-back with an agent found, `MEMBER.md` names the second agent until the first
-one rejoins with an agent found (a first agent found by nothing leaves it, and gets the note at
-every session). The first one's next session then gets the note too, so it asks whose membership it
-is, not whether another agent works here (yes for both). Why: a second agent started in another's
-folder with no `--role` builds the same name and takes the first one's membership with no word, and
-the agent is the only sign vcharon has; it can't be sure (an agent found by nothing, or more than
-one, reads `other`), so it is a note. The fix has no `leave`: that would leave the first agent's
-membership, its record and a `LEAVE` under its name.
-
-`whoami C`'s text names the same: after the membership's own lines, `  also     <name>  (--project
-P --role R): this project's other membership of C here` for each other membership of C this
-project has on this machine. Why: a plain `whoami C` shows the role-less membership, and an
-agent in a folder another agent shares saw nothing of the other one's.
+**Another agent's folder.** A join that takes back a folder with no `--rejoin` (step 1's record,
+or a lobby's folder after a `leave`) whose `MEMBER.md` said another `agent:` than this run's
+prints a `note:`: if that membership is another agent's, join as a member of your own with
+`--role R`. None when the two agree, with `--rejoin` (the user's word), or for a `MEMBER.md`
+with no `agent:`. The note changes nothing: the rejoin updates `agent:` as [Member
+names](#member-names) says, so the first agent's next session gets the note too. Why: a second
+agent started in another's folder with no `--role` builds the same name and takes the first
+one's membership with no word, and the agent is the only sign vcharon has; it can't be sure, so
+it is a note. The fix has no `leave`: that would end the first agent's membership.
 
 ### Create, join, leave, close
 
 - **`create C`**: one `channel.claim` with `create`: `mkdir <root>/C` (fails if it exists, so of
   two creators one wins), then `mkdir <root>/C/<name>`; if that fails, the empty channel folder
-  is removed. A join record of the name already here, for this server, while the channel isn't
-  there is left from a channel that ended without a `leave`: refused before the claim, with
-  `vcharon leave C` as the fix (with the channel there, the claim's own refusal stands). Then
-  the record, `MEMBER.md` and `CHANNEL.md`; a remote member also gets its local
-  tree and section, then a `--full` sync. A failure before the sync undoes what it wrote and
-  releases the claim. Right after the claim it takes this machine's watcher lock for the name,
-  as `join` does (held by another: `a live session holds <name> in C`, and the claim is
-  released), and holds it to the end, through the sync. Then (after a remote leader's sync, a
-  failed one too, but not one stopped by Ctrl-C), under that lock, it saves the leader's
-  watcher snapshot: the files at the top
-  of the channel and the check's warnings, and nothing of any member's folder, none of whose
-  entries is marked seen. Why: every member folder is newer than the claim, so the leader's
-  first watcher start prints every member's `JOIN`, one that a remote create's own down sync
-  (it runs after the up) already brought too; a baseline there would take it as seen. Saved
-  as in `join` (below), with the same note when it fails.
-- **`join C`**, in this order: (1) `channel.list`: the channel exists with a leader by the
-  charters' terms ([Leader handoff](#leader-handoff); none, or two at the top term, refuses),
-  and its format and limits pass; checked before the
-  claim, so a refused join leaves nothing behind. (2) This machine's watcher lock for the name,
-  taken without waiting: held by another means a live session already is that member: refused,
-  `a live session holds <name> in C` (its watcher, or a `create`, `join`, `leave` or `close` of
-  it still running). When this machine has a record of the name, the line goes on to say whose
-  membership it is, `(this machine's record: the leader's membership, created here with --project
-  P, no --role)` or `(…: a member, joined here with --project P --role R)`, and the fix names the
-  cases without choosing: `your own earlier watcher: keep using it, or if you no longer get its
-  output, stop it with vcharon watch C --stop <flags> (a command of yours: let it end); another
-  agent's (your user says so): join with --role R; unsure: ask your user`, the flags the
-  record's (with no record, so no membership for the stop to find: `your own earlier watcher or
-  command: keep it or let it end; …`). The line ends ` (PID <n>)` when the holder wrote its PID
-  ([Lock](#lock)), as the refusal of `leave` and `close` does. The record can't
-  choose: a leader re-running `join` after a `/clear` gets `the leader's membership` for its own
-  watcher. A record of the name on another server says `(this machine's record: a membership on
-  another server)`, with `pass --role R to join from here as another member`. Why: an agent in the
-  leader's folder builds the leader's name, so the holder may not be the reader's. Taken, the join
-  holds it until it returns, through its sync, on every way out; a join that fails with no record
-  of the name left deletes the lock file it made, so it leaves nothing behind here either (POSIX
-  deletes it, then releases; Windows, which can't delete an open file, releases first; a failed
-  delete is ignored). Deleting first doesn't keep everyone out on POSIX: a process that opened the
-  file just before the delete gets the lock of the deleted file once it is released, while a later
-  one makes a new file at the path.
-  A record of this name for another server (the same channel name on a second server) is
-  refused too, `you are in C on another server`. So is a record of this name whose folder
-  isn't in the listed channel, or whose leader holds no `CHANNEL.md` there: it is of an earlier
-  channel of the name (closed and made again, with no `leave` here), `your join record of C as
-  <name> is of an earlier channel: …`, with `vcharon leave C` as the fix. Why: reused, the new
-  channel would get the old `MEMBER.md`'s `leader:` and old entries, and the full down would
-  delete this machine's copy of the old channel. (3) `channel.claim`, one `mkdir`; the claim's
-  own reading of format and limits must equal the listing's. (4) An existing folder: the
-  claimer rules above; with no record and no `--rejoin`, `the name <name> is taken in C`. (5) The record, then `MEMBER.md` (a new member only), a remote
-  member's section. A failure before the record releases a new claim. (6) A remote member's
-  rejoin first pulls its own folder from the server when this machine lost it (below). (7) A
-  `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md` (a lobby's differ: [The
-  lobby](#the-lobby)), then the sync (one line when it works: [Output](#output)), which
-  sends it with `MEMBER.md`: the leader sees the `JOIN` when the folder appears, not at the
-  member's next sync.
-  Then (unless the sync was stopped by Ctrl-C) the watcher's snapshot, under the lock the join
-  holds: a first join, or a rejoin with no snapshot it can use, saves the one a watcher's start
-  with none would save, from one look at the tree (the same scan, folder limits, entries taken
-  as seen and warnings: one constructor builds both, since a snapshot that differs isn't caught
-  when it loads, and the first round would print a false `WARN` and count it as a change). A
-  rejoin with a usable snapshot keeps it, so its watcher still prints what came while none ran
-  (to-you, other-entry, edit and file lines). A first join always replaces one left there: it
-  can only be of an earlier channel or membership, whose marks would take the new channel's
-  entries of the same numbers as seen; so does a rejoin with no join record here (`--rejoin`),
-  for the same reason. Why: a start with no snapshot is a baseline, so an entry
-  posted between the join (or the create) and the watcher's first start was never printed, by
-  that start, by a later round, or by `--once`; and for a remote member any sync in between (by
-  hand, or the `--full` one a failed join's line asks for) made it so too. A save that fails
-  doesn't fail the join: `  note: your watcher's snapshot couldn't be saved (<why>): its first
-  start takes what is there then as seen; once it runs, read what came: vcharon read C --to-me
-  <flags>`, and the first start is a baseline as before. Then the entries already addressed to
-  the member or to all are printed (the sync brought the others' folders): with a snapshot just
-  saved, only those it takes as seen, so one that lands after the look is the watcher's to
-  print, and each is printed once; with a kept snapshot (or none), all of them, and the watcher
-  may print again what came while it was away. An entry edited between the look and the
-  listing shows its new text here; if its heading changed, the first round warns that it was
-  edited (the edit check hashes only the heading). Each line is escaped as `read` escapes it;
-  an entry whose ID names another member is one line,
-  `WARN entry <id> in <folder>/: not its folder's`, as the watcher prints it, after the entries,
-  and one with no ID is left out, as the watcher leaves it. Of an ID in two files only the first
-  in path order is printed, the copy `read` and the watcher keep.
-- **The next step.** A `join` or `create` that succeeded prints, before its `OK` line (which stays
-  the last), `  next: start your watcher now (vcharon guide member): vcharon watch C
-  --until-change <flags>` (a lobby's join: `(vcharon guide lobby)`); `create` adds `  then post
-  the plan (vcharon guide lead): vcharon post C --steps --to @all --title '…' <flags>, with the
-  body on stdin`. The flags are the record's (`--project`, and
-  `--role` when it has one), so the commands work from any folder; spelled as this machine runs
-  vcharon. A first `join` (not a rejoin) of a work channel then prints `  note: if your user only
-  asked you to join, ask them whether to work on the steps the leader assigns you`: a bare
-  "join" is no task, and the steps are work only the user can ask for (`create`, and a rejoin,
-  the leader's in a new session
-  too, print no such line). A first `join` and a `create` whose agent (MEMBER.md's `agent:`) isn't
-  `claude` print, right after the watcher line, `  note: first time, add --max-minutes 1 to that
-  command and see how it ends (vcharon guide member, "The one-minute check")` (a lobby's join:
-  `(vcharon guide lobby, "Watching")`, its short form): only a watcher that
-  ran shows whether the agent's tool lets it end on its own, and the guide gives Claude Code's
-  limits. A note, not `--max-minutes 1` in the watcher line: run again as printed later, that
-  would keep every watcher at one minute. A `join` or `create` run by Codex (`--agent codex`, or
-  Codex found in the environment) prints, after those, `  note: Codex: while idle, don't end your
-  turn: poll the watcher again with a long wait each time it returns still running (vcharon guide
-  codex)`, at every session (a rejoin too): Codex sees its watcher's exit only by
-  polling, and polls only while its turn runs, so a turn ended while idle leaves entries unread
-  until its user types. The watcher line is a command to run as printed, and it names the page
-  an agent reads before it joins (member's, or the lobby's) rather than a way to run it: a
-  background command is right only where the agent's CLI reports its exit, and that page and the
-  CLI's topic say what to do otherwise. Every guide topic a line on the normal path names is
-  one of those read before joining (`tests/test_guide.py` checks each string in the code; a
-  refusal's fix line, a rare case's note, or help text may name a reference topic, each listed
-  with its reason): an agent reads the reference topics when a line points there. The plan line is a
-  template (a placeholder title, and the trailing words make it refuse to parse), since a plan
-  posted as printed would reach everyone and can't be taken back. Why: an agent that skips the
-  guide still sees what to run next. A join whose sync failed prints none of these: its sync is
-  the next step.
-- **The stale-skill note.** Just before the `next:` line, `join` and `create` print `  note:
-  your vcharon skill at <path> is from another version: vcharon skill install --claude` when a
-  skill copy that `vcharon skill install` wrote (its marker line) holds another text than this
-  version's SKILL.md; `--codex` for that copy, both flags and `skills at <path> and <path> are`
-  for both. The check is doctor's `skill` row (`skill.installed()`); the command is spelled as
-  this machine runs vcharon. A copy without the marker is the user's own and gets no note, and
-  a copy that can't be read, or a check that fails, gives no note and changes nothing else: the
-  exit code stays the command's. On stdout, with the rest of the output, which already names
-  this machine's folders (the `OK` line's). Why: an agent reads the skill before the guide,
-  and an update made by an older updater, or any change to SKILL.md, leaves the copies as they
-  were until `vcharon skill install` or a later `--update`.
+  is removed. A join record of the name already here for this server while the channel isn't
+  there is left from a channel that ended without a `leave`: refused before the claim, fix
+  `vcharon leave C`. Then the record, `MEMBER.md` and `CHANNEL.md`; a remote member also gets
+  its local tree and section, then a `--full` sync. A failure before the sync undoes what it
+  wrote and releases the claim. Right after the claim it takes this machine's watcher lock for
+  the name, as `join` does, and holds it to the end. Then (after the sync, even a failed one,
+  but not one stopped by Ctrl-C) it saves the leader's watcher snapshot with nothing of any
+  member's folder marked seen. Why: every member folder is newer than the claim, so the
+  leader's first watcher start must print every member's `JOIN`.
+- **`join C`**, in this order:
+  1. `channel.list`: the channel exists with a leader by the charters' terms ([Leader
+     handoff](#leader-handoff); none, or two at the top term, refuses), and its format and
+     limits pass; checked before the claim, so a refused join leaves nothing behind.
+  2. This machine's watcher lock for the name, taken without waiting. Held means a live session
+     already is that member: refused, `a live session holds <name> in C`. With a record of the
+     name here, the line says whose membership it is (the leader's or a member's, with its
+     flags), and the fix names the cases without choosing (your own earlier watcher: keep it or
+     stop it with `watch --stop`; another agent's: join with `--role R`; unsure: ask your user);
+     ` (PID <n>)` ends it when the holder wrote one ([Lock](#lock)). Why: an agent in the
+     leader's folder builds the leader's name, so the holder may not be the reader's. Taken, the
+     lock is held until the join returns; a join that fails with no record left deletes the lock
+     file it made.
+     A record of this name for another server is refused, and so is one whose folder isn't in
+     the listed channel, or whose leader holds no `CHANNEL.md` there: it is of an earlier channel
+     of the name, fix `vcharon leave C`. Why: reused, the new channel would get the old
+     `MEMBER.md`'s `leader:` and old entries, and the full down would delete this machine's copy
+     of the old channel.
+  3. `channel.claim`, one `mkdir`; the claim's own reading of format and limits must equal the
+     listing's.
+  4. An existing folder: the claimer rules ([The claimer](#the-claimer)); with no record and no
+     `--rejoin`, `the name <name> is taken in C`.
+  5. The record, then `MEMBER.md` (a new member only), a remote member's section. A failure
+     before the record releases a new claim.
+  6. A remote member's rejoin first pulls its own folder from the server when this machine
+     lost it (below).
+  7. A `JOIN` (or `REJOIN`) entry to the leader in `RESULTS.md` (a lobby's differ: [The
+     lobby](#the-lobby)), then the sync, which sends it with `MEMBER.md`: the leader sees the
+     `JOIN` when the folder appears.
+  8. Unless the sync was stopped by Ctrl-C, the watcher's snapshot, under the lock the join
+     holds. A first join, or a rejoin with no usable snapshot, saves the one a watcher's start
+     with none would save (one constructor builds both, so they agree: a difference isn't
+     caught when it loads); a first join, and a `--rejoin` with no record here, replace one
+     left there, which can only be of an earlier membership. A rejoin with a usable snapshot
+     keeps it, so its watcher still prints what came while none ran. Why: a start with no
+     snapshot is a baseline, so an entry posted between the join and the watcher's first start
+     would never be printed. A save that fails doesn't fail the join: a `note:` says so and
+     points at `read --to-me`.
+  9. The entries already addressed to the member or to all are printed, escaped as `read`
+     escapes them: with a snapshot just saved, only those it takes as seen, so each is printed
+     once; with a kept snapshot, all of them. A wrong-folder ID is a `WARN` line, as the watcher
+     prints it; an entry with no ID is left out; of an ID in two files, the first in path order.
+- **The next step.** A successful `join` or `create` prints, before its `OK` line (which stays
+  last), a `next:` line with the watcher command to run (`watch C --until-change` with the
+  record's flags, spelled as this machine runs vcharon, so it works from any folder) and the
+  guide topic to read (`member`, or `lobby`); `create` adds a template of the plan's `post`
+  (a placeholder title that refuses to parse, since a plan posted as printed would reach
+  everyone). Notes after it, each for one case:
+  - a first `join` of a work channel: if the user only asked to join, ask them whether to work
+    on the leader's steps (a bare "join" is no task);
+  - a first `join` or `create` whose agent isn't `claude`: try the watcher once with
+    `--max-minutes 1` to see how it ends (only a run shows whether the agent's tool lets it end
+    on its own). A note, not part of the watcher line, which would then keep every watcher at
+    one minute;
+  - any `join` or `create` by Codex: while idle, don't end the turn, poll the watcher again
+    (Codex sees a background command's exit only while its turn runs).
+
+  Every guide topic a line on the normal path names is one read before joining
+  (`tests/test_guide.py` checks each string in the code). Why: an agent that skips the guide
+  still sees what to run next. A join whose sync failed prints none of these: its sync is the
+  next step.
+- **The stale-skill note.** Just before the `next:` line, `join` and `create` print a `note:`
+  when a skill copy that `vcharon skill install` wrote (its marker line) holds another text
+  than this version's SKILL.md, with the `skill install` command for those agents. The check is
+  doctor's `skill` row. A copy without the marker is the user's own; a check that fails gives no
+  note and never changes the exit code. Why: an agent reads the skill before the guide, and only
+  `skill install` (or a later `--update`) rewrites the copies.
 - **The rejoin's pull** is decided from up's saved state, never from how the folder looks (a
   stray `.DS_Store` would pass for a tree): it pulls when up has no usable state, has sent
   nothing, or has sent `MEMBER.md` and `MEMBER.md` is missing here. It pulls into a temp folder
@@ -1485,172 +1340,111 @@ agent in a folder another agent shares saw nothing of the other one's.
   path is `lstat`'ed first and a symlink refused. Why: down never plans the own folder, and an
   up from a lost tree would delete the server's files and restart numbering at #1. A file
   deleted on purpose (with `MEMBER.md` still here) is not pulled back.
-- **`leave C`**: refused while this machine's watcher lock or a sync lock of the membership is
-  held; the watcher lock is taken, not just checked, and held to the end. It checks the server's
-  machine id against the record, then lists: a name listed as unusable is refused (never taken
-  for a gone channel); a gone channel skips to the removal. So does a listed channel without the
-  member's folder, or with another leader than the record's (the own folder removed at the
-  server, or the channel made again), with a `note` saying which: a `LEAVE` would reach no one,
-  and the sync would fail on the missing folder and point back at `leave`. Only then is a work
-  channel's leader refused, the one the listing names by the charters' terms (it hands the
-  lead over or closes: `you lead C: hand the lead over, or close it`; a former leader leaves as
-  a member, and every `LEAVE` goes to the listed leader; a lobby's founder leaves as any member
-  does): a live channel is the leader's to close, but a gone or made-again one isn't there for
-  its close to remove, and the stale record's fix line is this `leave`. The `leave` of the
-  record's leader lists before it checks the locks (the listing changes nothing): a lock refusal
-  first would have it stop the watcher of a channel it still leads.
-  Else, a remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with
-  the rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
-  member's is noted and nothing posted. Else it posts `LEAVE` (once: not again after a failed
-  try, while its folder shows it left by `whoami C`'s rule for `left`), says so (`  posted
-  LEAVE <id> into <file>, to @<name>`, plus ` (wakes no one)` when that is the member itself,
-  as in a lobby; a day file's `removed` lines follow it, as `post`'s do) and syncs; a failed
-  sync stops before removing anything. Then it removes the local tree (only when it is
-  exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs'
-  state, the kept last-watched ages, `read`'s kept version note, logs, locks not held, the
-  watcher's snapshot and a stop request left by a stop that was killed (`--stop`), the post
-  lock, the record, the section file, and last the watcher's lock file, after the record, so a
-  watcher started then finds no membership; deleted and released in the order a failed join
-  uses. One `removed <path>` line each, a path under the home as `~/…` (`~\…` on Windows).
-  The member's folder in the channel stays: it is its history, and its name stays taken (a
-  lobby gives it back to this machine: [The lobby](#the-lobby)).
-  When the channel, or the member's folder in it, was gone, it ends with `note    nothing of <C>
-  as <name> is left on this machine` (and `still here: <names>` for other memberships of C on
-  this machine, which stay): an agent told nothing would ask its user what to delete. `close`
-  prints the same. Nothing is removed on its own when a watcher sees the channel closed: `EXIT
-  closed` also means a folder removed as idle or by hand, and after a close this machine's copy
-  is the last of the channel's text.
-- **`close C`**: the leader only, the one the listing names by the charters' terms: every
-  close checks the machine id and lists first, so a member or a former leader is refused, `only
-  the leader closes C, and that is X`, before any lock check (a former leader isn't told to
-  stop its watcher for a close it may not make). The leader then takes the same lock checks
-  as `leave` (a held lock can't leave a half-closed channel; the watcher lock held to the end,
-  as `leave` holds it), then `channel.remove`, which refuses unless the caller holds the top term's charter
-  (a former leader's `CHANNEL.md` in another folder is fine; two at the top term refuse) and
-  every top-level entry is a folder with a valid member name, and takes the next term's marker
-  first, as a takeover does ([Leader handoff](#leader-handoff)), dropped again when the rename
-  fails, so a close and a takeover exclude each other. It renames
+- **`leave C`**:
+  - Refused while this machine's watcher lock or a sync lock of the membership is held; the
+    watcher lock is taken, not just checked, and held to the end.
+  - It checks the server's machine id against the record, then lists. A gone channel, or a
+    listed one without the member's folder or with another leader than the record's, skips to
+    the removal with a `note`: a `LEAVE` would reach no one. Only then is a work channel's
+    leader by the charters' terms refused (`you lead C: hand the lead over, or close it`; a
+    former leader leaves as a member, and a lobby's founder as any member). The record's leader
+    lists before the lock checks, so it isn't told to stop the watcher of a channel it still
+    leads; any other member's leave takes the locks first.
+  - A remote member whose own folder here lacks `MEMBER.md` is refused, `not_found`, with the
+    rejoin as its fix (a sync would send the emptied folder over the server's copy); a local
+    member's gets a note, and no `LEAVE`.
+  - Else it posts `LEAVE` to the listed leader (in a lobby, to itself: [The lobby](#the-lobby),
+    "Silent entries"), once, not again after a failed try, and syncs; a failed sync stops before
+    removing anything.
+  - Then it removes everything of the membership on this machine: the local tree (only when it
+    is exactly the computed `joined/<C>.<name>`, with the no-link walk), the jobs' state, the
+    kept ages and version note, logs, locks not held, the watcher's snapshot and a stale stop
+    request, the post lock, the record, the section file, and last the watcher's lock file, so
+    a watcher started then finds no membership. One `removed <path>` line each.
+  - The member's folder in the channel stays: it is its history, and its name stays taken (a
+    lobby gives it back to this machine: [The lobby](#the-lobby)).
+  - When the channel or the member's folder was gone, it ends with a note that nothing of that
+    membership is left here, naming other memberships of C that stay; `close` prints the same.
+    Why: an agent told nothing would ask its user what to delete. Nothing is removed on its own
+    when a watcher sees `EXIT closed`: that also means a folder removed as idle or by hand, and
+    after a close this machine's copy is the last of the channel's text.
+- **`close C`**: the leader only, the one the listing names by the charters' terms. It checks
+  the machine id and lists first, so a member or a former leader is refused before any lock
+  check. Then the same lock checks as `leave`, then `channel.remove`, which refuses unless the
+  caller holds the top term's charter and every top-level entry is a folder with a valid member
+  name, and takes the next term's marker first, as a takeover does ([Leader
+  handoff](#leader-handoff)), so a close and a takeover exclude each other; the marker is
+  dropped again if the rename fails. It renames
   `<root>/C` to `.vcharon-closed-<C>-<stamp>` in one step, so every member's next sync sees the
   channel gone at once (a channel name can't start with `.`), then deletes it with the no-link
-  walk. A failed delete leaves the renamed folder, which `list`
-  notes. Then its own files as `leave` removes them. On Windows a rename refused because
-  something holds a file or its current folder inside the channel fails cleanly, with a `fix:`
-  saying so. When the leader's folder (read before the removal: a local leader's goes with
-  the channel) holds no entry of its own to `@all` titled `CLOSED`, as the watcher matches it,
-  a note follows the `closed` line: `  note    you posted no CLOSED to @all, so the members
-  weren't told C closed: each one's watcher ends with EXIT closed. Next time post CLOSED first
-  and wait for the LEAVEs; how: vcharon guide end`. A note, not a refusal: by then the close is
-  done, and refusing would only have the leader post a `CLOSED` it closes over at once. No note
-  when the channel was gone already, or with no own folder to read.
-- **Why held, not checked once**: a watcher started between the check and the command's own
-  sync ran alongside it. Measured on Linux (seven overlaps seen): the watcher's round was
-  skipped as busy, and once the join's own sync lost the job lock (`ERROR busy`, exit 2). Held,
-  a watcher started meanwhile exits 12 at once. The refusal of `leave` and `close` names
-  the watcher first, since a running watcher is what an agent forgets to stop: `your watcher of
-  <name> in C is running, or a create, join, leave or close of it (<lock> is held)`, followed
-  by ` (PID <n>)` when the holder wrote its PID ([Lock](#lock)), its fix `stop the watcher with
-  vcharon watch C --stop <flags> (a create, join, leave or close: let it end), then run this
-  again`; a job's lock held is `a sync of <name> in C is running (<lock> is held)`.
+  walk. A failed delete leaves the renamed folder, which `list` notes. On Windows a rename
+  refused because something holds a file or folder inside the channel fails cleanly, with a
+  `fix:` saying so. Then its own files as `leave` removes them. When the leader posted no
+  `CLOSED` to `@all`, a note after the close says the members weren't told and points at the
+  guide's end: a note, not a refusal, since by then the close is done.
+- **Why the lock is held, not checked once**: a watcher started between the check and the
+  command's own sync ran alongside it, skipping rounds as busy, and once made the join's own
+  sync fail `busy`. Held, a watcher started meanwhile exits 12 at once. The
+  refusal of `leave` and `close` names the watcher first, since a running watcher is what an
+  agent forgets to stop, with ` (PID <n>)` when known, its fix `watch C --stop` and then the
+  command again.
 
 ### Removing idle members
 
 `vcharon list --remove-idle (--server ALIAS | --local) [C …] [--days N] [--yes] [--home |
 --shared] [--json]` is the user's way to remove the folders of members that don't come back:
-`leave` keeps a member's folder (its history, [Create, join, leave,
-close](#create-join-leave-close)), and so does a session that ends without one. It acts on
-no membership, as `list` does.
+`leave` keeps a member's folder (its history), and so does a session that ends without one. It
+acts on no membership, as `list` does.
 
-- **Idle**: the server's time now less the newest of the member's last-watched stamp (when it
-  holds a pace: [The watcher in a channel](#the-watcher-in-a-channel)) and the change time
-  (`st_ctime`) of its folder and of every entry below it, stage dirs too, by an `lstat` walk
-  that never follows a link; on a Windows root `st_mtime`, since there `st_ctime` is the
-  creation time (a Windows root holds local members only, whose writes are its own). Every
-  time is the root's machine's ([Clocks](#clocks)). Why the change time: a sync copies each
-  file's mtime from the writer's machine, while its rename or `utime` at the server moves the
-  change time then; `list`'s `newest` is such a copied mtime. Gap: a member that only reads,
-  with no watcher, leaves no trace. `list` ends each member's line with `idle <age>` (`-` when
-  unknown), and `--json` gives it as each `member_info`'s `idle_seconds`.
+- **Idle**: the server's time now less the newest of the member's last-watched stamp ([The
+  watcher in a channel](#the-watcher-in-a-channel)) and the change time (`st_ctime`) of its
+  folder and of every entry below it, stage dirs too, by an `lstat` walk that never follows a
+  link; on a Windows root `st_mtime`, since there `st_ctime` is the creation time. Every time is
+  the root's machine's ([Clocks](#clocks)). Why the change time: a sync copies each file's mtime
+  from the writer's machine, while its rename at the server moves the change time. Gap: a
+  member that only reads, with no watcher, leaves no trace. `list` shows each member's idle
+  time.
 - **Which**: each member idle over `--days` days (default 14, 1 to 3650), in the channels named
-  (each must be listed: `not_found` otherwise, before anything changes), else in every
-  channel. Never removed, listed as `keep` with why: a folder holding `CHANNEL.md` (the
-  leader's, a former leader's after a handoff, whose charter the terms' chain still reads, or
-  a lobby founder's); this machine's own membership, a join record of the name for this server
-  (`this machine's own membership; to end it: vcharon leave C <flags>`; another machine's
-  record can't be seen from here, which is why the idle time is the guard); in a work channel,
-  a folder holding more than 450 files and folders, itself included, since every remote
-  member's down would delete its copy in one plan, which the dir sink refuses over its
-  `max_deletes` of 500 (a lobby's down has no limit: [The lobby](#the-lobby)); and for the
-  same reason, in a work channel, the folders one run removes hold at most 450 together
-  (counted as the down's stage step counts them, each folder itself included), in the members'
-  order: one past what is left is kept, `over 450 deletes for the members' syncs in one run:
-  run again once their watchers have synced`. Why 450, not 500: the same down plan may hold
-  other deletes (the member's own, a file moved), and 50 leaves them room; one number for the
-  folder and the run, since a folder over the run's budget could never go. The limit: a remote
-  member whose down didn't run between two runs (offline, no watcher), or a second run before
-  its watcher synced, still gets both runs' deletes in one plan, over 500, and its down refuses
-  them (`too_many_deletes`). A name at a channel's top that isn't a
-  member's folder, or is a link, is no member and never listed. A work channel whose every
-  member, its leader too, is idle gets one note, `note: C: every member is idle over N days,
-  its leader too: nothing of it is removed; its leader closes it, or your user deletes it at
-  the server` (`1 day` with `--days 1`, here and in the listing's first line, `members idle
-  over N days`), and none of its members is listed: a whole channel is its leader's to close.
-- **Without `--yes`** nothing changes: under each channel's line, one line per idle member,
-  `remove <name>  idle <age>` or `keep <name>  idle <age>: <why>`, then `to remove them, your
-  user runs: vcharon list --remove-idle --yes <the same flags>` (`--home` or `--shared` too);
-  `none` when nothing is idle; exit 0, never a prompt.
+  (each must be listed, else `not_found` before anything changes), else in every channel. Never
+  removed, listed as `keep` with why:
+  - a folder holding `CHANNEL.md` (the leader's, a former leader's, a lobby founder's);
+  - this machine's own membership (another machine's record can't be seen from here, which is
+    why the idle time is the guard);
+  - in a work channel, a folder holding more than 450 files and folders, and past 450 for the
+    folders one run removes together: every remote member's down deletes the copies in one
+    plan, which the dir sink refuses over its `max_deletes` of 500 (a lobby's down has no
+    limit: [The lobby](#the-lobby)). 450 leaves room for the plan's other deletes. Limit: a
+    member whose down didn't run between two runs gets both runs' deletes in one plan and
+    refuses them (`too_many_deletes`).
+
+  A name at a channel's top that isn't a member's folder, or is a link, is never listed. A work
+  channel whose every member, its leader too, is idle gets one note and none of its members is
+  removed: a whole channel is its leader's to close.
+- **Without `--yes`** nothing changes: one `remove` or `keep` line per idle member, then the
+  command the user runs to remove them; exit 0, never a prompt.
 - **With `--yes`** each candidate is one `channel.prune`, which checks again at the server, by
-  its clock at the call: still a real folder with no `CHANNEL.md`, still idle over the days (a
-  member back since the listing is `kept`, `active again`), and the 450 rules, the run's
-  budget sent with the call (`budget`: what the run's removals in the channel left of 450; a
-  member kept since the listing frees its share for the next). Then one rename
-  to `<root>/.vcharon-removed-<C>-<name>-<stamp>`, so every member's next run sees the folder
-  gone at once (a channel's name can't start with `.`), then the no-link walk deletes it, and
-  the member's stamp goes, as at a close. A failed delete leaves the renamed folder, which
-  `list` notes (`a member's folder removed as idle that wasn't deleted`), and its error's fix
-  is `delete it by hand`. Lines: `removed <name>  idle <age>: <n> files and folders deleted`,
-  `kept <name>  idle <age>: <why>`, `failed <name>  idle <age>: <code>: <message>`; a failure
-  doesn't stop the others, and the first one is the command's error at the end (exit 1).
-- **What the member sees**: a remote member's next sync fails on its missing folder with the
-  channel-gone fix, `the channel is closed, or your folder in it is gone: in a work channel
-  with no CLOSED, ask your user first (vcharon guide end); then run: vcharon leave C <flags>`,
-  so its watcher ends with `EXIT closed`; a local member's watcher sees its own
-  folder gone at its next round, `ERROR your folder <path> is gone`, the same fix, and `EXIT
-  closed` ([The watcher in a channel](#the-watcher-in-a-channel)). Its `leave` then removes
-  the membership here, and a later `join` makes a new folder, whose `JOIN` the others'
-  watchers print as new.
-- **`--json`**: `{"server", "days", "yes", "root", "members", "idle_channels", "shared"}`;
-  each member
-  `{"channel", "name", "idle_seconds", "action", "why", "deleted"}`: `action` `remove` or
-  `keep` without `--yes`, `removed`, `kept` or `failed` with it; `why` the reason's key
-  (`charter`, `own`, `items`, `budget`, `active`, `gone`, `not_member`), a failure's
-  `<code>: <message>`, or null; `deleted` the count deleted, else null. `idle_channels` names
-  the whole idle work channels. With a failure the object is printed, then the error (exit 1).
-  `shared`: the shared root's `{"members", "idle_channels"}` the same way, or null. `root`:
-  `home` or `shared` for that flag, `both` for neither (the shared root too where there is
-  one; `shared` is null where there is none); with `--shared`, `members` and
-  `idle_channels` are null; with `--home`, `shared` is.
-- **Both roots**: on a Linux server (or machine, with `--local`) it covers the shared root's
-  channels too, as `list` shows them: the lines above for each root, each after its own first
-  line (the shared one's `(<server>'s shared root)`, printed whenever `list` shows that
-  root's group: it holds a channel or another name; its `none` says it was checked), then one
-  `to remove them` line; a channel named must be in either. A shared folder
-  that fails its checks is a note line and `shared`: `{"error"}`, as in `list` ([The shared
-  root](#the-shared-root)). Why: any member's
-  user cleans up a shared channel ([The shared root](#the-shared-root)), and with neither
-  `--home` nor `--shared` the roots come from the listing, as for `list`.
-- **One root**: `--home` covers the root in the home alone, and the shared root isn't read at
-  all (no note either); `--shared` the shared root alone, its group always printed (`none`
-  when nothing is idle, even with no channel there). A channel named is looked up in that root
-  only. With `--shared`, a server (or machine) that can't hold a shared root is refused as
-  `create --shared` is there (`config`, exit 3, `the shared root (--shared) is on Linux
-  only`), and a shared folder that fails its checks is the command's error, not a note: the
-  user asked for that root. Why: a name can be in both roots (a lobby in each), so without
-  them the shared one can't be cleaned alone.
+  its clock at the call: still a real folder with no `CHANNEL.md`, still idle, and within the
+  run's 450 budget (sent as `budget`). Then one rename to
+  `<root>/.vcharon-removed-<C>-<name>-<stamp>`, so every member's next run sees the folder gone
+  at once, then the no-link walk deletes it, and the member's stamp goes. A failed delete leaves
+  the renamed folder, which `list` notes. Each member gets a `removed`, `kept` or `failed` line;
+  a failure doesn't stop the others, and the first one is the command's error (exit 1).
+- **What the member sees**: its channel-gone fix and `EXIT closed`, as at a close ([The watcher
+  in a channel](#the-watcher-in-a-channel)). Its `leave` then removes the membership here, and a
+  later `join` makes a new folder, whose `JOIN` the others' watchers print as new.
+- **`--json`**: the fields are in [Stable](#stable); with a failure the object is printed, then
+  the error (exit 1).
+- **Roots**: on a Linux server (or machine, with `--local`) it covers both roots, as `list`
+  shows them, each root's lines under its own first line, and a shared folder that fails its
+  checks is a note, as in `list` ([The shared root](#the-shared-root)). `--home` reads the root
+  in the home alone; `--shared` the shared root alone, where a failed check is the command's
+  error, and a machine that can't hold one refuses as `create --shared` does. Why both flags: a
+  name can be in both roots (a lobby in each), and any member's user cleans up a shared
+  channel.
 - `--days`, `--yes`, `--home`, `--shared` or a channel name without `--remove-idle` is a usage
   error (exit 3); `--home` and `--shared` together are one too.
-- Why a flag of `list` and not a verb: it decides from the listing and acts on no membership,
-  as `list` does. Why the user's only: it deletes other members' folders ([Trust and
-  access](#trust-and-access)).
+- Why a flag of `list` and not a verb: it decides from the listing and acts on no membership.
+  Why the user's only: it deletes other members' folders ([Trust and access](#trust-and-access)).
 
 ### Leader handoff
 
@@ -1661,87 +1455,71 @@ that is gone, on its user's word. A member writes only its own folder, so the ol
 - **Charters and terms.** A folder's charter is its own last entry in its `CHANNEL.md`: create's
   #2, or the one a takeover writes ([Formats](#formats)). Its header may hold `term: T` (none:
   term 1) and `after: <L>#<m>`. The **leader** is the folder whose charter has the highest term
-  (`charter.chain`); two at the top term is no leader: `join` and `close` refuse, `<C> has 2
-  leaders at term T (…)`, and `list` notes it. `list`'s `leaders` still names every folder
-  holding a `CHANNEL.md`; its `leader` and `term` say who leads. Why terms: no member may delete
-  another's file, so the old charter can't go.
+  (`charter.chain`); two at the top term is no leader: `join` and `close` refuse, and `list`
+  notes it. `list`'s `leaders` still names every folder holding a `CHANNEL.md`; its `leader` and
+  `term` say who leads. Why terms: no member may delete another's file, so the old charter
+  can't go.
 - **Whose `@all` counts**, by entry numbers, never clocks: the leader's from its charter's
   number on (`#c + 1`); a former leader's from `#c + 1` to the `#m` its successor's `after:`
-  names, and none after; term 1's from `#1`, as before any handoff. So an `@all` a former
-  leader posted to the server before the takeover still counts wherever it arrives late, and
-  one that reaches the server after it never does (one posted earlier but still unsent
-  included), whatever the clocks say. The watcher (each round: a handoff moves the lead
-  while it runs), `read --to-me` and join's print go by it (`kind.Work.may_post_all`), and
-  `post` refuses a former leader's `@all` (`@all is the leader's (X since term T)`) and its
+  names, and none after; term 1's from `#1`. So an `@all` a former leader posted before the
+  takeover still counts wherever it arrives late, and one that reaches the server after it
+  never does, whatever the clocks say. The watcher (each round), `read --to-me` and join's print
+  go by it (`kind.Work.may_post_all`), and `post` refuses a former leader's `@all` and its
   `--steps`. While a tree holds no charter (a remote member before its first pull) the record's
-  leader counts, as before.
+  leader counts.
 - **The offer**: `vcharon lead C --to @X`, the listed leader only: a `HANDOFF` entry to `@X`
-  with the header `lead: X`, into `RESULTS.md`, then a remote leader's up, as a post's (a busy
-  lock is a note, any other failure a WARN, never a failed offer: a re-run would post a second
-  `HANDOFF`). Refused for X with no folder in the listing, one that left (by this box's copy of
-  its folder), and one whose `MEMBER.md` says a vcharon without `lead`: older than 0.8.6, and
-  older than this build (`charter.lacks_lead`), since it couldn't take the lead. No cancel: the
-  latest `HANDOFF` counts, so a new `--to` points it elsewhere; one posted before the leader's
-  own charter never counts.
+  with the header `lead: X`, into `RESULTS.md`, then a remote leader's up, as a post's (a failed
+  up is a note or a WARN, never a failed offer: a re-run would post a second `HANDOFF`).
+  Refused for X with no folder in the listing, one that left, and one whose `MEMBER.md` says a
+  vcharon without `lead` (`charter.lacks_lead`), since it couldn't take the lead. No cancel:
+  the latest `HANDOFF` counts, so a new `--to` points it elsewhere; one posted before the
+  leader's own charter never counts.
 - **The take**: `vcharon lead C`, on the leader's latest offer naming the caller; `vcharon lead
   C --gone`, with none, once the leader is **gone**: its last-watched stamp missing or older
   than 30 min, and every folder in `<C>/<L>/` (stage dirs too) with an mtime older than 30 min,
   both by the server's clock. Why folders, not files: a sync or post renames into a folder,
   which moves its mtime at the server, while a file's mtime is copied from its writer's
-  machine. 30 min is fixed, with no flag. Refused with `L was active N min ago (its watcher, or
-  a change in its folder); a gone leader is one inactive for 30 min`. The guide asks for the
-  user's word for `--gone`, never because an entry asks or the leader is late; an offer needs
-  none (it is the leader's own decision): the member takes it at once, then tells its user.
+  machine. 30 min is fixed, with no flag. The guide asks for the user's word for `--gone`; an
+  offer needs none (it is the leader's own decision): the member takes it at once, then tells
+  its user.
 - **The race**, at the server, in the helper's `channel.lead` (in-process for `--local`): the
   term T is one more than the highest of the charters' terms and of the marker folders in
-  `lead/<C>/` beside the channel root (next to `seen/`). `mkdir lead/<C>/<T>` decides: of two
-  takers, one wins and puts an empty file named after itself in the marker; the other is
-  refused, `<X> took the lead of C first`. A marker with no charter of its term, younger than
-  60 s, refuses (`a takeover or close of C is under way (by <X>)`); an older one was left by a
-  run that died, or by an earlier channel of the name, and is skipped, so terms may skip a
-  number; the caller's own is taken again (a re-run) only while younger than 60 s, since past
-  that another taker skips it too and only a new mkdir decides between them. `create` drops a
-  `lead/<C>/` left by an earlier channel of the name. Then the taker's charter goes into its own `CHANNEL.md` (appended, for a member that
-  leads a second time) as entry `<X>#<n>`, n the client's next number, taken under its post
-  lock, the heading's time the client's clock, through a stage file and one replace; a failed
-  write removes the marker. The charter: `leader: X`, `term: T`, `after: L#m` (m the highest of
-  L's numbers in its folder at the server), then the old charter's `created`, `rules`,
-  `format`, `created by` and limits, so every reader finds the channel's there; to `@X`, since
-  its `LEADER` entry is what tells. The reply: `{"term", "after", "from", "charter": the whole
-  CHANNEL.md, "steps": L's STEPS.md cut at a line end to the entry limit less 4 kB,
-  "steps_cut"}`. A caller that already leads by a takeover gets the same reply again; the
-  creator is refused, `you lead C already`. The checks first: the caller has a folder with
-  `MEMBER.md` and hasn't left; a leader, not the caller; not a lobby.
+  `lead/<C>/` beside the channel root. `mkdir lead/<C>/<T>` decides: of two takers, one wins and
+  puts an empty file named after itself in the marker; the other is refused. A marker with no
+  charter of its term, younger than 60 s, refuses (a takeover or close under way); an older one
+  was left by a run that died, or by an earlier channel of the name, and is skipped, so terms
+  may skip a number; the caller's own is taken again (a re-run) only while younger than 60 s.
+  `create` drops a `lead/<C>/` left by an earlier channel of the name. Then the taker's charter
+  goes into its own `CHANNEL.md` (appended) as entry `<X>#<n>`, n the client's next number,
+  taken under its post lock, through a stage file and one replace; a failed write removes the
+  marker. The charter: `leader: X`, `term: T`, `after: L#m` (m the highest of L's numbers in
+  its folder at the server), then the old charter's `created`, `rules`, `format`, `created by`
+  and limits, so every reader finds the channel's there; to `@X`. The reply carries the term,
+  `after`, the whole `CHANNEL.md` and L's `STEPS.md` (cut to fit an entry). A caller that
+  already leads by a takeover gets the same reply again; the creator is refused. The checks
+  first: the caller has a folder with `MEMBER.md` and hasn't left; a leader, not the caller;
+  not a lobby.
 - **The taker's steps**, each skipped when done, so a run that stopped halfway is finished by
-  running it again: the watcher's lock (held, so its own running watcher is refused, with the
-  stop as the fix) and the job locks checked, as `close` takes them; under the post lock, the
-  number and the call; a remote taker writes the reply's charter, byte for byte, into its local
-  tree, as a lobby's founder does, so its up sends the server's own bytes back; the record's
+  running it again: the watcher's lock and the job locks checked, as `close` takes them; under
+  the post lock, the number and the call; a remote taker writes the reply's charter, byte for
+  byte, into its local tree, so its up sends the server's own bytes back; the record's
   `leader`, the section's `mailbox.leader` and `MEMBER.md`'s `leader:`; `PLAN` into its own
-  `STEPS.md`, to itself, header `term: T`, with L's `STEPS.md` quoted (its heading lines behind
-  `> `; too big for the entry limit: a pointer to it); `LEADER` into `RESULTS.md`, header `term:
-  T`, to `@all` and to `@` each member whose `MEMBER.md` says a vcharon without `lead` (its
-  watcher ignores the new leader's `@all`, so this wakes it once); then a remote taker's up,
-  as the offer's (the lead is taken already: a failure is a WARN). A run that stops after the
-  call prints `  note: you lead C at the server now (term T), but the takeover stopped before
-  its end: …, run: vcharon lead C <flags> again` above its error.
-  Its lines: `  you lead C: term T, after L#m`, `  posted PLAN …`, `  posted LEADER …`, `  next:
-  tell your user you lead C now (term T); then start your watcher again (vcharon guide lead):
-  vcharon watch C --until-change <flags>`, `OK  you lead C (term T)`. Exit 0, 1 (`channel`), 2
-  (busy) or 3 (usage: `--to` with `--gone`, `--to` naming itself, a lobby's `a lobby has no
-  leader`); no `--json`: `whoami C --json` shows `leader` and `term`.
+  `STEPS.md`, to itself, header `term: T`, with L's `STEPS.md` quoted (or a pointer to it when
+  too big); `LEADER` into `RESULTS.md`, header `term: T`, to `@all` and to `@` each member whose
+  vcharon has no `lead` (its watcher ignores the new leader's `@all`, so this wakes it once);
+  then a remote taker's up (a failure is a WARN: the lead is taken already). A run that stops
+  after the call says the lead is taken and to run `lead` again. It ends with a `next:` line:
+  tell your user, then start the watcher again. Exit 0, 1 (`channel`), 2 (busy) or 3 (usage);
+  no `--json`: `whoami C --json` shows `leader` and `term`.
 - **What the others see**: the watcher's `next:` lines after the leader's `HANDOFF` to the
-  member and after its `LEADER` ([The watcher in a channel](#the-watcher-in-a-channel)). After
-  that line the guide has a member post again to the new leader each report or `DONE` the
-  former leader hadn't answered, with `--re` the original's ID: an entry stays addressed to
-  whom it was posted to, and only the member knows which went unanswered. A
-  watcher's start sets the own `MEMBER.md`'s `leader:` to the chain's, as it sets `vcharon:`
-  ([Member names](#member-names)), silently. `join` takes the listed leader into the record and
-  the section, and sends `JOIN` to it; `leave` posts `LEAVE` to the listed leader, a former
-  leader leaves as a member, and the leader is refused (`you lead C: hand the lead over, or
-  close it`). Only the leader closes; the close takes the next term's marker first ([Create,
-  join, leave, close](#create-join-leave-close)), and sweeps `lead/<C>/` with `seen/<C>/`.
-
+  member and after its `LEADER` ([The watcher in a channel](#the-watcher-in-a-channel)). The
+  guide then has a member post again to the new leader each report the former leader hadn't
+  answered, with `--re`: an entry stays addressed to whom it was posted to, and only the member
+  knows which went unanswered. A watcher's start sets the own `MEMBER.md`'s `leader:` to the
+  chain's, as it sets `vcharon:` ([Member names](#member-names)). `join` takes the listed leader
+  into the record and the section, and sends `JOIN` to it; `leave` posts `LEAVE` to the listed
+  leader. Only the leader closes; the close takes the next term's marker first ([Create, join,
+  leave, close](#create-join-leave-close)), and sweeps `lead/<C>/` with `seen/<C>/`.
 
 ### The lobby
 
@@ -1751,246 +1529,141 @@ each other there and talk. One per channel root, named `lobby`. A channel made b
 
 - **Kind.** A lobby's `CHANNEL.md` #2 holds `kind: lobby` and `format: 2` ([Formats](#formats));
   a channel without `kind:` is a work channel. The `channel.list` and `channel.claim` replies
-  carry a lobby's kind with the format (a work channel's have no `kind` key), and the join
-  record keeps it (`"kind": "lobby"`; a record without the key is a work channel's). `post`,
-  `read`, `whoami`, `watch`, `leave` and `close` take it from the record, as they take the
-  format; the watcher gets it from its caller, which holds the record. A local member's
-  watcher with no record (it reads the leader from `MEMBER.md`) reads the kind from
-  `CHANNEL.md`. Why the record: a remote member has no `CHANNEL.md` until its first pull.
-- **The name.** `lobby` is reserved: `create lobby` is refused, exit 3, `the lobby is made by
-  its first join`, `fix: join it: vcharon join lobby <--server ALIAS | --local> <flags>`, with
-  the create's own place and membership flags: the agent runs it as printed. A channel named
-  `lobby` that has no `kind:` (made by an older vcharon) stays a work channel, with its leader
-  and its close; a join of it prints `  note: lobby here is a work channel, not a lobby`. Why
-  one fixed name: "join the lobby in devbox" is then a whole instruction, with nothing to agree
-  on first.
+  carry a lobby's kind with the format, and the join record keeps it (`"kind": "lobby"`);
+  every later command takes it from the record. A local member's watcher with no record reads
+  it from `CHANNEL.md`. Why the record: a remote member has no `CHANNEL.md` until its first
+  pull.
+- **The name.** `lobby` is reserved: `create lobby` is refused, exit 3, with the matching `join
+  lobby` as the fix. A channel named `lobby` with no `kind:` (made by an older vcharon) stays a
+  work channel, and a join of it says so. Why one fixed name: "join the lobby in devbox" is then
+  a whole instruction, with nothing to agree on first.
 - **The first join makes it.** `join lobby` on a root with no `lobby` makes it with one
-  `channel.claim` that, for a lobby, also writes `CHANNEL.md` at the root: `mkdir
-  <root>/lobby`, `mkdir <root>/lobby/<name>`, then `<name>/CHANNEL.md` with the lobby's header
-  and limits, all in the one call, and the reply carries its text. A remote founder writes that
-  text, byte for byte, into its local tree, so both copies agree. Why at the
-  root, in the claim: a `CHANNEL.md` that reached the server only with the founder's first sync
-  would leave the lobby without one until then (forever, if that sync failed), and every other
-  join would be refused, `has no leader`. The founder's join takes the format and limits from
-  the lobby's constants, not from the claim's reply (there was nothing to list), and goes on as
-  a first join. A claim whose `CHANNEL.md` write fails removes the member's folder and then
-  `lobby/`, as a failed `mkdir` of the member's folder already removes the channel's. Once the
-  claim has succeeded, other members can join at once, so a founder's join that fails after it
-  undoes as `create`'s does only while its folder is the lobby's only one: the release then
-  removes `CHANNEL.md` and `lobby/` too. With another member there, the release keeps the
-  founder's folder, `CHANNEL.md` in it, and removes only the rest of what the join wrote, and
-  the join's error is preceded, on stderr, by `  note: lobby/<name> stays: it holds the lobby's
-  CHANNEL.md; to use it, join again with --rejoin` (the error comes last, as every refusal's
-  `fix:` line does). Why: removing it would leave a lobby with
-  no `CHANNEL.md`, which every join refuses. Of two first joins at once, one `mkdir
-  <root>/lobby` wins; the other's claim is refused as `create`'s is, and that join lists again
-  and joins the lobby the winner made. The claim writes `CHANNEL.md` a moment after its
-  `mkdir`s, so a `lobby` listed without `CHANNEL.md` is listed again, for up to 10 s, before
-  the refusal in "Closed by the user" below. The folder that holds `CHANNEL.md` is the lobby's
-  **founder**: it has no power the other members lack. The record's and `MEMBER.md`'s
-  `leader:` name it all the same, since the code finds a channel's `CHANNEL.md` by that key.
-  The claim line says `claimed lobby/<name>; made the lobby`, or `claimed lobby/<name>; in the
-  lobby`.
+  `channel.claim` that, for a lobby, also writes `CHANNEL.md` at the root: `mkdir <root>/lobby`,
+  `mkdir <root>/lobby/<name>`, then `<name>/CHANNEL.md` with the lobby's header and limits, all
+  in the one call; the reply carries its text, which a remote founder writes byte for byte into
+  its local tree. Why at the root, in the claim: a `CHANNEL.md` that reached the server only
+  with the founder's first sync would leave the lobby without one until then (forever, if that
+  sync failed), and every other join would be refused. A claim whose `CHANNEL.md` write fails
+  removes what it made. Once the claim succeeded others can join at once, so a founder's join
+  that fails after it undoes as `create`'s does only while its folder is the lobby's only one;
+  with another member there it keeps the founder's folder and `CHANNEL.md`, and a note says to
+  join again with `--rejoin`. Of two first joins at once, one `mkdir` wins and the other joins
+  the lobby it made; a `lobby` listed without `CHANNEL.md` (its claim not done yet) is listed
+  again for up to 10 s. The folder that holds `CHANNEL.md` is the lobby's **founder**, with no
+  power the other members lack; the record's and `MEMBER.md`'s `leader:` name it all the same,
+  since the code finds a channel's `CHANNEL.md` by that key.
 - **Back after a `leave`.** `leave` keeps the member's folder, so its name stays taken. In a
   lobby, a join that finds its folder there with no record here and a `MEMBER.md` whose
-  `claimer:` equals this machine's takes it back as a rejoin, without `--rejoin`, with the claim
-  line `  took back lobby/<name>, this machine's folder; in the lobby`. Why: "join the lobby" must
-  work again next week without asking the user. The risk: two OS users on one machine, or cloned VMs
-  (one machine id), in checkouts of one name would share one folder; `--role` keeps them apart.
-  A different claimer is refused as in any channel, and so is a folder with no claimer (no
-  `MEMBER.md` yet: another machine's member whose first push hasn't landed may be making it):
-  that one needs `--rejoin`, on the user's word: only the user knows whose folder it is.
-- **Anyone posts to all.** Every member may post `@all`; in a lobby the watcher, `read
-  --to-me` and join's count line take any member's `@all` as to all. `--steps` is refused,
-  exit 3, `a lobby has no plan`, `fix: post without --steps`: a usage error, as `create lobby`
-  and `close lobby` without `--yes` are. The watcher never prints the `next:` line after a
-  `CLOSED` entry in a lobby: there it is chat.
-- **Day files.** A lobby post with no `--file` goes into `chat-YYYY-MM-DD.md` in the own folder:
-  the date is the poster's local one, taken under the post lock from the same clock reading as
-  the heading's time, so an entry posted at midnight is in the file of its heading's day. So do
-  `JOIN`, `REJOIN` and `LEAVE`. A lobby has no `RESULTS.md`. `--file` works as in a work
-  channel. Why one file a day: a sync sends a changed file whole, so a post re-sends only
-  today's file, not the history.
-- **Silent entries.** In a lobby, `JOIN`, `REJOIN`, `LEAVE`, `MEMBER.md`'s #1 and the
-  founder's `CHANNEL.md` #2 are addressed to the member itself (`to: @<own name>`), and
-  another member's watcher prints nothing for an entry addressed only to its own poster: no
-  `to you`, no `<n> other entries` line, so neither a `--until-change` watcher nor one a
-  Monitor streams wakes. `read` still lists them (but `MEMBER.md`, which `read` never lists),
-  and `read --to-me` and join's count line leave them out. Why: every agent rejoins at each
-  new session, and a wake or a streamed line is a model turn for every member that watches;
-  `whoami lobby` says who is here. The guide asks for `@name` over `@all` for the same reason:
-  each `@all` is a turn for every member that watches.
+  `claimer:` equals this machine's takes it back as a rejoin, without `--rejoin`. Why: "join the
+  lobby" must work again next week without asking the user. The risk: two OS users on one
+  machine, or cloned VMs, in checkouts of one name would share one folder; `--role` keeps them
+  apart. A different claimer is refused as in any channel, and so is a folder with no claimer
+  yet: that one needs `--rejoin`, on the user's word.
+- **Anyone posts to all.** Every member may post `@all`; in a lobby the watcher, `read --to-me`
+  and join's print take any member's `@all` as to all. `--steps` is refused, exit 3. The watcher
+  never prints the `next:` line after a `CLOSED` entry in a lobby: there it is chat.
+- **Day files.** A lobby post with no `--file` goes into `chat-YYYY-MM-DD.md` in the own folder,
+  the date the poster's local one, from the same clock reading as the heading's time. So do
+  `JOIN`, `REJOIN` and `LEAVE`. A lobby has no `RESULTS.md`. Why one file a day: a sync sends a
+  changed file whole, so a post re-sends only today's file, not the history.
+- **Silent entries.** In a lobby, `JOIN`, `REJOIN`, `LEAVE`, `MEMBER.md`'s #1 and the founder's
+  `CHANNEL.md` #2 are addressed to the member itself (`to: @<own name>`), and another member's
+  watcher prints nothing for an entry addressed only to its own poster, so no watcher wakes.
+  `read` still lists them; `read --to-me` and join's print leave them out. Why: every agent
+  rejoins at each new session, and a wake is a model turn for every member that watches;
+  `whoami lobby` says who is here. The guide asks for `@name` over `@all` for the same reason.
   - **`--presence`**, the one exception: a watcher started with it also prints each other
-    member's `JOIN`, `REJOIN` and `LEAVE` (an entry addressed only to its poster whose title
-    is exactly one of the three, outside `MEMBER.md` and `CHANNEL.md`) as `presence: <id> —
-    <title>  (<path>)`, in the entries' time order, and that line counts as a `to you` line
-    does ([The watcher in a channel](#the-watcher-in-a-channel)). `MEMBER.md`'s #1 and the
-    founder's `CHANNEL.md` #2 stay silent: they say nothing of coming or going. The snapshot
-    rules are the other lines': an entry seen once, by a watcher with or without the flag, is
-    not printed again, and a baseline takes them as seen. A work channel's watch refuses the
-    flag, exit 3, `ERROR config: --presence is for the lobby`, `fix: a work channel's JOIN
-    and LEAVE already reach its leader; leave out --presence`: a usage error, as `--steps` in
-    a lobby; the fix names no command, so the agent's other flags (`--once`) stay. Join's
-    `next:` line doesn't add it. Why opt in: an agent coordinating others in the lobby (a test
-    of them) never learned that they had come or gone, while for every other member each such
-    line would be a turn at every session.
-- **Limits.** `max mb: 50`, `max files: 1000`, `max entry kb: 10000` (10 MB a day file). Nothing
-  sets them: `create lobby` is refused, and `join` has no limit flags. So 10 MB is room for one
-  busy day; over 30 days a member can post at most about 1.7 MB a day on average (50 MB / 30).
-  A day file of some MB
-  costs every post that much: the sync sends the whole file up and to every remote member's
-  down, a streaming watcher parses it again, and `read` and `whoami` read every day file.
+    member's `JOIN`, `REJOIN` and `LEAVE` (addressed only to its poster, with exactly that
+    title, outside `MEMBER.md` and `CHANNEL.md`) as `presence:` lines, which count as `to you`
+    lines do. The snapshot rules are the other lines'. A work channel's watch refuses the flag,
+    exit 3. Why opt in: an agent coordinating others in the lobby needs to know who came or
+    went, while for every other member each such line would be a turn at every session.
+- **Limits.** `max mb: 50`, `max files: 1000`, `max entry kb: 10000` (10 MB a day file), fixed:
+  `create lobby` is refused and `join` has no limit flags. So 10 MB is room for one busy day,
+  and over 30 days a member can post about 1.7 MB a day on average. A big day file costs every
+  post: the sync sends it whole up and to every remote member, and a streaming watcher parses
+  it again.
 - **The 30-day cleanup.** When a post (`join`'s and `leave`'s too) creates today's day file, it
-  then deletes the member's own day files dated more than 29 days before today, so 30 days
-  stay, today's included. A post into any other new file (`--file`) doesn't run it. Only
-  regular files (by `lstat`; a link is never followed) at the top of the own folder whose names
-  are exactly `chat-YYYY-MM-DD.md` with a real date; nothing else, `MEMBER.md` and `CHANNEL.md`
-  never. It runs under the post lock, after the entry is written, and prints `  removed <file>
-  (older than 30 days)` for each on stdout after the `posted` line; a delete that fails is a
-  `note:` on stderr, and the post's exit stays 0.
-  - The limit check of the post that creates today's file counts the folder without the files
-    the cleanup will delete. Why: else a folder near its limit refuses the very post whose
-    cleanup would make room, and its fix leaves only deleting by hand. If a delete then fails
-    (on Windows, a file another program holds), the folder can end over its limit: a remote
-    member's up refuses to send it, and the other members leave it out, until a later cleanup
-    or a delete by hand brings it back under; the `note:` says so.
+  then deletes the member's own day files dated more than 29 days before today. Only regular
+  files (by `lstat`) at the top of the own folder named exactly `chat-YYYY-MM-DD.md` with a real
+  date. It runs under the post lock, after the entry is written, and prints one `removed` line
+  for each; a failed delete is a `note:`, and the post's exit stays 0.
+  - The limit check of that post counts the folder without the files the cleanup will delete:
+    else a folder near its limit refuses the very post whose cleanup would make room. If a delete
+    then fails, the folder can end over its limit until a later cleanup; the note says so.
   - Why after the write: the next entry's number is the largest in the own folder plus one, and
-    today's file holds the largest, so the cleanup never lowers it. A lowered number would
-    reuse an ID, and every watcher would take the new entry as one it had seen.
+    today's file holds the largest, so the cleanup never lowers it. A lowered number would reuse
+    an ID, and every watcher would take the new entry as seen.
   - Why at a new day file: it runs at most once a day per member that posts, with no timer and
     no service ([Scope](#scope)).
-  - Each member deletes only its own files (one writer per folder). A remote member's post sends
-    the deletes with its own up (with `--no-sync`, the next sync does), and every other member's
-    down deletes its copies. The watcher prints nothing for a deleted `.md` file: its `gone`
-    lines are for other files only.
+  - Each member deletes only its own files; its up sends the deletes and every other member's
+    down deletes its copies. The watcher prints nothing for a deleted `.md` file.
   - A lobby's down job has no `max_deletes` limit (0). Why: a remote member away a long time
-    gets every member's old files deleted by one down, which could pass 500, and the refusal's
-    fix (raise `max_deletes`) is a key a channel section can't set; down deletes only copies
-    inside its local tree, never the own folder (`mailbox_me`). Work channels keep 500. The
-    section says which: `join` writes `mailbox.kind = lobby` into a lobby member's section
-    ([Channel sections](#channel-sections)), since the jobs are built from the section alone.
+    gets every member's old files deleted by one down, which could pass 500, and a channel
+    section can't set `max_deletes`; down never deletes the own folder (`mailbox_me`). `join`
+    writes `mailbox.kind = lobby` into the section ([Channel sections](#channel-sections)),
+    since the jobs are built from the section alone.
   - The cutoff is the poster's clock: a clock a year ahead deletes all but today's file. Not
     guarded: the loss is that member's own folder.
-  - A member that never posts again keeps its last files for good, under its folder limit, and
-    each new member pulls them.
-- **The watcher's snapshot in a lobby.** A lobby watcher drops a seen entry's heading hash from
-  its snapshot once that entry's file is gone from the tree. It also keeps each folder's seen
-  numbers short: on each round it takes as seen every number below the smallest one in that
-  folder's day files, but no higher than the highest number of that folder it had seen before
-  the round (a folder with a file it couldn't read that round aside). Only day files count,
-  since a founder's `CHANNEL.md` #2 or an old `--file` file stays for good and would hold the
-  mark down. Why: the cleanup deletes the oldest day files first, so a member that joins
-  after another's cleanup sees a gap in its numbers, and without the rule every later number
-  stays in the snapshot's list for good; the gap closes one round after the watcher first sees
-  past it. The cap keeps an entry that lands one round after a higher-numbered day-file entry
-  of the same member (a sync bringing a member's files over two rounds, or a day file of
-  before midnight that lags) printed. The limit: an entry is taken as seen and never printed
-  when it arrives more than one round after a higher-numbered entry of the same member (in
-  any file), once a day file holds a higher number still. Accepted: it needs a
-  sync that splits one member's files over several rounds, which is rare, and the other way
-  is a snapshot that grows for good. Why the hashes go: the
-  snapshot keeps a hash for every entry seen (about 70 bytes each, estimated from a synthetic
-  file, not measured on a lobby), is rewritten whole on each round that changes it, and a
-  lobby never closes. A dropped hash only means no `edited` warning if that entry turns up
-  again, and a day file deleted after 30 days doesn't come back. A work channel's watcher keeps
-  them all: it ends with its close.
-- **Closed by the user.** `close` of a channel whose record says lobby, without `--yes`, is
-  refused for every member, exit 3, `closing the lobby deletes every member's folder: your
-  user's decision only; your user closes it with vcharon close lobby --yes <flags>`, `fix: to
-  leave it: vcharon leave lobby <flags>`: the fix line is the agent's way out, the close only
-  named in the message. With `--yes` any member closes it, the founder or not: the lock checks
-  and the listing of a work channel's close, a record of an earlier lobby refused as `leave`'s
-  check finds it (`your join record of lobby as <name> is of an earlier channel: …`, so a
-  stale record never closes a lobby made since), then `channel.remove` with `lobby`, which
-  refuses unless the channel is a lobby by its `CHANNEL.md` and the caller has a folder in it
-  (no leader to check and no term marker: a lobby has neither), and renames and deletes it as
-  a close does. No `CLOSED` note: in a lobby
-  that is chat. Every member's watcher ends with `EXIT closed`; each member runs `leave lobby`
-  once, and its next `join lobby` makes a new lobby or joins it. On a work channel `--yes` is
-  ignored. Why the user's: it deletes every member's folder, each one's history. `leave` works
-  for every member, the founder too. By hand at the root, a lobby goes whole: the `lobby/`
-  folder, never only the founder's folder, which holds `CHANNEL.md`. A `lobby` without
-  it (still so after the 10 s of re-listing) is refused at every join, `the lobby has no
-  CHANNEL.md: it is gone or was never finished`, `fix: ask your user to remove the whole lobby
-  folder at the channel root; the next join makes a new one`. Once the lobby is closed or
-  removed, a member with a join record of it is refused at its next join as for any channel
-  made again, `your join record of lobby as <name> is of an earlier channel: lobby is gone from
-  <where>`, `fix: run vcharon leave lobby <flags> (…), then join again`: each member runs that
-  `leave` once, and its next `join lobby` makes the new lobby or joins it. Why: the record
-  names the old founder, and a join that made a lobby over it would mix the two.
-- **What `join` prints.** In a lobby, of the entries already there, only those addressed to the
-  member from the last 24 h, then, when any are left out, up to two lines. When j or n isn't 0:
-  `  not shown: <j> to you before your leave, <n> to all in the last 24 h; to see them: vcharon
-  read lobby --full --to-me --last <m> <flags>`, each count only when it isn't 0, m the number
-  of entries `--to-me` lists from the oldest one those two count to the newest. When k isn't 0,
-  after it: `  older: <k> to you older than 24 h, from earlier work; to see them too: vcharon
-  read lobby --full --to-me --last <o> <flags>`, o from the oldest of all left out; with j and n
-  both 0, that line alone, as `  not shown: <k> to you older than 24 h, from earlier work; to
-  see them: …`. Why two: one `--last` reaching back to the oldest count would pull a week of old
-  rounds into the read of what matters now, and three counts on one line, with the `(<m>
-  entries: …)` part after them, are hard to read. An entry to the member with no time or a bad
-  one (by hand, or from 0.1.0rc1: `post` stamps seconds) counts in k, and read lists it first, so
-  the `older:` line's `--last` reaches it. Why not the first line: listed first, it would make
-  that line's `--last` reach back over everything again. `--full` because the left-out entries
-  are the ones to weigh (the range can hold more entries than the counts, such as older `@all`
-  ones, and prints their bodies too). When a line's m or o is more than what its read counts (c:
-  the first line's j + n; the older line's j + n + k, since its range covers both), `to see
-  them` becomes `to see them (<m> entries: the <c> counted and <m - c> more to you or to all
-  after the oldest counted one)`, on the `older:` line `to see them too (<o> entries: the <c>
-  counted on both lines and …)`, the command still last on the line; the others are entries the
-  join showed above, older `@all` ones, and ones the watcher's snapshot hasn't taken as seen
-  (the watcher prints those). Why: a `--last` bigger than the counts, with no word on the rest,
-  reads as a mistake. An entry to the member from the last 24 h whose time is before the
-  member's own last `LEAVE` (the one with the highest number in its folder) is counted in j, not
-  shown. Why: after a `leave` and a join, a new snapshot takes everything as seen, so the old
-  membership's work would be printed again; but no watcher may have printed it (one stopped for
-  the `leave`, gaps between `--until-change` runs, none started), so it is counted and the
-  `read` reaches it. That compares two members' clocks, so an entry posted within the skew of
-  the `LEAVE` may land on the wrong side. With none shown and those lines following, the line
-  before them is `no entries for <name> since your leave` when j isn't 0, else `no entries for
-  <name> in the last 24 h` (with no line, `no entries for <name> in lobby yet`), so the two
-  agree. Why: a first join and every rejoin print them, and 30 days of everyone's `@all`, in day
-  files of up to 10 MB, would flood every new session; and an older entry to the member, taken
-  as seen by a new snapshot, would be printed by nothing else. The 24 h go by the heading's
-  time, the poster's local time with no zone, so a member in another time zone moves the window
-  by its offset (up to about 14 h); a window is all it is. The snapshot rules are a work
-  channel's.
-- **Who is here.** `whoami lobby` lists the members by last watched, newest first (no stamp
-  last), each line marked with the first of these that holds (a `left` that is unknown, as for
-  a local member's folder over the limits, counts as not left):
+  - A member that never posts again keeps its last files for good, under its folder limit.
+- **The watcher's snapshot in a lobby.** A lobby never closes, so its snapshot must not grow for
+  good:
+  - A seen entry's heading hash is dropped once that entry's file is gone. A dropped hash only
+    means no `edited` warning if the entry turns up again.
+  - Each folder's seen numbers stay short: each round takes as seen every number below the
+    smallest in that folder's day files, but no higher than the highest number of that folder
+    seen before the round. Only day files count (a founder's `CHANNEL.md` #2 stays for good). A
+    folder with a file that couldn't be read that round is skipped: its entries would be taken
+    as seen unread.
+    Why: the cleanup deletes the oldest day files first, so a member that joins later sees a
+    gap in the numbers, and every later number would stay listed for good. The cap keeps an
+    entry printed that lands one round after a higher-numbered entry of the same member. The
+    limit, accepted: an entry arriving more than one round after a higher-numbered one, once a
+    day file holds a higher number still, is taken as seen and never printed.
+
+  A work channel's watcher keeps everything: it ends with its close.
+- **Closed by the user.** `close lobby` without `--yes` is refused for every member, exit 3: the
+  message says closing deletes every member's folder, the user's decision only, and the fix line
+  is the agent's way out, `leave lobby`. With `--yes` any member closes it: the lock checks and
+  listing of a work channel's close, a stale record refused as `leave`'s check finds it, then
+  `channel.remove` with `lobby`, which refuses unless the channel is a lobby by its
+  `CHANNEL.md` and the caller has a folder in it, and renames and deletes it as a close does. No
+  `CLOSED` note. Every member's watcher ends with `EXIT closed`; each member runs `leave lobby`
+  once, and its next `join lobby` makes a new lobby or joins it (a record of the old lobby is
+  refused at the join as of an earlier channel: it names the old founder). On a work channel
+  `--yes` is ignored. By hand, a lobby goes whole, never only the founder's folder: a `lobby`
+  without `CHANNEL.md` is refused at every join, with a fix asking the user to remove it.
+- **What `join` prints.** Of the entries already there, only those addressed to the member from
+  the last 24 h; then up to two lines that count what was left out (to the member before its own
+  last `LEAVE`, to all in the last 24 h, and to the member older than 24 h), each with the
+  `read --full --to-me --last <m>` that shows them, saying when that range holds more entries
+  than it counts. Why: a first join and every rejoin print it, and 30 days of everyone's `@all`
+  would flood every new session, while an older entry to the member, taken as seen by a new
+  snapshot, would be printed by nothing else. An entry to the member from before its own last
+  `LEAVE` is counted, not shown: after a leave and a join the new snapshot takes everything as
+  seen, but no watcher may have printed it. The 24 h and the `LEAVE` compare posters' clocks,
+  with no zone: a window is all it is.
+- **Who is here.** `whoami lobby` lists the members by last watched, newest first, each marked
+  with the first of these that holds:
   - `left` ([Reading a channel](#reading-a-channel)), when its newest file is at most 24 h old:
-    first, since its stamp stays after a `leave` and would read `here` for a while;
-  - `here`: its stamp's age at most twice its `--every` plus 2 minutes (the lead guide's rule),
-    so a watcher stopped a moment ago still reads `here` for up to that long (the guide says
-    so). A join drops the member's own stamp ([Calls](#calls)): a stamp from before a
-    `leave` would otherwise read `here` after the rejoin, with no watcher started yet;
+    first, since its stamp stays after a `leave`;
+  - `here`: its stamp's age at most twice its `--every` plus 2 minutes (the lead guide's rule).
+    A join drops the member's own stamp ([Calls](#calls)), so a stamp from before a `leave`
+    doesn't read `here` after the rejoin;
   - `away`: a stamp at most 24 h old, or no stamp and a newest file at most 24 h old.
 
-  Every other member (`gone`: a stamp, or with none its newest file, older than 24 h; a member
-  that left, the same) is left out of the text, with one closing line `+<n> not seen in 24 h
-  (--all)`; `whoami lobby --all` lists them, marked `gone`. The channel line is `channel
-  lobby (a lobby, founded by <founder>)` and no member is marked `(leader)`. Without a join,
-  `vcharon list` names the lobby's members (the guide says so), with no presence: a remote
-  lobby has no copy here to stamp from. `--json` always
-  lists every member and adds `presence` to each: `here`, `away`, `left` or `gone`. `--all`
-  is a usage error (exit 3) without a channel or with a work channel. Why the stamp: a session
+  Every other member (`gone`) is left out of the text, with one closing line `+<n> not seen in
+  24 h (--all)`; `--all` lists them. `--json` always lists every member, with `presence`.
+  `--all` is a usage error without a channel or with a work channel. Why the stamp: a session
   that ends without `leave` posts no `LEAVE`, while every running watcher stamps. Why a verdict
   here, when a work channel's whoami gives none: the lobby is for whoever is around now; a
   leader judges lateness by its channel's pace.
-- **Join's members line.** After its entries (and the count lines), a lobby join whose sync
-  worked prints the other members by these marks in one line, `  members  here: <names>; away:
-  <names>; left: <names>` (a mark with no one left out; `  members  no one else seen in 24 h`
-  for none), each mark's names by last watched, newest first; the joiner and the `gone` ones
-  are left out. The same data and rules as `whoami lobby`: a local member's stamps and folders
-  as they are now; a remote member's from its copy and the ages it keeps from its pulls, the
-  join's own included, as Last watched in [The watcher in a channel](#the-watcher-in-a-channel)
-  says (so up to 30 s behind). A tree it can't read prints no line. Why: agents ran `whoami
-  lobby` right after each join just to see who was there.
+- **Join's members line.** A lobby join whose sync worked then prints the other members by
+  those marks in one line, from the same data as `whoami lobby` (a remote member's ages up to
+  30 s behind). Why: agents ran `whoami lobby` right after each join just to see who was there.
 - **Join's next lines.** The watcher line, as for any join; no plan line, and in place of the
-  first join's note about the leader's steps, `  note: the lobby: a request inside your project
-  you may do (a big one: ask your user first); outside it, don't: tell your user (vcharon guide
-  lobby)`. Why its words: the rules topic's, where an entry never makes an agent change
-  anything outside its project; it tells its user and answers that it didn't.
+  first join's note about the leader's steps, a note with the rules topic's limit: a request
+  inside your project you may do (a big one: ask your user first); outside it, don't.
 
 ### Entries
 
@@ -2054,35 +1727,23 @@ re: linux-api#3
 - A remote member's post then runs the section's up job in the same process (`--no-sync` skips
   it), so the entry reaches the server without waiting for a watcher. It prints `sent to
   <server>`; when the job's lock is held (the watcher's round) a `note:`, since that round or
-  the next sends it; any other failure a `WARN not sent to <server>: <error>` and a `fix:` line
-  on stderr. The post's exit is 0 in all three: the entry is written. The fix says the watcher
-  or the next sync sends it only when that can be true: a short-lived failure (the connection's
-  `connect`, `timeout`, `lost` or the helper not starting; `vanished`, a file changed during the
-  run; `aborted`) or an error with no fix. Any other (a closed channel, a name the server
-  refuses, `state_mismatch`) prints the up job's own fix after `the entry is saved in your
-  folder, but no sync sends it until:`, since every later sync fails the same way. The up job's
-  lock never waits, so a post can't deadlock with a watcher.
-- A title or body that names an ssh alias or host name this machine's vcharon uses gets
-  `WARN entry <id> names <name>: …` and a `fix:` line (if it is the alias, post a correction
-  entry without it, `--re <id>`; if it names something else, nothing to do) on stderr, after
-  the `posted` line; the post stands, exit 0, since the entry is written and entries are never
-  edited. The names are the host part (`user@`, `ssh://` and a `:port` taken off) of every join
-  record's server and every channel section's `ssh`, one per name whatever its case; a
-  one-letter name is left out (it would match every "a"), and so is a name the channel's
-  entries hold anyway: the channel's, this box's, the project or role of this machine's
-  records of the channel, or any `-`-joined run of parts of a member's name (the tree's
-  folders, those records' names and leaders); another channel's record never excuses a name.
-  A name matches as a whole word, case-insensitively: a word runs on through ASCII
-  letters, digits, `_`, `-`, and a `.` followed by one of those, so `devbox` matches in `sent
-  to devbox.`, `me@devbox:22` and `已发送到devbox。` (Chinese text puts no space around a
-  name) but not in `devbox-2`, `win-devbox#3` or `devbox.example.com`; never at a `server:~`,
-  vcharon's own spelling of the server's home ([Rules for the code](#rules-for-the-code)),
-  even for an alias spelled `server`. The records are read
-  one by one: one that can't be read only leaves its own name out.
-  Why: vcharon's own lines (`sent to <server>`, `--server <alias>` in fix lines) print the
+  the next sends it; any other failure a `WARN` and a `fix:` line on stderr. The post's exit is
+  0 in all three: the entry is written. The fix says a later sync sends it only for a
+  short-lived failure (the connection, `vanished`, `aborted`); any other gives the up job's own
+  fix, since every later sync fails the same way. The up job's lock never waits, so a post
+  can't deadlock with a watcher.
+- A title or body that names an ssh alias or host name this machine's vcharon uses gets a
+  `WARN entry <id> names <name>` and a `fix:` line (a correction entry with `--re`, if it is the
+  alias) on stderr, after the `posted` line; the post stands, exit 0. The names are the host
+  part of every join record's server and every channel section's `ssh`, less one-letter names
+  and names the channel's entries hold anyway (the channel's, this box's, the project or role,
+  any `-`-joined run of a member name's parts). A name matches as a whole word,
+  case-insensitively, where a word runs on through ASCII letters, digits, `_`, `-` and an inner
+  `.`, so `devbox` matches in `me@devbox:22` and in Chinese text with no spaces, but not in
+  `devbox-2` or `devbox.example.com`; never at `server:~`, vcharon's own spelling of the
+  server's home ([Rules for the code](#rules-for-the-code)). Why: vcharon's own lines print the
   alias, and an agent quoting them carries it into the channel, which the rules keep machine
-  details out of; the warning names the word, since it is seen only on this machine's terminal.
-  It never refuses: a word can be a host's name and an ordinary word at once.
+  details out of. It never refuses: a word can be a host's name and an ordinary word at once.
 - The whole new file goes to a `.vcharon-stage-` temp file in the same folder, then replaces it
   in one step: a reader or a sync sees the old file or the new one, never half. On Windows the
   replace fails while another program holds the file (a sync uploading it); it is tried again
@@ -2122,13 +1783,8 @@ max entry kb: 1000
 with `MEMBER.md`'s entry #1 fields ([Member names](#member-names)), entries as
 [Entries](#entries) has them, and the member-folder layout of [Layout](#layout).
 
-- Format 1 is fixed by 0.1.0. Seconds in the heading came after 0.1.0rc1 and stayed format 1:
-  0.1.0rc1 was a pre-release, and nothing of a channel is lost or written wrong by it. Its `read`
-  lists an entry with seconds first, with a `bad time` note, so its `read --last N` leaves it out
-  of its N (measured against its code); `read` now does the same with an entry 0.1.0rc1 wrote,
-  whose time has no seconds. `watch` and the numbering never read the time, so they tell and
-  count such entries in both (from the code). Members of one channel update together from a
-  release candidate.
+- Format 1 is fixed by 0.1.0. A heading time without seconds (written by a pre-release) is a
+  bad time to `read`, listed first; `watch` and the numbering never read the time.
 
 - Where it's read: a remote member can't read `CHANNEL.md` before its first pull, so the helper's
   `channel.list` and `channel.claim` replies carry `format` and `limits`, read at the server; a
@@ -2193,30 +1849,18 @@ each channel limits each member's folder and each entry file.
 `vcharon watch C` prints what reached a member. A local member's watcher reads the channel
 folder every 10 s; a remote member's runs a sync and then reads its local tree.
 
-- **Output outside the channel.** `watch` refuses to start, with `ERROR config: the watcher's
-  output goes to <path>, a file in the channel: …` and exit 3, when its stdout or stderr is a
-  regular file in the channel tree as this machine holds it (a local member's channel folder, a
-  remote member's copy). Why: that file goes to every member, its `watching` line puts this
-  machine's path there, and each write is a change line in every other watcher. Checked once,
-  before the watch writes anything (the `MEMBER.md` refresh, the snapshot and its lock): each
-  stream's `fstat` against an `lstat` walk of the tree, by `(st_dev, st_ino)`, following no link;
-  pipes, terminals and files elsewhere pass. `<path>` is the file's path in the channel, never
-  this machine's. The fix says to delete it only if the redirect created it: a `>>` onto
-  `RESULTS.md` or `MEMBER.md` matches too, and agents follow fix lines as written. It names the
-  file in backticks, or as "that file" when fix lines' respelling would change the name (it
-  holds ` vcharon <verb>` and this install isn't run as plain `vcharon`). The refusal goes to stderr even when stderr is that
-  file: an agent that sent both there reads its error in it. Limits: only a file the process
-  holds itself is seen, so a pipe that ends in a channel file (`| tee <channel>/x.log`) passes,
-  and so, likely, does PowerShell's `>` on a native program, which pipes (inferred, not run);
-  cmd's and Git Bash's `>` hand over the file itself and are caught (inferred). An error raised
-  before the tree is known (the config, the membership) still goes to a redirected stderr.
-- **The stale-skill note.** After that check, before the lock and the `watching` line, a
-  watcher prints `note: your vcharon skill at <path> is from another version: vcharon skill
-  install --claude` once, as join's note ([Create, join, leave, close](#create-join-leave-close),
-  "The stale-skill note"), with the time in front like every line. It is printed before the
-  first round, so it never counts as a change, and it comes after the output check, so its home
-  paths never reach a channel file. Why once at the start: a watcher restarts often, and two
-  small reads per start cost little, while a check each round would read them for nothing.
+- **Output outside the channel.** `watch` refuses to start (`config`, exit 3) when its stdout or
+  stderr is a regular file in the channel tree as this machine holds it. Why: that file goes to
+  every member, its `watching` line puts this machine's path there, and each write is a change
+  line in every other watcher. Checked once, before the watch writes anything: each stream's
+  `fstat` against an `lstat` walk of the tree, by `(st_dev, st_ino)`, following no link. The
+  message names the file's path in the channel, never this machine's, and the fix says to delete
+  it only if the redirect created it (a `>>` onto `RESULTS.md` matches too). The refusal goes to
+  stderr even when stderr is that file. Limit: only a file the process holds itself is seen, so
+  a pipe that ends in a channel file (`| tee`) passes.
+- **The stale-skill note**, as join's ([Create, join, leave, close](#create-join-leave-close)),
+  printed once at start, after the output check and before the first round, so it never counts
+  as a change and its home paths never reach a channel file.
 - **Remote members stream.** One long-lived child, `vcharon sync C --repeat <every>` (default
   every 2 s, 1 to 300), keeps one ssh connection; each `ROUND <code>` line ends one round. When
   the child exits it is started again after 2, 4, 8, 16, 30, 30… s, back to 2 after a good
@@ -2224,169 +1868,99 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   watch closes the child's stdin, waits up to 10 s, then ends it, its whole process group on
   POSIX ([Running watchers](#running-watchers)). The child gets `PYTHONIOENCODING=utf-8` and its
   output is read as UTF-8: a Windows code page would garble `—`. `--no-stream` runs one sync per
-  round instead (every 30 s by default), through `fsops.run` in a session of its own, so its
-  900 s timeout, or a Ctrl-C, ends the sync's whole process group. A streaming watcher's
-  `watching` line ends `, syncing every <n> s`, with `--until-change` too. Why not "streaming":
-  the guide calls a watcher whose every line reaches the agent (a Monitor) streaming, and agents
-  read the word as that mode.
+  round instead (every 30 s by default), through `fsops.run` in a session of its own, with a
+  900 s timeout.
 - **Last watched.** Each round that read the channel stamps the member's last-watched time at
-  the channel's machine, in `seen/<C>/<member>` beside the channel root (by default
-  `~/.local/state/vcharon/seen/`): a file holding the watcher's pace (`stream 2`, `run 30`,
-  `local 10`: its mode and `--every`), its mtime the time. Why: a `watching` entry is a claim,
-  and nothing else showed whether a member's watcher still ran.
+  the channel's machine, in `seen/<C>/<member>` beside the channel root: a file holding the
+  watcher's pace (`stream 2`, `run 30`, `local 10`: its mode and `--every`), its mtime the time.
+  Why: a `watching` entry is a claim, and nothing else showed whether a member's watcher still
+  ran.
   - Who stamps: a local member's watcher after a round's scan worked; a remote member's through
     its down plan, the helper stamping after the plan opened the channel folder. Only while the
-    member's folder is there: a watcher still running once its folder was removed (as idle)
-    stamps nothing. The watcher
-    marks its sync child (streaming or not) with the private `VCHARON_WATCHER=<pace>`, and the
-    sync then adds `watch` to `source.plan`. A sync by hand, or a join's pull, stamps nothing:
-    it would make a member look watched. A channel down gets the ages back at the session's
-    first plan of the channel, when a member or a pace changed, and when it asks for them
-    ([Calls](#calls)).
-  - Where: beside the root, never in it: a name at a channel's top is synced to every member,
-    logged by every down and makes close refuse; one at the root's top shows in `list`. The
-    helper and a local member both find it through the channel root, so they agree; a down of
-    a folder that isn't a channel in the root gets no stamp and no ages.
+    member's folder is there. The watcher marks its sync child with the private
+    `VCHARON_WATCHER=<pace>`, and the sync then adds `watch` to `source.plan`. A sync by hand,
+    or a join's pull, stamps nothing: it would make a member look watched.
+  - Where: beside the root, never in it: a name at a channel's top is synced to every member and
+    makes close refuse; one at the root's top shows in `list`.
   - Cost: the time is written only when 30 s have passed (or the pace changed), with the
-    writer's own clock set explicitly (`os.utime`), never a file server's. A stamp makes `seen/`
-    and `seen/<C>/` with one `mkdir` each, never above them, and removes a `seen/<C>/` it made
-    when the channel went meanwhile (a close).
+    writer's own clock set explicitly (`os.utime`). A stamp makes `seen/` and `seen/<C>/` with
+    one `mkdir` each, and removes a `seen/<C>/` it made when the channel went meanwhile.
   - Best effort: a stamp or listing that fails never fails a plan or prints a watcher line; the
-    helper sends its text as `seen_error`, which the client logs as a warning.
-  - The ages ride back in the down's plan reply (`seen`: each stamped member's age in seconds
-    and pace, worked out by the channel machine's own clock, so no two machines' clocks are
-    compared). A remote member keeps them in `<state>/<C>.<name>.down.seen.json`, as this box's
-    time less the age: written when a member or a pace changed, else at most every 30 s. Read
-    by `whoami C` and `read --json` ([Reading a channel](#reading-a-channel)); removed by
-    `leave` and `close` with the membership's other files.
-  - How late is dead: a live watcher's stamp is at most 30 s plus one of its rounds old at the
-    channel's machine (and the sync's own time), and a remote reader's copy lags by up to another
-    30 s plus its own round while its own watcher runs (30 s more when the ages it last asked
-    for hadn't moved, so the copy wasn't written: it asks again 30 s later, [Calls](#calls));
-    else by up to 30 s more than the time since its last pull. The guide's rule: late past 2 ×
-    `--every` + 120 s. `--until-change` restarts and foreground runs make gaps normal.
+    helper sends it as `seen_error`, which the client logs.
+  - The ages ride back in the down's plan reply (`seen`: each stamped member's age and pace, by
+    the channel machine's own clock, so no two machines' clocks are compared; [Calls](#calls)).
+    A remote member keeps them in `<state>/<C>.<name>.down.seen.json`, as this box's time less
+    the age, written at most every 30 s unless a member or a pace changed; read by `whoami C`
+    and `read --json`.
+  - How late is dead: a live watcher's stamp is at most 30 s plus one round old, and a remote
+    reader's copy lags by up to about another 30 s plus its own round. The guide's rule: late
+    past 2 × `--every` + 120 s.
 - **What it reads**: in the other members' folders, the entries of every `.md` file, never the
-  own folder (in any case, on macOS and Windows), never stage files. It prints, each line
-  starting with the local time `YYYY-mm-dd HH:MM:SS`, every line escaped as `read`'s text is
-  (`pathrules.printable`), since titles, IDs and file names come from other members and a
-  control character in one could forge a line such as `EXIT closed`:
-  - `to you: <id> — <title>  (<path>)` for an entry whose `to:` holds `@<me>` (even with
-    `@all`), and `to all: …` for `@all` from the leader by the charters' terms and entry numbers,
-    read each round ([Leader handoff](#leader-handoff); the record's leader while the tree holds
-    no charter; in a lobby, from any member); in the entries' own time order;
-  - in a work channel only, `  next: the leader closed the channel: don't start your watcher
-    again, stop it if it runs (vcharon watch C --stop <flags>), then run: vcharon leave C
-    <flags>` right after the line of the leader's entry to `@all` (a `to all`, or a `to you`
-    when it names the member too) whose whole title is `CLOSED` exactly, letter case included,
-    spaces around it aside. The flags are the member's record's (a placeholder without one, as
-    the gone fix's), the commands as this box runs vcharon; never for the
-    leader, who closes instead; it doesn't count on its own (its entry does), and comes again
-    only with its entry's line. Why: the guide's end has each member leave after the leader's
-    `CLOSED` and the leader close after the `LEAVE`s, so the channel is still there and no `EXIT
-    closed` fix line gives the command. Why the exact title: a looser match ("Closed", "CLOSED
-    soon") could tell a member to leave a channel that goes on, while a miss only leaves the
-    member to the guide's example. It goes by the leader of the round: a former leader gets it
-    after the new leader's `CLOSED`;
-  - in a work channel, `  next: L offers you the lead of C: stop your watcher if it runs
-    (vcharon watch C --stop <flags>), then run: vcharon lead C <flags> ; then tell your user`
-    right after the leader's `HANDOFF` to the member whose `lead:` header names it, and `  next:
-    X leads C now: send reports, DONE and requests to @X` right after the leader's `LEADER` to
-    all (a former leader's line goes on `; you are a member now; only X closes`): [Leader
-    handoff](#leader-handoff);
-  - with `--presence`, in a lobby only, `presence: <id> — <title>  (<path>)` for another
-    member's `JOIN`, `REJOIN` or `LEAVE` ([The lobby](#the-lobby), "Silent entries"), among
-    the `to you` lines in the entries' time order;
-  - `<n> other entries (<folders>)`, `1 other entry (<folder>)` for one (addressed elsewhere,
-    no ID, an ID not its folder's, or a `MEMBER.md` #1; in a lobby, not an entry addressed only
-    to its poster): at most one line a round, or held (below); `note: @all from <folders>, not
-    the leader: ignored` (never in a lobby), at most one line a round;
-  - `WARN entry <id> was edited` (a heading seen before with another text in the same file,
-    once), `WARN entry <id> in <folder>/: not its folder's`;
-  - `note: duplicate entry <id> in <path>: the one in <file> stands`: of an ID in two files of its
-    folder, the copy first in path order stands, the one `read` orders; the other is skipped, with
-    this note once per file and run; it wakes nobody. Why not "edited": comparing the two files'
-    headings would warn again on every change to either file. A copy in a file that sorts before the
-    one seen first, or the copy left when that file is gone or no longer holds the ID, takes over,
-    and its heading is compared with the one told: a retitled copy warns that it was edited, since
-    it is what `read` now shows;
-  - `new | changed | gone <path>` for files that aren't `.md` files in a member's folder: a
-    patch or log is announced by an entry, and only entries wake; held (below);
+  own folder (in any case, on macOS and Windows), never stage files. Each line starts with the
+  local time `YYYY-mm-dd HH:MM:SS` and is escaped as `read`'s text is (`pathrules.printable`),
+  since titles, IDs and file names come from other members and a control character could forge
+  a line such as `EXIT closed`. The lines ([Stable](#stable) lists their shapes):
+  - `to you:` for an entry whose `to:` holds `@<me>`, and `to all:` for `@all` from the leader
+    by the charters' terms and entry numbers, read each round ([Leader
+    handoff](#leader-handoff); in a lobby, from any member); in the entries' own time order;
+  - `next:` lines, in a work channel, right after the line of the leader's entry they follow,
+    with commands to run as printed (the record's flags, spelled as this box runs vcharon):
+    - after the leader's `@all` whose whole title is exactly `CLOSED`: stop the watcher, then
+      `leave`. Never for the leader. Why: the guide has each member leave after `CLOSED` and the
+      leader close after the `LEAVE`s, so no `EXIT closed` fix line gives the command yet. Why
+      exact: a looser match could tell a member to leave a channel that goes on;
+    - after the leader's `HANDOFF` naming the member: stop the watcher, run `lead C`, tell your
+      user; after its `LEADER`: send reports to the new leader ([Leader
+      handoff](#leader-handoff));
+  - with `--presence`, in a lobby, `presence:` lines ([The lobby](#the-lobby), "Silent
+    entries");
+  - `<n> other entries (<folders>)` for entries addressed elsewhere, with no ID or a wrong
+    folder's, and `MEMBER.md` #1s; `note: @all from <folders>, not the leader: ignored` (never in
+    a lobby); each at most one line a round;
+  - `WARN entry <id> was edited` (a heading seen before with another text in the same file),
+    `WARN entry <id> in <folder>/: not its folder's`;
+  - `note: duplicate entry …`: of an ID in two files of its folder, the copy first in path order
+    stands, as in `read`; the other is skipped, noted once per file and run, and wakes nobody. If
+    the standing copy's file goes or sorts after a new one, the other takes over and its heading
+    is compared with the one told;
+  - `new | changed | gone <path>` for files that aren't `.md` in a member's folder: a patch or
+    log is announced by an entry, and only entries wake;
   - `WARN <text>` / `WARN cleared: <text>` for problems in the tree: a local member's watcher
-    checks for names clients leave out at the top, case twins, names a Windows client can't
-    hold, symlinks and special files, and over-limit folders; a remote member's shows the
-    folders its last pull left out;
+    checks for names clients leave out, case twins, names Windows can't hold, symlinks and
+    special files, and over-limit folders; a remote member's shows the folders its last pull
+    left out;
   - `ERROR …`, then its `  fix: …` (and `  log: …`) lines, once while the text holds; `ok again`
     after the first good round;
-  - `EXIT change | EXIT quiet <n> min | EXIT error | EXIT closed | EXIT updated | EXIT orphaned
-    | EXIT nothing new | EXIT stopped | EXIT interrupted` as the last line, each followed by
-    ` (exit <code>)`,
-    the process's exit code: `EXIT quiet 1 min (exit 10)`. `sync --repeat`'s `EXIT updated`,
-    `EXIT orphaned` and `EXIT interrupted` carry it too. Why: an agent's tool may report another
-    code than the process's (Codex's summary said exit 1 for a watcher's 10), so the line says
-    it. Readers match on the `EXIT <kind>` start.
-- **Quiet lines held.** Without `--until-change` or `--once`, the other entries and file lines
-  print nothing alone: they are held, and printed just before the watcher's next line,
-  whatever it is (`to you`, `to all`, `presence`, a `WARN`, `ERROR`, `ok again`, a `note:`, an
-  `EXIT` line), merged: one other entries line for all of them (the entries summed, the
-  folders joined in name order), then a line for each file whose state differs from the last
-  file lines printed, in path order, as one round's comparison would give it (a file new and
-  gone again since then gives none, one new then changed is `new`). Each line keeps its shape
-  and has the time it is printed. A round's own join them, so a round with a `to you` prints
-  them before it. Why: under Claude Code's Monitor every line printed on its own is a turn,
-  and members counted 11 to 15 of these lines in about 5 minutes against 5 or 6 addressed to
-  them, lines the guide says to read only if the work needs them. Why the last state of each
-  file: it is what the agent can look at now, and a log written every round would give a line
-  per round. A Ctrl-C, a SIGTERM or a crash prints them as the watch ends, before `EXIT
-  interrupted` (after the sync child is stopped) or the crash's error. An end that stops the
-  process at once loses them, while the snapshot already has them seen: a SIGKILL or
-  `TerminateProcess`, and a Windows binary whose bootloader is gone, whose `EXIT orphaned`
-  comes from another thread just before the process exits (inferred from the source). A
-  SIGTERM whose reader is already gone (as a `TaskStop` can leave it) prints them to nobody.
-  `--until-change` and `--once` print each round's lines in that round, in its order: their
-  output is read when they exit, not line by line.
+  - an `EXIT <kind> (exit <code>)` last line. Why the code in the line: an agent's tool may
+    report another code than the process's.
+- **Quiet lines held.** Without `--until-change` or `--once`, the other-entries and file lines
+  print nothing alone: they are held and printed, merged, just before the watcher's next line,
+  whatever it is (one other-entries line for all of them; one line per file whose state differs
+  from the last file lines printed). Why: under Claude Code's Monitor every line printed alone
+  is a turn, and these lines are ones the guide says to read only if the work needs them. A
+  Ctrl-C, a SIGTERM or a crash prints them as the watch ends; an end that stops the process at
+  once loses them, while the snapshot already has them seen. `--until-change` and `--once` print
+  each round's lines in that round: their output is read when they exit.
 - **`--until-change`** exits 0 (`EXIT change`) after the first round that printed a `to you`,
   `to all`, `presence`, an edited entry, a new tree `WARN`, an `ERROR` that counts, or `ok
   again` after one. Without it the watch runs on (for a streaming tool such as Claude Code's
-  Monitor).
-  `--max-minutes M` (1 to 1440; 25 with `--until-change`) exits 10 with `EXIT quiet M min`;
-  streaming, a round under way at the deadline is stopped.
-- **`--once`**: one round at once from the saved snapshot, then exit: a check between steps
-  for an agent whose CLI has no background commands, where a quiet `--until-change
-  --max-minutes 1` costs a minute each time. It prints what came since the member's last look
-  as any round does, saves, and ends `EXIT change` (0) when something counted, else `EXIT
-  nothing new` (16). Its own code, not 10: the guide's rule for 10 is "start it again at once",
-  which would make a check a loop. A remote member's round is one `vcharon sync C`, never the
-  streaming child, through `run_sync` with a 60 s cap in place of 900 s (the sync's group gets
-  SIGTERM, then SIGKILL, as with `--no-stream`): an agent waits for it between steps. The cap is
-  a guess, not measured over real ssh. It stamps the member's last watched time as a round
-  does, at `--no-stream`'s pace (`run 30`; a local member `local 10`): a foreground member's
-  checks are its only sign of life.
+  Monitor). `--max-minutes M` (1 to 1440; 25 with `--until-change`) exits 10 with `EXIT quiet M
+  min`; streaming, a round under way at the deadline is stopped.
+- **`--once`**: one round at once from the saved snapshot, then exit: a check between steps for
+  an agent whose CLI has no background commands. It prints what came since the last look as
+  any round does, saves, and ends `EXIT change` (0) when something counted, else `EXIT nothing
+  new` (16). Its own code, not 10: the guide's rule for 10 is "start it again at once", which
+  would make a check a loop. A remote member's round is one `vcharon sync C` with a 60 s cap (a
+  guess). It stamps as a `--no-stream` round does: a foreground
+  member's checks are its only sign of life.
   - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every` or
-    `--fresh`, and when there is no snapshot (`ERROR config: --once needs your watcher's saved
-    snapshot: there is none for <name> on this machine (a join or create by an older vcharon or
-    one stopped early, or a snapshot that couldn't be saved or was removed)`, with the fix
-    below).
-    Why: a fresh start, or one with no snapshot, is a baseline, which takes what is there as
-    seen and prints none of it, so an entry to the member would be lost for good. Join and
-    create save the snapshot, so a check works right after them, and a missing one means
-    something may already have been missed: hence `read --to-me` first. Refused (exit 3) too,
-    before the lock, when a snapshot is there but can't be used (not JSON, another shape, can't
-    be read, another root or member: the start's `note:` reasons), as `ERROR config: --once
-    can't use your watcher's saved snapshot <path>: <why>`; its fix is `vcharon read C --to-me`
-    (what came since the last look may not all have been printed), then the one-minute check.
-    Why: the same baseline would mark it all seen. The snapshot is checked before the lock (a
-    watcher holding it doesn't hide the refusal) and again under it, where no writer can change
-    it, so one spoilt in between is refused the same way. One the start still can't use (a read
-    that fails only the second time) gives its `note:` line, the same `fix:` line, then
-    `EXIT error`: its baseline is saved by then.
-  - Never "nothing new" when the round can't tell: a sync that found the job busy (`ERROR busy:
-    a sync of C is running (a post's, or one a stopped watcher left): nothing was synced`, its
-    fix to run the check again after the next step) and an error that still holds (a network
-    blip counts only in its second round in a row, which a check never has; a saved error
-    shown again; the cap) end `EXIT error` (11). A failed save ends `EXIT error` too, as with
-    `--until-change`. `EXIT closed`, `EXIT updated` and `EXIT orphaned` come as in any round.
-  - The stale-skill note isn't printed: a check runs between every two steps, and join and
-    every watcher start print it.
+    `--fresh`, and when there is no snapshot or one it can't use, checked before the lock and
+    again under it; the fix is `read C --to-me`, then the one-minute check. Why: a start with no
+    snapshot is a baseline, which takes everything there as seen, so an entry to the member
+    would be lost for good.
+  - Never "nothing new" when the round can't tell: a busy job, an error that still holds, the
+    cap, or a failed save end `EXIT error` (11).
+  - No stale-skill note: join and every watcher start print it.
 - **Which errors count**: by key: `transport` for `connect`, `timeout`, `lost` and the
   watcher's own sync failures; the code alone for `too_many_deletes`, `vanished` and `aborted`,
   whose text changes run to run; else the text. Each key counts once in a failing streak.
@@ -2396,149 +1970,75 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
 - **`EXIT interrupted`**: a Ctrl-C (exit 130) or, on POSIX, a SIGTERM (exit 143) ends `watch`
   and `sync --repeat` with it, after `vcharon: interrupted` on stderr. A SIGTERM handler,
   installed only while those two run, raises the same `KeyboardInterrupt` a Ctrl-C does, so
-  every way out runs as for a Ctrl-C: the sync child is stopped as on any way out of the watch,
-  the lock released, then the line is printed; a closed pipe drops it, and stdout then goes to
-  devnull so the exit's own flush can't fail and change the code. Further SIGTERMs are
-  ignored from then on: a binary's bootloader passes one on, and a user may end both of its
-  processes, and neither may cut the child's stop short. Why: an agent's tool that stops a
+  every way out runs as for a Ctrl-C (child stopped, lock released, then the line); later
+  SIGTERMs are ignored, so none cuts the child's stop short. Why: a tool that stops a
   background command (Claude Code's `TaskStop`) gave no last line, so a stopped watcher looked
-  like a dead one. A SIGKILL, or a session's end that takes the process with it, prints
-  nothing: output that just ends means the watcher is gone, which `whoami C`'s `watched`
-  shows. Windows has no SIGTERM to catch: there only a Ctrl-C prints it. `TerminateProcess`
-  (`Stop-Process`, a harness's stop) of the watcher's own process ends it with no line; in a
-  binary, one of the bootloader alone makes the watcher print `EXIT orphaned (exit 15)` ([Running
-  watchers](#running-watchers), "A Windows binary ends with its bootloader, at once"), and one of
-  both, no line (inferred from the source, not run on Windows). A `sync --repeat` that is a
-  watcher's streaming child (`VCHARON_WATCHER` in its environment) installs no SIGTERM handler
-  and prints no `EXIT interrupted`: the watcher stops it by its stdin, then SIGTERM, and a child
-  killed from outside stays silent, so the watcher still says `ERROR vcharon sync of
-  <C>.<name> exited with <n>` with its fix naming the logs; a Ctrl-C to it alone says only
-  `vcharon: interrupted`, as before. After a SIGTERM, SIG_IGN stays in place to the exit. When
-  the run printed an `EXIT` line already (a Ctrl-C while the watch stops its child after `EXIT
-  change`), no second one comes; the exit code is the interrupt's.
-- **`--stop`**: `vcharon watch C --stop` asks this machine's watcher of the membership (found
-  as a watch finds it) to end, and waits for it. Why: a watcher could be stopped only by its own
-  session (Ctrl-C, `TaskStop`) or by its PID, and a Codex in its Linux sandbox sees no PID (each
-  command has its own PID namespace), Windows prints no `EXIT` line on a terminate, and an agent
-  that lost its session after the leader's `CLOSED` had no clean way to stop the watcher that
-  makes `leave` refuse (exit 12). A file in the state dir crosses PID namespaces, and the
-  watcher ends through its normal way out, so every OS gets an `EXIT` line.
-  - No watcher holds the snapshot's lock (the stop can take it, and lets go at once): `no watcher
-    of <name> in C runs on this machine`, exit 0, nothing written.
-  - Held: it writes `<snapshot>.stop` beside the lock (the state dir, never a channel), prints
-    `asked the watcher of <name> in C to stop; waiting up to 30 s`, and polls the lock every
-    0.5 s. Free within 30 s, with the request taken (gone): `the watcher of <name> in C
-    stopped`, plus ` (PID <n>)` when the lock named one ([Lock](#lock)), exit 0. Free with the
-    request still there: `the lock's holder ended without taking the request (a create, join,
-    leave or close, a --once check, or an older vcharon's watcher)` (and the PID), exit 0: a
-    holder that isn't a watcher never takes it, and the stop can't tell holders apart before it
-    asks, so it tells by whether the request was taken. Still held: `ERROR channel: the watcher
-    of <name> in C didn't stop within 30 s (<lock> is still held)` (and the PID), exit 1, its
-    fix to stop it in its own session or by the PID (pointing at the guide's `watch`, "Stopping
-    it", which has each CLI's way), or to run the stop again. The request is
-    removed either way. Why 30 s: a streaming child gets 10 s to end after its
-    stdin closes, then 3 s after a SIGTERM; a `--no-stream` sync or a `--once` check under way
-    runs to its end first, which may take longer, and then the stop times out.
-  - The watcher removes a request it finds at its start, under the lock: a stop that timed out
-    must not end the next watcher. It looks for one at the top of each round, after each round,
-    and every 0.5 s while it waits: between rounds (a local member's 10 s, `--no-stream`'s 30
-    s), for its streaming child's next `ROUND` line, and in the backoff before a restart. A
-    `--no-stream` sync under way runs to its end. Seen, the request is removed and the watch
-    ends as on any way out (the streaming child stopped, the snapshot as saved after the last
-    round, the lock released), last line `EXIT stopped (exit 17)`. Its own code, not 130 or 143:
-    the guide's rule for it is "don't start it again", and an agent can tell it from a stop it
-    didn't ask for. A `--once` check only removes a stale request: its one round ends within its
-    60 s cap anyway, and ending it `stopped` would hide the check's result.
-  - Refused (exit 3) with `--until-change`, `--max-minutes`, `--max-errors`, `--every`,
-    `--fresh`, `--once`, `--no-stream` or `--presence`: each is a watcher's, and a stop starts
-    none.
-  - Limits: a stop whose request lands just as a new watcher takes the lock, before that one
-    removes stale requests, loses it, and times out; a `held` check takes the lock for an
-    instant, so a watcher starting in that instant exits 12, and a `create` or `join` of that
-    member refuses with `a live session holds <name> in C`.
+  like a dead one. A SIGKILL, or Windows' `TerminateProcess`, prints nothing (a binary's
+  bootloader killed alone: `EXIT orphaned`, [Running watchers](#running-watchers)). A watcher's
+  streaming child installs no SIGTERM handler: the watcher stops it, and reports a child killed
+  from outside itself. After an `EXIT` line, no second one comes.
+- **`--stop`**: `vcharon watch C --stop` asks this machine's watcher of the membership to end,
+  and waits for it. Why: a Codex in its Linux sandbox sees no PID, Windows prints no `EXIT` line
+  on a terminate, and an agent that lost its session had no clean way to stop the watcher that
+  makes `leave` refuse. A file in the state dir crosses PID namespaces, and the watcher ends
+  through its normal way out, so every OS gets an `EXIT` line.
+  - No watcher holds the snapshot's lock: says so, exit 0, nothing written.
+  - Held: it writes `<snapshot>.stop` beside the lock and polls the lock every 0.5 s for up to
+    30 s. Freed with the request taken: stopped, exit 0. Freed with the request still there: the
+    holder wasn't a watcher (a `create`, `join`, `leave`, `close` or `--once`), exit 0. Still
+    held: `ERROR channel` (exit 1), its fix pointing at the guide's per-CLI way to stop it. The
+    request is removed either way. Why 30 s: a streaming child gets 10 s, then 3 s after a
+    SIGTERM.
+  - The watcher removes a request it finds at its start (one a timed-out stop left must not end
+    the next watcher), and looks for one at the top of each round, after each round and every
+    0.5 s while it waits. Seen: removed, the watch ends as on any way out, last line `EXIT
+    stopped` (17), its own code because the guide's rule for it is "don't start it again". A
+    `--once` check only removes a stale request.
+  - Refused (exit 3) with any watcher-only flag: a stop starts no watcher.
+  - Limits: a request that lands just as a new watcher takes the lock is lost and the stop times
+    out; the stop's own instant on the lock can make a starting watcher exit 12.
 - **`EXIT closed`** (13): as soon as a round sees the channel gone (a remote member's sync error
-  whose `fix:` starts with the channel-gone text; a local member's channel folder missing), after
-  the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays gone. Why
-  its own code: `EXIT change` means "restart, then read", a closed channel means "don't restart;
-  leave". A local member's own folder gone while the channel stays (removed as idle, or by
-  hand: the scan leaves the own folder out, so each round `lstat`s it) is the same, `ERROR your
-  folder <path> is gone` with the channel-gone fix; a start then is refused as before, `your
-  folder <path> in the channel is gone`, with that fix (exit 1). A remote member's own folder
-  gone at the server fails its up the same way as a closed channel.
-- **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by the
-  channel folder's normalized real path: the files seen, the entry numbers seen per member (every
-  number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's file and
-  heading hash for the edit check (`[<path>, <hash>]`; an older snapshot's bare hash is still read,
-  its file taken from the next one seen), hashes of entries without an ID of their folder, the
-  warnings shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the round's
-  lines are printed, so a crash may print a change twice but never loses one (quiet lines still
-  held aside: an end that stops the process at once loses them, as "Quiet lines held" says);
-  written only when it
-  changed, so a quiet watch doesn't touch the disk (but for the last-watched stamp, at most one
-  small write every 30 s), and a restart's first round that changes nothing doesn't either. A
-  restart goes on from it (`watching <dir>, <n> files in other folders, since <time>`, the
-  time of the last round that changed it) and prints what came meanwhile; a saved error
-  that holds is printed again without counting, so a blocked member isn't woken in a loop. Join
-  and create save the first one ([Create, join, leave, close](#create-join-leave-close)), so the
-  first start goes on from it too. A start with no snapshot (a join or create by an older
-  vcharon or one stopped by Ctrl-C, or a snapshot that couldn't be saved or was removed), or
-  `--fresh`, is a baseline: the tree as it is before the first round (for a remote member, this
-  machine's copy as of its last sync), none of it printed; what the first round brings prints
-  and counts as in any round. A failed save with `--until-change` ends the watch with `EXIT
-  error`.
-  - A member folder gone from a scan that worked loses its marks (its numbers seen, its IDs'
-    heads, its duplicate notes); a folder with no file left is gone too (it holds no entry to
-    mark). One whose `MEMBER.md` changed and holds a `<folder>#1` whose heading isn't the one
-    seen is **renewed**: each of its numbers seen so far, the next time it is read, is told as
-    new when its heading isn't the one seen (no `WARN … edited`), and stays seen when it is;
-    once each is read the folder is as any other. The snapshot keeps the renewal (`renewed`)
-    until then. Why: a member removed (as idle, or by hand) that joins again under its name
-    restarts at #1, so the old marks would take its new entries as seen, or as edited; and a
-    member that made its `MEMBER.md` again in place (a rejoin after losing it) keeps its old
-    entries, which must not be told twice. Limits: a hand edit of a `MEMBER.md` #1 heading
-    renews too, so an entry edited before its next read is told as new, not as edited; an
-    entry of a new member with the very heading (time to the second, title) of the old one's
-    is taken as seen. An older vcharon refuses a snapshot holding `renewed` (another shape)
-    and starts from a baseline.
+  whose `fix:` starts with the channel-gone text; a local member's channel folder missing),
+  after the `ERROR` and `fix:` lines, in every mode, and again on every start while it stays
+  gone. Why its own code: `EXIT change` means "restart, then read", a closed channel means
+  "don't restart; leave". A local member's own folder gone while the channel stays (removed as
+  idle, or by hand) is the same in a round (`ERROR your folder <path> is gone`, then `EXIT
+  closed`); a start with it gone is refused, `not_found`, exit 1, with the same fix. A remote
+  member's own folder gone at the server fails its up the same way as a closed channel.
+- **The snapshot** (version 2), in the state dir, keyed by the section, or for a local member by
+  the channel folder's normalized real path: the files seen, the entry numbers seen per member
+  (every number up to `low`, plus a list: a member's #8 can arrive before its #7), each ID's
+  file and heading hash for the edit check, hashes of entries without an ID of their folder, the
+  warnings shown, the `ERROR` and `fix:` shown and the keys that counted. Saved after the
+  round's lines are printed, so a crash may print a change twice but never loses one; written
+  only when it changed, so a quiet watch doesn't touch the disk. A restart goes on from it and
+  prints what came meanwhile; a saved error that holds is printed again without counting, so a
+  blocked member isn't woken in a loop. Join and create save the first one. A start with no
+  snapshot, or `--fresh`, is a baseline: the tree as it is, none of it printed. A failed save
+  with `--until-change` ends the watch with `EXIT error`.
+  - A member folder gone from a scan that worked loses its marks. One whose `MEMBER.md` #1
+    heading changed is **renewed**: each of its numbers seen so far is told as new, the next
+    time it is read, when its heading isn't the one seen, and stays seen when it is. Why: a
+    member removed and joined again under its name restarts at #1, so the old marks would hide
+    its new entries; one that made `MEMBER.md` again in place keeps its old entries, which must
+    not be told twice. Limits: a hand edit of that heading renews too, and a new entry with the
+    very heading (time to the second, title) of the old one is taken as seen.
 - **One watcher per member**: the snapshot's lock. A second exits 12 with `ERROR another watcher
-  is running on this mailbox (<lock>), or a create, join, leave or close of this member`
-  (`<lock>` under the home as `~/…`, `~\…` on Windows):
-  `create`, `join`, `leave` and `close` refuse while a watcher holds the same lock, and hold it
-  while they run. When the holder wrote its PID ([Lock](#lock)) the line ends ` (PID <n>)`.
-  The text up to `ERROR another watcher is running on this mailbox (` is unchanged, so a
-  script that matches that still works; one that matches with the full lock path, or reads
-  the path out, allows or expands a leading `~` (`~\` on Windows). A `  fix:` line follows it:
-  the PID, when shown, holds the lock; keep using your own watcher you still see, let a command
-  of yours end, ask the user if it isn't yours, and stop your own watcher you lost with
-  `vcharon watch C --stop` and this membership's flags, then start yours. The ERROR line alone
-  named nothing to run and read as if the PID could be any create's or join's.
-- **A sync child that exited without a word** (no `ERROR` line, nothing on stderr; killed from
-  outside: SIGKILL on Linux gives -9, and on Windows a process ended that way exits 1, which is
-  inferred; its own `EXIT updated` or `EXIT orphaned` line counts as no word, and is never
-  printed: it would read as the watcher's own last line, and its exit code is what the watcher
-  goes by) gives `ERROR vcharon sync of <C>.<name> exited with <n>` and a `fix:` naming the
-  logs that hold what it did up to then: `<C>.<name>.up.log`, `<C>.<name>.down.log` and
-  `vcharon.log` in the logs folder, full paths; if it happens again, tell the user. When it
-  wakes an agent is as for any error. A silent exit with the code of a failed round just before
-  it is the child's own exit after an unusable session ([Repeated syncs](#repeated-syncs)), so
-  a kill from outside that happens to give that code goes untold; the next start says whether
-  the problem holds.
-- **A sync that didn't finish, or couldn't start.** Past its timeout (900 s, a `--once`
-  check's 60 s; a streaming child with no round for 900 s plus `--every`) the watcher ends the
-  sync itself (its process group on POSIX) and says `ERROR vcharon sync of <C>.<name> didn't
-  finish within <n> s`, with a `fix:` saying so, that the next round (or one-minute check) syncs
-  again, and to run `vcharon doctor` (it checks the servers of the channels) if it happens
-  again. A child that can't be started gives `ERROR couldn't start vcharon: <the OS's
-  message>`, its `fix:` saying that the next round (or one-minute check) tries again by itself
-  (a start can fail while the system is short of processes, open files or memory), and, if it
-  keeps failing, to run `vcharon
-  doctor`, which runs this same install: if that can't start either, the install was moved or
-  removed. A `--once` check runs one round and exits, so nothing tries again by itself: its
-  two fixes say so and name `vcharon watch C --once <flags> again after your next step` in
-  place of the next round, the `doctor` part as above. Both fixes are spelled as this install
-  runs vcharon. Neither
-  line has an error code: the watcher's own lines about its child have none, `error_key` counts
-  both as the connection's by their text, and an agent matches an `ERROR` line on its start
+  is running on this mailbox (<lock>), or a create, join, leave or close of this member`, `
+  (PID <n>)` when known ([Lock](#lock)), and a `fix:` line: keep using your own watcher, let a
+  command of yours end, ask the user if it isn't yours, or stop a lost one of yours with `watch
+  C --stop`. `create`, `join`, `leave` and `close` take the same lock.
+- **A sync child that exited without a word** (no `ERROR` line, nothing on stderr: killed from
+  outside; its own `EXIT updated` or `EXIT orphaned` line counts as no word and is never
+  printed, since it would read as the watcher's own last line) gives `ERROR vcharon sync of
+  <C>.<name> exited with <n>`, its fix naming the logs. A silent exit right after a failed
+  round is the child's own exit after an unusable session ([Repeated syncs](#repeated-syncs)).
+- **A sync that didn't finish, or couldn't start.** Past its timeout the watcher ends the sync
+  itself (its process group on POSIX) and says `ERROR vcharon sync of <C>.<name> didn't finish
+  within <n> s`; a child that can't be started gives `ERROR couldn't start vcharon: <the OS's
+  message>`. Each fix says the next round (or, for `--once`, the next check) tries again, and to
+  run `vcharon doctor` if it keeps happening. Neither line has an error code: the watcher's own
+  lines about its child have none, and an agent matches an `ERROR` line on its start
   ([Stable](#stable)).
 
 ### Reading a channel
@@ -2557,91 +2057,46 @@ shows the local tree as of the last sync, and says so.
   its folder's, the first with that ID) takes part.
 - `note:` lines after the list: an unreadable folder or file, a left-out folder, an entry with no
   or a wrong-folder ID or a duplicate, a bad or future time, an answer stamped before its
-  question (clocks differ?), a `re:` naming an ID not in the tree, a `re:` cycle; last of them,
-  when the members' `MEMBER.md` give two or more `vcharon:` versions, `note: members' vcharon
-  versions differ (from their MEMBER.md): <name> <version>, …; their guides may differ`, a
-  member without the line as `unknown`. Quiet when fewer than two known versions differ. A
-  member that left (its `LEAVE` after its last `JOIN` or `REJOIN`) is left out: it reads no
-  guide now, and its folder stays (a lobby's for good), so it would keep the note on. The
-  text form prints it once per join: the note last printed is kept in the state folder
-  (`<C>.<name>.version-note.json`, removed by each `join` and `create`, since a new session
-  starts with a `join`, and by `leave`), and a `read` whose note is the same text leaves it out;
-  a changed text (a member's version, or a member coming or going) prints again, and a `read`
-  that finds the versions agreeing removes the file, so a later difference prints too. A file
-  that can't be read or written prints the note each time. `--json` has it in `notes` every
-  time. Why: printed on every `read`, it repeated what the reader was told already; a script
-  reads `--json`, which keeps it. The printed note ends with ` (this note shows once after each
-  join or create of yours, and again when the versions change)`, which the kept text and
-  `--json` leave out (`--json` has it every time). Why: agents who saw the note once took its
-  absence on the next `read` for a sign of something.
-- Without `--full` or `--json`, when it lists an entry, the last line is `  note: to see the
-  bodies: vcharon read C --full [--last N] --project P [--role R]`: the same `--last`, the
-  command spelled as in [Fix lines](#fix-lines). Why: the short form shows titles only, and
-  agents in a channel run didn't find how to see a body.
-- `--json` gives each member read its `MEMBER.md` fields in `member_info`, `vcharon` among them
-  (null when missing).
-- **IDs** (`read C mac-web#3 …`, a leading `@` dropped, as `post --re` takes it): only the
-  placed entries with those IDs, whole (as `--full`), in the view's order; the first line and
-  the notes as always. Why: the watcher names one entry by its ID, and `--last` goes by entry
-  time, so a remote entry that synced late is not the newest. A copy of an ID in another folder
-  is never taken for the entry. An ID no placed entry has is `ERROR not_found: no entry <ids> in
-  <C>` (`, as of this box's last sync` for a remote member), exit 1, after the entries found
-  are printed (with `--json`, after the object, whose `missing` lists them): the fix is the whole
-  list's `read`, and for a remote member a `sync` first. An argument that isn't `<name>#<n>`,
-  or IDs with `--last` or `--to-me`, is a usage error (exit 3): `--last` and `--to-me` pick
-  from the whole list, and IDs already name what to show. A number alone (`19`, `#19`) is
-  refused too, since every member numbers its own entries; its fix line lists the IDs with
-  that number that `read` would show, `give each ID as <name>#<n>; with that number:
-  <name>#19, …`, sorted; with none, `no entry read would show has number 19; ` before the usual
-  line, and with a membership or tree it can't read, the usual `give each ID as <name>#<n>, as
-  the watcher's line prints it` alone (nothing is known about the number then).
-- **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:`
-  ([The watcher in a channel](#the-watcher-in-a-channel)): a placed entry in another member's
-  folder addressed to `@<me>`, or to `@all` from the leader by the charters' terms and entry
-  numbers ([Leader handoff](#leader-handoff); in a lobby, from any member). A
-  member's `@all` (in a work channel) and the own
-  folder are left out, as the watcher leaves them out. `--last` and `--full` apply to that
-  subset; the bodies line keeps `--to-me`.
+  question, a `re:` naming an ID not in the tree, a `re:` cycle; last, when the members'
+  `MEMBER.md` give two or more `vcharon:` versions, a note listing them (a member that left is
+  left out: it reads no guide now). The text form prints that note once per join or create of
+  the reader's, and again when its text changes, keeping the last one printed in the state
+  folder (`<C>.<name>.version-note.json`, removed by `join`, `create` and `leave`); `--json` has
+  it every time. Why: printed on every `read`, it repeated what the reader was told already.
+- Without `--full` or `--json`, when it lists an entry, the last line is a `note:` with the
+  `read --full` command (the same `--last`, spelled as in [Fix lines](#fix-lines)). Why: the
+  short form shows titles only, and agents didn't find how to see a body.
+- **IDs** (`read C mac-web#3 …`, a leading `@` dropped): only the placed entries with those IDs,
+  whole, in the view's order. Why: the watcher names one entry by its ID, and `--last` goes by
+  entry time, so a remote entry that synced late is not the newest. A copy of an ID in another
+  folder is never taken for the entry. An ID no placed entry has is `not_found`, exit 1, after
+  the entries found are printed (`--json`: listed in `missing`). IDs with `--last` or `--to-me`
+  are a usage error (exit 3), and so is a number alone (`19`), since every member numbers its
+  own entries; its fix lists the IDs with that number.
+- **`--to-me`**: only the entries the member's watcher prints as `to you:` or `to all:` ([The
+  watcher in a channel](#the-watcher-in-a-channel)); `--last` and `--full` apply to that subset.
 - A top-level folder whose name can't be a member's (a Windows reserved name such as `con`) is
-  left out of `read` and `--to-me`, while the watcher still reports it; `join` refuses such names.
+  left out of `read`, while the watcher still reports it; `join` refuses such names.
 - The text lines escape other members' text ([Entries](#entries)); `--json` gives it as it is,
-  JSON-escaped.
+  JSON-escaped, with each member's `MEMBER.md` fields in `member_info`.
 - A tree it can't read is an `ERROR <code>:` line and a `fix:` line, text and `--json` alike. A
   local member's channel folder that is gone (closed) is `not_found` with the `leave` fix; a
   remote member's copy stays until its `leave`, so it can still read the channel then.
-- **`whoami C` lists the members** after who you are: each member folder of the tree read
-  (a remote member's copy, said so: `members <n> (this box's copy, as of its last sync)`), with
-  `agent`, `box` and `os` from its `MEMBER.md` #1 (`?` for one it lacks; its `vcharon:` version
-  is read too, for the last-watched part below), `(leader)` and `(you)`, and the newest file's
-  time in the folder, local, to the second (`-` for none);
-  `--json` gives them as `members`, null when the tree can't be listed (text: a `can't read`
-  line, still exit 0, since who you are is shown). Why: the watcher's `<n> other entries
-  (<folders>)` doesn't say who the folders are, and `list` needs the server. It shows nothing
-  else of a member's files, so no host name or path shows.
-- **Left**: a member whose folder has a `LEAVE` of it numbered after its last `JOIN` or
-  `REJOIN` (of the entry headings of every `.md` file in the folder but `MEMBER.md`, the files
-  `read` reads) shows `left` in place of the last-watched part below; a rejoin clears it.
-  Why: `leave` keeps the folder and its last-watched stamp, so without it a member that left
-  would read as a watcher whose age only grows. Only the headings are read, line by line, and
-  only the flag shows. A local member's whoami doesn't read the entries of another member's
-  folder over the channel's limits, as `read` leaves it out: its `left` is unknown and its
-  line keeps the last-watched part. When the join record's limits can't be read, every other
-  member's `left` is unknown, since whoami never fails on the channel.
-  `--json` gives `left` in `whoami C`'s `members` (true, false, or null for unknown) and in
-  `read`'s `member_info` (true or false, from the entries `read` already read; a folder it left
-  out isn't listed there).
+- **`whoami C` lists the members** after who you are: each member folder of the tree (a remote
+  member's copy, said so), with `agent`, `box` and `os` from its `MEMBER.md` #1, `(leader)` and
+  `(you)`, and the newest file's time. Why: the watcher's `<n> other entries (<folders>)`
+  doesn't say who the folders are, and `list` needs the server. It shows nothing else of a
+  member's files, so no host name or path shows. A tree it can't list is a line, still exit 0.
+- **Left**: a member whose folder has a `LEAVE` numbered after its last `JOIN` or `REJOIN` (in
+  the headings of the files `read` reads) shows `left` in place of the last-watched part; a
+  rejoin clears it. Why: `leave` keeps the folder and its stamp, so a member that left would
+  read as a watcher whose age only grows. Unknown (`--json` null) for a folder over the limits,
+  which isn't read.
 - **Last watched**: each member's line ends with `watched <age> ago (every <n> s)`, from the
-  stamps ([The watcher in a channel](#the-watcher-in-a-channel)): the age in seconds under 2
-  minutes, minutes under 2 hours, else hours; `watched -` for a member with no stamp; `watched ?
-  (vcharon <version>)` for one with none whose `MEMBER.md` says 0.2.3 or older (or no version:
-  `unknown`), since those versions never stamp and such a member may be watching all the same.
-  A version the reader's own build also carries counts as stamping: a build that stamps but
-  is not yet numbered past 0.2.3 writes 0.2.3 too.
-  A remote member's are as of its last sync, as the rest of its list. `--json` gives each
-  member `watched` (the time, local, to the second, or null) and `watch_every` (seconds, or
-  null), in `whoami C`'s `members` and `read`'s `member_info`; both are null for `-` and `?`
-  alike, and only `member_info` carries the `vcharon` version that tells them apart. No
-  verdict and no note in `read`'s text: how late is too late depends on the pace, which the
+  stamps ([The watcher in a channel](#the-watcher-in-a-channel)); `watched -` for a member with
+  no stamp; `watched ? (vcharon <version>)` for one whose version never stamps (0.2.3 or older,
+  or unknown), since it may be watching all the same. A remote member's are as of its last
+  sync. No verdict in a work channel: how late is too late depends on the pace, which the
   guide's lead topic gives. A lobby's `whoami` is the exception ([The lobby](#the-lobby)).
 
 ### Clocks
@@ -2666,23 +2121,15 @@ by each machine's own clock, and nothing else in a channel's files can show a ga
   members' differ. Why: nothing else in a channel shows which version a member runs.
 - A channel's files are guarded by the format ([Formats](#formats)).
 - A channel whose lead moved ([Leader handoff](#leader-handoff)), with a member on a vcharon
-  before `lead` (0.8.6): that member goes by its record's leader, so it ignores the new
-  leader's `@all` (the `LEADER` entry names it with `@`, so it is woken once) and its `CLOSED`
-  line; its `join`, rejoin and `close` see two folders holding `CHANNEL.md` and refuse, `<C> has 2
-  leaders`. The cure is its update. The leader can't offer the lead to such a member. An old
-  leader on such a vcharon whose lead was taken with `--gone` still leads by its record: its
-  `leave` is refused, `you lead C: close it instead`, and its `close`, `C has 2 leaders`, so it
-  can do neither until its update (loud, never a wrong close).
-- Last-watched stamps: a member on 0.2.3 or older never stamps; `whoami C` shows it as `watched
-  ?` with its version, not as never watched. An older version's close (or a failed create's
-  undo) doesn't sweep `seen/`; the next claim or close on that machine does. The `watch` arg
-  and the `seen` reply pass only between a client and its own helper, as do states by
-  reference ([Calls](#calls)).
-- A member folder removed as idle, or a lobby closed, with members on a vcharon before 0.8.6:
-  a remote member's sync gives the channel-gone fix, as before; an older local member's watcher
-  goes on without its folder until stopped; an older watcher keeps a removed folder's marks,
-  so after a rejoin under that name it takes the new entries up to the old highest number as
-  seen (or warns them edited). An older `close lobby` is refused, `a lobby isn't closed`.
+  without `lead`: that member goes by its record's leader, so it ignores the new leader's
+  `@all` (the `LEADER` entry names it with `@`, so it is woken once) and refuses to join, rejoin
+  or close a channel with two folders holding `CHANNEL.md`; an old leader whose lead was taken
+  can neither leave nor close (loud, never a wrong close). The cure is its update. The leader
+  can't offer the lead to such a member.
+- The `watch` arg and the `seen` reply pass only between a client and its own helper, as do
+  states by reference ([Calls](#calls)).
+- A member on a vcharon without idle removal or the lobby misses their rules: its watcher may
+  run on without its removed folder, or keep a removed folder's marks.
 - The record and the section hold everything a later command needs, so a membership made by one
   version is used by the next. A record in another shape (an older layout, or a hand edit) is
   refused, with the fix: the user removes it, then the member rejoins with `--rejoin`. It has
@@ -2758,30 +2205,19 @@ Every verb also takes `-v` (log lines to stderr too).
   handoff made it term 2 or later), members, newest file,
   format, `age` and `size`; then one line per member (box, os, agent, project, idle: [Removing
   idle members](#removing-idle-members)) and the notes.
-  `age` counts from `CHANNEL.md`'s `created:`, else from the channel folder's mtime, which a
-  later join or leave moves on. `created:` has no zone, as a heading's ([Clocks](#clocks)): a
-  work channel's is the creating client's clock, a lobby's the server helper's, so the age is
-  off by any zone gap to this machine (the mtime fallback isn't). `size` is every regular file
-  below the channel's folder, stage dirs too, in the walk that finds `newest` (a link is
-  neither followed nor counted): disk use, not what the limits count (`charter.folder_total`,
-  per member folder, skips stage dirs and stage files), so it can pass `max mb` with no limit hit.
-  `--json` gives them as `created` (a heading's time) and `bytes`. Why: only `close` deletes
-  a channel, so a forgotten one stays until someone sees it. `--remove-idle`: [Removing idle
-  members](#removing-idle-members).
+  `age` counts from `CHANNEL.md`'s `created:` (no zone, as a heading's: [Clocks](#clocks)),
+  else from the channel folder's mtime. `size` is every regular file below the channel's
+  folder, stage dirs too, no link followed: disk use, not what the limits count, so it can pass
+  `max mb` with no limit hit. Why: only `close` deletes a channel, so a forgotten one stays
+  until someone sees it. `--remove-idle`: [Removing idle members](#removing-idle-members).
 - `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
   matches the program it runs. Several topics (`guide member rules`) print in the order given,
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
   one among them refuses them all before anything is printed (exit 3). Topics after a flag
-  count too (`guide lobby --role x rules`), in the order given, as `read`'s IDs do: an agent
-  adds its flags anywhere. Why: an agent reads the guide in layers, and a member's first read
-  is one command: `member rules` and its CLI's topic (`claude`, `codex`, `opencode`), in the
-  lobby `lobby rules` and that topic, about 15 to 25 kB with a leader's `lead`, read before the
-  plan. Those pages hold the normal path whole and every rule an agent gets no signal for when
-  it breaks it (a silent mistake), each on one page of the route; a CLI's topic holds only what
-  that CLI adds (its tools, limits, its own case of a rule, and what was checked). The rest
-  (`start`, `watch`, `post`, `read`, `end`, `errors`) is reference, read when a line vcharon
-  prints names it or a case isn't on the agent's page, each in a tool call of its own, never
-  several guide commands in one call or loop, since agents' tools cut a long output.
+  count too (`guide lobby --role x rules`): an agent adds its flags anywhere. Why: a member's
+  first read is one command, its role's topics plus `rules` and its CLI's topic; the pages
+  before joining hold the normal path whole and every rule an agent gets no signal for when it
+  breaks it, and the rest is reference, read when a line vcharon prints names it.
   `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
   only a file holding its own marker line. The skill names the topics to read by role and the
@@ -2789,10 +2225,8 @@ Every verb also takes `-v` (log lines to stderr too).
   reads its skill, but only some of the guide's topics.
 - **A skill copy of another version**: `doctor`'s `skill` row compares each copy holding the
   marker with this version's text: one that differs is a `warn`, its fix `vcharon skill install`
-  with the flags of those agents only (a user's own file of the other agent would refuse a run
-  for both); all the same is `ok`. No copy with the marker, no row: a file without it is the
-  user's own. `--update` rewrites them itself ([Self-update](#self-update)). Why: only `skill
-  install` writes the skill, and an update replaced the program without it.
+  with the flags of those agents only; no copy with the marker, no row. `--update` rewrites them
+  itself ([Self-update](#self-update)). Why: only `skill install` writes the skill.
 
 ### Output
 
@@ -2827,10 +2261,9 @@ OK  2 jobs  (0.7 s)
   blocks: `  synced: up <n> written; down <n> written  (<t> s)`, each side with `, <n>
   deleted` when it deleted any, then the sync's own `  note    …` lines. A failure prints
   everything `vcharon sync` would (the blocks held so far, then the rest as it comes, the
-  error block in its place), and `-v` prints the blocks always (and no `syncing` line: the
-  blocks show the progress). `leave`'s last sync prints
-  its blocks as `vcharon sync` does. Why: in a join the seven lines, two of them both ends'
-  full paths, say nothing to act on when the sync worked; on a failure they are what to read.
+  error block in its place), and `-v` prints the blocks always. `leave`'s last sync prints its
+  blocks as `vcharon sync` does. Why: in a join the blocks say nothing to act on when the sync
+  worked; on a failure they are what to read.
 - A remote rejoin that pulls its own folder back (the rejoin's pull, [Create, join, leave,
   close](#create-join-leave-close)) prints, before the sync's lines, `  pulled your folder
   from the server: <a> files added, <k> already here`: only the own folder's files, those
@@ -2854,7 +2287,10 @@ The watcher has its own: 0 change, 10 quiet, 11 error, 12 another watcher (or a 
 while it ran; `sync --repeat` exits 14 too), and 15 orphaned (a binary's bootloader process is
 gone; `sync --repeat` too, and on Windows any command of a binary, though nothing is left to
 see it), 16 nothing new (a `--once` check that found nothing), and 17 stopped (`watch C
---stop` asked it to end). A usage error is 3, not argparse's 2, since 2 means busy.
+--stop` asked it to end). A usage error is 3, not argparse's 2, since 2 means busy. A command
+whose stdout reader goes away (`vcharon doctor | head -3`) exits 1 with no `ERROR` line, its
+stdout sent to the null device so Python's own flush at exit can't fail too, and one line
+logged.
 [Error codes](#error-codes) maps every error code to one of these.
 
 ### Logs
@@ -2876,37 +2312,17 @@ So that a run from an agent's background shell behaves like one from a terminal:
   command acts: a Windows code page, a POSIX locale or a `PYTHONIOENCODING` that isn't UTF-8
   would fail the first name it can't hold, after a create or join has done its work, and the
   retry would say the channel exists. Every file VCharon writes is UTF-8;
-- another program's output (ssh's stderr, `ssh -V`, `ssh-add -l`) is read as UTF-8 when it is valid
-  UTF-8; on Windows, else in the ANSI code page if that decodes it all; else as UTF-8 with U+FFFD
-  for the bad bytes, never an error. Win32-OpenSSH's text of some errors (a host name it can't
-  resolve) is the system's, in the ANSI code page, and arrives escaped by ssh (below), so it is
-  decoded once the escapes are undone. Not the console's code page: ssh sets the console to UTF-8
-  for its run, and an OEM code page (cp437, cp850, cp866) decodes any byte, so trying it first would
-  hide the ANSI text (inferred from Win32-OpenSSH's source, not run; on a Chinese Windows both code
-  pages are 936, so a run there can't tell them apart). The session's ssh stderr and the `-v`
-  probe's are decoded line by line, so one such line can't change how the others read. ssh escapes
-  its own log messages (strnvis with `VIS_SAFE | VIS_OCTAL`): a byte above 0x7F becomes `\` and
-  three octal digits, and a backslash is doubled, so the system's text arrives as `\262\273…`
-  (measured with OpenSSH 10.0 on Linux, also under a UTF-8 locale, and with Win32-OpenSSH on a
-  Chinese Windows). ssh's own lines are therefore turned back into bytes first and then decoded as
-  above: in the `-v` probe, every line up to and with `Authenticated to`; in a session, which runs
-  ssh without `-v` and so has no such line, every line of an exit 255 before the marker, which is
-  ssh's own failure (a server line among them, from a connection lost after the login, is unescaped
-  too, and so is a ProxyCommand's stderr there and in the probe before `Authenticated to`: ssh
-  passes it on as it is, measured with OpenSSH 10.0; so is the server's login banner, sshd's
-  `Banner`, sent before the login, there and in every probe, which ssh prints with high bytes
-  escaped under a non-UTF-8 locale but backslashes not doubled, so a `\` and three octal digits or
-  a `\\` in it are unescaped too, measured with OpenSSH 10.0). Every other line, the server's text
-  that ssh relays as it is among
-  them, stays as written, so a literal `\262` there is kept. A backslash not followed by another or
-  by three octal digits stays. So a Windows path in an ssh error shows with single backslashes (ssh
-  doubled them: measured on Linux with `Can't open user config file C:\\no\\cfg`; inferred for
-  Win32-OpenSSH, which shares the log code); a line ssh writes outside its log, such as `Warning:
-  Identity file … not accessible`, isn't escaped (measured), so a backslash and three octal digits
-  in it read as one byte. The log's stderr lines, the probe's and the session's, keep ssh's text as
-  written. The `vcharon sync` child of a watcher is read as UTF-8 only: it is told to write UTF-8
-  ([Running watchers](#running-watchers)). What the server's shell prints before VCharon's marker is
-  remote text, cut at a byte count: it is read as UTF-8 with U+FFFD;
+- another program's output (ssh's stderr, `ssh -V`, `ssh-add -l`) is read as UTF-8 when it is
+  valid UTF-8; on Windows, else in the ANSI code page if that decodes it all (not the console's
+  OEM code page, which decodes any byte and would hide the ANSI text); else as UTF-8 with U+FFFD,
+  never an error. Line by line, so one line can't change how the others read. ssh escapes its own
+  log messages (a byte above 0x7F as `\` and three octal digits, a backslash doubled), so the
+  system's text of a Windows error arrives as `\262\273…`: ssh's own lines (the `-v` probe's up to
+  `Authenticated to`, and a session's exit-255 lines before the marker) are unescaped into bytes
+  first, then decoded as above; every other line stays as written. The log keeps ssh's text as
+  written. The watcher's `vcharon sync` child is read as UTF-8 only: it is told to write UTF-8.
+  What the server's shell prints before the marker is cut at a byte count and read as UTF-8 with
+  U+FFFD;
 - never prompt (BatchMode, no `input()`), except `vcharon key` and `--update`'s `Update now?
   [y/N]`, which takes no terminal as "no";
 - starting itself as a child (the watcher's sync) uses `platform.self_argv()`: the binary itself,
@@ -2932,27 +2348,21 @@ line of text>` for the agent or its user.
 
   Why: a fix line an agent runs as printed must work here; `vcharon` alone isn't on every
   install's `PATH`.
-- **Other installs on PATH**: `doctor`'s `path` row. It walks `PATH` in order (an empty entry
-  skipped) for a file named `vcharon` that may be run, or on Windows `vcharon` plus one of
-  `PATHEXT`'s extensions (Windows runs by extension, not by mode), each file once by its real
-  path; this install's own is the one `self_command` would call `vcharon` (`platform.runs_this`).
-  What a typed `vcharon` runs is `platform.typed_vcharon`'s answer, the one `self_command`
-  spells from too, so the row and the fix lines agree: `shutil.which`'s, except that on Windows
-  a hit found only through the current folder (not itself on `PATH`) is dropped for the first
-  one on `PATH`. Git Bash's and PowerShell's order counts, not cmd.exe's: agents type commands
-  there, and neither searches the current folder.
-  - Another one after this one: `warn`, since a shell or tool with another `PATH` order runs it.
+- **Other installs on PATH**: `doctor`'s `path` row walks `PATH` in order for runnable files
+  named `vcharon` (on Windows with a `PATHEXT` extension), each once by its real path. What a
+  typed `vcharon` runs is `platform.typed_vcharon`'s answer, the one `self_command` spells from
+  too, so the row and the fix lines agree: `shutil.which`'s, except that on Windows a hit found
+  only through the current folder is dropped (Git Bash and PowerShell, where agents type, don't
+  search it).
+  - Another one after this one: `warn`, since a shell with another `PATH` order runs it.
   - A typed `vcharon` runs another one, or this one isn't on `PATH`: `FAIL` (doctor exits 1)
-    for a binary, pipx, uv or pip install; `warn` for a checkout (install kind `source`), which
-    is normally run by hand as `<venv python> -m vcharon` and has no folder of its own to put
-    on `PATH`.
-  - Each fix line starts `ask your user to …`: an agent follows fix lines, and removing
-    software or changing `PATH` is the user's call.
+    for a binary, pipx, uv or pip install; `warn` for a source checkout, which is run by hand
+    and has no folder of its own to put on `PATH`.
+  - Each fix line starts `ask your user to …`: removing software or changing `PATH` is the
+    user's call.
 
   Why: an agent whose `vcharon` is another install reads that install's guide and runs its
-  code. Limits of the scan: a literal `~` in a `PATH` entry isn't expanded (bash expands it, so
-  bash may find a `vcharon` there that doctor doesn't list), and a quoted Windows entry isn't
-  unquoted.
+  code.
 - `<command>` is one of the verbs, `--version` or `--help`, after the text's start, a space, `(`
   or a backquote, and before a space, the end, or one of `),.;` and a backquote. So `vcharon's`,
   a path and the `-m vcharon` it wrote are never rewritten, and applying it twice changes nothing
@@ -2972,113 +2382,68 @@ line of text>` for the agent or its user.
   (`fsops.SERVER`), where no agent's sandbox runs. The error code stays `permission`. A failed
   `dirs` check of `doctor` gives the same fix for `EROFS` or `EPERM` (any other error keeps `fix
   its permissions, or set VCHARON_HOME …`), and a `note:` under it still names all four
-  folders. Why: an agent CLI's
-  sandbox refuses with these on a folder that is fine (Codex CLI 0.160.0 on Linux: `Read-only
-  file system`; macOS's sandbox is expected to give `Operation not permitted`, not checked),
-  allowing the folders is the user's step, and the fix points at the list they need.
-- A server's fix line that points at `list` (no such channel, a closed or removed folder left
-  undeleted, a folder gone during a close) is the client's to word: the helper never knows the
+  folders. Why: an agent CLI's sandbox refuses with these on a folder that is fine (Codex's
+  Linux sandbox gives `Read-only file system`), allowing the folders is the user's step, and the
+  fix points at the list they need.
+- A server's fix line that points at `list` is the client's to word: the helper never knows the
   alias it was reached by, so it sends a plain text (`channels.NO_CHANNEL_FIX` and the two
-  beside it), and the client, at each server call (`_Remote._call`, `_Local._call`) and in
-  `list --remove-idle`'s own unknown-channel check, puts the command in its place, `vcharon
-  list --server ALIAS` or `vcharon list --local` (`channel_cmd.LIST_FIXES`). Why:
-  `vcharon list` alone doesn't run, and `list's output` is never rewritten into this install's
-  spelling.
+  beside it), and the client puts `vcharon list --server ALIAS` or `vcharon list --local` in
+  its place (`channel_cmd.LIST_FIXES`). Why: `vcharon list` alone doesn't run.
 - The tests parse every command-form fix line back with the command line's own parser.
 
 ### Running watchers
 
 A watcher and `sync --repeat` run for a long time while the program under them may be replaced
 (a `pipx install --force`, a binary swapped by an update). A one-file binary reads its code
-archive from its own file, by path, at each first-time import; after a swap, an old process
-importing a module for the first time reads the new file at the old offsets. Measured on Linux
-with PyInstaller 6.22.3 (a watcher of a built binary, the binary replaced with `os.replace` as
-`--update` does): the running process holds no file descriptor on its binary. In a build
-changed to import one module for the first time at the top of a round, before the check, that
-import failed with a `zlib` error ("incorrect header check") after a swap with another build,
-and worked after a swap with a byte-identical copy. The checks below turned each case, and the
-unchanged build's, into `EXIT updated` and exit 14 within a round, with no traceback.
+archive from its own file, by path, at each first-time import, and holds no descriptor on it:
+after a swap, an old process importing a module for the first time reads the new file at the
+old offsets and fails (with PyInstaller, a `zlib` error).
 
-- So the long-running commands import every module they can need at start, in every install mode:
-  `cli.py` imports every module of the package at its top, the plugins too (which `plugin.py`
-  loads by name); the few imports inside functions, there to break an import cycle, only look up a
-  module already loaded. The standard library loads some modules at first use: the UTF-16 codec
-  `pathrules` counts with and the `utf-8-sig` one `config` reads with are looked up when those
-  load; on Windows, `winreg` and the codec of the ANSI code page that `fsops` reads other
-  programs' output with ([Launch rules](#launch-rules)) load at start;
-  and the start of `watch` and `sync --repeat` spells `vcharon` once as fix lines do, which reads
-  sysconfig's data (`_sysconfigdata_*`, and `_osx_support` on macOS) when an entry point named
-  `vcharon` is on PATH. `update.py` is the one module imported later, by `--update` alone, which
-  imports nothing after its swap. Tests run a watcher and `sync --repeat` in a child through
-  rounds and check that no module was imported after the start, each child under `-S` (no `.pth`
-  read, as in a binary) with the environment's scripts folder first on PATH.
+- So the long-running commands import every module they can need at start, in every install
+  mode: `cli.py` imports every module of the package at its top, the plugins too; the few
+  imports inside functions, there to break an import cycle, only look up a module already
+  loaded. Standard-library modules loaded at first use are loaded at start too: the codecs
+  `pathrules` and `config` use, on Windows `winreg` and the ANSI code page's codec, and the
+  sysconfig data that spelling `vcharon` as fix lines do reads. `update.py` is the one module
+  imported later, by `--update` alone, which imports nothing after its swap. Tests run a watcher
+  and `sync --repeat` in a child and check that no module was imported after the start.
 - At the top of each round, before any other work, `watch` and `sync --repeat` compare the
   code's file with the one they started with: a binary's own file, else the package's
-  `__init__.py` (pipx and pip rewrite it), by size, modification time and file id (`st_ino`,
-  which `os.stat` fills on Windows too). Changed or gone: `EXIT updated`, exit 14. `sync
-  --repeat` does it on its own, never relying on its watcher; a streaming watcher whose child
-  exits 14 says `EXIT updated` too.
-- A failed read of the code can show up as any exception (`ImportError`, a `zlib` error, bad
-  marshal data, `EOFError`). So in a binary, an unexpected exception in a long-running command
-  checks the file first: changed, `EXIT updated` and 14 (a round's error in `sync --repeat` is
-  raised to that check, not shown); unchanged, the usual `internal` error.
+  `__init__.py` (pipx and pip rewrite it), by size, mtime and file id. Changed or gone: `EXIT
+  updated`, exit 14. `sync --repeat` does it on its own, never relying on its watcher.
+- A failed read of the code can show up as any exception, so in a binary an unexpected
+  exception in a long-running command checks the file first: changed, `EXIT updated` and 14;
+  unchanged, the usual `internal` error.
 - The fix for 14 is to start the watcher again: that runs the new VCharon.
-- **Orphans.** A one-file binary runs as two processes: the bootloader, and the Python child
-  it starts. A signal the bootloader can't catch (SIGKILL; `TerminateProcess` on Windows) ends
-  the bootloader alone; on POSIX the child runs on, holding the watcher's lock, and its unpack
-  folder stays (a Windows binary: the next bullet). Measured on Linux: after a SIGKILL of the
-  bootloader, the child ran on until it was stopped by hand. So in a binary, `watch` and
-  `sync --repeat` note their parent at start
-  (POSIX: the parent pid; Windows: a handle on the parent, opened with `SYNCHRONIZE`) and check
-  it at the top of each round, after the update check: gone (POSIX: another parent pid, not
-  only 1, since a subreaper may take the child), they log one line, print `EXIT orphaned` and
-  exit 15 through the normal path, which releases the lock. A new code, not 11: nothing failed,
-  and a restart is right only if the user didn't mean to stop it. Not in a Python install,
-  where the command is the process that was signalled. Measured on Linux with the binary: the
-  child printed `EXIT orphaned` and exited 1.9 s after the SIGKILL (rounds every 2 s), and a
-  new watcher then started. The unpack folder (about 20 MB) still stays: only the bootloader
-  removes it.
-- **A Windows binary ends with its bootloader, at once.** Every command of a Windows binary,
-  a plain `sync` too, opens the `SYNCHRONIZE` handle on its parent at start and waits on it in
-  a daemon thread (the wait doesn't hold the GIL). Signalled, the thread logs the orphaned line,
-  prints `EXIT orphaned` in `watch` and `sync --repeat`, and exits 15 with `os._exit`; a timer
-  exits after 2 s whatever the printing does, since a full pipe no one reads would block it.
-  The OS drops the locks, as for any kill. While the thread waits, the round's check leaves
-  the exit to it, so one death prints one `EXIT orphaned`; a wait that fails gives the check
-  back. Why: `TerminateProcess` ends the bootloader alone,
-  whoever sends it (a watcher ending its sync child, `fsops.run`'s timeout, a harness stopping
-  a watcher), and Windows has no process group to kill with it; the check at the top of a
-  round comes late and a plain `sync` has none. One thread covers every case, with no ctypes
-  and no other program. Not on POSIX, where the round's check stays and vcharon's own kills
-  reach the whole group. Not in a Python install: a checkout run by a system Python is one
-  process, and in a venv or pipx install the venv launcher already runs the real `python.exe`
-  in a job that ends with it (from CPython's source, not run). Without the handle (OpenProcess
-  refused) nothing is started, and the round's check stays. The ssh under such a process isn't
-  killed: it ends at its stdin's end, or on a dead link after ssh's keepalive gives up, about
-  45 s (inferred). The unpack folder stays each time. Tested with a stand-in `_winapi` on
-  every OS, and on Windows with the real one and a Python stand-in for the bootloader; no test
-  runs a real Windows binary.
-- **Ending a sync child.** The other way round, a watcher ending its sync child must not kill
-  only the bootloader. On POSIX the streaming child runs in a session of its own; a child that
-  hasn't ended 10 s after its stdin closed gets SIGTERM, which the bootloader passes on to its
-  Python process, so both end the usual way and the unpack folder goes; after 3 s, whatever is
-  left of its process group gets SIGKILL, sent before the child is reaped, so the group's id
-  can't belong to another process yet. `--no-stream`'s sync runs through `fsops.run` in a new
-  session; on its timeout or a Ctrl-C, `fsops.run` sends SIGTERM to the whole group, waits up
-  to the same 3 s for the bootloader without reaping it, then sends SIGKILL to what is left,
-  so the bootloader removes its unpack folder (PyInstaller's docs: it cleans up whenever its
-  child exits, but can't once it is killed itself). `--update`'s runs of the new binary get
-  the same ([Self-update](#self-update)); `fsops.run`'s other callers (the ssh probes,
-  `doctor`, `vcharon key`, macOS's `ioreg`) still kill at once. The session's own ssh, started in a
-  session of its own, isn't in the group: it ends at its stdin's end, or on a dead link after
-  ssh's keepalive gives up (inferred). Why: the Python process holds the pipes, so the watcher
-  would wait on it with no end (no `EXIT` line, `--max-minutes` unable to fire, the lock held),
-  and it holds the job's locks, so every later round would be busy. A pipe whose reader still
-  runs after the child ended is left open, never closed under the reader. Windows has no tree
-  kill here, and no grace: `TerminateProcess` ends the bootloader alone, at once, and a
-  binary's Python process then ends itself at once, mid-round, as SIGTERM ends it on POSIX
-  (the bullet above), and its unpack folder stays; the watcher doesn't wait for it (inferred,
-  not run on Windows).
+- **Orphans.** A one-file binary runs as two processes: the bootloader, and the Python child it
+  starts. A signal the bootloader can't catch (SIGKILL; `TerminateProcess`) ends the bootloader
+  alone, and on POSIX the child runs on, holding the watcher's lock. So in a binary, `watch` and
+  `sync --repeat` note their parent at start and check it at the top of each round, after the
+  update check: gone (another parent pid, not only 1, since a subreaper may take the child),
+  `EXIT orphaned`, exit 15, through the normal path, which releases the lock. A new code, not
+  11: nothing failed, and a restart is right only if the user didn't mean to stop it. Not in a
+  Python install, where the command is the process that was signalled. The unpack folder (about
+  20 MB) stays: only the bootloader removes it.
+- **A Windows binary ends with its bootloader, at once.** Every command of a Windows binary
+  opens a `SYNCHRONIZE` handle on its parent at start and waits on it in a daemon thread.
+  Signalled, the thread logs, prints `EXIT orphaned` in `watch` and `sync --repeat`, and exits
+  15 with `os._exit`, after at most 2 s whatever the printing does; the OS drops the locks.
+  While the thread waits, the round's check leaves the exit to it. Why: `TerminateProcess` ends
+  the bootloader alone, whoever sends it, Windows has no process group to kill with it, and a
+  plain `sync` has no round check. Not in a Python install: a venv or pipx launcher already runs
+  `python.exe` in a job that ends with it. Without the handle the round's check stays. The ssh
+  under such a process ends at its stdin's end, or after ssh's keepalive gives up. No test runs
+  a real Windows binary.
+- **Ending a sync child.** A watcher ending its sync child must not kill only the bootloader. On
+  POSIX the streaming child runs in a session of its own; one that hasn't ended 10 s after its
+  stdin closed gets SIGTERM, which the bootloader passes on, so both end the usual way and the
+  unpack folder goes; after 3 s, what is left of its process group gets SIGKILL, sent before the
+  child is reaped, so the group's id can't belong to another process yet. `fsops.run`'s
+  timeout or Ctrl-C does the same for `--no-stream`'s sync and `--update`'s runs; its other
+  callers kill at once. Why: the Python process holds the pipes and the job's locks, so a
+  watcher waiting on it would never end and every later round would be busy. Windows has no
+  tree kill: `TerminateProcess` ends the bootloader, and the Python process then ends itself as
+  the bullet above says.
 
 ### Self-update
 
@@ -3089,115 +2454,84 @@ it is run: no version check at start-up.
 - **A flag, not a verb**: the verbs are what agents run, and an agent never updates (the guide
   says to ask the user: it replaces the program every member on the machine runs). Refused, as a
   usage error (3), with a verb or any flag but `--yes`, `--force`, `--json`, `--rc` and
-  `--check`; those five are refused without it. `--project P` and `--role R` (or `=P`, `=R`)
-  are taken and ignored, as by the verbs that act on no membership: an agent passes them on
-  every command, `--update --check` included.
-- **`--check`**: reads the latest as `--update` does (`--rc` and a pre-release build count
-  pre-releases the same way), prints the `current` and `latest` lines, then `<latest> is
-  newer; your user can install it: <command>` (this binary's `--update [--rc]`, or another
-  install kind's own command), `<version> is the latest release` or `is ahead of the latest
-  release`, then `OK`. It never asks and never installs, and refuses nothing for another
-  install kind: exit 0 once the release is read, 1 when the read fails. Refused (3) with
-  `--yes` or `--force`, which only an install uses. Why: an agent asked "is there a newer
-  vcharon?" refused the scripted check `--update --json`, since the guide's rule names
-  `--update` with no exception; `--check` is the one an agent may run without its user's word,
-  and the guide says so.
+  `--check`; those five are refused without it. `--project P` and `--role R` are taken and
+  ignored: an agent passes them on every command.
+- **`--check`**: reads the latest as `--update` does, prints the `current` and `latest` lines,
+  then whether it is newer (with the command to install it: this binary's `--update [--rc]`, or
+  another install kind's own command), then `OK`. It never asks and never installs: exit 0 once
+  the release is read, 1 when the read fails. Refused (3) with `--yes` or `--force`. Why: the
+  guide forbids agents `--update`; `--check` is the one an agent may run without its user's
+  word, and the guide says so.
 - **It asks first**: it reads `releases/latest` (GitHub leaves out drafts and pre-releases),
   prints the current and the latest version, and with nothing newer and no `--force` says so and
   exits 0. Else `Update now? [y/N]`. No terminal, `--json`, Ctrl-C or anything but `y`/`yes` is
   "no": it reports and installs nothing, exit 0, so `vcharon --update --json` is the scripted
   check. `--yes` is the one yes; `--force` installs the latest even when it is this version, or
-  an older one (this build is ahead of the latest release).
-- **Pre-releases**: with `--rc`, or when this build is itself a pre-release, it reads the first 30
-  releases GitHub lists instead (`releases?per_page=30`), skips drafts and tags that don't parse,
-  and takes the highest version, pre-releases included; by version, not list order, since GitHub
-  doesn't document the order and a fix tagged after an rc can come first. Its `latest` line then
-  marks a pre-release `(pre-release, <url>)`, and a pre-release build says that is why it counted
-  them. Why the pre-release build: a user testing `0.5.0rc1` follows rc2 and then the final with a
-  plain `--update`, and once on the final reads full releases only again, with no state kept. A
-  build without `--rc` (0.4.1 and older) gets its first pre-release by hand, from the release page.
+  an older one.
+- **Pre-releases**: with `--rc`, or when this build is itself a pre-release, it reads the first
+  30 releases GitHub lists, skips drafts and tags that don't parse, and takes the highest
+  version, pre-releases included: by version, not list order, which GitHub doesn't document.
+  Why the pre-release build: a user testing `0.5.0rc1` follows rc2 and then the final with a
+  plain `--update`, and once on the final reads full releases only again, with no state kept.
 - **Versions**: numbers, then an optional pre-release label (`dev` < `a` < `b` < `rc`) and its
-  number, after a leading `v`; a pre-release sorts below its final, so `0.1.0rc1` < `0.1.0rc2` <
-  `0.1.0`, and a post-release (`post`) above it: `0.1.0.post1` is newer than `0.1.0`. On a final
-  build a plain `--update` reads only full releases (`releases/latest` never returns a
-  pre-release); `--rc` counts pre-releases too, and `--force --rc` installs the highest it read
-  even when it is this version or older. A tag that doesn't parse is never newer. `--force`
-  with an older release says it "can be installed"; with the same one, "can be reinstalled".
+  number, after a leading `v`; a pre-release sorts below its final, and a post-release (`post`)
+  above it. A tag that doesn't parse is never newer.
 - **Checked before the question**: how VCharon was installed, that a binary is published for
-  this platform (`linux-x64`, `darwin-arm64`, `win-x64`; an Intel Mac or Linux arm64 gets the
-  pipx command), that the binary's folder is writable (by making and removing a temp folder in
-  it: on Windows `os.access` ignores ACLs), and that the release has the archive. A problem found
-  after a yes would be a question that should never have been asked.
+  this platform (`linux-x64`, `darwin-arm64`, `win-x64`; others get the pipx command), that the
+  binary's folder is writable (by making and removing a temp folder in it: on Windows
+  `os.access` ignores ACLs), and that the release has the archive. A problem found after a yes
+  would be a question that should never have been asked.
 - **Install kinds**: a PyInstaller binary (both `sys.frozen` and `sys._MEIPASS`) is replaced in
   place. pipx, uv, pip and a source checkout are refused with the exact command, pinned to the
   release's tag, as the fix line; nothing changes.
 - **The swap**, in this order: download the archive into a temp folder inside the binary's own
   folder (one filesystem, so the last rename can't hit `EXDEV`); check the release's
-  `<archive>.sha256`, one line `<hex>  <file>` whose first word counts (a mismatch fails, and so
-  does a file whose first word isn't a sha256; none published warns and goes on); extract only the
-  binary, never everything, to a path of its own: the `.tar.gz`'s top-level `vcharon`, or the
-  `.zip`'s entry named exactly `vcharon.exe` (no folder part), a file of at most 200 MB, streamed
-  with `ZipFile.open` to `vcharon.new.exe`; run the new binary's `--version` and require the
-  release's version; then replace. POSIX: `os.replace` over the running binary, which keeps running
-  from its own inode. Windows, where a running `.exe` can be renamed but not replaced: rename it to
-  a unique `vcharon.exe.old-<unix time>`, move the new one in, and rename the old one back if that
-  fails; each rename is tried a few times over about two seconds, since antivirus often holds a new
-  file for a moment. Any way out of the swap, a Ctrl-C too, renames the old one back once it was
-  moved and nothing is at the binary's path (a Ctrl-C just after the move leaves the new one); if
-  even that fails, a Ctrl-C included, the error keeps the move's own error, its fix names both
-  paths, and the temp folder holding the new one is kept. Every start of a Windows binary deletes
-  the `.old-*` copies next to it that it can. Any other failure leaves the old binary as it was;
-  temp folders a killed run left are removed by a later run once an hour old.
+  `<archive>.sha256`, whose first word counts (a mismatch, or a first word that isn't a sha256,
+  fails; none published warns and goes on); extract only the binary, never everything (the
+  `.tar.gz`'s top-level `vcharon`, or the `.zip`'s entry named exactly `vcharon.exe`, at most
+  200 MB, streamed); run the new binary's `--version` and require the release's version; then
+  replace. POSIX: `os.replace` over the running binary, which keeps running from its own inode.
+  Windows, where a running `.exe` can be renamed but not replaced: rename it to a unique
+  `vcharon.exe.old-<unix time>`, move the new one in, and rename the old one back if that fails;
+  each rename is retried for about two seconds, since antivirus often holds a new file. Any way
+  out of the swap, a Ctrl-C too, renames the old one back once it was moved and nothing is at
+  the binary's path; if even that fails, the error's fix names both paths and the temp folder
+  holding the new one is kept. Every start of a Windows binary deletes the `.old-*` copies next
+  to it that it can. Any other failure leaves the old binary as it was; temp folders a killed
+  run left are removed by a later run once an hour old.
 - **Network**: https only, also after a redirect; `GITHUB_TOKEN` (or `GH_TOKEN`) is sent to
   `api.github.com` only, and dropped on a redirect to another host; timeouts per socket
   operation (15 s for the API, 120 s for a download). A binary whose OpenSSL can't find its
   build machine's CA file uses the system's bundle. An HTTP 401 to a call that carried a token
-  is tried once more without it, and goes on if that works; if that call hits the rate limit
-  (403, 429), the error is `bad_token`, whose fix says to unset or renew the variable it names.
-  Why: a stale token fails every later try the same way, and the release is public; a rate
-  limit's fix ("set GITHUB_TOKEN") would be wrong there. A 401 without a token stays
-  `http_error`, also on that second call: there is nothing to drop, and the token isn't what
-  was refused.
+  is tried once more without it; if that hits the rate limit, the error is `bad_token`, whose
+  fix says to unset or renew the variable. Why: a stale token fails every later try the same
+  way, and the release is public.
 - **The skill**, after a swap: the agents whose skill copy holds the marker (read before the
-  swap) get it rewritten by the new binary, run as `<binary> skill install --claude|--codex`
-  the way the `--version` check runs it (same timeout, same environment). Not by this process:
-  it is the old version, and its skill text the old one. A copy without the marker, or none, is
-  left alone. A failure there doesn't fail the update (it is done): a `note:` line with the
-  error's first line and the command to run, exit 0. Why: an agent reads the skill before the
-  guide, and an old skill can name what the new version changed.
+  swap) get it rewritten by the new binary, run as `<binary> skill install --claude|--codex`.
+  Not by this process: it is the old version, with the old skill text. A failure there doesn't
+  fail the update: a `note:` with the command to run, exit 0. Why: an agent reads the skill
+  before the guide, and an old skill can name what the new version changed.
 - **Running the new binary** (`--version`, then `skill install`): through `fsops.run`, at most
-  90 s each, and on POSIX in a session of its own with the 3 s grace a `--no-stream` sync gets
-  ([Running watchers](#running-watchers)): on the timeout or a Ctrl-C its whole process group
-  gets SIGTERM, then SIGKILL once the bootloader ended or 3 s passed. Why: the new binary is a
-  one-file binary, a bootloader and the Python process it starts; a SIGKILL to the bootloader
-  alone leaves that process running and its unpack folder (about 20 MB) in the temp folder.
-  Neither run needs the controlling terminal a new session lacks: stdin is an empty pipe and
-  neither command prompts. Windows: no group and no grace; `TerminateProcess` ends the
-  bootloader alone, and the binary's Python process then ends itself (the bullet "A Windows
-  binary ends with its bootloader, at once" in Running watchers); its unpack folder stays. A
-  release built before that bullet's thread, which `--force` can install, has no such check:
-  its Python process runs on until its command ends.
+  90 s each, on POSIX in a session of its own with the 3 s grace a `--no-stream` sync gets
+  ([Running watchers](#running-watchers)), so a timeout or Ctrl-C ends the bootloader and its
+  Python process both and the unpack folder (about 20 MB) goes. Stdin is an empty pipe, and
+  neither command prompts.
 - **Exit codes**: 0 done, nothing newer, or "no"; 1 every failure, with the `update` error
   code; 3 a usage error.
 - **`--json`**: one object on stdout, a failure's too: `current`, `install` (the kind), `path`,
-  `rc` (whether pre-releases are counted, and why: `"flag"` for `--rc`, which wins, `"current"`
-  for a pre-release build, else `false`; known before the read, so a failed read has it too),
-  `update_available` (null until the release is read, so a failed read has null; then true or
-  false); once the release is read `latest`, `tag`, `prerelease` (whether that release is a
-  GitHub pre-release), `url`, `changed`, `confirmed`; with `--check` and another install kind
-  whose release is newer, its `command`;
-  `ok`; a failure's `error` (`not_self_updatable`, `unsupported_platform`, `not_writable`,
-  `missing_asset`, `no_release`, `not_found`, `network`, `rate_limited`, `bad_token`,
-  `checksum_mismatch`, `smoke_failed`, `version_mismatch`, `bad_asset`, `install_failed`, …),
-  `message` and `fix`;
-  another install kind's `command`; an install's `previous`, `installed`, `verified`, and
-  `skills` (`{"paths", "ok", "fix"}`: the skill copies the new binary was run for, empty when
-  none, whether that worked, and the command to run when it didn't).
-- `not_writable`'s fix runs the installer again: `install.sh` on Linux and macOS, `install.ps1`
-  on Windows. A new binary that won't run here (`smoke_failed`; on Linux most often a glibc
-  older than the build machine's) and a broken release point to pipx; only the failures a later
-  try can fix say to try again. `doctor` prints the install kind and a binary's path, so a user
-  knows what `--update` touches.
+  `rc` (`"flag"` for `--rc`, which wins, `"current"` for a pre-release build, else `false`),
+  `update_available` (null until the release is read; then true or false); once the release is
+  read `latest`, `tag`, `prerelease`, `url`, `changed`, `confirmed`; with `--check` and another
+  install kind whose release is newer, its `command`; `ok`; a failure's `error`
+  (`not_self_updatable`, `unsupported_platform`, `not_writable`, `missing_asset`, `no_release`,
+  `not_found`, `network`, `rate_limited`, `bad_token`, `checksum_mismatch`, `smoke_failed`,
+  `version_mismatch`, `bad_asset`, `install_failed`, …), `message` and `fix`; another install
+  kind's `command`; an install's `previous`, `installed`, `verified`, and `skills` (`{"paths",
+  "ok", "fix"}`).
+- `not_writable`'s fix runs the installer again. A new binary that won't run here
+  (`smoke_failed`; on Linux most often a glibc older than the build machine's) and a broken
+  release point to pipx; only the failures a later try can fix say to try again. `doctor`
+  prints the install kind and a binary's path, so a user knows what `--update` touches.
 
 ### Packaging
 
@@ -3205,16 +2539,13 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
 `vcharon.spec` (the `build` extra pins its version).
 
 - **One file**, console, named `vcharon` (`vcharon.exe` on Windows). A one-file binary unpacks
-  itself into a temp folder at each start: about 0.3 s for `vcharon --version` on a Linux dev
-  box, against 0.1 s for `python -m vcharon --version`. So a `--no-stream` watcher, which
-  starts a child every round, pays that each round; the streaming child starts once.
-- **Stripped on Linux**: the spec sets `strip` on Linux, so PyInstaller runs `strip` on every
-  shared library it packs (libpython, the extension modules; not its own bootloader). The
-  Python CI builds with (actions/setup-python) ships libpython and the extension modules with
-  debug info (the system libraries it packs are already stripped), which more than doubled the
-  binary (24.2 MB against 9.7 MB). A missing `strip` would only be a warning in PyInstaller,
-  so the spec stops the build instead. Not on macOS: its binary is small already (8.8 MB in
-  the first release candidate) and stripping there is untested; not on Windows.
+  itself into a temp folder at each start (a few tenths of a second), so a `--no-stream`
+  watcher, which starts a child every round, pays that each round; the streaming child starts
+  once.
+- **Stripped on Linux**: the spec sets `strip` on Linux, so PyInstaller strips every shared
+  library it packs: the Python CI builds with ships them with debug info, which more than
+  doubled the binary. A missing `strip` would only be a warning in PyInstaller, so the spec
+  stops the build instead. Not on macOS (small already, stripping untested) or Windows.
 - **The package's files on disk**: the spec collects every file of the package as data, the
   `.py` files too, under the binary's unpack folder (`sys._MEIPASS/vcharon/`). The PYZ holds
   only bytecode, and the bundle sent to a server is source: `bundle._sources()` reads it from
@@ -3241,25 +2572,15 @@ VCharon ships as a wheel and as a standalone binary per platform, built by PyIns
   `%LOCALAPPDATA%\Programs\vcharon\vcharon.exe` (a running one is renamed to `vcharon.exe.old-<unix
   time>` first). `install.sh` prints the line that puts `~/.local/bin` on the PATH when it isn't;
   `install.ps1` adds its folder to the user's PATH. An Intel Mac, Linux arm64 and Windows on ARM
-  get the pipx command. Only their own tests set `VCHARON_INSTALL_API_URL` and
-  `VCHARON_INSTALL_DOWNLOAD_URL`, to a local fake release (both then allow plain http to
-  `127.0.0.1` or `localhost` exactly, and refuse any URL with an `@`; otherwise https only, and
-  `install.sh` holds redirects to https too). Only a 404 for the `.sha256` warns; any other failure
-  to get it fails, as for `--update`, where only a release that lists no `.sha256` warns.
-  `VCHARON_INSTALL_VERSION_TIMEOUT` and `VCHARON_INSTALL_KILL_GRACE` (whole seconds; anything
-  else gets the default) are for the same tests: they shorten the waits for a hung binary.
-  `install.sh` writes only the archive member's bytes (`tar -O`, so a link member gives an empty
-  file, which fails the version check), reads at most one byte over the 200 MB through `head -c`
-  and fails if it got it (it lists the member first: sh has no pipefail to report tar's failure
-  through the pipe), hashes with `sha256sum`, `shasum` or `openssl`, whichever is found first,
-  and fails when none is (a published checksum is never skipped), gives the version check 60 s
-  (without `timeout(1)`: TERM, then KILL after 5 s), and cleans up on INT, TERM and HUP.
-  `install.ps1` stops a binary that overruns the 60 s, and its child, best effort; its two moves
-  are retried 5 times 0.5 s apart, a stop between them puts the old binary back, and its work
-  folder is kept while no binary is in place.
-  `install.sh` is tested under sh and dash against a local fake release, and both installers run
-  against a fake release in each release build ([Releases](#releases)); neither has run against
-  GitHub yet.
+  get the pipx command. https only (redirects too); only their own tests point them at a local
+  fake release over plain http to `127.0.0.1` or `localhost` (`VCHARON_INSTALL_API_URL`,
+  `VCHARON_INSTALL_DOWNLOAD_URL`, and two variables that shorten the waits). Only a 404 for the
+  `.sha256` warns; any other failure to get it fails. `install.sh` writes only the archive
+  member's bytes (`tar -O`), enforces the 200 MB cap, fails when it finds no sha256 tool (a
+  published checksum is never skipped), gives the version check 60 s, and cleans up on INT,
+  TERM and HUP. `install.ps1` stops a binary that overruns the 60 s, retries its two moves, puts
+  the old binary back after a stop between them, and keeps its work folder while no binary is in
+  place. Both run against a fake release in each release build ([Releases](#releases)).
 
 ### Releases
 
@@ -3303,14 +2624,10 @@ maintainer asks before tagging.
   nothing; with the real one, whose installed binary must print the tag's version; then over
   that install, whose binary it first overwrites with a marker, so only a real replace prints
   the version, and after which the folder must hold the binary alone (on Windows: no
-  `vcharon.exe.old-*` left). On Windows the real-checksum install runs once more under Windows
-  PowerShell 5.1 (`powershell.exe`), what `irm | iex` runs in by default, whose branches (TLS
-  1.2) pwsh never takes; it is a replace too, over the pwsh install. The replace runs leave a
-  file outside the install folder, which must still be there: proof the earlier install was
-  kept, not wiped for a fresh one. Not run by any check: `install.ps1`'s stop of a binary whose
-  `--version` runs past 60 s, and the 5.1 `WebException` branch of its HTTP status reader.
-  `install.ps1` also adds its folder to the user's PATH, so on Windows the check runs only where
-  `CI` is set.
+  `vcharon.exe.old-*` left). On Windows the install also runs under Windows PowerShell 5.1,
+  what `irm | iex` runs in by default. A file left outside the install folder must survive the
+  replace runs. `install.ps1` adds its folder to the user's PATH, so on Windows the check runs
+  only where `CI` is set.
 - **The build's inputs are pinned**, so a release is built from what was checked, not from what
   was newest that day. The actions are at commit SHAs (a tag can be moved; the publish job holds
   a write token), with the version in a comment, which Dependabot bumps weekly as pull requests
@@ -3321,9 +2638,8 @@ maintainer asks before tagging.
   package with `--no-deps --no-build-isolation`, so nothing comes from the index unpinned. One
   lock serves all three runners: hashes cover every file of a release, so each OS's pip finds
   its own wheel. The `build` extra pins PyInstaller and its hooks package to the same versions
-  (`tests/test_build_lock.py`), so a hand build matches. No ruff: the release runs no lint.
-  That test checks the lock's shape only; whether it resolves on each OS (every dependency
-  pinned, every hash right, a wheel for each runner) is proven only by a release build, at a tag.
+  (`tests/test_build_lock.py`, which checks the lock's shape only), so a hand build matches. No
+  ruff: the release runs no lint.
 - **One job publishes**, after all three builds: it takes their assets, checks there are exactly
   the nine and that each checksum holds, and runs `gh release create`. The release notes are
   the version's CHANGELOG entry without its heading, then a line pointing at the README's install
@@ -3345,8 +2661,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   member, runs), 13 (closed), 14 (updated), 15 (orphaned), 16 (nothing new) and 17
   (stopped).
 - **The watcher's lines**, each after a `YYYY-mm-dd HH:MM:SS ` time (a `<dir>` or `<path>`
-  that is absolute shows a path under the home as `~/…`, `~\…` on Windows, where older
-  versions printed it whole: expand a leading `~` where you read one out):
+  that is absolute shows a path under the home as `~/…`, `~\…` on Windows: expand a leading `~`
+  where you read one out):
   - `watching <dir>, <n> files in other folders[, since <time> | , fresh start][, syncing
     every <n> s]`
   - `to you: <id> — <title>  (<path>)`, `to all: <id> — <title>  (<path>)`, and after the
@@ -3360,8 +2676,8 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     two; at start only)
   - `new <path>`, `changed <path>`, `gone <path>`
   - without `--until-change` or `--once`, the other entries and file lines come just before the
-    next line, merged over the rounds they were held, with that line's time (older versions
-    printed them in their own round): their shapes are as above
+    next line, merged over the rounds they were held, with that line's time: their shapes are as
+    above
   - `WARN <text>`, `WARN cleared: <text>`, `WARN entry <id> was edited`, `WARN entry <id> in
     <folder>/: not its folder's`
   - `ERROR <text>`, `  fix: <text>`, `  log: <path>`, `ok again`
@@ -3370,10 +2686,9 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     ` (exit <code>)` (match
     on the `EXIT <kind>` start); `ERROR another watcher is running on this mailbox (<lock>), or a
     create, join, leave or close of this member` with exit 12, followed by ` (PID <n>)` when the
-    holder wrote its PID (older versions end it at `(<lock>)`; `<lock>` shows a path under the
-    home as `~/…`, `~\…` on Windows, where older versions printed it whole: match on the start up
-    to `mailbox (`, and allow or expand a leading `~` where you compare or read the lock path).
-    The `  fix:` line after it is not stable (its text can change; older versions print none).
+    holder wrote its PID (`<lock>` shows a path under the home as `~/…`, `~\…` on Windows: match
+    on the start up to `mailbox (`, and allow or expand a leading `~` where you read the path).
+    The `  fix:` line after it is not stable.
     The text after an `ERROR` line's colon is the OS's message and may be translated: match on
     the prefix.
 - **`--json` fields**:
@@ -3389,8 +2704,11 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
     "shared"}` (`root`: `home` or `shared` for that flag, `both` for neither; `shared`: the shared root's `{"members",
     "idle_channels"}`, null, or `{"error"}` as in `list`; with `--shared`, `members` and
     `idle_channels` are null, with `--home`, `shared` is), each member
-    `{"channel", "name", "idle_seconds", "action", "why", "deleted"}` ([Removing idle
-    members](#removing-idle-members)).
+    `{"channel", "name", "idle_seconds", "action", "why", "deleted"}`: `action` `remove` or
+    `keep` without `--yes`, `removed`, `kept` or `failed` with it; `why` the reason's key
+    (`charter`, `own`, `items`, `budget`, `active`, `gone`, `not_member`), a failure's
+    `<code>: <message>`, or null; `deleted` the count deleted, else null. `idle_channels` names
+    the whole idle work channels ([Removing idle members](#removing-idle-members)).
   - `whoami C`: `{"channel", "name", "project", "role", "leader", "term", "founder", "leads",
     "mode", "server", "shared", "folder", "tree", "box", "box_source", "members", "kind"}`
     (`shared` true for a channel in the server's shared root; `leader`,
@@ -3430,14 +2748,13 @@ Agents parse VCharon's output and scripts call its flags, so these are a contrac
   (--all)`.
 - **The `fix:` line form**: `fix: <runnable command>` or `fix: <one line of text>`, the last line
   of every refusal.
+- **`vcharon --version`** prints the bare version and nothing else: the installers, `--update`
+  and the smoke test require exactly the release's version from a new binary.
 - **The config keys** ([Config](#config), [Channel sections](#channel-sections)).
 
 Not stable: other human-facing lines (a sync's summary, `doctor`'s text, `list`'s layout), the
 log format, the state, snapshot and record files, and the wire protocol (both ends always run
-one version). A record change still gets a CHANGELOG line on how to adapt: a shared root's
-join record has `"shared": true`, which 0.8.6 and older stop on (`the record … has another
-shape`); records of the root in the home are unchanged, so update every box that joins a
-shared channel.
+one version). A record change still gets a CHANGELOG line on how to adapt.
 
 Versioning is semver. Before 1.0, a minor version may break one of these, and the CHANGELOG says
 which and how to adapt. A channel format change is always a minor version at least.
@@ -3451,10 +2768,8 @@ which and how to adapt. A channel format change is always a minor version at lea
   functions that name VCharon's folders fail on a path under the real home. Why: a test that
   loses its own environment must not reach the user's real config and channels. So a test never
   calls `mock.patch.stopall()`. It drops the shell's `VCHARON_HOME` and `VCHARON_CHANNELS_ROOT`
-  too, so their defaults fall in the temp folder. Why: a developer exports them for hand runs,
-  and a test that forgets its own would write into that scratch folder. Nothing in the shell
-  turns the sandbox off, the real-ssh tests included. Why they don't need it off: OpenSSH reads
-  `~/.ssh` from the account's home, not `$HOME`.
+  too (a developer exports them for hand runs). Nothing turns the sandbox off; the real-ssh
+  tests don't need it off, since OpenSSH reads `~/.ssh` from the account's home, not `$HOME`.
 - The controller takes the ssh command as an argument list, so tests replace `[<ssh_path>]` with
   `[sys.executable, "tests/fake_ssh.py"]` on every OS. The fake ssh runs the bootstrap with
   `sys.executable -I -c`, relays stdin and stdout as ssh does, sets HOME and the test machine
@@ -3478,15 +2793,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   path, it patches the OS only around the call it is about, or gives that OS's own paths. Why: a
   host path read by another OS's rules isn't absolute there (`C:\…` under `"linux"`) and joins
   with the wrong separator.
-- A test fakes what each OS's code path uses. Why: a fake the other OS never calls leaves its
-  path running for real; `install.Parent` waits on a process handle on Windows and reads
-  `os.getppid()` elsewhere, so a loop that fakes only `os.getppid` never ends on Windows (fake
-  `install.Parent`). A fake sleep that waits for a faked event raises after a few rounds, so
-  such a miss fails the test instead of hanging the job.
+- A test fakes what each OS's code path uses (`install.Parent`, not only `os.getppid`): a fake
+  the other OS never calls leaves its path running for real. A fake sleep that waits for a faked
+  event raises after a few rounds, so such a miss fails the test instead of hanging the job.
 - A fake stream is an `io.StringIO`, or a mock whose `fileno` raises `io.UnsupportedOperation`
-  and whose `isatty` returns False. Why: Python 3.14's argparse asks
-  `os.isatty(stream.fileno())` whether to print in colour, and a bare `mock.Mock()`'s `fileno`
-  returns a mock there: a `TypeError` on 3.14 (3.13's argparse has no colour).
+  and whose `isatty` returns False: Python 3.14's argparse calls `os.isatty(stream.fileno())`.
 - A check that no path is shown from the home looks for `~` and a separator at a path's start,
   never for any `~`. Why: a Windows temp path can hold an 8.3 short name such as `RUNNER~1`.
 - Guards on the repo itself: the guide's commands and flags parse with the command line's own
@@ -3499,21 +2810,16 @@ which and how to adapt. A channel format change is always a minor version at lea
   tests` on one row.
 - A push or pull request that changes only docs (top-level `*.md`, `docs/`, `LICENSE`, the issue
   templates) skips CI and runs `docs.yml` instead: `tests.test_guide` and `tests.test_old_name`
-  on one Linux row, the guards that read those files. CI's seven runner jobs would test code that
-  didn't change. Its paths and `ci.yml`'s `paths-ignore` are the same list. A release tag still
-  runs the whole suite.
-- CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`: sshd started, a
-  key without a passphrase authorized, `localhost` in `known_hosts`, and setup-python's 3.13 linked
-  as `/usr/local/bin/python3`, since the runner's own `python3` is below the floor and the server
-  side runs what an ssh login finds; a login is checked to get 3.13) and runs a real channel over
-  it: `tests/ssh_flow.sh localhost WORK` pings, then two remote members from two `VCHARON_HOME`s
-  (boxes `ci1` and `ci2`, one project) create and join a channel, the second one's `watch
-  --until-change` wakes on the first one's post and sync, and it ends with `read`, `leave` and
-  `close`; then the real-ssh unit tests (`VCHARON_TEST_SSH=localhost`). The channel is made in the
-  ssh user's real channel root (and the helper's cache beside it), since the server side reads
-  no test variable over ssh, so `ssh_flow.sh` runs only where `CI` is set (or
-  `SSH_FLOW_REAL_HOME=1`), refuses a root that already holds its channel, and `ci_sshd.sh` only on
-  GitHub Actions.
+  on one Linux row, the guards that read those files. Its paths and `ci.yml`'s `paths-ignore`
+  are the same list. A release tag still runs the whole suite.
+- CI's `ssh` job (Linux) makes the runner its own ssh server (`tests/ci_sshd.sh`, with
+  setup-python's 3.13 as the login's `python3`, since the runner's own is below the floor) and
+  runs a real channel over it: `tests/ssh_flow.sh localhost WORK` has two remote members from
+  two `VCHARON_HOME`s create, join, post, watch, read, leave and close; then the real-ssh unit
+  tests (`VCHARON_TEST_SSH=localhost`). The channel is made in the ssh user's real channel root,
+  since the server side reads no test variable over ssh, so `ssh_flow.sh` runs only where `CI`
+  is set (or `SSH_FLOW_REAL_HOME=1`) and refuses a root that already holds its channel, and
+  `ci_sshd.sh` only on GitHub Actions.
 - `install.sh` runs under `sh` against a fake release on a local HTTP server, with `uname`
   faked for each platform (POSIX only). A built binary is checked by `tests/smoke.sh`
   ([Packaging](#packaging)), and its packed assets by `tests/pack.py` and
@@ -3555,38 +2861,23 @@ which and how to adapt. A channel format change is always a minor version at lea
   What is stored and compared (records, state, the hello) keeps the id itself.
 - Every human-readable line prints a path under the home folder with the home as `~` (`~/…`,
   `~\…` on Windows): agents quote these lines into channel entries, and the full path names
-  the user. A path the line names goes through `platform.tilde`; text made from paths in many
-  places goes through `platform.tilde_text` where it is printed: an error's message and `  | `
-  lines (`ERROR <code>: …`), and `doctor`'s check lines. A `fix:` line's text that names a
-  path in prose (`check the owner and permissions of ~/…`, `fix ~/.config/vcharon/vcharon.ini`)
-  is made with `platform.prose_hint`, which keeps the text whole and the printed form beside it
-  (`proto.Hint`), so only the printers (`show_error`, `doctor`'s check, `--update`'s refusal)
-  show the `~`; never `tilde_text` on a whole fix line, which would reach its commands. A fix
-  only ever printed names its paths through `platform.tilde` (a watcher's for a sync child that
-  said nothing), and a watcher's fix made from its sync's `  log:` line keeps that line's `~`.
-  `doctor`'s `dirs` lines keep their fix whole, as they do their text (below). Display only.
-  Whole: a command, in a `fix:` line or any other (a `next:` line, a note), which runs as
-  printed, its program's path and the paths it takes included (`chmod go-w <path>`;
-  `--update`'s `rename <old> back to <new>`, a command the user types); `doctor`'s `config` line's
-  file (when it is ok), its `dirs` lines and its `vcharon's folders` note, which a user pastes
-  into an agent's sandbox allow-list, where `~` may not expand (a quoted argument,
-  PowerShell's native arguments, cmd.exe, a settings field); a `--json` field; a line only
-  logged (one printed and logged by the same call is logged as printed); and what a program
-  reads back (state, records, MEMBER.md, section files), though the watcher's snapshot keeps
-  its last `ERROR` line and fix as printed. A quoted path (`pathrules.show`, JSON) keeps its
-  home where the quoting changed the home's text (a home holding a character shown escaped; on
-  Windows, JSON's doubled backslashes), and so does a server's path (`<ssh>:<path>`), which
-  the client's home doesn't name. A path under the server's home shows that home as
-  `server:~` (`server:~/…`; the word, never the host name or alias), because a bare `~` reads
-  as the client's home: in an error raised on the server, where the helper's connection
-  applies `platform.server_tilde_text` to the message of every error it sends (a call's, a
-  file stream's), since the client's tilde knows only the client's home; and in `doctor`'s
-  checks from the server (`plugin.doctor`'s result), with the home from the hello, before the
-  client's own tilde, so a client whose home has the same text doesn't take it as its own.
-  The client's tilde, run after, finds no home text left in `server:~/…` to change. The
-  error's hint and detail go as they are, so a server's fix line names its paths whole: the
-  wire carries the hint as text, which doesn't mark its prose paths apart from its commands'
-  arguments. The client's log has the message as sent, and `--json`'s text stays whole.
+  the user. Display only:
+  - A path a line names goes through `platform.tilde`; text made from paths in many places
+    through `platform.tilde_text` where it is printed (an error's message and `  | ` lines,
+    `doctor`'s check lines). A `fix:` line that names a path in prose is made with
+    `platform.prose_hint` (`proto.Hint`), so only the printers show the `~`: never `tilde_text`
+    on a whole fix line, which would reach its commands.
+  - Kept whole: a command in any line (it runs as printed, with its paths); `doctor`'s `config`
+    file, `dirs` lines and folders note, which a user pastes into a sandbox allow-list where `~`
+    may not expand; a `--json` field; a line only logged; what a program reads back (state,
+    records, `MEMBER.md`, sections); a quoted path whose quoting changed the home's text; a
+    server's `<ssh>:<path>`.
+  - A path under the server's home shows that home as `server:~` (the word, never the host name
+    or alias), because a bare `~` reads as the client's home: the helper applies
+    `platform.server_tilde_text` to the message of every error it sends, and `doctor` to its
+    checks from the server, before the client's own tilde. The error's hint goes as it is, so
+    a server's fix line names its paths whole: the wire doesn't mark prose paths apart from a
+    command's arguments.
 - Long-running commands import every module at start ([Running watchers](#running-watchers)).
 - Comment the reason for anything that isn't obvious: why the code does this, never which piece
   of work or which review it came from.
@@ -3615,16 +2906,12 @@ Later:
 - A shared root closed to some accounts (a Unix group's): the shared root is one folder per
   Linux machine, open to every account on it ([The shared root](#the-shared-root)).
 - Many streaming watchers on one server: each holds an ssh connection and a helper of about
-  25 MB. Measured: 10, 20, 30 and 50 watchers started at once had 0, 3, 7 and at least 16
-  connections reset at start, each retried and was streaming within about 4 s, and 50 helpers
-  took about 1.2 GB. That sshd's `MaxStartups 10:30:100` caused the resets is inferred (the
-  server's log wasn't read). `MaxSessions 10` caps them only when `ssh_config` shares
-  connections (ControlMaster, never on Windows); not measured. A later run (0.8.4, 30 watchers
-  in one channel, started in bursts of 5, 5, 10 and 10) measured 16 to 19 MB of the server's
-  available memory per watcher and one reset in a burst of 10.
+  16 to 25 MB of the server's memory, and many started at once get connections reset at start
+  (each retries); the measurements are in the CHANGELOG.
 
 Not planned: Intel Mac and Linux arm64 binaries, a Homebrew tap or a winget package (pipx or
 uv covers them); support for server distros other than Debian (doctor warns and goes on);
-a shared root on macOS or Windows (a server is Linux already: [Scope](#scope)); two-way merge; the server connecting back; a background service; VCharon's own ssh code; a
+a shared root on macOS or Windows (a server is Linux already: [Scope](#scope)); two-way merge;
+the server connecting back; a background service; VCharon's own ssh code; a
 `command=`-restricted key, which can't restrict anything here ([Keys without
 prompts](#keys-without-prompts)).
