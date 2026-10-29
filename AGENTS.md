@@ -161,6 +161,9 @@ Guards that fail the suite, and what to do:
 | build history | `tests/test_guide.py` (`NoHistoryTest`) | remove milestone names, review tags, plan pointers from code, tests, README, DESIGN |
 | the old tool's name | `tests/test_old_name.py` | VCharon came from another tool, whose name appears only in the CHANGELOG line that says so; `ALLOWED` counts hits per file exactly |
 | a reference to a doc section | `tests/test_guide.py` (`DocReferenceTest`) | references go by heading name, as `(DESIGN, "Which membership")`; rename both together; never a section number |
+| `--project` and `--role` on every verb | `tests/test_cli.py` (`IdentityFlagsTest`) | a verb refuses them in some place: give it `ident()`, or `ignored()` if it acts on no membership; a verb whose list of positionals goes on after a flag goes in `cli.LISTS_AROUND_FLAGS` |
+| no home or raw machine id shown | `tests/test_leaks.py` | show the path through `platform.tilde` or `tilde_text` (`server_tilde_text` for the server's home, `prose_hint` for a fix line's prose path), a machine id through `platform.shown_machine` (`shown_doc` in a document); a line DESIGN ("Rules for the code") keeps whole goes in the test's `CLIENT_KEPT` or `SERVER_KEPT` and in DESIGN together |
+| the guide's size | `tests/test_guide.py` (`GuideSizeTest`) | a guide command prints `GUIDE_MAX_BYTES` or more: shorten or split the topic; raise the cap only after a live check that the larger output reaches Claude Code and Codex whole |
 
 ## Example names
 

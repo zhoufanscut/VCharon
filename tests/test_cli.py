@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import errno
 import io
 import itertools
@@ -317,6 +318,98 @@ class CliTest(FakeSshCase):
         self.assertIn(cli.EXIT_CODES, out)
         self.assertLessEqual(len(out.splitlines()), 50)
         # each verb's own --help: test_commands' FixRoundTripTest parses its example
+
+
+def verb_parsers(parser, path=()):
+    """(verb path, its parser) of every command the parser takes: a verb with sub-verbs (skill)
+    only as each sub-verb (skill install), since alone it is no command."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, one in action.choices.items():
+                yield from verb_parsers(one, path + (name,))
+            return
+    yield path, parser
+
+
+def needed_words(parser):
+    """(positionals, options) that make a command line the parser takes: each positional once,
+    a list of them twice, and each required option, the first of a required group."""
+    def value(action, i=1):
+        return action.choices[0] if action.choices else "w%d" % i
+
+    positionals, options = [], []
+    required = [action for action in parser._actions if action.required and action.option_strings]
+    required += [group._group_actions[0] for group in parser._mutually_exclusive_groups
+                 if group.required]
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            continue
+        if not action.option_strings:
+            many = action.nargs in ("*", "+")
+            positionals += [value(action, i) for i in ((1, 2) if many else (1,))]
+        elif action in required:
+            options += [action.option_strings[0]] + ([value(action)] if action.nargs != 0 else [])
+    return positionals, options
+
+
+IDENTITY = ["--project", "x", "--role", "y"]
+# list takes its channels only with --remove-idle, a command for the user, never an agent's,
+# so a flag between two of them is not one an agent passes
+NOT_BETWEEN = ("list",)
+
+
+class IdentityFlagsTest(FakeSshCase):
+    """The guide has an agent pass join's --project and --role on every command, anywhere after
+    the verb: no verb, and not --update, may refuse them. The command line's own handling runs,
+    up to the verb's work, which is replaced."""
+
+    def parsed(self, argv):
+        """The args vcharon argv hands to the verb's work, or --update's, in their place."""
+        got = []
+
+        def record(args, run):
+            got.append(args)
+            return 0
+
+        with mock.patch.dict(cli.COMMANDS, {verb: record for verb in cli.COMMANDS}), \
+                mock.patch.object(cli, "_update", record):
+            code, out, err = self.run_cli(*argv)
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertEqual(len(got), 1)
+        return got[0]
+
+    def test_every_verb_in_every_place(self):
+        paths = []
+        for path, parser in verb_parsers(cli._parser()):
+            paths.append(" ".join(path))
+            positionals, options = needed_words(parser)
+            # after the verb, between any two positionals, after them, and at the very end
+            places = range(len(positionals) + 1)
+            if path[0] in NOT_BETWEEN:
+                places = (0, len(positionals))
+            lines = [list(path) + positionals[:i] + IDENTITY + positionals[i:] + options
+                     for i in places]
+            lines.append(list(path) + positionals + options + IDENTITY)
+            # a verb with no options needed has its last two the same
+            for argv in dict.fromkeys(tuple(line) for line in lines):
+                with self.subTest(argv=" ".join(argv)):
+                    args = self.parsed(argv)
+                    self.assertEqual((args.command, args.project, args.role),
+                                     (path[0], "x", "y"))
+        # every verb is here, the ones that act on no membership too
+        self.assertLessEqual({"setup", "key", "doctor", "ping", "list", "create", "join",
+                              "leave", "close", "lead", "whoami", "post", "read", "watch",
+                              "sync", "guide", "skill install"}, set(paths))
+
+    def test_update(self):
+        for argv in (["--update", *IDENTITY], [*IDENTITY, "--update"],
+                     ["--update", "--project", "x", "--check", "--role", "y"],
+                     ["--update", "--check", *IDENTITY],
+                     ["--project=x", "--update", "--check", "--role=y"]):
+            with self.subTest(argv=" ".join(argv)):
+                args = self.parsed(argv)
+                self.assertTrue(args.update)
+                self.assertEqual(args.update_check, "--check" in argv)
 
 
 class ShowErrorTest(unittest.TestCase):

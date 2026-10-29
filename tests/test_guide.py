@@ -372,6 +372,27 @@ class SkillInstallTest(FakeSshCase):
         self.assertLess(len(text.splitlines()), 71)
 
 
+# The most one guide command may print, in bytes. Agents' tools cut a long output: a topic of
+# about 34 kB came back cut in two agents' tools. Raising it needs a live check that the
+# larger output arrives whole in Claude Code and in Codex.
+GUIDE_MAX_BYTES = 26000
+
+
+class GuideSizeTest(FakeSshCase):
+    def test_each_reading_fits_one_tool_call(self):
+        # What the skill and the start topic have an agent run, each in one tool call: the
+        # bare guide, a role's topics with the rules and its CLI's topic, and any single topic
+        clis = [agent for agent in platform.AGENTS if agent in guide.TOPICS]
+        self.assertLessEqual({"claude", "codex", "opencode"}, set(clis))
+        readings = [[]] + [[topic] for topic in guide.TOPICS]
+        readings += [[role, "rules", one] for role in ("member", "lobby") for one in clis]
+        for words in readings:
+            with self.subTest(command=" ".join(["vcharon", "guide"] + words)):
+                code, out, err = self.run_cli("guide", *words)
+                self.assertEqual((code, err), (0, ""))
+                self.assertLess(len(out.encode("utf-8")), GUIDE_MAX_BYTES)
+
+
 class TrustLineTest(ChannelCase):
     def test_join_and_create_point_at_the_rules(self):
         # --local only: a channel on a server says the same line, on the same code path

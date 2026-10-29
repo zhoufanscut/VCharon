@@ -2818,6 +2818,17 @@ which and how to adapt. A channel format change is always a minor version at lea
   where VCharon came from; every reference by name to a section of DESIGN.md or README.md names
   a heading that exists, and none goes by a section number; every `vcharon <verb>` string
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
+- Guards on rules that any new verb, printed line or guide text can break: every verb, and
+  `--update`, takes `--project` and `--role` after the verb, between its positionals (not
+  between `list`'s channels, which only its user's `--remove-idle` takes) and at the end, since
+  the guide has an agent pass them on every command; a remote channel's create through close
+  over the fake ssh (not the streaming watcher, `lead`, `--local`, `--shared` or the lobby)
+  writes no home path, `~` path or raw machine id into the channel's files, and prints no home
+  path or raw machine id outside the lines [Rules for the code](#rules-for-the-code) keeps
+  whole, since agents quote those lines into entries; every guide command the skill and `start`
+  name, and each topic, prints under one byte cap, since agents' tools cut a long output; the
+  cap is raised only after a live check that the larger output arrives whole in Claude Code
+  and Codex.
 - CI runs the suite on Linux, macOS and Windows, each with Python 3.13 and 3.14, and `ruff check src
   tests` on one row.
 - A push or pull request that changes only docs (top-level `*.md`, `docs/`, `LICENSE`, the issue
@@ -2881,9 +2892,10 @@ which and how to adapt. A channel format change is always a minor version at lea
     on a whole fix line, which would reach its commands.
   - Kept whole: a command in any line (it runs as printed, with its paths); `doctor`'s `config`
     file, `dirs` lines and folders note, which a user pastes into a sandbox allow-list where `~`
-    may not expand; a `--json` field; a line only logged; what a program reads back (state,
-    records, `MEMBER.md`, sections); a quoted path whose quoting changed the home's text; a
-    server's `<ssh>:<path>`.
+    may not expand; `ping`'s `server` line, which names the server's home whole for a person
+    checking that server; a `--json` field; a line only logged; what a program reads back
+    (state, records, `MEMBER.md`, sections); a quoted path whose quoting changed the home's
+    text; a server's `<ssh>:<path>`.
   - A path under the server's home shows that home as `server:~` (the word, never the host name
     or alias), because a bare `~` reads as the client's home: the helper applies
     `platform.server_tilde_text` to the message of every error it sends, and `doctor` to its
