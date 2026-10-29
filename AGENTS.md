@@ -20,6 +20,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once: the package
 
 .venv/bin/python -m unittest discover -s tests -t .          # the whole suite (about 8 minutes)
 CI=1 PATH=$PWD/.venv/bin:$PATH .venv/bin/python -m unittest discover -s tests -t .  # as CI (below)
+CI=1 PATH=$PWD/.venv/bin:$PATH .venv/bin/python tests/parallel.py  # quick: a class per process
 .venv/bin/python -m unittest tests.test_channel -v           # one module
 .venv/bin/python -m unittest tests.test_channel.CreateJoinTest -v  # one class
 
@@ -39,6 +40,9 @@ them on your own machine.
 
 - **`-t .` matters**: it makes `tests` a package, so `tests/__init__.py`'s sandbox loads before
   any test (below).
+- **`tests/parallel.py`** runs each test class in its own process, up to 32 at a time (`-j N`):
+  about 35 seconds on a 40-core box, for a quick local run. A failing class's output is
+  printed in full. It is not the run as CI below: before a push, run that one.
 - **The run as CI** is the one to trust before a push: `CI=1` arms `tests/__init__.py`'s hang
   dump, and the venv's `vcharon` first on PATH makes fix lines spell `vcharon`, as on CI
   (`platform.self_command`). A `.venv` made before that entry point existed needs the install

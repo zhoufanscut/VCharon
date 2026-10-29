@@ -2765,6 +2765,11 @@ which and how to adapt. A channel format change is always a minor version at lea
 
 - From the repo root: `python -m unittest discover -s tests -t .` (standard library only; `-t .`
   so `tests/__init__.py`'s sandbox loads for every module).
+- `tests/parallel.py` runs each test class as `python -m unittest module.Class` in its own
+  process, many at a time, and fails when the classes ran fewer or more tests than discovery
+  found. Why: a local run in a fraction of the serial time; each process has a sandbox of its
+  own, so classes share no process state or sandbox. CI runs the serial suite, which also
+  shows a test that fails only after another class ran in the same process.
 - `tests/__init__.py` points HOME and the OS's config and state folders into a temp folder for the
   whole suite, in `os.environ` itself, so no test can undo it, and every child inherits it; the
   functions that name VCharon's folders fail on a path under the real home. Why: a test that
