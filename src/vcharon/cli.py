@@ -394,7 +394,7 @@ UPDATE_FLAGS = ("--update", "--yes", "--force", "--json", "--rc", "--check")
 # taken with --update and ignored, as by the verbs that act on no membership
 UPDATE_IGNORED = ("--project", "--role")
 # the verbs whose list of positionals may go on after a flag, and the list's dest
-LISTS_AROUND_FLAGS = {"read": "ids", "guide": "topics"}
+LISTS_AROUND_FLAGS = {"read": "ids", "guide": "topics", "list": "channels"}
 
 
 def _main(argv, run):
@@ -408,8 +408,8 @@ def _main(argv, run):
             # --help, --version
             return e.code if isinstance(e.code, int) else 0
         if extra and args.command in LISTS_AROUND_FLAGS:
-            # IDs or topics on both sides of a flag (read C a#1 --full b#2, guide lobby --role
-            # x rules): argparse takes only the first run of them into the list
+            # IDs, topics or channels on both sides of a flag (read C a#1 --full b#2, guide
+            # lobby --role x rules): argparse takes only the first run of them into the list
             dest = LISTS_AROUND_FLAGS[args.command]
             setattr(args, dest, getattr(args, dest) + [w for w in extra if not w.startswith("-")])
             extra = [w for w in extra if w.startswith("-")]

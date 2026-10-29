@@ -409,6 +409,24 @@ class RemoveIdleTest(ChannelCase):
                               "check the name: %s list --local" % SPELLED))
         self.assertEqual(read_tree(self.root), before)
 
+    def test_channels_on_both_sides_of_a_flag(self):
+        # as read and guide take theirs: the channels after the flag join those before it
+        for channel, project in (("docs", "d"), ("misc", "m")):
+            self.lead(channel, where=("--local",), box="win", project=project)
+            self.use_box("linux")
+            self.ok("join", channel, "--local")
+            self.use_box("mac")
+            self.fresh("win-" + project, channel)
+        self.assertIn("  misc", self.lines("--local"))
+        for flag in (("--project", "web"), ("--days", "3"), ("--local",)):
+            with self.subTest(flag=flag):
+                where = () if flag == ("--local",) else ("--local",)
+                lines = self.lines(*where, "docs", *flag, "game")
+                # a channel's heading is its name alone, two spaces in
+                self.assertEqual([one for one in lines if one.startswith("  ")
+                                  and len(one.split()) == 1], ["  docs", "  game"])
+                self.assertTrue(lines[-1].endswith(" docs game"), lines)
+
     def test_a_charter_holder_and_a_whole_idle_channel(self):
         # the leader idle, a member active: the leader's folder stays
         os.remove(os.path.join(channels.seen_root(self.root), "game", "laptop-ui"))

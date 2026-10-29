@@ -353,9 +353,6 @@ def needed_words(parser):
 
 
 IDENTITY = ["--project", "x", "--role", "y"]
-# list takes its channels only with --remove-idle, a command for the user, never an agent's,
-# so a flag between two of them is not one an agent passes
-NOT_BETWEEN = ("list",)
 
 
 class IdentityFlagsTest(FakeSshCase):
@@ -385,17 +382,20 @@ class IdentityFlagsTest(FakeSshCase):
             positionals, options = needed_words(parser)
             # after the verb, between any two positionals, after them, and at the very end
             places = range(len(positionals) + 1)
-            if path[0] in NOT_BETWEEN:
-                places = (0, len(positionals))
             lines = [list(path) + positionals[:i] + IDENTITY + positionals[i:] + options
                      for i in places]
             lines.append(list(path) + positionals + options + IDENTITY)
+            # a verb whose list goes on after a flag: the whole list, as with no flag between
+            dest = cli.LISTS_AROUND_FLAGS.get(path[0])
+            whole = dest and getattr(self.parsed(list(path) + positionals + options), dest)
             # a verb with no options needed has its last two the same
             for argv in dict.fromkeys(tuple(line) for line in lines):
                 with self.subTest(argv=" ".join(argv)):
                     args = self.parsed(argv)
                     self.assertEqual((args.command, args.project, args.role),
                                      (path[0], "x", "y"))
+                    if dest:
+                        self.assertEqual(getattr(args, dest), whole)
         # every verb is here, the ones that act on no membership too
         self.assertLessEqual({"setup", "key", "doctor", "ping", "list", "create", "join",
                               "leave", "close", "lead", "whoami", "post", "read", "watch",

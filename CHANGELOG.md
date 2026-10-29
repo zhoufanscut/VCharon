@@ -9,6 +9,10 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- `vcharon list --remove-idle` takes `--project`, `--role` and its other flags between the
+  channels it is given too (`list --remove-idle C1 --role y C2`), as `read` and `guide` take
+  them between theirs; before, the channels after a flag were refused as unrecognized
+  arguments. To adapt: nothing.
 - The fix lines of an unknown channel, of a closed channel's or a removed member's folder left
   undeleted, and of a folder gone during a close now name the command that lists that root,
   `vcharon list --server ALIAS` or `vcharon list --local`, spelled as this install runs it, in

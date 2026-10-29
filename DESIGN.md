@@ -2819,16 +2819,14 @@ which and how to adapt. A channel format change is always a minor version at lea
   a heading that exists, and none goes by a section number; every `vcharon <verb>` string
   constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
 - Guards on rules that any new verb, printed line or guide text can break: every verb, and
-  `--update`, takes `--project` and `--role` after the verb, between its positionals (not
-  between `list`'s channels, which only its user's `--remove-idle` takes) and at the end, since
-  the guide has an agent pass them on every command; a remote channel's create through close
-  over the fake ssh (not the streaming watcher, `lead`, `--local`, `--shared` or the lobby)
+  `--update`, takes `--project` and `--role` after the verb, between its positionals and at the
+  end, since the guide has an agent pass them on every command; a remote channel's create through
+  close over the fake ssh (not the streaming watcher, `lead`, `--local`, `--shared` or the lobby)
   writes no home path, `~` path or raw machine id into the channel's files, and prints no home
-  path or raw machine id outside the lines [Rules for the code](#rules-for-the-code) keeps
-  whole, since agents quote those lines into entries; every guide command the skill and `start`
-  name, and each topic, prints under one byte cap, since agents' tools cut a long output; the
-  cap is raised only after a live check that the larger output arrives whole in Claude Code
-  and Codex.
+  path or raw machine id outside the lines [Rules for the code](#rules-for-the-code) keeps whole,
+  since agents quote those lines into entries; every guide command the skill and `start` name,
+  and each topic, prints under one byte cap, since agents' tools cut a long output; the cap is
+  raised only after a live check that the larger output arrives whole in Claude Code and Codex.
 - CI runs the suite on Linux, macOS and Windows, each with Python 3.13 and 3.14, and `ruff check src
   tests` on one row.
 - A push or pull request that changes only docs (top-level `*.md`, `docs/`, `LICENSE`, the issue
