@@ -25,8 +25,10 @@ OTHER_ID = "07e4007e00000000000000000000c003"
 CLIENT_HOME = "client-hq7k"
 SERVER_HOME = "server-zx9w"
 WORK = "work-m3vd"
-# a path from a home shown as ~ (DESIGN, "Tests": never any ~, which a Windows short name holds)
-_TILDE_PATH = re.compile(r"(?<![^\s(`'\"])~[/\\]")
+# a path from a home shown as ~ (DESIGN, "Tests": never any ~, which a Windows short name holds),
+# wherever a path may start (platform._BEFORE) and after a colon too (server:~/x), or the home
+# alone at a line's end
+_TILDE_PATH = re.compile(r"(?<![^\s'\"`(\[<{=:])~(?:[/\\]|$)", re.MULTILINE)
 # a watcher line's time
 _STAMP = re.compile(r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
 # The lines that keep the client's home whole (DESIGN, "Rules for the code"): doctor's config
@@ -164,7 +166,7 @@ class LeakSweepTest(ChannelCase):
             for word in (CLIENT_HOME, SERVER_HOME, WORK, SERVER_ID, CLIENT_ID, OTHER_ID):
                 with self.subTest(file=name, word=word):
                     self.assertNotIn(word, text)
-            with self.subTest(file=name, word="~/"):
+            with self.subTest(file=name, word="~"):
                 self.assertEqual(_TILDE_PATH.findall(text), [])
 
         # Printed and logged, a machine id only hashed, --json included
