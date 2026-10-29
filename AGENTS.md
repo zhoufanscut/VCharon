@@ -195,20 +195,45 @@ So DESIGN.md never grows a build log, and the code's comments never point into o
 
 ## Releases
 
-Push to `main` only on the maintainer's word: the repo is public, and every push starts its CI.
+Push anything, to `main` or to a branch, only on the maintainer's word: the repo is public, and
+a push to `main` starts its CI (one that changes only docs runs only `docs.yml`).
 
 `.github/workflows/release.yml` builds, checks and publishes on a tag `v<version>` (DESIGN,
 "Releases"). The steps:
 
-1. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
+1. Before the release commit, the commits it carries have passed CI on every row (for a commit
+   that changes only docs, its `docs.yml` run on `main`): push them to `main` first, or push
+   them to a branch and run CI there with `gh workflow run ci.yml --ref <branch>` (a push to a
+   branch starts no CI by itself). Why: a failure only another OS's row shows, found after the
+   release commit, puts fix commits between it and the tag.
+2. A final has a release candidate first. Before the final's release commit, run a live round on
+   its last rc: agents (Claude Code, Codex) talking through a real channel. Why: only real agents
+   show how they read the guide and act on it. The largest kind of change since the last final
+   sizes it; tests, CI and docs other than the guide and the skill don't count:
+   - Guide, skill or message wording: a headless round on one Linux machine, a Claude Code
+     (`claude -p`) and a Codex (`codex exec`) member running the flow the changed text covers.
+   - Any other code (the watcher, sync, update or install, for example), or the build or
+     packaging (`build-requirements.txt`, `vcharon.spec`: they change the binary): interactive
+     agent sessions, run by a person, with Linux, macOS and Windows clients, at least one a
+     remote member over ssh to a Linux server, plus a local channel. This round covers the
+     headless one's ground.
+   - Nothing that counts: no round.
+
+   Fixes the round brings go through step 1 before the release commit. If the final will then
+   differ from that rc by more than step 3's version strings, README's install lines and the
+   CHANGELOG entry, size a round again by what changed since that rc, and run it on that code: a
+   new rc, or a source checkout of it. The maintainer can ask for more. The rounds, and what ran
+   where, go in the final's CHANGELOG entry (step 4) as "Checked:" lines, marked measured or
+   inferred.
+3. The version is in two places, which must agree: `VERSION` in `src/vcharon/__init__.py` and
    `version` in `pyproject.toml`. A final version also moves README's pipx and uv lines to
    `@v<version>`; a pre-release leaves them on the last final: they are what a reader installs.
-2. The CHANGELOG's `## Unreleased` heading becomes `## <version> — <date>`, with what was
+4. The CHANGELOG's `## Unreleased` heading becomes `## <version> — <date>`, with what was
    checked on which OS, marked measured or inferred.
-3. Push the release commit to `main` and wait until CI passes on it; only then push the tag. Why:
+5. Push the release commit to `main` and wait until CI passes on it; only then push the tag. Why:
    a tag pushed while CI runs can land on a commit that fails, and moving a public tag later
    rewrites what others may have fetched.
-4. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
+6. The maintainer tags `v<version>` (ask first: a tag publishes). `release.yml` refuses a tag that
    doesn't match both version strings, or whose CHANGELOG heading isn't `## <version> —
    YYYY-MM-DD`, then runs the suite, builds one binary per platform
    (`linux-x64`, `darwin-arm64`, `win-x64`), smoke-tests each, runs the installer against it,
@@ -217,5 +242,5 @@ Push to `main` only on the maintainer's word: the repo is public, and every push
    a plain `--update` on a final build never offer; `--update --rc` does, and a pre-release build
    follows later ones with a plain `--update`: a way to test a build in real use before the
    release.
-5. These agree on the release asset names and change together: `release.yml` and
+7. These agree on the release asset names and change together: `release.yml` and
    `tests/pack.py`, `install.sh`/`install.ps1` (and `tests/install_check.sh`), and the updater.
