@@ -106,14 +106,14 @@ Lines; * marks the ones that count for --until-change:
                                    (StopRequest): don't start it again
     EXIT interrupted               the last line after a Ctrl-C (exit 130) or, on POSIX, a
                                    SIGTERM (exit 143), once the sync child is stopped
-                                   (cli.py); a SIGKILL prints nothing
+                                   (command.py); a SIGKILL prints nothing
 
 Without --until-change or --once, where every line is an agent's turn under a Monitor, the
 other entries and file lines print nothing alone: they are held (_Watch.flush) and printed,
 merged, just before the next line, whatever it is, the EXIT line too, with that time; one
 other entries line for all of them, then a line for each file whose state differs from the
 last file lines printed. A Ctrl-C, a SIGTERM or a crash prints them as the watch ends, before
-cli.py's line. An end that stops the process at once loses them, and the snapshot already has
+command.py's line. An end that stops the process at once loses them, and the snapshot already has
 them seen: a SIGKILL or TerminateProcess, and a Windows binary whose bootloader is gone, whose
 EXIT orphaned comes from another thread (install.follow). --until-change and --once print each
 round's lines in it.
@@ -173,6 +173,7 @@ from .. import (
     channel_cmd,
     channels,
     charter,
+    charter_state,
     config,
     entries,
     fsops,
@@ -187,7 +188,7 @@ from ..proto import VCharonError
 
 # vcharon's stage dirs, in any case (DESIGN, "Staging and commit")
 STAGE_PREFIX = ".vcharon-stage-"
-# how the sync's fix and log lines start, among its ERROR line's own (cli.py's show_error)
+# how the sync's fix and log lines start, among its ERROR line's own (command.py's show_error)
 FIX = "  fix: "
 LOG = "  log: "
 # between a fix's text and its log path, in the fix that run_sync returns and the snapshot
@@ -1800,14 +1801,14 @@ def _job_watch(job, local, me, leader, channel, out, clock, timer=time.monotonic
     modes: a streaming sync prints no notes)."""
     return _Watch(local, me, out, clock, fold=FOLDS, state=snapshot_path(local, me, job),
                   leader=leader, timer=timer, hold=hold, suffix=suffix,
-                  check=lambda root, me: charter.left_out_notes(job),
+                  check=lambda root, me: charter_state.left_out_notes(job),
                   closing=_nexts(channel, me, kind_), kind_=kind_,
                   presence=presence, hold_quiet=hold_quiet)
 
 
 def _last_flush(w):
     """The quiet lines still held (_Watch.flush) when the watch ends with no EXIT line of its
-    own: a Ctrl-C or SIGTERM, whose EXIT interrupted cli.py prints after this, a crash, or a
+    own: a Ctrl-C or SIGTERM, whose EXIT interrupted command.py prints after this, a crash, or a
     test's last round. A stdout that is gone drops them, as it drops that line, and the error
     that ends the watch stays the one cli.py sees."""
     try:
@@ -1911,7 +1912,7 @@ def parse_failure(code, lines, job):
         if line.startswith("ERROR"):
             fix = log = None
             # the error's own lines are indented: the connection's last words ("  | ") and
-            # the done line can come between it and its fix (cli.py's show_error)
+            # the done line can come between it and its fix (command.py's show_error)
             for after in lines[i + 1:]:
                 if not after.startswith("  "):
                     break

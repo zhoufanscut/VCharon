@@ -8,8 +8,12 @@ import dataclasses
 import functools
 import hashlib
 import io
+import json
 import os
+import re
+import shlex
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -17,12 +21,29 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import unittest
 from unittest import mock
 
 import vcharon
-from vcharon import charter, cli, config, doctor, platform, run, skill, ssh, stage
+from vcharon import (
+    channel_cmd,
+    charter,
+    cli,
+    config,
+    doctor,
+    entries,
+    lock,
+    platform,
+    run,
+    skill,
+    ssh,
+    stage,
+    sync,
+)
 from vcharon.log import Log
+from vcharon.mailbox import watch
+from vcharon.proto import VCharonError
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 FAKE_SSH = os.path.join(TESTS_DIR, "fake_ssh.py")
@@ -178,7 +199,7 @@ class FakeSshCase(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def run_jobs(self, *argv):
-        """The sync's runner (cli.run_jobs) for the jobs named, in this process, with the
+        """The sync's runner (sync.run_jobs) for the jobs named, in this process, with the
         errors shown as every command shows them: (exit code, stdout, stderr). argv: job names,
         and --full, --dry-run, --repeat S, -v. The engine's own tests drive jobs this way:
         vcharon sync runs only a channel section's two."""
@@ -198,7 +219,7 @@ class FakeSshCase(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         run = cli._Run()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = cli._guarded(lambda: cli.run_jobs(names, run=run, **kw), run)
+            code = cli._guarded(lambda: sync.run_jobs(names, run=run, **kw), run)
         return code, out.getvalue(), err.getvalue()
 
     def reset_job(self, name, verbose=False):
@@ -207,7 +228,7 @@ class FakeSshCase(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         run = cli._Run()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = cli._guarded(lambda: cli._reset(name, verbose, run), run)
+            code = cli._guarded(lambda: sync._reset(name, verbose, run), run)
         return code, out.getvalue(), err.getvalue()
 
     def write_record(self, channel, name, leader, ssh="fake-dest", remote="vcharon_mailbox",
@@ -498,3 +519,605 @@ def patch_stats(case, path, **fields):
         patcher = mock.patch.object(os, name, wrap(getattr(os, name)))
         patcher.start()
         case.addCleanup(patcher.stop)
+
+
+# Holds an exclusive lock on argv[1], says so, then waits to be killed.
+if os.name == "nt":
+    HOLDER = """
+import msvcrt, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_BINARY)
+msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+print("held", flush=True)
+time.sleep(60)
+"""
+else:
+    HOLDER = """
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR)
+fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+print("held", flush=True)
+time.sleep(60)
+"""
+
+
+def hold_in_child(path):
+    """A child process that holds the lock on path, once it has said so. path must exist: the
+    child opens it without O_CREAT (test_channel's hold makes it)."""
+    child = subprocess.Popen([sys.executable, "-c", HOLDER, path], stdout=subprocess.PIPE,
+                             stdin=subprocess.DEVNULL)
+    try:
+        line = readline(child.stdout)
+    except AssertionError:
+        line = b"(nothing)"
+    if line.strip() != b"held":
+        child.kill()
+        child.communicate(timeout=60)
+        raise AssertionError("the child didn't take the lock: %r" % line)
+    return child
+
+
+# Takes the watcher's lock on the snapshot argv[1] as a watcher does (it writes its PID, with
+# argv[2] as its PID namespace, "-" for none), says that PID, then waits to be killed.
+TAKE_LOCK = """
+import os, sys, time
+from vcharon import lock
+from vcharon.mailbox import watch
+ns = None if sys.argv[2] == "-" else sys.argv[2]
+lock.pid_ns = lambda: ns
+lk = watch.take_lock(sys.argv[1])
+print(os.getpid() if lk is not None else "not held", flush=True)
+time.sleep(60)
+"""
+
+
+def take_in_child(snapshot):
+    """(a child process holding the watcher's lock on snapshot, its PID) once it has said so.
+    Its own os.getpid(), not Popen.pid: on Windows a venv's python.exe runs the real one as a
+    child. It writes the PID namespace this process's pid_ns gives (show_pid's, in a test that
+    called it), so this process reads its PID back."""
+    package = os.path.dirname(os.path.abspath(vcharon.__file__))
+    ns = lock.pid_ns()
+    child = subprocess.Popen([sys.executable, "-c", TAKE_LOCK, snapshot,
+                              "-" if ns is None else ns],
+                             stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                             env=dict(os.environ, PYTHONPATH=os.path.dirname(package)))
+    try:
+        line = readline(child.stdout)
+    except AssertionError:
+        line = b"(nothing)"
+    if not line.strip().isdigit():
+        stop_child(child)
+        raise AssertionError("the child didn't take the lock: %r" % line)
+    return child, int(line)
+
+
+# the PID namespace show_pid gives this process: Linux's initial one, or none off Linux
+SHOWN_NS = lock.INIT_PID_NS if sys.platform.startswith("linux") else None
+
+
+def show_pid(case, shown=True):
+    """Makes write_pid in this process write its PID and holder_pid read it (or neither, shown
+    False: as with an unreadable /proc/self/ns/pid) for the rest of the test case, in whatever
+    PID namespace the suite runs."""
+    ns = SHOWN_NS if shown else ""
+    patcher = mock.patch.object(lock, "pid_ns", lambda: ns)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+
+
+def stop_child(child):
+    child.kill()
+    child.communicate(timeout=60)
+
+
+def unix_socket(case, path):
+    """A bound AF_UNIX socket at path. It's bound from its own directory, so a long temp path
+    can't overflow the socket address."""
+    if not hasattr(socket, "AF_UNIX"):
+        case.skipTest("no AF_UNIX sockets here")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    case.addCleanup(sock.close)
+    cwd = os.getcwd()
+    os.chdir(os.path.dirname(path))
+    try:
+        sock.bind(os.path.basename(path))
+    finally:
+        os.chdir(cwd)
+    return sock
+
+
+VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+
+
+class Between:
+    """sync._wait_or_end for --repeat tests: each wait between rounds runs the next action;
+    with none left, stdin has ended."""
+
+    def __init__(self, *actions):
+        self.actions = list(actions)
+        self.waits = []
+
+    def __call__(self, ended, seconds):
+        self.waits.append(seconds)
+        if not self.actions:
+            return True
+        self.actions.pop(0)()
+        return False
+
+
+def hold(case, path):
+    """A child process holding the lock file path (made first), until the test ends. A held
+    post lock (entries.lock_path) stalls whatever posts into that folder, leave's LEAVE too,
+    for entries.LOCK_WAIT, then busy."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "ab").close()
+    child = hold_in_child(path)
+    case.addCleanup(release, child)
+    return child
+
+
+def release(child):
+    """Ends a holder; once is enough."""
+    if child.poll() is None:
+        stop_child(child)
+
+
+class ChannelCase(FakeSshCase):
+    """One fake server (its root under the fake home) and boxes, each a VCHARON_HOME of its own
+    with [vcharon] box set. The current directory is a git checkout named Web."""
+
+    def setUp(self):
+        FakeSshCase.setUp(self)
+        self.root = os.path.join(self.home, "channels")
+        os.environ["VCHARON_CHANNELS_ROOT"] = self.root
+        self.homes = {}
+        self.use_box("mac", self.vcharon_home)
+        self.project = os.path.join(self.tmp, "work", "Web")
+        os.makedirs(os.path.join(self.project, ".git"))
+        cwd = os.getcwd()
+        os.chdir(self.project)
+        self.addCleanup(os.chdir, cwd)
+
+    # A class that sets TEMPLATE builds its channel once (from_template) and gives every test
+    # a copy. The files hold absolute paths into the temp folder (records, job state, logs),
+    # so each test of such a class gets the same temp folder path: a copy put back there
+    # reads as the build left it. The tests stay apart: each starts from a fresh copy.
+    TEMPLATE = False
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if cls.TEMPLATE:
+            # made again each time the class runs: a later run in the same process (tests of
+            # two classes named in turn) finds the last one's folder gone
+            cls._template_root = tempfile.mkdtemp(prefix="vcharon-class-")
+            cls._template = None
+            cls.addClassCleanup(shutil.rmtree, cls._template_root, True)
+
+    def make_tmp(self):
+        if not self.TEMPLATE:
+            return FakeSshCase.make_tmp(self)
+        tmp = os.path.join(self._template_root, "case")
+        shutil.rmtree(tmp, True)
+        if os.path.exists(tmp):
+            # never hand a test a folder that isn't new
+            left = [os.path.join(d, n) for d, dirs, files in os.walk(tmp) for n in dirs + files]
+            self.fail("the last test left files that can't be removed in %s: %s"
+                      % (tmp, ", ".join(left[:5]) or "the folder itself"))
+        os.mkdir(tmp)
+        return tmp
+
+    def from_template(self, build):
+        """build() in this class's first test, then keep a copy of the temp folder, the
+        environment and the boxes it left; every later test gets that copy in place of its
+        fresh setUp's, as if it had run build() itself."""
+        assert self.TEMPLATE, "from_template needs TEMPLATE = True on the class"
+        cls = type(self)
+        saved = os.path.join(cls._template_root, "template")
+        if cls._template is None:
+            build()
+            shutil.copytree(self.tmp, saved, symlinks=True)
+            cls._template = (dict(os.environ), dict(self.homes))
+            return
+        env, homes = cls._template
+        # out of the folder first: Windows can't remove the current directory
+        os.chdir(cls._template_root)
+        shutil.rmtree(self.tmp)
+        shutil.copytree(saved, self.tmp, symlinks=True)
+        os.environ.clear()
+        os.environ.update(env)
+        self.homes = dict(homes)
+        os.chdir(self.project)
+
+    def use_box(self, box, home=None):
+        """Switches to the box named box (a VCHARON_HOME of its own, made on first use)."""
+        if box not in self.homes:
+            home = home or os.path.join(self.tmp, "box-" + box)
+            os.makedirs(home, exist_ok=True)
+            with open(os.path.join(home, "vcharon.ini"), "w", encoding="utf-8") as f:
+                f.write("[vcharon]\nbox = %s\n" % box)
+            self.homes[box] = home
+        os.environ["VCHARON_HOME"] = self.homes[box]
+        return self.homes[box]
+
+    def channel(self, *argv):
+        return self.run_cli(*argv)
+
+    def ok(self, *argv):
+        code, out, err = self.channel(*argv)
+        self.assertEqual(code, 0, out + err)
+        return out
+
+    def refused(self, *argv, code=1):
+        """The ERROR line of a refused command."""
+        return self.refusal(*argv, code=code)[0]
+
+    def refusal(self, *argv, code=1):
+        """The ERROR line and the fix line (as printed, after runnable) of a refused
+        command."""
+        got, out, err = self.channel(*argv)
+        self.assertEqual(got, code, out + err)
+        lines = err.splitlines()
+        fixes = [l[len("  fix: "):] for l in lines if l.startswith("  fix: ")]
+        return lines[0], fixes[0] if fixes else None
+
+    def server_tree(self):
+        return read_tree(self.root) if os.path.isdir(self.root) else {}
+
+    def joined(self, section, box=None):
+        """A remote member's local tree on the current box."""
+        return os.path.join(os.environ["VCHARON_HOME"], "joined", section)
+
+    def record(self, section):
+        with open(os.path.join(os.environ["VCHARON_HOME"], "state", "channels",
+                               section + ".json"), encoding="utf-8") as f:
+            return json.load(f)
+
+    def lead(self, channel="game", where=("--server", "fake-dest"), box="laptop", project="ui"):
+        """box creates channel and leads it; back to the mac box after."""
+        self.use_box(box)
+        self.ok("create", channel, *where, "--project", project)
+        self.use_box("mac")
+        return "%s-%s" % (box, project)
+
+
+# a spelling of vcharon that runnable() has to write, so a fix line that it skips shows
+SPELLED = "/opt/vc/bin/vcharon"
+
+
+def read_only(test, folder):
+    """folder/sub/f with sub read-only, so a delete of folder fails at f; writable again at
+    the cleanup, for the test's own removal."""
+    sub = os.path.join(folder, "sub")
+    write_tree(sub, {"f": b"x"})
+    os.chmod(sub, 0o555)
+
+    def writable():
+        for dirpath, dirnames, _ in os.walk(test.root):
+            for n in dirnames:
+                os.chmod(os.path.join(dirpath, n), 0o755)
+
+    test.addCleanup(writable)
+
+
+NO_READ_ONLY = os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0)
+
+
+OTHER_CLIENT = "f" * 32
+
+
+LIMITS = {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}
+
+
+def channel_md(leader, fmt="1", limits=LIMITS, extra=()):
+    """CHANNEL.md's text as create writes it; fmt None leaves the format: line out."""
+    header = [("leader", leader), ("created", "2026-10-01 09:00")]
+    if fmt is not None:
+        header.append(("format", fmt))
+    header += [(charter.HEADER_KEYS[k], str(limits[k])) for k in charter.LIMIT_KEYS
+               if k in limits] + list(extra)
+    return ("# CHANNEL\n" + entries.build("2026-10-01 09:00", leader, 2, "channel game created",
+                                          ["@all"], header=header)).encode("utf-8")
+
+
+def charter_text(name, number, term=None, after=None, leader=None):
+    """A CHANNEL.md holding one charter of name's."""
+    # a taker's is to itself, as vcharon lead writes it; create's to @all
+    lines = ["# CHANNEL", "", "## 2026-10-23 10:00:00 — %s#%d — channel" % (name, number),
+             "to: %s" % ("@all" if term is None else "@" + name),
+             "leader: %s" % (leader or name), "created: 2026-10-23 10:00:00",
+             "rules: vcharon guide rules"]
+    if term is not None:
+        lines.append("term: %d" % term)
+    if after is not None:
+        lines.append("after: %s" % after)
+    lines += ["format: 1", "created by: vcharon 0.8.5", "max mb: 50", "max files: 1000",
+              "max entry kb: 1000", ""]
+    return "\n".join(lines).encode("utf-8")
+
+
+# what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
+SYNC = ["mb", "--project", "p"]
+
+
+# 2026-10-01 09:05:46 on this machine's clock, whatever its zone
+T0 = time.mktime((2026, 10, 1, 9, 5, 46, 0, 0, -1))
+
+
+STAMP = re.compile(r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
+
+
+class Clock:
+    """A clock for the watch loops: both the lines' time and the limits' timer."""
+
+    def __init__(self, t=T0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class Rounds:
+    """A sleep for the watch loops: each call runs the next of the given steps, and moves the
+    clock on if there is one."""
+
+    def __init__(self, *steps, clock=None):
+        self.steps = list(steps)
+        self.seconds = []
+        self.clock = clock
+
+    def __call__(self, seconds):
+        self.seconds.append(seconds)
+        if self.clock is not None:
+            self.clock.t += seconds
+        self.steps.pop(0)()
+
+
+def never(seconds):
+    raise AssertionError("slept before the first round")
+
+
+def member_md(name, leader, channel="mb"):
+    """MEMBER.md as vcharon join writes it."""
+    return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
+            "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
+
+
+class WatchCase(unittest.TestCase):
+    """watch.scan keys a file by its size and mtime_ns only: a test that rewrites a file
+    changes its length, else the rewrite can land in the same mtime tick and go unseen."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        # a channel's folder, mb; server mode watches it as the member debian, its leader
+        self.tree = os.path.join(self.tmp, "mb")
+        # the saved snapshots and their locks go to vcharon's state dir: one per test
+        self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
+        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": self.vcharon_home})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.lines = []
+        self.member()
+
+    def member(self, me="debian", leader="debian", root=None):
+        """me's own folder with its MEMBER.md: server mode watches only such a folder's
+        member."""
+        write_tree(self.tree if root is None else root,
+                   {"%s/MEMBER.md" % me: member_md(me, leader)})
+
+    def post(self, folder, n, title, to="@debian", name=None, file="RESULTS.md",
+             when="2026-10-01 09:00", root=None):
+        """Appends one entry, as mailbox_post.py writes it, by name (folder's member unless
+        given) to folder/file."""
+        path = os.path.join(self.tree if root is None else root, folder, *file.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        text = entries.build(when, name or folder, n, title, to.split())
+        with open(path, "ab") as f:
+            if not f.tell():
+                f.write(b"# RESULTS\n")
+            f.write(text.encode("utf-8"))
+        return path
+
+    def said(self, lines=None):
+        """The lines without their time, each checked to start with one."""
+        out = []
+        for line in self.lines if lines is None else lines:
+            self.assertRegex(line, STAMP)
+            out.append(line[20:])
+        return out
+
+    def saved_at(self, path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)["saved"]
+
+    def state(self, me="debian", job=None, root=None):
+        return watch.snapshot_path(self.tree if root is None else root, me, job)
+
+    def local_record(self, me="debian", leader="debian", project="q", role=None):
+        """me's join record as a local member of mb, whose folder is self.tree: vcharon watch
+        mb --project <project> then watches it as me (DESIGN, "Which membership")."""
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": me, "leader": leader,
+                                  "ssh": None, "remote": self.tree,
+                                  "machine": TEST_MACHINE_ID, "project": project,
+                                  "role": role, **record_format()})
+
+    def cli(self, *argv, project="q"):
+        """vcharon watch mb --project <project> ARGV in this process: (exit code, stdout,
+        stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            code = cli.main(["watch", "mb", "--project", project] + list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+
+    @staticmethod
+    def write_config(case):
+        """vcharon.ini, channels.d/mb.windows.ini and windows's join record, a remote member
+        of the project p; the client's tree starts empty (server mode's debian/MEMBER.md goes:
+        a test of both modes writes it again). Returns what follows `vcharon sync` for it."""
+        os.remove(os.path.join(case.tree, "debian", "MEMBER.md"))
+        os.rmdir(os.path.join(case.tree, "debian"))
+        os.makedirs(case.vcharon_home, exist_ok=True)
+        with open(os.path.join(case.vcharon_home, "vcharon.ini"), "w", encoding="utf-8") as f:
+            f.write("[vcharon]\n")
+        folder = os.path.join(case.vcharon_home, "channels.d")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "mb.windows.ini"), "w", encoding="utf-8") as f:
+            f.write(MAILBOX.format(local=case.tree))
+        channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows",
+                                  "leader": "debian", "ssh": "devbox",
+                                  "remote": "~/.local/state/vcharon/channels/mb",
+                                  "machine": TEST_MACHINE_ID, "project": "p",
+                                  "role": None, **record_format()})
+        return list(SYNC)
+
+
+# a channel section, in channels.d/ next to vcharon.ini: the member windows of the channel
+# mb, led by debian
+MAILBOX = """
+[mb.windows]
+ssh            = devbox
+mailbox.me     = windows
+mailbox.leader = debian
+mailbox.local  = {local}
+mailbox.remote = ~/.local/state/vcharon/channels/mb
+"""
+
+
+# A stand-in for the streaming child, `vcharon sync C --repeat <every>`: it does the
+# actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
+# sync --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
+# at the end of a file; exit: exit with that code now; deaf: ignore the end of stdin for 60 s;
+# pause: sleep that many seconds (stdout and stderr are two pipes: a pause orders them).
+FAKE_CHILD = """
+import json, sys, time
+for act in json.loads(sys.argv[1]):
+    kind = act[0]
+    if kind == "out":
+        sys.stdout.write(act[1] + "\\n")
+        sys.stdout.flush()
+    elif kind == "err":
+        sys.stderr.write(act[1] + "\\n")
+        sys.stderr.flush()
+    elif kind == "raw":
+        sys.stdout.buffer.write(bytes.fromhex(act[1]))
+        sys.stdout.flush()
+    elif kind == "append":
+        with open(act[1], "ab") as f:
+            f.write(act[2].encode("utf-8"))
+    elif kind == "exit":
+        sys.exit(act[1])
+    elif kind == "deaf":
+        time.sleep(60)
+    elif kind == "pause":
+        time.sleep(act[1])
+sys.stdin.buffer.read()
+"""
+
+
+class StreamCase(WatchCase):
+    """A streaming watcher over scripted child processes, also used by lobby tests."""
+
+    def setUp(self):
+        WatchCase.setUp(self)
+        self.sync_args = self.write_config(self)
+        os.makedirs(self.tree, exist_ok=True)
+        self.spawned = []
+        self.children = []
+        self.slept = []
+
+    def entry(self, folder, n, title, to="@windows", file="RESULTS.md"):
+        """("append", path, text): an entry, as mailbox_post.py writes it, for a child to add."""
+        path = os.path.join(self.tree, folder, file)
+        # the folder now, the file only when the child appends: the start sees no file
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        head = "" if os.path.exists(path) else "# RESULTS\n"
+        return ["append", path,
+                head + entries.build("2026-10-01 09:00", folder, n, title, to.split())]
+
+    def spawn(self, argv, env):
+        self.spawned.append((argv, env))
+        acts = self.children.pop(0)
+        proc = subprocess.Popen([sys.executable, "-c", FAKE_CHILD, json.dumps(acts)],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        self.addCleanup(self.reap, proc)
+        self.procs.append(proc)
+        return proc
+
+    @staticmethod
+    def reap(proc):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            stream.close()
+
+    def watch(self, *children, clock=None, steps=None, **kw):
+        """watch_job, syncing every 2 s, over the children: (exit code, the lines without
+        their time). steps: with clock, the seconds each round moves the clock on. timer: the
+        limits' clock, clock unless given. A child does all its actions at once, then waits for
+        its stdin's end, and the fake clock never reaches the stuck rule: a watcher that gets
+        fewer rounds than rounds= hangs on the last child, so end that one with ["exit", 0]."""
+        self.children = [list(c) for c in children]
+        self.procs = []
+        clock = clock or Clock()
+        timer = kw.pop("timer", clock)
+        lines = []
+        real = watch.Stream.next_round
+
+        def next_round(stream, deadline=None):
+            got = real(stream, deadline)
+            if steps:
+                clock.t += steps.pop(0)
+            return got
+
+        def sleep(seconds):
+            self.slept.append(seconds)
+            clock.t += seconds
+
+        kw.setdefault("max_minutes", 25)
+        with mock.patch.object(watch.Stream, "next_round", next_round):
+            code = watch.watch_job("mb.windows", self.sync_args, 2, out=lines.append, sleep=sleep,
+                                   clock=clock, timer=timer, stream=True, spawn=self.spawn,
+                                   **kw)
+        return code, self.said(lines)
+
+    def assert_all_stopped(self):
+        for proc in self.procs:
+            self.assertIsNotNone(proc.poll(), "a child still runs")
+
+# where a command ends inside a text: always a space first, so that a mark stuck to the last
+# value (a "--role b," copied along) shows in parse()
+_STOP = re.compile(r" ; | again\b| once | takes | makes it| works\b| \(|\Z")
+_COMMAND = re.compile(r"(?:\A|(?<=[ (`:]))vcharon (?=\S)")
+
+
+def commands(text):
+    """Each `vcharon …` command in text, as argv after `vcharon`. One that opens a parenthesis,
+    `(vcharon guide watch)`, ends at its closing one."""
+    out = []
+    for m in _COMMAND.finditer(text):
+        rest = text[m.end():]
+        end = _STOP.search(rest).start()
+        if text[m.start() - 1:m.start()] == "(" and ")" in rest:
+            end = min(end, rest.index(")"))
+        out.append(shlex.split(rest[:end]))
+    return out
+
+
+def parse(case, argv):
+    """argv (after `vcharon`) parses with the command line's own parser. --update isn't one of
+    runnable()'s commands (DESIGN, "Fix lines"), but it parses."""
+    case.assertIn(argv[0], platform.COMMANDS + ("--update",))
+    # a command ends before any mark: none sticks to its last value
+    case.assertNotRegex(argv[-1], r"[,;:.)]\Z")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._parser().parse_args(argv)
+    except VCharonError as e:
+        case.fail("%r doesn't parse: %s" % (argv, e.message))
+    except SystemExit:
+        # a verb's --help
+        case.assertEqual(argv[-1], "--help")

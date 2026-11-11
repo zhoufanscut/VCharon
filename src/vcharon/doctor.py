@@ -51,6 +51,7 @@ from . import (
     skill,
     ssh,
     state,
+    sync,
 )
 from .log import Log
 from .proto import VCharonError, shown_hint
@@ -638,8 +639,7 @@ def _job(rep, job, session, hello, log):
         for level, message, fix in checks:
             if job.mailbox is not None and side.end == "remote" and level == "FAIL":
                 # the closed channel's hint, as a sync shows it
-                from . import cli
-                fix = cli.channel_gone_hint(job, "not_found", fix) or fix
+                fix = sync.channel_gone_hint(job, "not_found", fix) or fix
             elif job.mailbox is not None and role == "source":
                 level, message, fix = _made_by_the_run(job, level, message, fix)
             rep.check(level, name, message, fix, server_home=server_home)

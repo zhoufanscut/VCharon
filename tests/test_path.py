@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import shutil
-import socket
 import tempfile
 import threading
 import time
@@ -21,7 +20,7 @@ from vcharon.plan import delete, put_dir, put_file
 from vcharon.plugins import path as path_plugin
 from vcharon.proto import VCharonError
 
-from tests.util import fd_count, unblock_fifo, write_tree
+from tests.util import fd_count, unblock_fifo, unix_socket, write_tree
 
 POSIX = os.name != "nt"
 WINDOWS = os.name == "nt"
@@ -31,22 +30,6 @@ LINKS_HINT = "remove them at the source"
 
 def paths(p):
     return [e.path for e in p.entries]
-
-
-def unix_socket(case, path):
-    """A bound AF_UNIX socket at path. It's bound from its own directory, so a long temp path
-    can't overflow the socket address."""
-    if not hasattr(socket, "AF_UNIX"):
-        case.skipTest("no AF_UNIX sockets here")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    case.addCleanup(sock.close)
-    cwd = os.getcwd()
-    os.chdir(os.path.dirname(path))
-    try:
-        sock.bind(os.path.basename(path))
-    finally:
-        os.chdir(cwd)
-    return sock
 
 
 class PathCases:

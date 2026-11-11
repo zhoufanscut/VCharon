@@ -25,6 +25,7 @@ from vcharon import (
     channel_cmd,
     channels,
     charter,
+    charter_state,
     cli,
     config,
     entries,
@@ -35,15 +36,31 @@ from vcharon import (
     skill,
     ssh,
     state,
+    sync,
 )
 from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError, shown_hint
 
 from tests import util
-from tests.test_cli import VCHARON_DIR, Between
-from tests.test_lock import hold_in_child, show_pid, stop_child, take_in_child
-from tests.util import CAN_SYMLINK, FAKE_SSH, TEST_MACHINE_ID, FakeSshCase, read_tree, write_tree
+from tests.util import (
+    CAN_SYMLINK,
+    FAKE_SSH,
+    NO_READ_ONLY,
+    OTHER_CLIENT,
+    SPELLED,
+    TEST_MACHINE_ID,
+    VCHARON_DIR,
+    Between,
+    ChannelCase,
+    hold,
+    read_only,
+    read_tree,
+    release,
+    show_pid,
+    take_in_child,
+    write_tree,
+)
 
 OTHER_MACHINE = "fedcba9876543210fedcba9876543210"
 # leave's fix for the leader, as written (before runnable)
@@ -68,23 +85,6 @@ def watcher_locked(snapshot, flags):
             platform.runnable(WATCHER_LOCKED_FIX % flags)]
 
 
-def hold(case, path):
-    """A child process holding the lock file path (made first), until the test ends. A held
-    post lock (entries.lock_path) stalls whatever posts into that folder, leave's LEAVE too,
-    for entries.LOCK_WAIT, then busy."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "ab").close()
-    child = hold_in_child(path)
-    case.addCleanup(release, child)
-    return child
-
-
-def release(child):
-    """Ends a holder; once is enough."""
-    if child.poll() is None:
-        stop_child(child)
-
-
 def no_checkout_above(case, folder):
     """Fails case at once when a folder above folder (the test's temp folder) holds a .git, .svn
     or .hg: a stray one (an empty /tmp/.git) is then the checkout of every folder the test
@@ -93,125 +93,6 @@ def no_checkout_above(case, folder):
     if mark is not None:
         case.fail("%s holds a stray %s, the checkout of every test folder below it: remove it, "
                   "or point TMPDIR at a folder outside it, and run again" % (above, mark))
-
-
-class ChannelCase(FakeSshCase):
-    """One fake server (its root under the fake home) and boxes, each a VCHARON_HOME of its own
-    with [vcharon] box set. The current directory is a git checkout named Web."""
-
-    def setUp(self):
-        FakeSshCase.setUp(self)
-        self.root = os.path.join(self.home, "channels")
-        os.environ["VCHARON_CHANNELS_ROOT"] = self.root
-        self.homes = {}
-        self.use_box("mac", self.vcharon_home)
-        self.project = os.path.join(self.tmp, "work", "Web")
-        os.makedirs(os.path.join(self.project, ".git"))
-        cwd = os.getcwd()
-        os.chdir(self.project)
-        self.addCleanup(os.chdir, cwd)
-
-    # A class that sets TEMPLATE builds its channel once (from_template) and gives every test
-    # a copy. The files hold absolute paths into the temp folder (records, job state, logs),
-    # so each test of such a class gets the same temp folder path: a copy put back there
-    # reads as the build left it. The tests stay apart: each starts from a fresh copy.
-    TEMPLATE = False
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        if cls.TEMPLATE:
-            # made again each time the class runs: a later run in the same process (tests of
-            # two classes named in turn) finds the last one's folder gone
-            cls._template_root = tempfile.mkdtemp(prefix="vcharon-class-")
-            cls._template = None
-            cls.addClassCleanup(shutil.rmtree, cls._template_root, True)
-
-    def make_tmp(self):
-        if not self.TEMPLATE:
-            return FakeSshCase.make_tmp(self)
-        tmp = os.path.join(self._template_root, "case")
-        shutil.rmtree(tmp, True)
-        if os.path.exists(tmp):
-            # never hand a test a folder that isn't new
-            left = [os.path.join(d, n) for d, dirs, files in os.walk(tmp) for n in dirs + files]
-            self.fail("the last test left files that can't be removed in %s: %s"
-                      % (tmp, ", ".join(left[:5]) or "the folder itself"))
-        os.mkdir(tmp)
-        return tmp
-
-    def from_template(self, build):
-        """build() in this class's first test, then keep a copy of the temp folder, the
-        environment and the boxes it left; every later test gets that copy in place of its
-        fresh setUp's, as if it had run build() itself."""
-        assert self.TEMPLATE, "from_template needs TEMPLATE = True on the class"
-        cls = type(self)
-        saved = os.path.join(cls._template_root, "template")
-        if cls._template is None:
-            build()
-            shutil.copytree(self.tmp, saved, symlinks=True)
-            cls._template = (dict(os.environ), dict(self.homes))
-            return
-        env, homes = cls._template
-        # out of the folder first: Windows can't remove the current directory
-        os.chdir(cls._template_root)
-        shutil.rmtree(self.tmp)
-        shutil.copytree(saved, self.tmp, symlinks=True)
-        os.environ.clear()
-        os.environ.update(env)
-        self.homes = dict(homes)
-        os.chdir(self.project)
-
-    def use_box(self, box, home=None):
-        """Switches to the box named box (a VCHARON_HOME of its own, made on first use)."""
-        if box not in self.homes:
-            home = home or os.path.join(self.tmp, "box-" + box)
-            os.makedirs(home, exist_ok=True)
-            with open(os.path.join(home, "vcharon.ini"), "w", encoding="utf-8") as f:
-                f.write("[vcharon]\nbox = %s\n" % box)
-            self.homes[box] = home
-        os.environ["VCHARON_HOME"] = self.homes[box]
-        return self.homes[box]
-
-    def channel(self, *argv):
-        return self.run_cli(*argv)
-
-    def ok(self, *argv):
-        code, out, err = self.channel(*argv)
-        self.assertEqual(code, 0, out + err)
-        return out
-
-    def refused(self, *argv, code=1):
-        """The ERROR line of a refused command."""
-        return self.refusal(*argv, code=code)[0]
-
-    def refusal(self, *argv, code=1):
-        """The ERROR line and the fix line (as printed, after runnable) of a refused
-        command."""
-        got, out, err = self.channel(*argv)
-        self.assertEqual(got, code, out + err)
-        lines = err.splitlines()
-        fixes = [l[len("  fix: "):] for l in lines if l.startswith("  fix: ")]
-        return lines[0], fixes[0] if fixes else None
-
-    def server_tree(self):
-        return read_tree(self.root) if os.path.isdir(self.root) else {}
-
-    def joined(self, section, box=None):
-        """A remote member's local tree on the current box."""
-        return os.path.join(os.environ["VCHARON_HOME"], "joined", section)
-
-    def record(self, section):
-        with open(os.path.join(os.environ["VCHARON_HOME"], "state", "channels",
-                               section + ".json"), encoding="utf-8") as f:
-            return json.load(f)
-
-    def lead(self, channel="game", where=("--server", "fake-dest"), box="laptop", project="ui"):
-        """box creates channel and leads it; back to the mac box after."""
-        self.use_box(box)
-        self.ok("create", channel, *where, "--project", project)
-        self.use_box("mac")
-        return "%s-%s" % (box, project)
 
 
 class NamesTest(unittest.TestCase):
@@ -1071,7 +952,7 @@ class SyncLineTest(ChannelCase):
         # the up job works, the down job fails: the up block held back comes out first, then
         # the down's header, its error block (stderr) and the summary, as vcharon sync shows
         self.lead()
-        real = cli.engine.Engine.run
+        real = sync.engine.Engine.run
         calls = []
 
         def run(eng, *a, **kw):
@@ -1082,7 +963,7 @@ class SyncLineTest(ChannelCase):
 
         # stdout and stderr in one stream, as a terminal shows them
         both = io.StringIO()
-        with mock.patch.object(cli.engine.Engine, "run", run), \
+        with mock.patch.object(sync.engine.Engine, "run", run), \
                 contextlib.redirect_stdout(both), contextlib.redirect_stderr(both):
             code = cli.main(["join", "game", "--server", "fake-dest"])
         out = both.getvalue()
@@ -1102,7 +983,7 @@ class SyncLineTest(ChannelCase):
         # the down job is interrupted: the up block held back comes out before the
         # interrupted line, as vcharon sync shows it, and the join stops with 130
         self.lead()
-        real = cli.engine.Engine.run
+        real = sync.engine.Engine.run
         calls = []
 
         def run(eng, *a, **kw):
@@ -1112,7 +993,7 @@ class SyncLineTest(ChannelCase):
             return real(eng, *a, **kw)
 
         both = io.StringIO()
-        with mock.patch.object(cli.engine.Engine, "run", run), \
+        with mock.patch.object(sync.engine.Engine, "run", run), \
                 contextlib.redirect_stdout(both), contextlib.redirect_stderr(both):
             code = cli.main(["join", "game", "--server", "fake-dest"])
         out = both.getvalue()
@@ -1127,7 +1008,7 @@ class SyncLineTest(ChannelCase):
         self.assertNotIn("  synced: ", out)
 
     def test_the_line_with_deletes_and_notes(self):
-        held = cli._Held()
+        held = sync._Held()
         for line in ("vcharon: c.n.down  a -> b", "  put     1 file, 0 dirs (1 B)",
                      "  note    left out x/: over the limit"):
             held.say(line)
@@ -1311,7 +1192,7 @@ class FirstLookTest(ChannelCase):
         def run(job, sync_args):
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()):
-                code = cli.sync_section(job)
+                code = sync.sync_section(job)
             return code, None if code == 0 else "ERROR the sync exited %d" % code, None
 
         code = watch.watch_job("game." + name, ["game", "--project", project], 30,
@@ -2113,7 +1994,7 @@ class LeaveCloseTest(ChannelCase):
         copy = os.path.join(self.joined("game.mac-web"), "laptop-ui", entries.MEMBER_FILE)
         entries.set_header(copy, os.path.dirname(copy), "laptop-ui", 1, "vcharon", "0.0.1")
         self.assertIn("vcharon versions differ", self.ok("read", "game"))
-        self.assertTrue(os.path.isfile(charter.version_note_path("game.mac-web")))
+        self.assertTrue(os.path.isfile(charter_state.version_note_path("game.mac-web")))
         before = set(self.box_files())
         out = self.ok("leave", "game")
         self.assertIn("OK  left game", out)
@@ -2452,28 +2333,6 @@ class LeaveCloseTest(ChannelCase):
         lines = self.ok("close", "docs", "--project", "d").splitlines()
         self.assertTrue(lines[1].startswith("  closed docs: "), lines[1])
         self.assertEqual(lines[2], platform.runnable(channel_cmd.CLOSE_UNTOLD_NOTE % "docs"))
-
-
-# a spelling of vcharon that runnable() has to write, so a fix line that it skips shows
-SPELLED = "/opt/vc/bin/vcharon"
-
-
-def read_only(test, folder):
-    """folder/sub/f with sub read-only, so a delete of folder fails at f; writable again at
-    the cleanup, for the test's own removal."""
-    sub = os.path.join(folder, "sub")
-    write_tree(sub, {"f": b"x"})
-    os.chmod(sub, 0o555)
-
-    def writable():
-        for dirpath, dirnames, _ in os.walk(test.root):
-            for n in dirnames:
-                os.chmod(os.path.join(dirpath, n), 0o755)
-
-    test.addCleanup(writable)
-
-
-NO_READ_ONLY = os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0)
 
 
 class ListFixTest(ChannelCase):
@@ -2841,7 +2700,7 @@ class PostSendTest(ChannelCase):
                                    "run again"),
                       VCharonError("aborted", "the run stopped")):
             with self.subTest(code=error.code), \
-                    mock.patch("vcharon.cli.run_jobs", side_effect=error):
+                    mock.patch("vcharon.sync.run_jobs", side_effect=error):
                 code, out, err = self.post()
                 self.assertEqual(code, 0, err)
                 self.assertEqual(len(out.splitlines()), 1)
@@ -3590,9 +3449,6 @@ class ReviewTest(ChannelCase):
         out = self.ok("join", "game", "--server", "fake-dest")
         self.assertIn("channel game created", out)
         self.assertNotIn("a member's all", out)
-
-
-OTHER_CLIENT = "f" * 32
 
 
 class ClaimerTest(ChannelCase):
@@ -4509,23 +4365,23 @@ class SeenTest(ChannelCase):
         section = "game.mac-web"
         session = mock.Mock(seen_at={})
         # the session's first plan of the section
-        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
-        self.assertIsNone(cli._down_args(False, session, None))
+        self.assertEqual(sync._down_args(True, session, section), {"want_seen": True})
+        self.assertIsNone(sync._down_args(False, session, None))
         now = time.monotonic()
         session.seen_at[section] = now
-        self.assertIsNone(cli._down_args(True, session, section))
+        self.assertIsNone(sync._down_args(True, session, section))
         # SEEN_SAVE_EVERY since they came, and no copy: asked
-        session.seen_at[section] = now - charter.SEEN_SAVE_EVERY
-        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
+        session.seen_at[section] = now - charter_state.SEEN_SAVE_EVERY
+        self.assertEqual(sync._down_args(True, session, section), {"want_seen": True})
         # a copy written since then (by another sync): not yet
-        charter.save_seen(section, {"a": [0, "stream 2"]}, time.time())
-        self.assertIsNone(cli._down_args(True, session, section))
+        charter_state.save_seen(section, {"a": [0, "stream 2"]}, time.time())
+        self.assertIsNone(sync._down_args(True, session, section))
         with mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
-            self.assertEqual(cli._down_args(True, session, section), {"watch": "stream 2"})
+            self.assertEqual(sync._down_args(True, session, section), {"watch": "stream 2"})
         # once it is as old
-        old = time.time() - charter.SEEN_SAVE_EVERY
-        os.utime(charter.seen_path(section), (old, old))
-        self.assertEqual(cli._down_args(True, session, section), {"want_seen": True})
+        old = time.time() - charter_state.SEEN_SAVE_EVERY
+        os.utime(charter_state.seen_path(section), (old, old))
+        self.assertEqual(sync._down_args(True, session, section), {"want_seen": True})
 
     def test_a_watchers_sync_and_whoami(self):
         self.lead()
@@ -4533,7 +4389,7 @@ class SeenTest(ChannelCase):
         # a sync by hand stamps nothing, but brings the ages (none yet)
         self.assertEqual(self.run_cli("sync", "game")[0], 0)
         self.assertFalse(os.path.exists(self.seen("game")))
-        with open(charter.seen_path("game.mac-web"), encoding="utf-8") as f:
+        with open(charter_state.seen_path("game.mac-web"), encoding="utf-8") as f:
             self.assertEqual(json.load(f), {"members": {}})
         # a watcher's child: its environment carries the pace
         with mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
@@ -4562,7 +4418,7 @@ class SeenTest(ChannelCase):
         self.assertEqual(got, {"laptop-ui": (False, None), "mac-web": (True, 2)})
         # leave removes the kept ages with the membership's other files
         self.ok("leave", "game")
-        self.assertFalse(os.path.exists(charter.seen_path("game.mac-web")))
+        self.assertFalse(os.path.exists(charter_state.seen_path("game.mac-web")))
 
     def test_a_servers_failed_stamp_is_logged(self):
         # only logged: the down log is the one place it shows
@@ -4612,8 +4468,8 @@ class QuietRoundsTest(ChannelCase):
         actions = [lambda f=f: f(sessions[0]) for f in between]
         with mock.patch.object(ssh.Session, "call", call), \
                 mock.patch.object(run.Engine, "_log_plan", log_plan), \
-                mock.patch.object(cli, "_watch_stdin", lambda ended: None), \
-                mock.patch.object(cli, "_wait_or_end", Between(*actions)), \
+                mock.patch.object(sync, "_watch_stdin", lambda ended: None), \
+                mock.patch.object(sync, "_wait_or_end", Between(*actions)), \
                 mock.patch.dict(os.environ, {watch.WATCH_ENV: "stream 2"}):
             code, out, err = self.run_cli("sync", "game", "--repeat", "1")
         self.assertEqual(code, 0, out + err)
@@ -4621,7 +4477,7 @@ class QuietRoundsTest(ChannelCase):
 
     def copy(self):
         """The members in this box's copy of the ages."""
-        with open(charter.seen_path("game.mac-web"), encoding="utf-8") as f:
+        with open(charter_state.seen_path("game.mac-web"), encoding="utf-8") as f:
             return sorted(json.load(f)["members"])
 
     def test_when_the_down_asks_for_the_ages(self):
@@ -4630,9 +4486,9 @@ class QuietRoundsTest(ChannelCase):
 
         def due(session):
             # SEEN_SAVE_EVERY since the ages came, and the copy as old
-            session.seen_at["game.mac-web"] -= charter.SEEN_SAVE_EVERY
-            old = time.time() - charter.SEEN_SAVE_EVERY
-            os.utime(charter.seen_path("game.mac-web"), (old, old))
+            session.seen_at["game.mac-web"] -= charter_state.SEEN_SAVE_EVERY
+            old = time.time() - charter_state.SEEN_SAVE_EVERY
+            os.utime(charter_state.seen_path("game.mac-web"), (old, old))
 
         _, plans = self.rounds(lambda session: None, due)
         # asked at the session's first plan; not while the copy is fresh; again once due
@@ -4741,7 +4597,7 @@ class SeenRoundsTest(ChannelCase):
                     child.kill()
                     child.communicate()
         self.assertEqual(child.returncode, 0)
-        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 2)
+        self.assertEqual(charter_state.load_seen("game.mac-web")["mac-web"][1], 2)
         # the leader never watched: no stamp
         self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
 
@@ -4823,7 +4679,7 @@ class SeenWatchProcessTest(ChannelCase):
         # the server stamps during the plan, the client keeps the ages after it: a watcher
         # stopped in between leaves the copy without them
         def done():
-            return os.path.exists(stamp) and "mac-web" in charter.load_seen("game.mac-web")
+            return os.path.exists(stamp) and "mac-web" in charter_state.load_seen("game.mac-web")
 
         try:
             deadline = time.monotonic() + 60
@@ -4848,7 +4704,7 @@ class SeenWatchProcessTest(ChannelCase):
         text, said = self.watch_until_stamped("--every", "3")
         self.assertEqual(text, b"stream 3\n")
         # the member's own copy of the ages came back with the same pull
-        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 3)
+        self.assertEqual(charter_state.load_seen("game.mac-web")["mac-web"][1], 3)
         # the leader's watcher never ran: no stamp of it
         self.assertEqual(os.listdir(self.seen("game")), ["mac-web"])
         self.assertNotIn("watched", said)
@@ -4867,7 +4723,7 @@ class SeenWatchProcessTest(ChannelCase):
     def test_a_no_stream_watcher_stamps(self):
         text, said = self.watch_until_stamped("--no-stream", "--every", "7")
         self.assertEqual(text, b"run 7\n")
-        self.assertEqual(charter.load_seen("game.mac-web")["mac-web"][1], 7)
+        self.assertEqual(charter_state.load_seen("game.mac-web")["mac-web"][1], 7)
         self.assertNotIn("watched", said)
 
 

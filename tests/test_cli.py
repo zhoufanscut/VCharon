@@ -32,6 +32,7 @@ from vcharon import (
     ssh,
     stage,
     state,
+    sync,
 )
 from vcharon import run as engine
 from vcharon.log import Log
@@ -39,14 +40,17 @@ from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.test_lock import hold_in_child, stop_child
 from tests.util import (
     CAN_SYMLINK,
     FAKE_SSH,
     TEST_MACHINE_ID,
+    VCHARON_DIR,
+    Between,
     FakeSshCase,
     helper_override,
+    hold_in_child,
     read_tree,
+    stop_child,
     write_tree,
 )
 
@@ -77,9 +81,6 @@ def source_send(h, call_id, args):
 _real.HANDLERS["source.plan"] = source_plan
 _real.HANDLERS["source.send"] = source_send
 """
-
-# the folder that holds the vcharon package (src/ in the repo)
-VCHARON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 
 # a helper whose server has no machine id
 NO_MACHINE = """
@@ -525,7 +526,7 @@ def with_helper(code):
 
 
 class JobTest(FakeSshCase):
-    """The sync's runner (cli.run_jobs), jobs and state through fake ssh; the remote end is
+    """The sync's runner (sync.run_jobs), jobs and state through fake ssh; the remote end is
     under the fake server's home."""
 
     def setUp(self):
@@ -647,7 +648,7 @@ class JobTest(FakeSshCase):
         self.write_config(PUSH.format(src=sixty))
         lines = self.ok("push", "--dry-run")
         self.assertEqual(lines[1], "  put     60 files, 0 dirs (60 B)")
-        self.assertEqual(cli.LIST_MAX, 50)
+        self.assertEqual(sync.LIST_MAX, 50)
         self.assertEqual(lines[2:52], ["          f%02d" % i for i in range(50)])
         self.assertEqual(lines[52], "          … and 10 more")
         self.assertRegex(lines[53], r"\AOK  dry run, nothing changed  \(\d+\.\d s\)\Z")
@@ -995,7 +996,7 @@ class JobTest(FakeSshCase):
         _out, err = self.failed(3, "nope")
         self.assertEqual(err[:2], ["ERROR config: no channel section nope in %s"
                                    % os.path.join(self.vcharon_home, "channels.d"),
-                                   "  fix: " + cli.NO_SECTION_HINT])
+                                   "  fix: " + sync.NO_SECTION_HINT])
         self.write_config(PUSH.format(src=self.src) + "from.pth = x\n")
         _out, err = self.failed(3, "push")
         self.assertEqual(err[0], "ERROR bad_options: from.pth: unknown option")
@@ -1004,7 +1005,7 @@ class JobTest(FakeSshCase):
         # no config file: as no section (a join writes the section, and needs no config file)
         self.assertEqual(err[:2], ["ERROR config: no channel section push in %s"
                                    % os.path.join(self.vcharon_home, "channels.d"),
-                                   "  fix: " + cli.NO_SECTION_HINT])
+                                   "  fix: " + sync.NO_SECTION_HINT])
         self.assertFalse(os.path.exists(self.argv_file))
         self.assertFalse(os.path.exists(state.path("push")))
 
@@ -1430,22 +1431,6 @@ class MultiJobTest(FakeSshCase):
         self.assertIn("vcharon %s sync b; Python " % VERSION, self.job_log("b"))
 
 
-class Between:
-    """cli._wait_or_end for --repeat tests: each wait between rounds runs the next action;
-    with none left, stdin has ended."""
-
-    def __init__(self, *actions):
-        self.actions = list(actions)
-        self.waits = []
-
-    def __call__(self, ended, seconds):
-        self.waits.append(seconds)
-        if not self.actions:
-            return True
-        self.actions.pop(0)()
-        return False
-
-
 class RepeatTest(FakeSshCase):
     """The sync's --repeat: rounds of the jobs on one session, per-round locks,
     the round's lines on stdout, its exit, and a quiet disk while there's nothing to do. On
@@ -1462,7 +1447,7 @@ class RepeatTest(FakeSshCase):
     def setUp(self):
         MultiJobTest.setUp(self)
         # never the test runner's own stdin; one test reads a real one, in a child
-        patcher = mock.patch.object(cli, "_watch_stdin", lambda ended: None)
+        patcher = mock.patch.object(sync, "_watch_stdin", lambda ended: None)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -1470,7 +1455,7 @@ class RepeatTest(FakeSshCase):
         """The runner on ARGV --repeat 1, with the actions between its rounds: (exit code, stdout
         lines, stderr, the Between)."""
         waits = Between(*between)
-        with mock.patch.object(cli, "_wait_or_end", waits):
+        with mock.patch.object(sync, "_wait_or_end", waits):
             code, out, err = self.run_jobs(*argv + ("--repeat", "1"))
         return code, out.splitlines(), err, waits
 
@@ -1496,13 +1481,13 @@ class RepeatTest(FakeSshCase):
 
     def test_rounds_on_one_session(self):
         resets = []
-        real = cli.remote.reset
+        real = sync.remote.reset
 
         def reset(session):
             resets.append(session)
             return real(session)
 
-        with mock.patch.object(cli.remote, "reset", reset):
+        with mock.patch.object(sync.remote, "reset", reset):
             code, lines, err, waits = self.repeat("a", "b", between=[lambda: None] * 2)
         self.assertEqual((code, err), (0, ""))
         # a good job prints nothing: three rounds, three ROUND lines
@@ -1530,7 +1515,7 @@ class RepeatTest(FakeSshCase):
             ran.append(jr.name)
             raise BrokenPipeError(errno.EPIPE, "Broken pipe")
 
-        with mock.patch.object(cli, "_run_one", gone):
+        with mock.patch.object(sync, "_run_one", gone):
             code, lines, err, _waits = self.repeat("a", "b", between=[lambda: None])
         self.assertEqual((code, lines, err, ran), (1, [], "", ["a"]))
         self.assertIn("stdout closed: [Errno 32] Broken pipe", self.job_log("a"))
@@ -1592,7 +1577,7 @@ class RepeatTest(FakeSshCase):
 
     def crash_in_round_two(self, swap):
         """_run_one, raising in the second round, after the swap if there is one."""
-        real = cli._run_one
+        real = sync._run_one
         calls = []
 
         def run_one(*args):
@@ -1603,7 +1588,7 @@ class RepeatTest(FakeSshCase):
                 raise ValueError("bad marshal data (unknown type code)")
             return real(*args)
 
-        return mock.patch.object(cli, "_run_one", run_one)
+        return mock.patch.object(sync, "_run_one", run_one)
 
     def test_an_unexpected_error_in_a_binary_after_a_swap(self):
         swap = self.code_file()
@@ -1733,7 +1718,7 @@ class RepeatTest(FakeSshCase):
         self.assertIn("  info  ssh exited with code 0", rest[1])
 
     def test_the_summary_line(self):
-        with mock.patch.object(cli, "REPEAT_SUMMARY", 0):
+        with mock.patch.object(sync, "REPEAT_SUMMARY", 0):
             code, _lines, err, _ = self.repeat("a", "b", between=[lambda: None])
         self.assertEqual((code, err), (0, ""))
         summaries = re.findall(r"  info  (repeat: \d+ rounds since [-0-9: ]+, nothing to do in "
@@ -1993,7 +1978,7 @@ class QuietRoundsTest(FakeSshCase):
         self.local = os.path.join(self.tmp, "local")
         self.write_config(PULLED.format(local=self.local, path="src") + "from.prune = yes\n")
         self.src = os.path.join(self.home, "src")
-        for patcher in (mock.patch.object(cli, "_watch_stdin", lambda ended: None),
+        for patcher in (mock.patch.object(sync, "_watch_stdin", lambda ended: None),
                         # the saved stamp, which would differ between the two runs
                         mock.patch.object(state, "now", lambda: "2026-10-23T00:00:00Z")):
             patcher.start()
@@ -2038,7 +2023,7 @@ class QuietRoundsTest(FakeSshCase):
 
         with mock.patch.object(ssh.Session, "call", call):
             if repeat:
-                with mock.patch.object(cli, "_wait_or_end", Between(*map(step, changes))):
+                with mock.patch.object(sync, "_wait_or_end", Between(*map(step, changes))):
                     code, out, err = self.run_jobs("p", "--repeat", "1")
                 self.assertEqual((code, out.splitlines(), err), (0, ["ROUND 0"] * 8, ""))
             else:
@@ -2212,11 +2197,11 @@ class MailboxTest(FakeSshCase):
         self.assertEqual(err.splitlines()[:2], [
             "ERROR not_found: the root %s doesn't exist"
             % self.server_shows(os.path.join(self.server, "windows")),
-            "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p"))])
+            "  fix: " + platform.runnable(sync.CHANNEL_GONE_HINT % ("mb", "--project p"))])
         # the job's log keeps the plain text: read later, maybe on another box
         with open(os.path.join(self.vcharon_home, "logs", "mb.windows.up.log"),
                   encoding="utf-8") as f:
-            self.assertIn("fix: " + cli.CHANNEL_GONE_HINT % ("mb", "--project p"), f.read())
+            self.assertIn("fix: " + sync.CHANNEL_GONE_HINT % ("mb", "--project p"), f.read())
         self.assertFalse(os.path.exists(os.path.join(self.server, "windows")))
 
     # --- case twins can't stall the mailbox ---
@@ -2438,7 +2423,7 @@ class MailboxTest(FakeSshCase):
 
     def test_a_name_too_long_for_the_target_keeps_its_hint(self):
         # fsops' hint: a root path can be too long too, which no writer fixes
-        self.assertNotIn(fsops.TOO_LONG_HINT, cli.SOURCE_HINTS)
+        self.assertNotIn(fsops.TOO_LONG_HINT, sync.SOURCE_HINTS)
 
     @unittest.skipUnless(CAN_SYMLINK, "no symlinks here")
     def test_a_target_side_error_keeps_its_hint(self):
@@ -2547,10 +2532,10 @@ class MailboxTest(FakeSshCase):
             self.assertEqual(errors, [
                 "ERROR mb.windows.up: not_found: the root %s doesn't exist"
                 % self.server_shows(os.path.join(self.server, "windows")),
-                "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p")),
+                "  fix: " + platform.runnable(sync.CHANNEL_GONE_HINT % ("mb", "--project p")),
                 "ERROR mb.windows.down: not_found: %s doesn't exist"
                 % self.server_shows(self.server),
-                "  fix: " + platform.runnable(cli.CHANNEL_GONE_HINT % ("mb", "--project p"))])
+                "  fix: " + platform.runnable(sync.CHANNEL_GONE_HINT % ("mb", "--project p"))])
             self.assertNotIn(stage.ROOT_HINT, err)
             self.assertFalse(os.path.exists(self.server))
 
@@ -2654,7 +2639,7 @@ class MailboxTest(FakeSshCase):
         fails = [l.strip() for l in out.splitlines() if l.startswith("  FAIL")]
         self.assertEqual(len(fails), 2, out)
         self.assertEqual(out.count("fix: " + platform.runnable(
-            cli.CHANNEL_GONE_HINT % ("mb", "--project p"))), 2, out)
+            sync.CHANNEL_GONE_HINT % ("mb", "--project p"))), 2, out)
         self.assertNotIn(stage.ROOT_HINT, out)
         # once up has sent files, a missing own folder is a FAIL
         write_tree(self.server, {"debian/": None, "windows/": None})
@@ -2711,11 +2696,11 @@ class PullGuardTest(unittest.TestCase):
                  "": None, "~": None, "~bob": None, "~/": None, ".": None, "..": None,
                  "/": None, "a/..": None, "//": None}
         for path, name in cases.items():
-            self.assertEqual(cli.pull_name(path), name, path)
+            self.assertEqual(sync.pull_name(path), name, path)
 
     def refused(self, path, entries):
         with self.assertRaises(VCharonError) as cm:
-            cli.pull_guard(path)(Plan(entries))
+            sync.pull_guard(path)(Plan(entries))
         self.assertEqual(cm.exception.code, "unsafe_path")
         self.assertEqual(cm.exception.hint, PULL_HINT)
         return cm.exception.message
@@ -2732,7 +2717,7 @@ class PullGuardTest(unittest.TestCase):
                 ("~", [put_dir("me")]), (".", [put_dir("me")]), ("~bob", [put_dir("bob")]),
                 ("x/..", [f])]:
             with self.subTest(path=path, entries=entries):
-                cli.pull_guard(path)(Plan(entries))
+                sync.pull_guard(path)(Plan(entries))
 
     def test_refuses(self):
         f = lambda p: put_file(p, 1, 1790000000.0)

@@ -14,56 +14,11 @@ import vcharon
 from vcharon import lock
 from vcharon.lock import Lock
 
-from tests.util import readline
-
-# Holds an exclusive lock on argv[1], says so, then waits to be killed.
-if os.name == "nt":
-    HOLDER = """
-import msvcrt, os, sys, time
-fd = os.open(sys.argv[1], os.O_RDWR | os.O_BINARY)
-msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-print("held", flush=True)
-time.sleep(60)
-"""
-else:
-    HOLDER = """
-import fcntl, os, sys, time
-fd = os.open(sys.argv[1], os.O_RDWR)
-fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-print("held", flush=True)
-time.sleep(60)
-"""
-
-
-def hold_in_child(path):
-    """A child process that holds the lock on path, once it has said so. path must exist: the
-    child opens it without O_CREAT (test_channel's hold makes it)."""
-    child = subprocess.Popen([sys.executable, "-c", HOLDER, path], stdout=subprocess.PIPE,
-                             stdin=subprocess.DEVNULL)
-    try:
-        line = readline(child.stdout)
-    except AssertionError:
-        line = b"(nothing)"
-    if line.strip() != b"held":
-        child.kill()
-        child.communicate(timeout=60)
-        raise AssertionError("the child didn't take the lock: %r" % line)
-    return child
-
-
-# Takes the watcher's lock on the snapshot argv[1] as a watcher does (it writes its PID, with
-# argv[2] as its PID namespace, "-" for none), says that PID, then waits to be killed.
-TAKE_LOCK = """
-import os, sys, time
-from vcharon import lock
-from vcharon.mailbox import watch
-ns = None if sys.argv[2] == "-" else sys.argv[2]
-lock.pid_ns = lambda: ns
-lk = watch.take_lock(sys.argv[1])
-print(os.getpid() if lk is not None else "not held", flush=True)
-time.sleep(60)
-"""
-
+from tests.util import (
+    hold_in_child,
+    show_pid,
+    stop_child,
+)
 
 # Takes the lock argv[1] and writes its PID; leaves the file as it is when it ends (no release),
 # as a holder killed before its release does; says its PID, its PID namespace and what
@@ -79,48 +34,9 @@ os._exit(0)
 """
 
 
-def take_in_child(snapshot):
-    """(a child process holding the watcher's lock on snapshot, its PID) once it has said so.
-    Its own os.getpid(), not Popen.pid: on Windows a venv's python.exe runs the real one as a
-    child. It writes the PID namespace this process's pid_ns gives (show_pid's, in a test that
-    called it), so this process reads its PID back."""
-    package = os.path.dirname(os.path.abspath(vcharon.__file__))
-    ns = lock.pid_ns()
-    child = subprocess.Popen([sys.executable, "-c", TAKE_LOCK, snapshot,
-                              "-" if ns is None else ns],
-                             stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                             env=dict(os.environ, PYTHONPATH=os.path.dirname(package)))
-    try:
-        line = readline(child.stdout)
-    except AssertionError:
-        line = b"(nothing)"
-    if not line.strip().isdigit():
-        stop_child(child)
-        raise AssertionError("the child didn't take the lock: %r" % line)
-    return child, int(line)
-
-
 # the longest PID and namespace PID_RE takes, from PID_AT on, and that namespace
 LONGEST_NS = "pid:[" + "9" * 20 + "]"
 LONGEST = b"9" * 10 + b"\n" + LONGEST_NS.encode() + b"\n"
-
-# the PID namespace show_pid gives this process: Linux's initial one, or none off Linux
-SHOWN_NS = lock.INIT_PID_NS if sys.platform.startswith("linux") else None
-
-
-def show_pid(case, shown=True):
-    """Makes write_pid in this process write its PID and holder_pid read it (or neither, shown
-    False: as with an unreadable /proc/self/ns/pid) for the rest of the test case, in whatever
-    PID namespace the suite runs."""
-    ns = SHOWN_NS if shown else ""
-    patcher = mock.patch.object(lock, "pid_ns", lambda: ns)
-    patcher.start()
-    case.addCleanup(patcher.stop)
-
-
-def stop_child(child):
-    child.kill()
-    child.communicate(timeout=60)
 
 
 class LockTest(unittest.TestCase):

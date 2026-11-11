@@ -12,27 +12,22 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, channels, charter, cli, entries, platform, state
+from vcharon import (
+    channel_cmd,
+    channels,
+    charter,
+    charter_state,
+    cli,
+    entries,
+    platform,
+    state,
+    sync,
+)
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.test_channel import ChannelCase
-from tests.test_mailbox_watch import member_md
-from tests.util import read_tree, write_tree
-
-LIMITS = {"max_mb": 50, "max_files": 1000, "max_entry_kb": 1000}
-
-
-def channel_md(leader, fmt="1", limits=LIMITS, extra=()):
-    """CHANNEL.md's text as create writes it; fmt None leaves the format: line out."""
-    header = [("leader", leader), ("created", "2026-10-01 09:00")]
-    if fmt is not None:
-        header.append(("format", fmt))
-    header += [(charter.HEADER_KEYS[k], str(limits[k])) for k in charter.LIMIT_KEYS
-               if k in limits] + list(extra)
-    return ("# CHANNEL\n" + entries.build("2026-10-01 09:00", leader, 2, "channel game created",
-                                          ["@all"], header=header)).encode("utf-8")
+from tests.util import LIMITS, ChannelCase, channel_md, member_md, read_tree, write_tree
 
 
 class CharterTest(unittest.TestCase):
@@ -122,8 +117,8 @@ class CharterTest(unittest.TestCase):
             self.assertEqual(charter.folder_total(os.path.join(self.tmp, "a")), (8, 2))
 
     def test_size_text(self):
-        # the sync's own (cli.size_text is this one)
-        self.assertIs(cli.size_text, charter.size_text)
+        # the sync's own (sync.size_text is this one)
+        self.assertIs(sync.size_text, charter.size_text)
         cases = [(0, "0 B"), (999, "999 B"), (1000, "1.0 kB"), (1049, "1.0 kB"),
                  (3400000, "3.4 MB"), (999949, "999.9 kB"), (999999, "1.0 MB"),
                  (1200000000, "1.2 GB"), (5 * 10 ** 12, "5.0 TB"), (50 * charter.MB, "50.0 MB")]
@@ -427,7 +422,7 @@ class LimitsTest(ChannelCase):
         self.assertEqual(self.down_sent(), sent)
         # saved for the watcher and read, names only: a remote read shows the note, from
         # the limit
-        self.assertEqual(charter.load_left_out("game.mac-web"),
+        self.assertEqual(charter_state.load_left_out("game.mac-web"),
                          {"limit": "50.0 MB and 10 files", "members": ["laptop-ui"]})
         saved = ("left out laptop-ui/: over the channel's limit of 50.0 MB and 10 files; this "
                  "box's copy of it stays as it was until it is back under")
@@ -439,7 +434,7 @@ class LimitsTest(ChannelCase):
         shutil.rmtree(os.path.join(lead, "new"))
         out = self.ok("sync", "game")
         self.assertNotIn("left out", out)
-        self.assertIsNone(charter.load_left_out("game.mac-web"))
+        self.assertIsNone(charter_state.load_left_out("game.mac-web"))
         self.assertNotIn("left out", self.ok("read", "game"))
         self.assertFalse(os.path.exists(os.path.join(copy, "old.txt")))
         self.assertTrue(os.path.exists(os.path.join(copy, "keep.txt")))
@@ -581,21 +576,21 @@ class SeenCacheTest(unittest.TestCase):
         patch = mock.patch.dict(os.environ, {"VCHARON_HOME": os.path.join(self.tmp, "vh")})
         patch.start()
         self.addCleanup(patch.stop)
-        self.path = charter.seen_path("mb.mac")
+        self.path = charter_state.seen_path("mb.mac")
 
     def save(self, seen, now):
-        return charter.save_seen("mb.mac", seen, now)
+        return charter_state.save_seen("mb.mac", seen, now)
 
     def test_written_on_change_and_throttled(self):
         self.assertTrue(self.save({"a": [10, "stream 2"]}, 1000))
-        self.assertEqual(charter.load_seen("mb.mac"), {"a": (990, 2)})
+        self.assertEqual(charter_state.load_seen("mb.mac"), {"a": (990, 2)})
         os.utime(self.path, (1000, 1000))
         # the same time again, give or take a second: not written
         self.assertFalse(self.save({"a": [11, "stream 2"]}, 1000))
         # a time that moved, within 30 s of the last write: not yet; after: written
         self.assertFalse(self.save({"a": [0, "stream 2"]}, 1029))
         self.assertTrue(self.save({"a": [0, "stream 2"]}, 1030))
-        self.assertEqual(charter.load_seen("mb.mac"), {"a": (1030, 2)})
+        self.assertEqual(charter_state.load_seen("mb.mac"), {"a": (1030, 2)})
         os.utime(self.path, (1030, 1030))
         # past the 30 s, a time a second off (the age's rounding) is still not a move
         self.assertFalse(self.save({"a": [30, "stream 2"]}, 1061))
@@ -603,7 +598,7 @@ class SeenCacheTest(unittest.TestCase):
         self.assertTrue(self.save({"a": [0, "stream 2"], "b": [5, "run 30"]}, 1031))
         os.utime(self.path, (1031, 1031))
         self.assertTrue(self.save({"a": [0, "run 30"], "b": [5, "run 30"]}, 1032))
-        self.assertEqual(charter.load_seen("mb.mac"), {"a": (1032, 30), "b": (1027, 30)})
+        self.assertEqual(charter_state.load_seen("mb.mac"), {"a": (1032, 30), "b": (1027, 30)})
 
     def test_a_malformed_reply_writes_nothing(self):
         for seen in ([], {"a": [1]}, {"a": ["1", "run 30"]}, {"a": [-1, "run 30"]},
@@ -611,12 +606,12 @@ class SeenCacheTest(unittest.TestCase):
             with self.subTest(seen=seen), self.assertRaises((TypeError, ValueError)):
                 self.save(seen, 1000)
         self.assertFalse(os.path.exists(self.path))
-        self.assertEqual(charter.load_seen("mb.mac"), {})
+        self.assertEqual(charter_state.load_seen("mb.mac"), {})
         # a file in another shape reads as none
         os.makedirs(os.path.dirname(self.path))
         with open(self.path, "w", encoding="utf-8") as f:
             f.write('{"members": {"a": [1, "fast"]}}')
-        self.assertEqual(charter.load_seen("mb.mac"), {})
+        self.assertEqual(charter_state.load_seen("mb.mac"), {})
 
 
 if __name__ == "__main__":

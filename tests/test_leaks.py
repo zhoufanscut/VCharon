@@ -10,11 +10,10 @@ import re
 import unittest
 from unittest import mock
 
-from vcharon import cli, platform
+from vcharon import platform, sync
 from vcharon.mailbox import watch
 
-from tests.test_channel import ChannelCase
-from tests.util import read_tree
+from tests.util import ChannelCase, read_tree
 
 # The machine ids: the fake server's, the client's, and another server's; each unlike the
 # others and unlike the hashes vcharon shows
@@ -79,7 +78,7 @@ class LeakSweepTest(ChannelCase):
         reach the fake ssh. Its stderr is the child's, which the watcher reads."""
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            code = cli.sync_section(job)
+            code = sync.sync_section(job)
         lines = err.getvalue().splitlines()
         self.human += [("child", ("sync", job), line) for line in lines]
         self.printed += lines

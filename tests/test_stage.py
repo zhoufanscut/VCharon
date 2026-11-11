@@ -19,9 +19,18 @@ from vcharon.lock import Lock
 from vcharon.plan import Plan, delete, put_dir, put_file
 from vcharon.proto import VCharonError
 
-from tests.test_lock import hold_in_child, stop_child
-from tests.test_path import unix_socket
-from tests.util import fd_count, patch_stats, read_tree, run_stager, umask, unblock_fifo, write_tree
+from tests.util import (
+    fd_count,
+    hold_in_child,
+    patch_stats,
+    read_tree,
+    run_stager,
+    stop_child,
+    umask,
+    unblock_fifo,
+    unix_socket,
+    write_tree,
+)
 
 POSIX = os.name != "nt"
 WINDOWS = os.name == "nt"

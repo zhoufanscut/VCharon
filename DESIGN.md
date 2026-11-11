@@ -177,10 +177,13 @@ member runs it as one long-lived child ([The watcher in a channel](#the-watcher-
 src/vcharon/
   __init__.py      VERSION, PROTOCOL, FLOOR = (3, 13)
   __main__.py      python -m vcharon
-  cli.py           the command line: verbs, output, exit codes; the sync runner       client
+  cli.py           the command line: verbs, output, exit codes                       client
+  command.py       the run context, error output and signals                         client
+  sync.py          the sync runner: jobs, state, sessions and repeated rounds         client
   channel_cmd.py   list, create, join, leave, close: names, records, sections         client
   channels.py      the channel root: list, claim, release, remove                    both
   charter.py       a channel's format and limits, from CHANNEL.md                    both
+  charter_state.py client caches: skipped folders, watched ages and version notes     client
   entries.py       entry text, parsing, numbers, the locked append                    both
   config.py        vcharon.ini and channels.d/                                        client
   doctor.py        vcharon doctor                                                     client
@@ -204,7 +207,7 @@ src/vcharon/
   mailbox/         post.py, read.py, watch.py: the verbs behind post, read, watch     client
   guide/           the agent guide, one .md file per topic                            client
   skill/           SKILL.md, which vcharon skill install writes                       client
-tests/             unittest, standard library only
+tests/             unittest, standard library only; shared helpers in util.py
 docs/GUIDE.md      made from src/vcharon/guide/*.md; a test fails when they differ
 ```
 
@@ -2427,7 +2430,7 @@ after a swap, an old process importing a module for the first time reads the new
 old offsets and fails (with PyInstaller, a `zlib` error).
 
 - So the long-running commands import every module they can need at start, in every install
-  mode: `cli.py` imports every module of the package at its top, the plugins too; the few
+  mode: importing `cli.py` loads every module of the package, the plugins too; the few
   imports inside functions, there to break an import cycle, only look up a module already
   loaded. Standard-library modules loaded at first use are loaded at start too: the codecs
   `pathrules` and `config` use, on Windows `winreg` and the ANSI code page's codec, and the
@@ -2842,7 +2845,11 @@ which and how to adapt. A channel format change is always a minor version at lea
   code, tests, README or DESIGN; the old tool's name nowhere but the CHANGELOG line that says
   where VCharon came from; every reference by name to a section of DESIGN.md or README.md names
   a heading that exists, and none goes by a section number; every `vcharon <verb>` string
-  constant in `src` is listed in `tests/test_commands.py`'s `HINTS`.
+  constant in `src` is discovered into `tests/test_commands.py`'s `HINTS`, with sample
+  values or an explicit noncommand mark in `HINT_VALUES`, keyed by module and source
+  scope rather than copied wording. A new literal needs a classification, while a
+  wording edit is tested directly from its source. Shared test helpers live in
+  `tests/util.py`, so importing a fixture never imports another test module.
 - Guards on rules that any new verb, printed line or guide text can break: every verb, and
   `--update`, takes `--project` and `--role` after the verb, between its positionals and at the
   end, since the guide has an agent pass them on every command; a remote channel's create through

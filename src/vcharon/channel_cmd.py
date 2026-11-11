@@ -22,6 +22,7 @@ from . import (
     VERSION,
     channels,
     charter,
+    charter_state,
     config,
     entries,
     fsops,
@@ -540,7 +541,7 @@ def _forget_version_note(section):
     one, so the session's first read shows the note again (DESIGN, "Reading a channel"). It
     only adds a note, so a file that can't be removed changes nothing else."""
     with contextlib.suppress(OSError):
-        os.remove(charter.version_note_path(section))
+        os.remove(charter_state.version_note_path(section))
 
 
 def _remove(path):
@@ -2226,7 +2227,7 @@ def _pull_own(server, remote_text, name, own, log, say):
     made; one that fails while moving leaves the files already moved. Never through a link.
     The checks go by path, one lstat per part: a link swapped in between a check and the move
     isn't caught (the own folder is the member's own, not another user's)."""
-    from . import cli
+    from . import sync
     path = posixpath.join(remote_text, name)
     local = os.path.dirname(own)
     temp = tempfile.mkdtemp(prefix=".vcharon-pull-", dir=os.path.dirname(local))
@@ -2237,7 +2238,7 @@ def _pull_own(server, remote_text, name, own, log, say):
         plugin.check_side(source.end, source.plugin, "source", source.options)
         plugin.check_side(sink.end, sink.plugin, "sink", sink.options)
         eng = engine.Engine(server.session, source, sink, log,
-                            after_plan=cli.pull_guard(path))
+                            after_plan=sync.pull_guard(path))
         eng.run()
         added = kept = 0
         pulled = os.path.join(temp, name)
@@ -2463,9 +2464,9 @@ def _not_shown(tree, name, leader, kind_, wheres, skip=None):
 
 def _run_section(args, section, full, brief=False):
     """A sync of the section [--full], in this process, as vcharon sync would run it: its
-    lines (brief: one line unless it fails; cli.sync_section), its exit code."""
-    from . import cli
-    return cli.sync_section(section, full=full, verbose=args.verbose, brief=brief)
+    lines (brief: one line unless it fails; sync.sync_section), its exit code."""
+    from . import sync
+    return sync.sync_section(section, full=full, verbose=args.verbose, brief=brief)
 
 
 def _leave(args, cfg, record, log, say, close):
@@ -2664,7 +2665,7 @@ def _remove_membership(cfg, record, section, say, watcher):
     """leave's and close's removal on this box: a remote member's local tree (only when its
     mailbox.local is exactly the computed joined/ path), its jobs' state, log and lock files;
     the watcher snapshot (a server member's keyed by the channel folder, as the local member's
-    watch), read's kept version note (charter.version_note_path), the own folder's post lock,
+    watch), read's kept version note (charter_state.version_note_path), the own folder's post lock,
     the record, a remote member's section file, and the watcher's lock last. Locks only when
     no one holds them. A server member's folder stays on the server (leave) or went with the
     channel (close). One `removed <path>` line each, the home as ~ (platform.tilde).
@@ -2700,9 +2701,9 @@ def _remove_membership(cfg, record, section, say, watcher):
                          os.path.join(platform.log_dir(), job + ".log.1")):
                 drop(path)
             drop(os.path.join(platform.state_dir(), job + ".lock"), lock=True)
-        drop(charter.left_out_path(section))
-        drop(charter.seen_path(section))
-    drop(charter.version_note_path(section))
+        drop(charter_state.left_out_path(section))
+        drop(charter_state.seen_path(section))
+    drop(charter_state.version_note_path(section))
     drop(snapshot)
     # a stop's request left by a stop that was killed (watch.StopRequest)
     drop(snapshot + ".stop")

@@ -82,7 +82,7 @@ works" gives the steps. What takes several files to see:
   `plugins/path.py` builds the plan, `plugins/dir.py` applies it, and every write inside a
   sink's root goes through `stage.Stager`. `run.py` is steps 5 to 8 for either direction; one
   side is a local object, the other a `remote.py` proxy, and push and pull differ only in
-  which. `cli.py` holds the runner behind `vcharon sync` and `--repeat`.
+  which. `sync.py` holds the runner behind `vcharon sync` and `--repeat`.
 - **Channels are built on top.** A remote member's membership is a record plus a channel
   section, `channels.d/<C>.<name>.ini`, whose two jobs are `<C>.<name>.up` and `.down`.
   `channel_cmd.py` does list, create, join, leave and close, and works out which membership a
@@ -155,7 +155,7 @@ Guards that fail the suite, and what to do:
 
 | guard | test | when it fails |
 |---|---|---|
-| a `vcharon <verb>` string constant in `src` | `tests/test_commands.py` (`HINTS`) | list the new constant there (None for one that isn't a command) |
+| a `vcharon <verb>` string constant in `src` | `tests/test_commands.py` (`HINTS`) | add its source key and sample values to `HINT_VALUES` (None for a noncommand); the wording is read from src |
 | the helper's imports | `tests/test_bundle.py` | only the modules in `bundle.SERVER` are sent to the server; the failure names the new import: add that module if the server needs it, or move the import to client code; remove one the helper no longer reaches |
 | the guide | `tests/test_guide.py` | regenerate `docs/GUIDE.md`; every command and flag in the guide must parse |
 | build history | `tests/test_guide.py` (`NoHistoryTest`) | remove milestone names, review tags, plan pointers from code, tests, README, DESIGN |

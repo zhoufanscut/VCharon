@@ -44,7 +44,7 @@ KIND_HINT = "remove or rename it at the target, then run again"
 MODE_HINT = "fix its owner or mode (for example: chmod go-w %s), then run again"
 DEVICE_HINT = "pick a root with no mount points under it"
 # not the path source's NAME_HINT text: a root path can be too long too, and a mailbox job
-# swaps that hint (cli.SOURCE_HINTS)
+# swaps that hint (sync.SOURCE_HINTS)
 TOO_LONG_HINT = "rename it at the source, or pick a shorter root"
 # An agent CLI's sandbox refuses with these on a folder that is fine: EROFS (Codex on Linux),
 # EPERM (macOS's sandbox) (DESIGN, "Fix lines"). EACCES is usually the file's own owner or mode.

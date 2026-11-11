@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, charter, cli, platform
+from vcharon import channel_cmd, charter_state, cli, platform
 from vcharon.mailbox import read as view
 
 from tests import util
@@ -455,7 +455,7 @@ class VersionTest(ViewCase):
         # the versions agree: the kept note goes, so the same difference later shows again
         write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.1.0")})
         self.assertIsNone(self.note(self.view()))
-        self.assertFalse(os.path.exists(charter.version_note_path("mb.zz")))
+        self.assertFalse(os.path.exists(charter_state.version_note_path("mb.zz")))
         write_tree(self.tree, {"bb/MEMBER.md": member("bb", "0.3.0")})
         self.assertEqual(self.note(self.view()), note.replace("bb 0.2.0", "bb 0.3.0"))
 
@@ -464,7 +464,7 @@ class VersionTest(ViewCase):
         # same versions don't show the note again
         bare = ("note: members' vcharon versions differ (from their MEMBER.md): aa 0.1.0, "
                 "bb 0.2.0; their guides may differ")
-        path = charter.version_note_path("mb.zz")
+        path = charter_state.version_note_path("mb.zz")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"note": bare}, f)

@@ -18,12 +18,17 @@ from vcharon.mailbox import post as post_mod
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
-from tests import test_mailbox_watch as watch_tests
 from tests import util
-from tests.test_channel import ChannelCase
-from tests.test_charter import channel_md
-from tests.test_mailbox_watch import Rounds, member_md, never
-from tests.util import write_tree
+from tests.util import (
+    ChannelCase,
+    Rounds,
+    StreamCase,
+    WatchCase,
+    channel_md,
+    member_md,
+    never,
+    write_tree,
+)
 
 LOBBY_LIMITS = {"max_mb": 50, "max_files": 1000, "max_entry_kb": 10000}
 # a time on this machine's clock, whatever its zone, and its day file
@@ -659,11 +664,11 @@ class PostTest(LobbyCase):
                                                            "Permission denied") + "\n")
 
 
-class LobbyWatchCase(watch_tests.WatchCase):
+class LobbyWatchCase(WatchCase):
     """A lobby's tree, self.tree, watched by debian (a local member, not the founder mac)."""
 
     def setUp(self):
-        watch_tests.WatchCase.setUp(self)
+        WatchCase.setUp(self)
         # the founder mac is the leader its members' MEMBER.md name
         write_tree(self.tree, {"mac/MEMBER.md": member_md("mac", "mac", "lobby"),
                                "mac/CHANNEL.md": lobby_md("mac"),
@@ -890,15 +895,15 @@ class WatchTest(LobbyWatchCase):
         self.assertEqual(self.snapshot()["seen"]["mac"], {"low": 551, "more": []})
 
 
-class LobbyStreamTest(watch_tests.WatchCase):
+class LobbyStreamTest(WatchCase):
     """A streaming watcher (StreamTest's fake child) in a lobby: a JOIN to its own poster
     wakes nothing, an @all from any member is to all."""
 
-    setUp = watch_tests.StreamTest.setUp
-    spawn = watch_tests.StreamTest.spawn
-    reap = staticmethod(watch_tests.StreamTest.reap)
-    watch = watch_tests.StreamTest.watch
-    entry = watch_tests.StreamTest.entry
+    setUp = StreamCase.setUp
+    spawn = StreamCase.spawn
+    reap = staticmethod(StreamCase.reap)
+    watch = StreamCase.watch
+    entry = StreamCase.entry
 
     def test_silent_entries(self):
         code, lines = self.watch([["out", "ROUND 0"], self.entry("mac", 2, "JOIN", to="@mac"),

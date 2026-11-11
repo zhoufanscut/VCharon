@@ -13,14 +13,21 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, channels, cli, fsops, platform
+from vcharon import channel_cmd, channels, fsops, platform, sync
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
-from tests.test_channel import NO_READ_ONLY, SPELLED, ChannelCase, read_only
-from tests.test_lead import charter_text
-from tests.test_mailbox_watch import member_md
-from tests.util import CAN_SYMLINK, read_tree, write_tree
+from tests.util import (
+    CAN_SYMLINK,
+    NO_READ_ONLY,
+    SPELLED,
+    ChannelCase,
+    charter_text,
+    member_md,
+    read_only,
+    read_tree,
+    write_tree,
+)
 
 DAY = 86400
 # the server's clock in the CLI tests: every folder there 20 days idle
@@ -568,7 +575,7 @@ class RemoveIdleRemoteTest(ChannelCase):
         def run(job, sync_args, **kw):
             err = io.StringIO()
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-                code = cli.sync_section(job)
+                code = sync.sync_section(job)
             return watch.parse_failure(code, err.getvalue().splitlines(), job)
 
         try:

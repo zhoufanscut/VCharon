@@ -15,8 +15,7 @@ from vcharon import channel_cmd, channels, fsops, helper, platform
 from vcharon.mailbox import watch
 from vcharon.proto import VCharonError
 
-from tests.test_channel import OTHER_CLIENT, ChannelCase, hold
-from tests.util import read_tree
+from tests.util import OTHER_CLIENT, ChannelCase, hold, read_tree
 
 DAY = 86400
 

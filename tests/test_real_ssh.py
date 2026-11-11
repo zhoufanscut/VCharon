@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from vcharon import cli, doctor, platform
+from vcharon import cli, doctor, platform, sync
 
 import tests
 from tests.util import read_tree, use_test_jobs, write_tree
@@ -73,12 +73,12 @@ class RealSshTest(unittest.TestCase):
         self.assertEqual(cli.main(["ping", DEST]), 0)
 
     def run_job(self, name, full=False):
-        """The sync's runner on the test job name (cli.run_jobs), which must succeed; its
+        """The sync's runner on the test job name (sync.run_jobs), which must succeed; its
         lines."""
         out = io.StringIO()
         run = cli._Run()
         with contextlib.redirect_stdout(out):
-            code = cli._guarded(lambda: cli.run_jobs([name], full=full, run=run), run)
+            code = cli._guarded(lambda: sync.run_jobs([name], full=full, run=run), run)
         self.assertEqual(code, 0, out.getvalue())
         return out.getvalue().splitlines()
 
@@ -95,7 +95,7 @@ class RealSshTest(unittest.TestCase):
             f.write("[push]\nssh = %s\nfrom = local:path\nfrom.path = %s\nto = remote:dir\n"
                     "to.path = %s\n" % (DEST, src, remote))
         def size():
-            return cli.size_text(sum(len(data) for data in read_tree(src).values() if data))
+            return sync.size_text(sum(len(data) for data in read_tree(src).values() if data))
 
         self.assertEqual(self.run_job("push")[1], "  put     4 files, 3 dirs (%s)" % size())
         self.assertEqual(self.run_job("push")[1], "  nothing to do")

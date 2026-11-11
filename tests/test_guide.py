@@ -14,12 +14,10 @@ import re
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, cli, guide, platform, skill
+from vcharon import channel_cmd, cli, guide, platform, skill, sync
 from vcharon.mailbox import watch as watch_mod
 
-from tests.test_channel import ChannelCase
-from tests.test_commands import commands, parse
-from tests.util import CAN_SYMLINK, PACKAGE_DIR, FakeSshCase
+from tests.util import CAN_SYMLINK, PACKAGE_DIR, ChannelCase, FakeSshCase, commands, parse
 
 REPO = os.path.dirname(os.path.dirname(PACKAGE_DIR))
 GUIDE_DIR = os.path.join(PACKAGE_DIR, "guide")
@@ -200,7 +198,7 @@ class GuideCommandsParseTest(unittest.TestCase):
                 check(self, argv, name_only)
 
     def test_the_guide_topics_in_hints_exist(self):
-        for text in (channel_cmd.RULES, channel_cmd.TRUST, cli.MAILBOX_DOWN_HINT):
+        for text in (channel_cmd.RULES, channel_cmd.TRUST, sync.MAILBOX_DOWN_HINT):
             for argv in commands(text):
                 with self.subTest(text=text):
                     self.assertEqual(argv[0], "guide")
@@ -521,7 +519,7 @@ BEFORE_JOINING = ("member", "rules", "lobby", "lead", "claude", "codex", "openco
 # reference topics: a refusal's fix line or a note on a rare case, which the agent reads when it
 # happens. A bare `vcharon guide` prints an index, so names no topic.
 L3_TRIGGERS = {
-    ("cli.py", "MAILBOX_DOWN_HINT", "errors"): "the hint of a sync that refused a name",
+    ("sync.py", "MAILBOX_DOWN_HINT", "errors"): "the hint of a sync that refused a name",
     ("channel_cmd.py", "CLOSE_UNTOLD_NOTE", "end"): "close's note on a leader that posted no "
                                                     "CLOSED: a mistake, told after it",
     ("channel_cmd.py", "OTHER_AGENT_NOTE", "start"): "a second agent took over a membership in "

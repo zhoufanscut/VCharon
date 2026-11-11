@@ -12,30 +12,13 @@ import time
 import unittest
 from unittest import mock
 
-from vcharon import channel_cmd, channels, charter, cli, entries, platform, state
+from vcharon import channel_cmd, channels, charter, entries, platform, state, sync
 from vcharon.mailbox import watch
 
-from tests.test_channel import ChannelCase, hold, release
-from tests.util import write_tree
+from tests.util import ChannelCase, charter_text, hold, release, write_tree
 
 # a time the gone check takes for "long ago": older than channels.GONE_AFTER
 LONG_AGO = 3 * 3600
-
-
-def charter_text(name, number, term=None, after=None, leader=None):
-    """A CHANNEL.md holding one charter of name's."""
-    # a taker's is to itself, as vcharon lead writes it; create's to @all
-    lines = ["# CHANNEL", "", "## 2026-10-23 10:00:00 — %s#%d — channel" % (name, number),
-             "to: %s" % ("@all" if term is None else "@" + name),
-             "leader: %s" % (leader or name), "created: 2026-10-23 10:00:00",
-             "rules: vcharon guide rules"]
-    if term is not None:
-        lines.append("term: %d" % term)
-    if after is not None:
-        lines.append("after: %s" % after)
-    lines += ["format: 1", "created by: vcharon 0.8.5", "max mb: 50", "max files: 1000",
-              "max entry kb: 1000", ""]
-    return "\n".join(lines).encode("utf-8")
 
 
 def entry(name, number, title, to="@all", header=()):
@@ -258,7 +241,7 @@ class OfferTest(LeadCase):
     def test_a_failed_send_warns(self):
         # the offer is posted and the lead taken at the server: a failed sync is a WARN
         failed = channels.refused("the server said no", "do what it says")
-        with mock.patch.object(cli, "run_jobs", side_effect=failed):
+        with mock.patch.object(sync, "run_jobs", side_effect=failed):
             out, err = self.as_leader("lead", "game", "--to", "@mac-web")
         self.assertIn("OK  offered the lead of game to mac-web", out)
         self.assertEqual(err.splitlines()[:2], [
@@ -268,7 +251,7 @@ class OfferTest(LeadCase):
         # the leader's next sync sends it
         self.as_leader("sync", "game")
         self.ok("sync", "game")
-        with mock.patch.object(cli, "run_jobs", side_effect=failed):
+        with mock.patch.object(sync, "run_jobs", side_effect=failed):
             got, out, err = self.run_cli("lead", "game")
         self.assertEqual(got, 0, out + err)
         self.assertIn("OK  you lead game (term 2)", out)

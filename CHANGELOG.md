@@ -9,6 +9,9 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Internal maintenance: separate the sync runner and shared command context from the CLI,
+  keep client channel caches out of the helper bundle, and share test fixtures and
+  source-backed command-hint samples. Commands and channel formats are unchanged.
 - Work-channel rejoins print ordinary messages from the last 24 hours, keeping the current
   charter and current leader's plan context even when older (including the leader's own).
   Messages with an invalid time stay visible, as do entries in over-limit local folders that

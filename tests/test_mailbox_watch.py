@@ -29,6 +29,7 @@ from vcharon import (
     channel_cmd,
     channels,
     charter,
+    charter_state,
     cli,
     entries,
     fsops,
@@ -41,15 +42,24 @@ from vcharon.mailbox import read, watch
 from vcharon.proto import VCharonError
 
 from tests import util
-from tests.test_lock import show_pid, stop_child, take_in_child
-from tests.util import PACKAGE_DIR, write_tree
+from tests.util import (
+    FAKE_CHILD,
+    MAILBOX,
+    PACKAGE_DIR,
+    SYNC,
+    T0,
+    Clock,
+    Rounds,
+    StreamCase,
+    WatchCase,
+    member_md,
+    never,
+    show_pid,
+    stop_child,
+    take_in_child,
+    write_tree,
+)
 
-# what follows `vcharon sync` for the remote member windows (ClientModeTest.write_config)
-SYNC = ["mb", "--project", "p"]
-
-# 2026-10-01 09:05:46 on this machine's clock, whatever its zone
-T0 = time.mktime((2026, 10, 1, 9, 5, 46, 0, 0, -1))
-STAMP = re.compile(r"\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
 # exit 12's line: a watcher, or a create, join, leave or close of the member, holds the lock
 LOCKED = ("ERROR another watcher is running on this mailbox (%s.lock), or a create, join, "
           "leave or close of this member")
@@ -83,32 +93,6 @@ def watching(tree, n, tail=""):
     return "watching %s, %d files in other folders%s" % (tree, n, tail)
 
 
-class Clock:
-    """A clock for the watch loops: both the lines' time and the limits' timer."""
-
-    def __init__(self, t=T0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
-class Rounds:
-    """A sleep for the watch loops: each call runs the next of the given steps, and moves the
-    clock on if there is one."""
-
-    def __init__(self, *steps, clock=None):
-        self.steps = list(steps)
-        self.seconds = []
-        self.clock = clock
-
-    def __call__(self, seconds):
-        self.seconds.append(seconds)
-        if self.clock is not None:
-            self.clock.t += seconds
-        self.steps.pop(0)()
-
-
 def no_site_env():
     """The environment of a child run with -S (no site, so no .pth file read, as in a binary;
     site.py decodes .pth files with utf-8-sig, which would hide a lazy
@@ -118,16 +102,6 @@ def no_site_env():
     (pip install -e . makes one), a fix line's spelling reads sysconfig's data, as on CI."""
     return dict(os.environ, PYTHONPATH=os.path.dirname(PACKAGE_DIR),
                 PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
-
-
-def never(seconds):
-    raise AssertionError("slept before the first round")
-
-
-def member_md(name, leader, channel="mb"):
-    """MEMBER.md as vcharon join writes it."""
-    return ("# MEMBER\n\n## 2026-10-01 09:00 — %s#1 — member\nto: @%s\nchannel: %s\nname: %s\n"
-            "leader: %s\n" % (name, leader, channel, name, leader)).encode("utf-8")
 
 
 def gone(pid, wait=10):
@@ -158,74 +132,6 @@ def end_pid(pid):
         os.kill(pid, signal.SIGTERM)
     except OSError:
         pass
-
-
-class WatchCase(unittest.TestCase):
-    """watch.scan keys a file by its size and mtime_ns only: a test that rewrites a file
-    changes its length, else the rewrite can land in the same mtime tick and go unseen."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="vcharon-test-")
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        # a channel's folder, mb; server mode watches it as the member debian, its leader
-        self.tree = os.path.join(self.tmp, "mb")
-        # the saved snapshots and their locks go to vcharon's state dir: one per test
-        self.vcharon_home = os.path.join(self.tmp, "vcharon-home")
-        patch = mock.patch.dict(os.environ, {"VCHARON_HOME": self.vcharon_home})
-        patch.start()
-        self.addCleanup(patch.stop)
-        self.lines = []
-        self.member()
-
-    def member(self, me="debian", leader="debian", root=None):
-        """me's own folder with its MEMBER.md: server mode watches only such a folder's
-        member."""
-        write_tree(self.tree if root is None else root,
-                   {"%s/MEMBER.md" % me: member_md(me, leader)})
-
-    def post(self, folder, n, title, to="@debian", name=None, file="RESULTS.md",
-             when="2026-10-01 09:00", root=None):
-        """Appends one entry, as mailbox_post.py writes it, by name (folder's member unless
-        given) to folder/file."""
-        path = os.path.join(self.tree if root is None else root, folder, *file.split("/"))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        text = entries.build(when, name or folder, n, title, to.split())
-        with open(path, "ab") as f:
-            if not f.tell():
-                f.write(b"# RESULTS\n")
-            f.write(text.encode("utf-8"))
-        return path
-
-    def said(self, lines=None):
-        """The lines without their time, each checked to start with one."""
-        out = []
-        for line in self.lines if lines is None else lines:
-            self.assertRegex(line, STAMP)
-            out.append(line[20:])
-        return out
-
-    def saved_at(self, path):
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)["saved"]
-
-    def state(self, me="debian", job=None, root=None):
-        return watch.snapshot_path(self.tree if root is None else root, me, job)
-
-    def local_record(self, me="debian", leader="debian", project="q", role=None):
-        """me's join record as a local member of mb, whose folder is self.tree: vcharon watch
-        mb --project <project> then watches it as me (DESIGN, "Which membership")."""
-        channel_cmd.write_record({"version": 1, "channel": "mb", "name": me, "leader": leader,
-                                  "ssh": None, "remote": self.tree,
-                                  "machine": util.TEST_MACHINE_ID, "project": project,
-                                  "role": role, **util.record_format()})
-
-    def cli(self, *argv, project="q"):
-        """vcharon watch mb --project <project> ARGV in this process: (exit code, stdout,
-        stderr)."""
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
-            code = cli.main(["watch", "mb", "--project", project] + list(argv))
-        return code, out.getvalue(), err.getvalue()
 
 
 class ExitLineTest(unittest.TestCase):
@@ -496,7 +402,7 @@ class HoldTest(WatchCase):
         self.assertEqual(lines[-1], "EXIT closed (exit 13)")
 
     def test_merged_before_exit_interrupted(self):
-        # a Ctrl-C, or a SIGTERM, during the wait: the watch unwinds, then cli.py prints
+        # a Ctrl-C, or a SIGTERM, during the wait: the watch unwinds, then command.py prints
         # its EXIT line
         self.local_record()
         steps = [self.first, self.second]
@@ -2006,29 +1912,17 @@ class UntilChangeTest(WatchCase):
             self.assertEqual(list(json.load(f)["files"]), ["debian/STEPS.md"])
 
 
-# a channel section, in channels.d/ next to vcharon.ini: the member windows of the channel
-# mb, led by debian
-MAILBOX = """
-[mb.windows]
-ssh            = devbox
-mailbox.me     = windows
-mailbox.leader = debian
-mailbox.local  = {local}
-mailbox.remote = ~/.local/state/vcharon/channels/mb
-"""
-
-
 class ClientModeTest(WatchCase):
     def test_a_member_left_out_by_the_pull(self):
         # --no-stream: the same WARN, from the file the sync's down saved
         note = charter.skipped_note("debian", "2.0 kB in 3 files, 1.0 kB over the limit of "
                                     "1.0 kB and 10 files")
         steps = [[note], [note.replace("2.0 kB in 3", "3.0 kB in 4")], []]
-        path = charter.left_out_path("mb.windows")
+        path = charter_state.left_out_path("mb.windows")
         seen = []
 
         def run(job, sync_args):
-            charter.save_left_out("mb.windows", steps.pop(0), 1000, 10)
+            charter_state.save_left_out("mb.windows", steps.pop(0), 1000, 10)
             if os.path.exists(path):
                 st = os.stat(path)
                 seen.append((st.st_ino, st.st_mtime_ns))
@@ -2041,31 +1935,10 @@ class ClientModeTest(WatchCase):
         # one warning while the folder grows, cleared once the pull takes it again
         self.assertEqual(self.said(), [watching(self.tree, 0), "WARN " + warn,
                                        "WARN cleared: " + warn])
-        self.assertFalse(os.path.exists(charter.left_out_path("mb.windows")))
+        self.assertFalse(os.path.exists(charter_state.left_out_path("mb.windows")))
         # the file holds names only: not written again while the folder grows
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[0], seen[1])
-
-    @staticmethod
-    def write_config(case):
-        """vcharon.ini, channels.d/mb.windows.ini and windows's join record, a remote member
-        of the project p; the client's tree starts empty (server mode's debian/MEMBER.md goes:
-        a test of both modes writes it again). Returns what follows `vcharon sync` for it."""
-        os.remove(os.path.join(case.tree, "debian", "MEMBER.md"))
-        os.rmdir(os.path.join(case.tree, "debian"))
-        os.makedirs(case.vcharon_home, exist_ok=True)
-        with open(os.path.join(case.vcharon_home, "vcharon.ini"), "w", encoding="utf-8") as f:
-            f.write("[vcharon]\n")
-        folder = os.path.join(case.vcharon_home, "channels.d")
-        os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "mb.windows.ini"), "w", encoding="utf-8") as f:
-            f.write(MAILBOX.format(local=case.tree))
-        channel_cmd.write_record({"version": 1, "channel": "mb", "name": "windows",
-                                  "leader": "debian", "ssh": "devbox",
-                                  "remote": "~/.local/state/vcharon/channels/mb",
-                                  "machine": util.TEST_MACHINE_ID, "project": "p",
-                                  "role": None, **util.record_format()})
-        return list(SYNC)
 
     def setUp(self):
         WatchCase.setUp(self)
@@ -2255,37 +2128,6 @@ class ClientModeTest(WatchCase):
         self.assertIn("run /opt/vc/bin/vcharon doctor (it runs", fix)
 
 
-# A stand-in for the streaming child, `vcharon sync C --repeat <every>`: it does the
-# actions in its argument, in order, then waits for the end of its stdin and exits 0, as vcharon
-# sync --repeat does. out/err: a line on stdout/stderr; raw: hex bytes on stdout; append: text
-# at the end of a file; exit: exit with that code now; deaf: ignore the end of stdin for 60 s;
-# pause: sleep that many seconds (stdout and stderr are two pipes: a pause orders them).
-FAKE_CHILD = """
-import json, sys, time
-for act in json.loads(sys.argv[1]):
-    kind = act[0]
-    if kind == "out":
-        sys.stdout.write(act[1] + "\\n")
-        sys.stdout.flush()
-    elif kind == "err":
-        sys.stderr.write(act[1] + "\\n")
-        sys.stderr.flush()
-    elif kind == "raw":
-        sys.stdout.buffer.write(bytes.fromhex(act[1]))
-        sys.stdout.flush()
-    elif kind == "append":
-        with open(act[1], "ab") as f:
-            f.write(act[2].encode("utf-8"))
-    elif kind == "exit":
-        sys.exit(act[1])
-    elif kind == "deaf":
-        time.sleep(60)
-    elif kind == "pause":
-        time.sleep(act[1])
-sys.stdin.buffer.read()
-"""
-
-
 # A child that leaves a grandchild (sleeping 30 s) holding its stdout, the grandchild's pid in
 # argv[1]; "detached" in argv[2] puts it in a session of its own on POSIX, out of the child's
 # process group. Then one round, and it ignores the end of its stdin.
@@ -2302,79 +2144,10 @@ time.sleep(60)
 """
 
 
-class StreamTest(WatchCase):
+class StreamTest(StreamCase):
     """A streaming watch: one long-lived vcharon sync --repeat child, its rounds
     as steps, its restarts with the backoff, the wake rules in time, and the child stopped on
     every way out. The child is FAKE_CHILD."""
-
-    def setUp(self):
-        WatchCase.setUp(self)
-        self.sync_args = ClientModeTest.write_config(self)
-        os.makedirs(self.tree, exist_ok=True)
-        self.spawned = []
-        self.children = []
-        self.slept = []
-
-    def entry(self, folder, n, title, to="@windows", file="RESULTS.md"):
-        """("append", path, text): an entry, as mailbox_post.py writes it, for a child to add."""
-        path = os.path.join(self.tree, folder, file)
-        # the folder now, the file only when the child appends: the start sees no file
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        head = "" if os.path.exists(path) else "# RESULTS\n"
-        return ["append", path,
-                head + entries.build("2026-10-01 09:00", folder, n, title, to.split())]
-
-    def spawn(self, argv, env):
-        self.spawned.append((argv, env))
-        acts = self.children.pop(0)
-        proc = subprocess.Popen([sys.executable, "-c", FAKE_CHILD, json.dumps(acts)],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        self.addCleanup(self.reap, proc)
-        self.procs.append(proc)
-        return proc
-
-    @staticmethod
-    def reap(proc):
-        if proc.poll() is None:
-            proc.kill()
-        proc.wait()
-        for stream in (proc.stdin, proc.stdout, proc.stderr):
-            stream.close()
-
-    def watch(self, *children, clock=None, steps=None, **kw):
-        """watch_job, syncing every 2 s, over the children: (exit code, the lines without
-        their time). steps: with clock, the seconds each round moves the clock on. timer: the
-        limits' clock, clock unless given. A child does all its actions at once, then waits for
-        its stdin's end, and the fake clock never reaches the stuck rule: a watcher that gets
-        fewer rounds than rounds= hangs on the last child, so end that one with ["exit", 0]."""
-        self.children = [list(c) for c in children]
-        self.procs = []
-        clock = clock or Clock()
-        timer = kw.pop("timer", clock)
-        lines = []
-        real = watch.Stream.next_round
-
-        def next_round(stream, deadline=None):
-            got = real(stream, deadline)
-            if steps:
-                clock.t += steps.pop(0)
-            return got
-
-        def sleep(seconds):
-            self.slept.append(seconds)
-            clock.t += seconds
-
-        kw.setdefault("max_minutes", 25)
-        with mock.patch.object(watch.Stream, "next_round", next_round):
-            code = watch.watch_job("mb.windows", self.sync_args, 2, out=lines.append, sleep=sleep,
-                                   clock=clock, timer=timer, stream=True, spawn=self.spawn,
-                                   **kw)
-        return code, self.said(lines)
-
-    def assert_all_stopped(self):
-        for proc in self.procs:
-            self.assertIsNotNone(proc.poll(), "a child still runs")
 
     def test_a_real_streaming_watcher_imports_nothing_after_its_start(self):
         # the watcher in a child, its sync child FAKE_CHILD: rounds with an entry and an
@@ -2441,7 +2214,7 @@ class StreamTest(WatchCase):
     def test_a_member_left_out_by_the_pull(self):
         # the streaming sync prints no notes: the members its down left out reach the
         # watcher through the file the sync saves, a WARN each while it lasts
-        path = charter.left_out_path("mb.windows")
+        path = charter_state.left_out_path("mb.windows")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         doc = json.dumps({"limit": "1.0 kB and 10 files", "members": ["debian"]})
         warn = ("left out debian/: over the channel's limit of 1.0 kB and 10 files; this box's "
@@ -4274,7 +4047,7 @@ class FirstLookTest(WatchCase):
         self.post("mac", 2, "for you", to="@windows")
         write_tree(self.tree, {"stray.txt": b"x"})
         # the members the last pull left out: a WARN each
-        charter.save_left_out("mb.windows", [charter.skipped_note(
+        charter_state.save_left_out("mb.windows", [charter.skipped_note(
             "big", "2.0 kB in 3 files, 1.0 kB over the limit of 1.0 kB and 10 files")],
             1000, 10)
         state = self.state("windows", "mb.windows")

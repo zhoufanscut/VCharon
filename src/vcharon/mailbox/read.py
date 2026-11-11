@@ -1,6 +1,6 @@
 """vcharon read C: a whole channel, every member's entries merged in one order (the guide's
 read topic). It only reads, apart from the version note it keeps in the state folder
-(charter.version_note_path, cli.py's read), and starts no sync.
+(charter_state.version_note_path, cli.py's read), and starts no sync.
 
 A local member reads the channel's folder in the channel root on this machine; a remote member
 reads this box's copy of the channel, as of its last sync (a watch, or vcharon sync C).

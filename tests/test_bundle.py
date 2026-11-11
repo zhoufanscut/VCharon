@@ -239,7 +239,7 @@ class BundleTest(unittest.TestCase):
         self.assertIn("vcharon.ssh", reached)
         self.assertIn("vcharon.guide", reached)
         # imported only inside functions
-        self.assertIn("vcharon.channels", imported_by("vcharon.charter"))
+        self.assertIn("vcharon.platform", imported_by("vcharon.fsops"))
         self.assertIn("vcharon.update", reached)
         self.assertIn("vcharon.helper", helper_closure())
         self.assertIn("vcharon.plugins", helper_closure())
