@@ -7,11 +7,12 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.9.3 — 2026-11-11
 
 - Internal maintenance: separate the sync runner and shared command context from the CLI,
   keep client channel caches out of the helper bundle, and share test fixtures and
-  source-backed command-hint samples. Commands and channel formats are unchanged.
+  source-backed command-hint samples. The binary smoke test opens the full `guide start`
+  topic. Commands and channel formats are unchanged.
 - Work-channel rejoins print ordinary messages from the last 24 hours, keeping the current
   charter and current leader's plan context even when older (including the leader's own).
   Messages with an invalid time stay visible, as do entries in over-limit local folders that
@@ -30,6 +31,18 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - `vcharon list --remove-idle C1 C2 …` repeats the requested channel names below each printed
   root's header, including when nothing is idle, in dry runs and with `--yes`. To adapt:
   nothing; the selection, JSON fields and removal behavior are unchanged.
+
+Checked: the unit suite on Linux (measured, Python 3.13.5: 1861 tests OK, 13 skipped,
+run as CI before and after the version change) and Ruff. Local and fake-helper CLI probes covered
+channel lifecycle, repeat failure and recovery, and SIGTERM/EOF shutdown; isolated checks
+covered client cache JSON and command-hint mutations (measured on Linux). The Linux binary
+built with pinned PyInstaller 6.22.3 passed the full smoke test (measured).
+
+CI before the version change passed on Linux, macOS and Windows with Python 3.13 and 3.14,
+and its real-SSH job on Linux (measured).
+
+Direct final release at the maintainer's request, without a release candidate. Not run for
+0.9.3: a new interactive multi-machine live round.
 
 ## 0.9.2 — 2026-11-11
 

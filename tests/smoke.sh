@@ -91,10 +91,10 @@ vcharon read smoke --last 1 --json > read.json
 cat read.json
 grep -q '"smoke test"' read.json || fail "read --json doesn't hold the entry"
 
-step vcharon guide
-vcharon guide > guide.txt
+step vcharon guide start
+vcharon guide start > guide.txt
 head -n 3 guide.txt
-[ "$(wc -l < guide.txt)" -gt 20 ] || fail "vcharon guide printed too little"
+[ "$(wc -l < guide.txt)" -gt 20 ] || fail "vcharon guide start printed too little"
 
 step vcharon skill install
 vcharon skill install
