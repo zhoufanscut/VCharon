@@ -328,7 +328,7 @@ class SharedMoreTest(SharedCase):
         self.assertEqual(self.ok("list", "--remove-idle", "--local", "--shared", "--days", "3",
                                  "lobby").splitlines(), [
             "vcharon: list --remove-idle  (this machine's shared root)  members idle over 3 "
-            "days", *shared,
+            "days", "  channels: lobby", *shared,
             platform.runnable("  to remove them, your user runs: vcharon list --remove-idle "
                               "--yes --local --shared --days 3 lobby")])
         # a channel named is looked up in that root only
@@ -346,6 +346,29 @@ class SharedMoreTest(SharedCase):
         self.ok("list", "--remove-idle", "--local", "--shared", "--yes")
         self.assertEqual(sorted(os.listdir(os.path.join(self.shared, "lobby"))),
                          ["laptop-ui-b"])
+
+    def test_remove_idle_selection_with_nothing_idle(self):
+        self.lobbies()
+        self.ok("create", "home", "--local")
+        self.ok("create", "shared", "--local", "--shared")
+        before = read_tree(self.root), read_tree(self.shared)
+        home = "vcharon: list --remove-idle  (this machine)  members idle over 21 days"
+        shared = ("vcharon: list --remove-idle  (this machine's shared root)  members idle "
+                  "over 21 days")
+        cases = [
+            ((), ("home", "lobby", "shared"), [
+                home, "  channels: home, lobby, shared", "  none",
+                shared, "  channels: home, lobby, shared", "  none"]),
+            (("--home",), ("lobby", "home"), [home, "  channels: lobby, home", "  none"]),
+            (("--shared",), ("shared", "lobby"), [
+                shared, "  channels: shared, lobby", "  none"])]
+        for flags, names, expected in cases:
+            for yes in ((), ("--yes",)):
+                with self.subTest(flags=flags, yes=yes):
+                    out = self.ok("list", "--remove-idle", "--local", "--days", "21",
+                                  *flags, *names, *yes)
+                    self.assertEqual(out.splitlines(), expected)
+        self.assertEqual((read_tree(self.root), read_tree(self.shared)), before)
 
     def test_remove_idle_of_one_root_json(self):
         self.lobbies()

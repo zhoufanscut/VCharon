@@ -7,6 +7,12 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
+## Unreleased
+
+- `vcharon list --remove-idle C1 C2 …` repeats the requested channel names below each printed
+  root's header, including when nothing is idle, in dry runs and with `--yes`. To adapt:
+  nothing; the selection, JSON fields and removal behavior are unchanged.
+
 ## 0.9.2 — 2026-11-11
 
 - `vcharon list --remove-idle` takes `--project`, `--role` and its other flags between the

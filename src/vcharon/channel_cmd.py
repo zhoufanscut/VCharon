@@ -1392,7 +1392,7 @@ def _remove_idle(args, cfg, log, say):
             # the shared root's group whenever list shows it (_list), so its "none" says
             # that root was checked too; with --shared it is the only group
             if i == 0 or listing["channels"] or listing["others"]:
-                _say_idle(one, plan, whole, days, say)
+                _say_idle(one, plan, whole, days, args.channels, say)
         if problem is not None:
             say(_shared_note(server, problem))
         if not args.yes and any(m["action"] == "remove" for g in groups for m in g[1]):
@@ -1446,8 +1446,10 @@ def _prune_idle(server, plan, items, days):
     return failed
 
 
-def _say_idle(server, plan, whole, days, say):
+def _say_idle(server, plan, whole, days, selected, say):
     say(IDLE_HEAD % (server.where, days_text(days)))
+    if selected:
+        say("  channels: %s" % ", ".join(selected))
     if not plan and not whole:
         say("  none")
     channel = None

@@ -1422,6 +1422,9 @@ acts on no membership, as `list` does.
   A name at a channel's top that isn't a member's folder, or is a link, is never listed. A work
   channel whose every member, its leader too, is idle gets one note and none of its members is
   removed: a whole channel is its leader's to close.
+- **Selection in text**: each printed root's header is followed by the requested channel
+  names in argument order, even when nothing is idle. With no channel names there is no
+  selection line. Why: an empty result should still show which selection was checked.
 - **Without `--yes`** nothing changes: one `remove` or `keep` line per idle member, then the
   command the user runs to remove them; exit 0, never a prompt.
 - **With `--yes`** each candidate is one `channel.prune`, which checks again at the server, by

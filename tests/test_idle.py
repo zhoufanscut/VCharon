@@ -388,6 +388,21 @@ class RemoveIdleTest(ChannelCase):
                          "nothing of it is removed; its leader closes it, or your user deletes "
                          "it at the server")
 
+    def test_named_channels_with_nothing_idle(self):
+        self.lead("docs", where=("--local",), box="win", project="d")
+        before = read_tree(self.root)
+        flags = ("game", "--role", "probe", "docs", "--local", "--home", "--days", "21")
+        for yes in ((), ("--yes",)):
+            with self.subTest(yes=yes):
+                self.assertEqual(self.lines(*flags, *yes), [
+                    "vcharon: list --remove-idle  (this machine)  members idle over 21 days",
+                    "  channels: game, docs",
+                    "  none"])
+        self.assertEqual(json.loads("\n".join(self.lines(*flags, "--json"))), {
+            "server": None, "days": 21, "yes": False, "root": "home", "members": [],
+            "idle_channels": [], "shared": None})
+        self.assertEqual(read_tree(self.root), before)
+
     def test_named_channels_only_and_one_unknown(self):
         self.lead("docs", where=("--local",), box="win", project="d")
         self.use_box("linux")
@@ -397,17 +412,30 @@ class RemoveIdleTest(ChannelCase):
         both = self.lines("--local")
         self.assertIn("  docs", both)
         self.assertIn("  game", both)
+        before = read_tree(self.root)
         only = self.lines("--local", "docs")
-        self.assertEqual(only[1:3], ["  docs", "    remove  linux-web  idle 20 d"])
+        self.assertEqual(only[1:4], ["  channels: docs", "  docs",
+                                    "    remove  linux-web  idle 20 d"])
         self.assertNotIn("  game", only)
         self.assertTrue(only[-1].endswith("--remove-idle --yes --local docs"), only)
-        before = read_tree(self.root)
+        selected = json.loads("\n".join(self.lines("--local", "--home", "docs", "--json")))
+        self.assertEqual(sorted(selected), ["days", "idle_channels", "members", "root",
+                                           "server", "shared", "yes"])
+        self.assertEqual([(m["channel"], m["name"], m["action"])
+                          for m in selected["members"]], [("docs", "linux-web", "remove")])
+        self.assertEqual(read_tree(self.root), before)
         with mock.patch.object(platform, "self_command", lambda *a, **kw: SPELLED):
             self.assertEqual(self.refusal("list", "--remove-idle", "--local", "--yes", "docs",
                                           "nope"),
                              ("ERROR not_found: there is no channel nope",
                               "check the name: %s list --local" % SPELLED))
         self.assertEqual(read_tree(self.root), before)
+        control = read_tree(os.path.join(self.root, "game"))
+        removed = self.lines("--local", "--yes", "docs")
+        self.assertEqual(removed[1:3], ["  channels: docs", "  docs"])
+        self.assertTrue(removed[3].startswith("    removed  linux-web  idle 20 d:"), removed)
+        self.assertEqual(os.listdir(os.path.join(self.root, "docs")), ["win-d"])
+        self.assertEqual(read_tree(os.path.join(self.root, "game")), control)
 
     def test_channels_on_both_sides_of_a_flag(self):
         # as read and guide take theirs: the channels after the flag join those before it
