@@ -1106,8 +1106,10 @@ HINTS = {
         ("the topics are %s and %s: vcharon guide %s",
          ("start, member, post, watch, read, rules, lead, end", "errors", "start")),
         ("vcharon %s: the agent guide. Read a topic with vcharon guide TOPIC:", None),
-        ("What `vcharon guide TOPIC` prints, one section per topic. An agent reads it with "
-         "`vcharon guide`, which always matches the vcharon it runs.", None)],
+        ("For example: vcharon guide member rules codex", ()),
+        ("Setup, names and new sessions: vcharon guide start", ()),
+        ("What `vcharon guide TOPIC` prints, one section per topic. An agent lists them\n"
+         "with `vcharon guide`, which always matches the vcharon it runs.", None)],
     "skill/__init__.py": [
         ("<!-- written by vcharon skill install, which replaces this file: keep your own edits "
          "elsewhere -->", None),

@@ -9,6 +9,21 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 
 ## Unreleased
 
+- Work-channel rejoins print ordinary messages from the last 24 hours, keeping the current
+  charter and current leader's plan context even when older (including the leader's own).
+  Messages with an invalid time stay visible, as do entries in over-limit local folders that
+  `read` excludes. A `not shown:` line counts older private and broadcast messages and gives
+  the command to read them; files and watcher snapshots are
+  unchanged. A first join and lobby joins keep their existing behavior. To adapt: use the
+  printed `read` command when you need the older history.
+- Bare `vcharon guide` prints the topic index and first-reading commands. To read the start
+  page, run `vcharon guide start`; explicit and combined topic reads are unchanged. The
+  CLI topics keep operating instructions without historical test accounts, reference pages
+  point to the member and lobby instructions where they repeated them, and new-session
+  catch-up reads use `--to-me --last 10` instead of listing the whole history.
+- Local watchers scan every 2 seconds by default, matching streaming remote watchers.
+  To keep the earlier local pace, pass `--every 10`.
+
 - `vcharon list --remove-idle C1 C2 …` repeats the requested channel names below each printed
   root's header, including when nothing is idle, in dry runs and with `--yes`. To adapt:
   nothing; the selection, JSON fields and removal behavior are unchanged.

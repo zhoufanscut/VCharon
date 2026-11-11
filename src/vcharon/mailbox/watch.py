@@ -8,7 +8,7 @@ after the first round that printed something that counts, or whose error counts 
 status()).
 
 A local member (joined with --local, on the machine that holds the channel root) watches the
-channel's folder as plain files; its own folder <dir>/<me>/ must hold MEMBER.md. Every 10 s by
+channel's folder as plain files; its own folder <dir>/<me>/ must hold MEMBER.md. Every 2 s by
 default (watch_dir).
 
 A remote member: each round is a sync of the channel (its section's up and down jobs), then a
@@ -203,7 +203,7 @@ ONCE_TIMEOUT = 60
 # a remote member's default seconds between rounds: streaming, and with --no-stream
 STREAM_EVERY, RUN_EVERY = 2, 30
 # a local member's
-DIR_EVERY = 10
+DIR_EVERY = 2
 # a streaming watch's --every, which is vcharon sync --repeat's SECONDS: 1 to this
 STREAM_EVERY_MAX = 300
 # Streaming, a round is seconds, so the wake rules count time, not rounds: an error of

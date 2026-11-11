@@ -37,17 +37,19 @@ class GuideCommandTest(FakeSshCase):
                 self.assertEqual(out, guide.text(topic))
                 self.assertTrue(out.startswith("# "), out[:40])
 
-    def test_the_index_and_start(self):
+    def test_the_index_without_a_topic(self):
         code, out, err = self.run_cli("guide")
         self.assertEqual((code, err), (0, ""))
-        index, start = out.split("\n\n# ", 1)
-        lines = index.splitlines()
+        self.assertEqual(out, guide.index())
+        self.assertNotIn("\n# ", out)
+        lines = out.splitlines()[:2 + len(guide.TOPICS)]
+        self.assertIn("vcharon guide member rules codex", out)
+        self.assertIn("vcharon guide start", out)
         self.assertIn("the agent guide", lines[0])
         self.assertEqual([l.split()[0] for l in lines[2:]], list(guide.TOPICS))
         # the titles line up, after the longest topic name too
         self.assertEqual(len({l.index(guide.title(topic))
-                              for l, topic in zip(lines[2:], guide.TOPICS)}), 1, index)
-        self.assertEqual("# " + start, guide.text("start"))
+                              for l, topic in zip(lines[2:], guide.TOPICS)}), 1, out)
 
     def test_several_topics(self):
         # each as it prints alone, in the order given, one blank line between; one named twice
@@ -517,7 +519,7 @@ def headings(path):
 BEFORE_JOINING = ("member", "rules", "lobby", "lead", "claude", "codex", "opencode")
 # (file in the package, the constant or function, topic) -> why that line may point into the
 # reference topics: a refusal's fix line or a note on a rare case, which the agent reads when it
-# happens. A bare `vcharon guide` names the start topic: that is what it prints
+# happens. A bare `vcharon guide` prints an index, so names no topic.
 L3_TRIGGERS = {
     ("cli.py", "MAILBOX_DOWN_HINT", "errors"): "the hint of a sync that refused a name",
     ("channel_cmd.py", "CLOSE_UNTOLD_NOTE", "end"): "close's note on a leader that posted no "
@@ -529,17 +531,16 @@ L3_TRIGGERS = {
                                                    "line",
     ("channel_cmd.py", "GONE_STEPS", "end"): "the channel-gone fix line: the channel closed, or "
                                              "the own folder removed",
-    ("cli.py", "_parser", "start"): "the skill verb's help says what the skill points at",
     ("mailbox/watch.py", "STOP_FIX", "watch"): "watch --stop's refusal when the watcher didn't "
                                                "stop: each CLI's own way to stop it",
-    ("guide/__init__.py", "document", "start"): "docs/GUIDE.md's header: a file for people, "
-                                                "not a line a command prints",
+    ("guide/__init__.py", "index", "start"): "the index points to setup and new-session cases",
 }
 # (file, constant or function, placeholder) -> what stands in for the topic there
 PLACEHOLDERS = {
     ("guide/__init__.py", "index", "TOPIC"): "the index's own usage line, above the topics",
     ("guide/__init__.py", "unknown", "%s"): "an unknown topic's fix: %s is guide.DEFAULT",
-    ("guide/__init__.py", "document", "TOPIC"): "docs/GUIDE.md's header, as for start above",
+    ("guide/__init__.py", "document", "TOPIC"): "docs/GUIDE.md's header, for people reading the "
+                                                "whole guide",
 }
 _MENTION = re.compile(r"\bvcharon guide\b")
 # a word after "vcharon guide", without the punctuation that ends a sentence, and a heading
@@ -552,7 +553,7 @@ _PLACEHOLDER = re.compile(r"%s|\{\}|[A-Z]+")
 
 def guide_mentions(text):
     """(topic, heading or None) for each topic each `vcharon guide` in text names; a heading
-    goes with the last topic before it. A bare one names the start topic, which it prints; one
+    goes with the last topic before it. A bare one prints the index, naming no topic; one
     followed by a word that is neither a topic nor a placeholder names that word, so a misspelt
     topic is reported, not read as bare."""
     out = []
@@ -570,7 +571,8 @@ def guide_mentions(text):
             if word:
                 topics, at = [word.group(1)], word.end()
         heading = _NAMED_HEADING.match(text, at)
-        topics = topics or [guide.DEFAULT]
+        if not topics:
+            continue
         out += [(topic, None) for topic in topics[:-1]]
         out.append((topics[-1], heading.group(1) if heading else None))
     return out
@@ -754,7 +756,7 @@ class NamedSectionTest(unittest.TestCase):
         self.assertEqual(got, [
             ("A", 3, [("member", None), ("rules", None), ("watch", "Stopping it")]),
             ("f", 6, [("{}", None)]),
-            ("B", 7, [("start", None)]),
+            ("B", 7, []),
             ("C", 8, [("watch", None), ("wach", "Stopping it")])])
 
 

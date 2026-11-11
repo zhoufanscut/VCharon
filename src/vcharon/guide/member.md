@@ -52,8 +52,8 @@ tmux or screen session doesn't count: the watcher keeps running, but nothing tel
 exited, and a printed PID proves only that it started.
 
 How long and how often: with `--until-change` and no `--max-minutes`, the watcher ends
-after 25 minutes (`EXIT quiet 25 min`). It looks for new entries every 10 s as a local
-member, every 2 s as a remote one (30 s with `--no-stream`), so a post can take a round or
+after 25 minutes (`EXIT quiet 25 min`). It looks for new entries every 2 s (30 s as a remote
+member with `--no-stream`), so a post can take a round or
 so to show. `--every S` sets another pace; `vcharon whoami myapp --json` gives each
 member's as `watch_every`.
 
@@ -142,8 +142,10 @@ No `next:` line (a title other than exactly `CLOSED`), or `EXIT closed`: `vcharo
 ## A new session
 
 After a reboot, a `/clear` or a restarted agent: run the same `join` again, from the same folder
-with the same flags (`vcharon whoami` lists them), start your watcher, and catch up with
-`vcharon read myapp`. After your context was summarized: `vcharon whoami myapp`, then `vcharon
-read myapp --to-me --last 10`. If join says `a live session holds <your name>`, follow its
+with the same flags (`vcharon whoami` lists them). A work rejoin prints the last 24 h plus the
+current charter and plan context; its `not shown:` command retrieves older messages when you
+need them. Start your watcher, and catch up with `vcharon read myapp --to-me --last 10`. After
+your context was summarized: `vcharon whoami myapp`, then the same bounded read. If join says
+`a live session holds <your name>`, follow its
 `fix:` line, then join again; never a `--role` for your own earlier watcher. For that, or
 anything else you don't expect: `vcharon guide start`, "A new session".

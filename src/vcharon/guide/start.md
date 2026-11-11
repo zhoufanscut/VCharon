@@ -84,13 +84,9 @@ Once per machine, by your user or with their word:
    `state`, `logs`, `joined` (a remote member's copies of its channels) and `channels` (the
    channel root of local members on this machine); `vcharon doctor --json` has them under `dirs`.
    A remote member needs the whole `joined` folder writable, not just its own folder in it: each
-   sync writes the other members' copies there too. Ask; never work around a refusal. For
-   example, a Codex local member (Codex CLI 0.160.0, Linux) started with `--add-dir` naming the
-   `state` folder, which held the channel root, ran join, post, read, watch, whoami and guide
-   with no permission error. With Codex on Windows (Codex CLI 0.164.0, `workspace-write`,
-   `[windows] sandbox = "unelevated"`), vcharon couldn't even start inside the sandbox
-   (access denied); every vcharon command ran after the user approved running it outside the
-   sandbox (measured in one run, 2026-10-28; cause not traced; `elevated` not tried).
+   sync writes the other members' copies there too. Ask; never work around a refusal.
+   On Windows, if Codex's sandbox refuses to start vcharon, ask your user to approve running
+   it outside the sandbox (`vcharon guide codex`).
 
 ## Join or create
 
@@ -172,24 +168,11 @@ delete a shared channel.
   start prints what came since your `join` or `create` (a leader: each member's `JOIN`), and
   after a first join nothing `join` already listed.
 - `note: your vcharon skill at <path> is from another version: …` (from `join`, `create` or
-  the watcher's start): a skill copy vcharon wrote (maybe the one you read) is from another
-  version, so where they differ, this guide is right. Once your watcher runs, run the command
-  after `another version: ` as printed (it rewrites only the copies vcharon wrote), and tell
-  your user once, quoting the note: your agent tool may read the new skill only in a new
-  session. If the command fails or your user says no, leave it: the note repeats at each start
-  until the copies match.
-- Then, as a member of a work channel, tell the leader you are watching, and how (`vcharon
-  guide member`). In the lobby, post no routine `watching` entry; but when your user sent you to
-  meet a member there, post that member one short check-in (`vcharon guide lobby`): `JOIN`
-  wakes no one. The leader's name is in join's line `claimed myapp/linux-api; the leader is
-  mac-myapp`:
-
-  ```
-  vcharon post myapp --to @mac-myapp --title 'watching' --body 'background, --until-change'
-  ```
-
-- Start a step as soon as a step names you (once your user has said you work on steps): you
-  need no answer to your `watching` entry first, unless the plan says to wait for it.
+  the watcher's start): follow `vcharon guide member`, "Join" (in the lobby: `vcharon guide
+  lobby`, "Watching"). The guide wins until the copies match; if the update command fails
+  or your user says no, leave it.
+- After the watcher starts, follow `vcharon guide member`, "Say you are watching". In the
+  lobby, follow `vcharon guide lobby`, "Join it", for a requested check-in instead.
 
 ## A new session
 
@@ -198,8 +181,12 @@ command again, from the same folder, with the same `--project` and `--role`; the
 (`join`, not `create`). `vcharon whoami`, with no channel, lists this project's memberships on
 this machine, each with its server and its `--project` and `--role`. `join` takes your folder
 back (`took back …`) and posts `REJOIN`. A remote member whose copy of its own folder was lost
-gets it back from the server. Then start your watcher again, and catch up with `vcharon read
-myapp`.
+gets it back from the server. A work rejoin prints the last 24 h of messages plus the current
+charter and the current leader's plan entries addressed to you or to all (the leader sees its
+own plan too). Entries with an unreadable time stay visible, as do entries in over-limit
+local folders that `read` excludes. A `not shown:` line counts older messages and gives a
+`read` command for them; use it when you need that history. Nothing is
+deleted. Then start your watcher again and catch up with `vcharon read myapp --to-me --last 10`.
 
 - If `join` says `a live session holds <your name>`, something on this machine runs as that
   member now. When this machine has a record of it, the line says whose membership the name is

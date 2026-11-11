@@ -1308,8 +1308,24 @@ it is a note. The fix has no `leave`: that would end the first agent's membershi
      points at `read --to-me`.
   9. The entries already addressed to the member or to all are printed, escaped as `read`
      escapes them: with a snapshot just saved, only those it takes as seen, so each is printed
-     once; with a kept snapshot, all of them. A wrong-folder ID is a `WARN` line, as the watcher
-     prints it; an entry with no ID is left out; of an ID in two files, the first in path order.
+     once; with a kept snapshot, the eligible entries already there. A wrong-folder ID is a
+     `WARN` line, as the watcher prints it; an entry with no ID is left out; of an ID in two
+     files, the first in path order. A work channel's first join prints the whole history; a
+     rejoin prints ordinary messages from the last 24 h. Entries with an invalid time stay
+     visible, since their age is unknown. The current top-term charter and the current
+     leader's top-level `STEPS.md` entries numbered after that charter stay visible regardless
+     of age: the plan still governs the work. Other members see plan entries addressed to
+     them or legitimate `@all`; the leader also sees its own charter and plan, which its
+     watcher never reads. Member metadata stays visible too: `read` excludes top-level
+     `MEMBER.md`, so a history hint could not retrieve it. Old entries in local folders that
+     `read` excludes for exceeding the limits stay visible for the same reason. The top
+     charter is shown even when addressed to its holder, as a takeover's is. Older omitted
+     messages to the member or legitimate `@all` get a count and
+     a runnable `read --full --to-me --last <m>` covering them, with a note when that range
+     holds more entries than the count; the range uses the local reader's limit checks too.
+     Nothing is deleted, and the snapshot rules stay the
+     same. Why the window: every new session rejoins, so replaying all past rounds spends
+     context on finished work. The window compares posters' clocks without a zone.
 - **The next step.** A successful `join` or `create` prints, before its `OK` line (which stays
   last), a `next:` line with the watcher command to run (`watch C --until-change` with the
   record's flags, spelled as this machine runs vcharon, so it works from any folder) and the
@@ -1852,7 +1868,8 @@ each channel limits each member's folder and each entry file.
 ### The watcher in a channel
 
 `vcharon watch C` prints what reached a member. A local member's watcher reads the channel
-folder every 10 s; a remote member's runs a sync and then reads its local tree.
+folder every 2 s; a remote member's runs a sync and then reads its local tree. The same
+default pace avoids making a local member wait longer for a message than a remote one.
 
 - **Output outside the channel.** `watch` refuses to start (`config`, exit 3) when its stdout or
   stderr is a regular file in the channel tree as this machine holds it. Why: that file goes to
@@ -1877,7 +1894,7 @@ folder every 10 s; a remote member's runs a sync and then reads its local tree.
   900 s timeout.
 - **Last watched.** Each round that read the channel stamps the member's last-watched time at
   the channel's machine, in `seen/<C>/<member>` beside the channel root: a file holding the
-  watcher's pace (`stream 2`, `run 30`, `local 10`: its mode and `--every`), its mtime the time.
+  watcher's pace (`stream 2`, `run 30`, `local 2`: its mode and `--every`), its mtime the time.
   Why: a `watching` entry is a claim, and nothing else showed whether a member's watcher still
   ran.
   - Who stamps: a local member's watcher after a round's scan worked; a remote member's through
@@ -2215,14 +2232,19 @@ Every verb also takes `-v` (log lines to stderr too).
   folder, stage dirs too, no link followed: disk use, not what the limits count, so it can pass
   `max mb` with no limit hit. Why: only `close` deletes a channel, so a forgotten one stays
   until someone sees it. `--remove-idle`: [Removing idle members](#removing-idle-members).
-- `guide` prints the agent guide built into this VCharon, so the guide an agent reads always
-  matches the program it runs. Several topics (`guide member rules`) print in the order given,
+- `guide` with no topic prints the topic index and the first-reading commands, so discovering
+  a topic does not also print a long reference page. `guide start` prints setup and new-session
+  cases. Named topics print the guide built into this VCharon, so it always matches the
+  program it runs. Several topics (`guide member rules`) print in the order given,
   each as it prints alone, one blank line between; a topic named twice prints once; an unknown
   one among them refuses them all before anything is printed (exit 3). Topics after a flag
   count too (`guide lobby --role x rules`): an agent adds its flags anywhere. Why: a member's
   first read is one command, its role's topics plus `rules` and its CLI's topic; the pages
   before joining hold the normal path whole and every rule an agent gets no signal for when it
-  breaks it, and the rest is reference, read when a line vcharon prints names it.
+  breaks it, and the rest is reference, read when a line vcharon prints names it. CLI topics
+  hold operating instructions; dated test accounts belong in the CHANGELOG, so every new
+  agent session need not read the same evidence. Reference pages point to the normal-path
+  instructions rather than repeat them; each role's first read stays complete on its own.
   `skill install` writes a short skill that points at it, to
   `~/.claude/skills/vcharon/SKILL.md` and `~/.agents/skills/vcharon/SKILL.md`, and overwrites
   only a file holding its own marker line. The skill names the topics to read by role and the

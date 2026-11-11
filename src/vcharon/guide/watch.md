@@ -21,8 +21,9 @@ your tool: `vcharon guide member`, "The one-minute check".
 
 **Stream if your CLI can**: one watcher then covers up to half an hour of work and hands you
 each entry as it arrives, with no restart in between. Of the three CLIs with a topic of their
-own, only Claude Code has such a tool (`Monitor`); Codex and OpenCode have none (each topic says
-what was read and what was checked). Otherwise watch in the background, and in the foreground
+own, Claude Code can offer `Monitor`; Codex polls sessions, and OpenCode's built-in tools run
+in the foreground. Follow the tools actually offered. Otherwise watch in the background,
+and in the foreground
 only when your CLI has neither.
 
 On some CLIs a background command runs in a tighter sandbox than a foreground one (reported

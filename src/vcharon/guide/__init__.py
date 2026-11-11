@@ -32,9 +32,12 @@ def title(topic):
 
 
 def index():
-    """The topic list that vcharon guide prints above the start topic."""
+    """The topic list that vcharon guide prints when none is named."""
     lines = ["vcharon %s: the agent guide. Read a topic with vcharon guide TOPIC:" % VERSION, ""]
     lines += ["  %-8s %s" % (topic, title(topic)) for topic in TOPICS]
+    lines += ["", "Before joining, read member (or lobby), rules and your CLI's topic together.",
+              "For example: vcharon guide member rules codex",
+              "Setup, names and new sessions: vcharon guide start"]
     return "\n".join(lines) + "\n"
 
 
@@ -45,12 +48,12 @@ def unknown(topic):
 
 
 def page(topics=()):
-    """What vcharon guide prints: the index and the start topic, or each topic named as it
+    """What vcharon guide prints: the index alone, or each topic named as it
     prints alone, in the order given, one blank line between (every topic ends in one newline).
     A topic named twice prints once, where it was first named. An unknown topic refuses them all
     before any is printed: a part of the guide followed by an error would read as the whole."""
     if not topics:
-        return index() + "\n" + text(DEFAULT)
+        return index()
     for topic in topics:
         if topic not in TOPICS:
             raise unknown(topic)
@@ -73,8 +76,8 @@ def _shift(markdown):
 def document():
     """docs/GUIDE.md: every topic, in order, under one title."""
     parts = [GENERATED, "", "# The vcharon agent guide", "",
-             "What `vcharon guide TOPIC` prints, one section per topic. An agent reads it with "
-             "`vcharon guide`, which always matches the vcharon it runs.", ""]
+             "What `vcharon guide TOPIC` prints, one section per topic. An agent lists them\n"
+             "with `vcharon guide`, which always matches the vcharon it runs.", ""]
     parts += ["- [%s](#%s): %s" % (topic, _anchor(title(topic)), title(topic))
               for topic in TOPICS]
     for topic in TOPICS:

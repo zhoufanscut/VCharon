@@ -3749,8 +3749,8 @@ class CommandTest(WatchCase):
         streams = dict(plain, stream=True)
         self.assertEqual(calls, [
             # a local member's watch holds another folder over the channel's limits
-            ((self.tree, "debian", 10), dict(plain, folder_limits=(50 * 1000 * 1000, 1000))),
-            ((self.tree, "debian", 10), dict(plain, until_change=True, max_minutes=25,
+            ((self.tree, "debian", 2), dict(plain, folder_limits=(50 * 1000 * 1000, 1000))),
+            ((self.tree, "debian", 2), dict(plain, until_change=True, max_minutes=25,
                                              folder_limits=(50 * 1000 * 1000, 1000))),
             (("mb.windows", SYNC, 5), streams),
             (("mb.windows", SYNC, 2), dict(streams, fresh=True, until_change=True,
@@ -3784,7 +3784,7 @@ class CommandTest(WatchCase):
             self.assertEqual(self.cli("--once", project="p")[0], 16)
             self.assertEqual(self.cli("--once", "--no-stream", project="p")[0], 16)
         self.assertEqual([(a, kw["once"], kw.get("stream")) for a, kw in calls], [
-            ((self.tree, "debian", 10), True, None),
+            ((self.tree, "debian", 2), True, None),
             (("mb.windows", SYNC, 30), True, False),
             (("mb.windows", SYNC, 30), True, False)])
         # the real check with no snapshot: the fix runs as printed

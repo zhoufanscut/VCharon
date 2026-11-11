@@ -1142,6 +1142,142 @@ class SyncLineTest(ChannelCase):
             "  note    left out x/: over the limit", "after"])
 
 
+class WorkRejoinPrintTest(ChannelCase):
+    """A fresh session needs the current plan, without replaying the channel's old rounds."""
+
+    def setUp(self):
+        super().setUp()
+        self.lead(where=("--local",))
+        self.now = time.time()
+        self.when = entries.stamp(self.now)
+        self.old = entries.stamp(self.now - 2 * 86400)
+        self.clock = mock.patch.object(channel_cmd, "_now",
+                                        return_value=entries.parse_time(self.when))
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+
+    def join(self, box="mac", project="web", *extra):
+        self.use_box(box)
+        return self.ok("join", "game", "--local", "--project", project, *extra)
+
+    def entry(self, number, title, to, when=None):
+        return entries.build(when or self.old, "laptop-ui", number, title, [to], body=title)
+
+    def test_the_first_join_lists_history_but_a_rejoin_counts_it(self):
+        # The cutoff itself is recent; invalid times stay visible rather than guessed old.
+        cutoff = entries.stamp(self.now - 86400)
+        before = entries.stamp(self.now - 86401)
+        write_tree(self.root, {"game/laptop-ui/RESULTS.md": (
+            "# results\n" + self.entry(3, "old private", "@mac-web")
+            + self.entry(4, "old broadcast", "@all")
+            + self.entry(5, "cutoff", "@mac-web", cutoff)
+            + self.entry(6, "before cutoff", "@all", before)
+            + self.entry(7, "recent", "@all", self.when)
+            + self.entry(8, "unknown time", "@mac-web", "bad time")
+            + self.entry(9, "someone else", "@linux-api")).encode("utf-8")})
+        first = self.join()
+        for title in ("old private", "old broadcast", "before cutoff"):
+            self.assertIn("— " + title, first)
+        out = self.join()
+        for title in ("cutoff", "recent", "unknown time"):
+            self.assertIn("— " + title, out)
+        for title in ("old private", "old broadcast", "before cutoff", "someone else"):
+            self.assertNotIn("— " + title, out)
+        [line] = [l for l in out.splitlines() if l.startswith("  not shown: ")]
+        self.assertIn("3 to you or to all older than 24 h", line)
+        last = int(line.split("--last ", 1)[1].split()[0])
+        read = self.ok("read", "game", "--full", "--to-me", "--last", str(last))
+        for title in ("old private", "old broadcast", "before cutoff"):
+            self.assertIn("  " + title + "  (", read)
+
+    def test_old_charter_and_plan_stay_visible_to_member_and_leader(self):
+        path = os.path.join(self.root, "game", "laptop-ui", "CHANNEL.md")
+        with open(path, encoding="utf-8") as f:
+            charter_text = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(charter_text.replace(entries.parse(charter_text)[0].time, self.old))
+        write_tree(self.root, {"game/laptop-ui/STEPS.md": (
+            "# steps\n" + self.entry(3, "the plan", "@all")).encode("utf-8"),
+            "game/laptop-ui/archive/STEPS.md": (
+                "# archive\n" + self.entry(4, "archived plan", "@all")).encode("utf-8")})
+        self.join()
+        for box, project in (("mac", "web"), ("laptop", "ui")):
+            out = self.join(box, project)
+            self.assertIn("— channel game created", out)
+            self.assertIn("— the plan", out)
+            self.assertNotIn("— archived plan", out)
+
+    def test_member_metadata_stays_visible_outside_read_history(self):
+        self.join()
+        path = os.path.join(self.root, "game", "mac-web", "MEMBER.md")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text.replace(entries.parse(text)[0].time, self.old))
+        out = self.join("laptop", "ui")
+        self.assertIn("— mac-web#1 — member", out)
+        self.assertNotIn("not shown:", out)
+
+    def test_local_history_hints_only_defer_entries_read_can_retrieve(self):
+        self.join()
+        self.join("linux", "api")
+        write_tree(self.root, {
+            "game/laptop-ui/RESULTS.md": (
+                "# results\n" + self.entry(3, "over-limit history", "@mac-web")
+                + self.entry(4, "over-limit recent", "@mac-web", self.when)).encode("utf-8"),
+            "game/linux-api/RESULTS.md": (
+                "# results\n" + entries.build(self.old, "linux-api", 3, "readable history",
+                                             ["@mac-web"], body="older readable body")
+                + entries.build(self.when, "linux-api", 4, "readable recent", ["@mac-web"],
+                                body="newer readable body")).encode("utf-8")})
+        own = os.path.join(self.root, "game", "laptop-ui")
+        for number in range(charter.DEFAULT_MAX_FILES):
+            with open(os.path.join(own, "artifact-%d.txt" % number), "wb"):
+                pass
+        out = self.join()
+        self.assertIn("— over-limit history", out)
+        self.assertNotIn("— readable history", out)
+        [hint] = [line for line in out.splitlines() if line.startswith("  not shown:")]
+        self.assertIn("1 to you or to all older than 24 h", hint)
+        last = hint.split("--last ", 1)[1].split()[0]
+        self.assertEqual(last, "2")
+        read = self.ok("read", "game", "--full", "--to-me", "--last", last)
+        self.assertIn("older readable body", read)
+        self.assertIn("newer readable body", read)
+        self.assertNotIn("over-limit history", read)
+
+    def test_current_context_after_handoff(self):
+        write_tree(self.root, {"game/laptop-ui/STEPS.md": (
+            "# steps\n" + self.entry(3, "former plan", "@all")).encode("utf-8")})
+        self.join()
+        self.join("linux", "api")
+        self.use_box("laptop")
+        self.ok("lead", "game", "--to", "@linux-api", "--project", "ui")
+        self.use_box("linux")
+        self.ok("lead", "game", "--project", "api")
+        self.ok("post", "game", "--steps", "--to", "@all", "--title", "current plan",
+                "--body", "work now", "--project", "api")
+        # Each new leader has its own charter and an inherited PLAN addressed to itself.
+        for filename in ("CHANNEL.md", "STEPS.md"):
+            path = os.path.join(self.root, "game", "linux-api", filename)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            for e in entries.parse(text):
+                text = text.replace("## " + e.time, "## " + self.old)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        out = self.join()
+        self.assertIn("— lead of game taken (term 2)", out)
+        self.assertIn("— current plan", out)
+        self.assertNotIn("— former plan", out)
+        # The self-addressed inherited plan still belongs only to its leader.
+        self.assertNotIn("— PLAN", out)
+        out = self.join("linux", "api")
+        self.assertIn("— lead of game taken (term 2)", out)
+        self.assertIn("— current plan", out)
+        self.assertIn("— PLAN", out)
+
+
 class FirstLookTest(ChannelCase):
     """join and create save the member's watcher snapshot (watch.first_look): its first start
     prints what came after the join or create, once, and nothing join listed (DESIGN, "Create,

@@ -352,7 +352,7 @@ def _parser():
                      "sync --full compares by content")
     ident(one)
 
-    one = verb("guide", "the agent guide for this vcharon, or the topics named",
+    one = verb("guide", "the guide topic index, or the topics named",
                "vcharon guide member rules")
     one.add_argument("topics", metavar="TOPIC", nargs="*", help="any of, printed in the order "
                      "given: %s" % ", ".join(guide.TOPICS))

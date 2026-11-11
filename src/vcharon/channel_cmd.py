@@ -166,6 +166,7 @@ NOT_SHOWN_WIDER_BOTH = (" (%d entries: the %d counted on both lines and %d more 
 NOT_SHOWN_LEFT = "%d to you before your leave"
 NOT_SHOWN_ALL = "%d to all in the last 24 h"
 NOT_SHOWN_OLD = "%d to you older than 24 h, from earlier work"
+NOT_SHOWN_WORK = "%d to you or to all older than 24 h, from earlier work"
 # how long a join re-lists a lobby listed without CHANNEL.md: its claim writes it a moment after
 # the mkdirs
 LOBBY_WAIT = 10.0
@@ -1898,11 +1899,17 @@ def _join_held(args, cfg, name, log, say, take):
                                                        name_flags(channel, name))))
     # 7. the watcher's snapshot, then the entries it takes as seen: the first start goes on
     # from there, so what lands after the look is printed by the watcher, once. A rejoin keeps
-    # a usable snapshot (its start prints what came while no watcher ran) and lists all
+    # a usable snapshot (its start prints what came while no watcher ran) and lists the
+    # eligible history without changing what the watcher has seen
     marks = _first_look(channel, name, section, say, log,
                         keep=rejoin and record is not None)
     tree = os.path.dirname(own)
-    _print_entries(tree, name, leader, channel, say, marks=marks, kind_=kind_)
+    read_skip = None
+    if rejoin and kind_ is kinds.WORK and server.ssh is None:
+        from . import cli
+        read_skip = cli._over_limit(info["limits"], name)
+    _print_entries(tree, name, leader, channel, say, marks=marks, kind_=kind_, rejoin=rejoin,
+                   read_skip=read_skip)
     if code == 0 and kind_ is kinds.LOBBY:
         # whoami lobby's marks in one line: agents ran whoami right after a join to see them
         _say_members(channel, name, say, log)
@@ -2270,7 +2277,8 @@ def _pull_own(server, remote_text, name, own, log, say):
         % (added, kept))
 
 
-def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WORK):
+def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WORK, rejoin=False,
+                   read_skip=None):
     """The entries already in the other members' folders addressed to name, or to @all from
     the leader's. An entry whose ID names another member is one line, `WARN entry <id> in
     <folder>/: not its folder's`, as the watcher's (DESIGN, "Trust and access"), printed after
@@ -2285,12 +2293,20 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
     before name's last LEAVE is counted, not shown: a rejoin after a leave would print again
     what that membership's watcher printed, but a watcher may not have run, so the count and
     its read still reach it. The ones older than 24 h get a second line (NOT_SHOWN_OLDER),
-    so that the first line's read doesn't reach back to them."""
+    so that the first line's read doesn't reach back to them. A work rejoin skips entries
+    older than 24 h, with a read hint counting both @all and private ones. Invalid times
+    stay visible: their age is unknown. The current charter and current leader's eligible
+    STEPS.md entries stay visible, the leader's own too, so a new session has its plan.
+    Member metadata stays visible too: read excludes top-level MEMBER.md, so a history
+    hint could not retrieve it. read_skip is the local read's limit check: entries in
+    folders it excludes stay visible, and recovery ranges use that same view."""
     # here, not at the top: the watch module imports this one
     from .mailbox import watch
     lobby = kind_ is kinds.LOBBY
     # whose @all is to all: by the charters' terms in the tree, as the watcher's
     chain = charter.chain(tree, leader)
+    current = chain.top() if rejoin and not lobby else None
+    old_work = []
     since = _now() - datetime.timedelta(hours=24)
     left_at = (entries.parse_time(entries.last_leave(os.path.join(tree, name), name))
                if lobby else None)
@@ -2309,9 +2325,11 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
         folders = []
     for folder in folders:
         path = os.path.join(tree, folder)
-        if (folder == name or pathrules.writer_problem(folder) is not None
+        if ((folder == name and not (current and folder == current.folder))
+                or pathrules.writer_problem(folder) is not None
                 or os.path.islink(path) or not os.path.isdir(path)):
             continue
+        readable = read_skip is None or read_skip(path, folder) is None
         seen = set()
         # read's path order: the paths below the tree, sorted as text
         for md in sorted(entries.md_files(path),
@@ -2329,10 +2347,18 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                 if (lobby and e.number == 1
                         and os.path.basename(md) == entries.MEMBER_FILE):
                     continue
-                if "@" + name not in e.to and not (
-                        entries.ALL in e.to and kind_.may_post_all(folder, e.number, chain)):
+                addressed = "@" + name in e.to or (
+                    entries.ALL in e.to and kind_.may_post_all(folder, e.number, chain))
+                context = (current is not None and folder == current.folder
+                           and e.name == folder and (
+                               md == os.path.join(path, entries.CHANNEL_FILE)
+                               and e.number == current.number
+                               or md == os.path.join(path, "STEPS.md")
+                               and e.number > current.number and (addressed or folder == name)))
+                if (folder == name or not addressed) and not context:
                     continue
-                if marks is not None and not watch.marked(marks, folder, e):
+                if (marks is not None and not (context and folder == name)
+                        and not watch.marked(marks, folder, e)):
                     continue
                 if e.name != folder:
                     if e.name is not None:
@@ -2352,6 +2378,12 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                             left_out["where"].append(at)
                             if recent:
                                 left_out["recent"].append(at)
+                        continue
+                if (rejoin and not lobby and not context and readable
+                        and md != os.path.join(path, entries.MEMBER_FILE)):
+                    when = entries.parse_time(e.time)
+                    if when is not None and when < since:
+                        old_work.append((os.path.relpath(md, tree).replace(os.sep, "/"), e.line))
                         continue
                 if not shown:
                     say("entries for %s already in %s:" % (name, channel))
@@ -2373,7 +2405,7 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
         say("")
     else:
         say("no entries for %s since your leave" % name if left_out["left"]
-            else "no entries for %s in the last 24 h" % name if left_out["where"]
+            else "no entries for %s in the last 24 h" % name if left_out["where"] or old_work
             else "no entries for %s in %s yet" % (name, channel))
     if left_out["where"]:
         flags = name_flags(channel, name)
@@ -2394,6 +2426,12 @@ def _print_entries(tree, name, leader, channel, say, marks=None, kind_=kinds.WOR
                      if last_all > len(everyone) else "")
             raw(platform.runnable(line % (NOT_SHOWN_OLD % left_out["old"], wider, channel,
                                           last_all, flags)))
+    if old_work:
+        [last] = _not_shown(tree, name, leader, kind_, [old_work], skip=read_skip)
+        wider = (NOT_SHOWN_WIDER % (last, len(old_work), last - len(old_work))
+                 if last > len(old_work) else "")
+        raw(platform.runnable(NOT_SHOWN % (NOT_SHOWN_WORK % len(old_work), wider, channel,
+                                          last, name_flags(channel, name))))
     for line in warnings:
         say(line)
 
@@ -2403,13 +2441,13 @@ def _now():
     return datetime.datetime.now()  # noqa: DTZ005
 
 
-def _not_shown(tree, name, leader, kind_, wheres):
+def _not_shown(tree, name, leader, kind_, wheres, skip=None):
     """The --last of each NOT_SHOWN line's read, one per list in wheres (of entries join
     left out, their (path, line)): how many entries read --to-me lists from the oldest of
     them to the newest, so that command shows every one of them."""
     from .mailbox import read
     try:
-        _folders, items, _notes = read.read_tree(tree)
+        _folders, items, _notes = read.read_tree(tree, skip=skip)
     except OSError:
         return [len(where) for where in wheres]
     ordered, _ = read.order(items, read._now())
