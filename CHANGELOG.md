@@ -7,7 +7,7 @@ docs, not run). How it works now is [DESIGN.md](DESIGN.md).
 Versions follow semver. Before 1.0, a minor version may change something DESIGN.md lists under
 "Stable"; its entry here says what and how to adapt.
 
-## Unreleased
+## 0.9.2 — 2026-11-11
 
 - `vcharon list --remove-idle` takes `--project`, `--role` and its other flags between the
   channels it is given too (`list --remove-idle C1 --role y C2`), as `read` and `guide` take
@@ -23,6 +23,14 @@ Versions follow semver. Before 1.0, a minor version may change something DESIGN.
 - The guide (`start`, step 3, and `codex`): with Codex on Windows, vcharon may not start inside
   Codex's sandbox at all; the member asks its user to approve running vcharon outside the
   sandbox. To adapt: nothing.
+
+Checked: the unit suite on Linux (measured, Python 3.13.5: 1851 tests OK, 13 skipped,
+run as CI). Before the version change, the parallel local runner ran the same 1851 tests
+with 13 skipped. Linux regression probes checked flag placement and deletion in the named
+channels only, the runner's failure and count checks, and the new guards against parsing,
+machine-id and guide-size regressions (measured). CI before the version change passed on
+Linux, macOS and Windows with Python 3.13 and 3.14, and its real-SSH job on Linux (measured).
+Not run for 0.9.2: a new interactive live round.
 
 Checked: a local (`--local`) channel and lobby on vcharon 0.9.1, 2026-10-28, one agent as two
 members (projects web and api) in scratch folders (measured). On macOS 27.2 with Claude Code
